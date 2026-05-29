@@ -108,7 +108,15 @@ def _run_once(args: argparse.Namespace) -> int:
     ) as workspace:
         for command in [
             ["mod", "tidy"],
-            ["run", "-buildvcs=false", "./cmd/observer", "--namespace", args.namespace],
+            [
+                "run",
+                "-buildvcs=false",
+                "./cmd/observer",
+                "--namespace",
+                args.namespace,
+                "--app-root",
+                str(app_root),
+            ],
         ]:
             exit_code = runner.run(command, cwd=workspace.path)
             if exit_code != 0:

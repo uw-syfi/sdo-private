@@ -38,13 +38,17 @@ func (r Runner) RunOnce(ctx context.Context) error {
 	}
 
 	for _, detector := range r.Detectors {
+		spec := detector.Spec()
 		findings, err := detector.Detect(ctx, snapshot)
 		if err != nil {
-			return fmt.Errorf("run detector %q: %w", detector.Spec().ID, err)
+			return fmt.Errorf("run detector %q: %w", spec.ID, err)
 		}
 		for _, finding := range findings {
+			if finding.DetectorID == "" {
+				finding.DetectorID = spec.ID
+			}
 			if err := r.Sink.Emit(ctx, finding); err != nil {
-				return fmt.Errorf("emit detector %q finding: %w", detector.Spec().ID, err)
+				return fmt.Errorf("emit detector %q finding: %w", spec.ID, err)
 			}
 		}
 	}

@@ -44,6 +44,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	flags := flag.NewFlagSet("sds-observer", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	namespace := flags.String("namespace", "", "namespace to observe")
+	appRoot := flags.String("app-root", "", "application root for validating finding playbook paths")
 	validateDetectors := flags.Bool("validate-detectors", false, "validate detector registration and exit")
 	version := flags.Bool("version", false, "print observer version and exit")
 	if err := flags.Parse(args); err != nil {
@@ -65,6 +66,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	sink := options.Sink
 	if sink == nil {
 		sink = JSONSink{Writer: stdout}
+	}
+	if *appRoot != "" {
+		sink = PlaybookValidatingSink{Inner: sink, AppRoot: *appRoot}
 	}
 	provider := options.Provider
 	if provider == nil {

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -186,21 +187,90 @@ def test_build_prompt_autonomous_direct_profile_omits_sds_contract() -> None:
     assert "do not treat script-writing or repo-local tooling as part of the task" in prompt
 
 
-def test_build_prompt_autonomous_mentions_persistent_diagnostic_contract() -> None:
+def test_build_prompt_autonomous_mentions_playbook_contract_without_root_diagnose_script() -> None:
     prompt = driver._build_prompt(
         planned_stages=["diagnosis", "mitigation"],
         app_info={"app_name": "a", "namespace": "n"},
         autonomous=True,
     )
     assert ".sds/" in prompt
-    assert ".sds/diagnose.sh" in prompt
+    assert ".sds/diagnose.sh" not in prompt
     assert ".sds/playbooks/" in prompt
+    assert "Do not create a top-level triage script under `.sds`" in prompt
+    assert "playbook-local helper scripts" in prompt
     assert "quick to run" in prompt
     assert "well-organized" in prompt
     assert "good Bash script best practices" in prompt
     assert "prefer small functions" in prompt
-    assert "dispatch into helper scripts" in prompt
     assert "readable, maintainable, and easy to extend" in prompt
+
+
+def test_build_prompt_autonomous_omits_observer_detectors_by_default() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+    )
+    assert ".sds/diagnostics" not in prompt
+    assert "sds-observer-check" not in prompt
+
+
+def test_build_prompt_autonomous_observer_detectors_when_enabled() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "demo"},
+        autonomous=True,
+        observer_detectors_enabled=True,
+    )
+    assert ".sds/diagnostics" in prompt
+    assert ".sds/diagnose.sh" not in prompt
+    assert "manifest.yaml" in prompt
+    assert "sds-observer-check" not in prompt
+    assert "Existing observer detectors are run by the driver before the session starts" in prompt
+    assert "Defer creating or revising observer detectors until after `submit_done` returns" in prompt
+    assert "observer-detector mechanism supersedes the old top-level shell triage entrypoint" in prompt
+    assert "do not create a root triage script under `.sds`" in prompt
+    assert "The driver will validate observer detectors after you exit" in prompt
+    assert ".sds/diagnostics/detectors/missing_endpoints/detector.go" in prompt
+    assert "module app-diagnostics" in prompt
+    assert "Use Go-safe detector package directory names with underscores" in prompt
+    assert "Do not make detector files `package main`" in prompt
+    assert "apiVersion: sds.dev/v1alpha1" in prompt
+    assert "package: ./detectors/missing_endpoints" in prompt
+    assert "sdk.Finding.Playbooks" in prompt
+    assert "func New() sdk.Detector" in prompt
+    assert "func (Detector) Detect(ctx context.Context, snap sdk.DetectionContext)" in prompt
+    assert "snap.ReadyEndpointCountForService" in prompt
+    assert "directly observed Kubernetes symptom" in prompt
+    assert "exploratory hypotheses" in prompt
+    assert "For Service endpoint incidents" in prompt
+    assert "should not skip findings because some application-specific dependency is absent" in prompt
+    assert "treat that detector ID as the owner of this issue class" in prompt
+    assert "Do not create a new overlapping detector or playbook" in prompt
+
+
+def test_build_prompt_autonomous_includes_observer_preflight_report() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "demo"},
+        autonomous=True,
+        observer_detectors_enabled=True,
+        observer_preflight_report=(
+            "Observer preflight completed successfully.\n"
+            "1 observer finding(s):\n"
+            "1. [warn active missing-endpoints] service frontend has no ready endpoints\n"
+            "   detector: missing-endpoints\n"
+            "   recommended playbooks:\n"
+            "   - .sds/playbooks/service-endpoints/README.md"
+        ),
+    )
+    assert "## Observer Preflight Findings" in prompt
+    assert "The driver already ran existing observer diagnostics before this session" in prompt
+    assert "Do not run observer commands yourself during preflight" in prompt
+    assert "Each finding lists the detector that fired" in prompt
+    assert "do not add a second detector or overlapping playbook" in prompt
+    assert "service frontend has no ready endpoints" in prompt
+    assert ".sds/playbooks/service-endpoints/README.md" in prompt
 
 
 def test_build_prompt_autonomous_requires_preflight_for_prior_diagnostics() -> None:
@@ -210,13 +280,30 @@ def test_build_prompt_autonomous_requires_preflight_for_prior_diagnostics() -> N
         autonomous=True,
     )
     assert "Start every run with this preflight workflow" in prompt
-    assert "If `.sds/diagnose.sh` exists, run it at the beginning of the session" in prompt
-    assert "Check whether `.sds/diagnose.sh` or related `.sds/` diagnostics already exist" in prompt
+    assert ".sds/diagnose.sh" not in prompt
+    assert "Check whether `.sds/playbooks/` already exists from prior runs" in prompt
+    assert "Use existing playbooks as context only" in prompt
     assert "Only edit source files when you can point to the exact bad setting in the repository" in prompt
-    assert "repository-local diagnostic scripts" in prompt
+    assert "do not spend incident time building repository-local diagnostic tooling" in prompt
     assert "Read the application source code and deployment manifests" in prompt
-    assert "quickly triage the cluster and flag previously seen issues" in prompt
-    assert "print which playbook file(s) under `.sds/playbooks/` are relevant" in prompt
+    assert "direct `kubectl`, source/manifests, logs, and targeted shell commands" in prompt
+    assert "playbook-linked helper output should name only" in prompt
+    assert "Only flag playbooks that are directly relevant to the detected symptom" in prompt
+    assert "Playbooks should be self-contained and avoid overlapping each other" in prompt
+    assert "potentially relevant" not in prompt
+
+
+def test_build_prompt_autonomous_warns_against_interactive_kubectl() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "hotel-reservation"},
+        autonomous=True,
+    )
+    assert "## Command Notes" in prompt
+    assert "Do not use `kubectl run -it ... --rm`" in prompt
+    assert "Interactive attach can hang after the pod completes" in prompt
+    assert "kubectl delete pod curl-test -n hotel-reservation --ignore-not-found" in prompt
+    assert "kubectl exec -n hotel-reservation deploy/frontend" in prompt
 
 
 def test_build_prompt_autonomous_mentions_post_submit_check_improvement() -> None:
@@ -228,13 +315,24 @@ def test_build_prompt_autonomous_mentions_post_submit_check_improvement() -> Non
     assert "Only after `submit_done` returns" in prompt
     assert "add a new diagnostic check, or enhance an existing one" in prompt
     assert "future run" in prompt
-    assert ".sds/diagnose.sh" in prompt
+    assert ".sds/diagnose.sh" not in prompt
     assert ".sds/playbooks/" in prompt
     assert "generalizable Markdown playbook" in prompt
+    assert "update the fired detector/playbook instead of adding a duplicate detector" not in prompt
     assert "using what you verified from the live cluster and source tree" in prompt
     assert "using the ground-truth feedback" not in prompt
     assert "commit those `.sds/` changes before exiting" in prompt
     assert "store_incident" not in prompt
+
+
+def test_build_prompt_autonomous_observer_avoids_duplicate_detectors_after_preflight_hit() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+        autonomous=True,
+        observer_detectors_enabled=True,
+    )
+    assert "update the fired detector/playbook instead of adding a duplicate detector" in prompt
 
 
 def test_build_prompt_autonomous_requires_source_fix_then_redeploy() -> None:
@@ -434,6 +532,20 @@ def _args(**overrides: Any) -> argparse.Namespace:
     return argparse.Namespace(**base)
 
 
+def _write_observer_manifest(app_root: Path) -> None:
+    diagnostics_dir = app_root / ".sds" / "diagnostics"
+    diagnostics_dir.mkdir(parents=True)
+    (diagnostics_dir / "manifest.yaml").write_text(
+        """
+apiVersion: sds.dev/v1alpha1
+kind: ObserverDiagnostics
+detectors:
+  - name: demo
+    package: ./detectors/demo
+""".lstrip()
+    )
+
+
 def test_run_autonomous_does_not_block_on_terminal_stage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -538,6 +650,225 @@ def test_run_autonomous_direct_profile_uses_direct_prompt(
     prompt = stub.calls[0]["prompt"]
     assert ".sds/" not in prompt
     assert "Repository-local scripts are optional, not expected" in prompt
+
+
+def test_run_autonomous_persistent_workspace_enables_observer_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.setenv("SREGYM_AUTONOMOUS_SUBMIT", "1")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+
+    stub = _StubAgent()
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis"],
+        app={"app_name": "a", "namespace": "demo"},
+        status_sequence=["diagnosis", "done"],
+    )
+    monkeypatch.setattr(driver, "get_current_stage_sync", lambda _api_base: "done")
+    driver._run(_args(application_workspace_mode="persistent"), agent_factory=lambda p, m, u: stub)
+
+    prompt = stub.calls[0]["prompt"]
+    assert ".sds/diagnostics" in prompt
+    assert "driver runs existing observer detectors before the session starts" in prompt
+    assert "sds-observer-check" not in prompt
+
+
+def test_run_non_autonomous_persistent_workspace_omits_observer_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+
+    stub = _StubAgent()
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis"],
+        app={"app_name": "a", "namespace": "demo"},
+        status_sequence=["diagnosis", "done"],
+    )
+    driver._run(_args(application_workspace_mode="persistent"), agent_factory=lambda p, m, u: stub)
+
+    prompt = stub.calls[0]["prompt"]
+    assert ".sds/diagnostics" not in prompt
+    assert "sds-observer-check" not in prompt
+
+
+def test_run_autonomous_persistent_workspace_without_manifest_skips_observer_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.setenv("SREGYM_AUTONOMOUS_SUBMIT", "1")
+    monkeypatch.setenv("SREGYM_EXP_ENV", str(tmp_path))
+
+    run_calls: list[list[str]] = []
+    monkeypatch.setattr(
+        driver.subprocess,
+        "run",
+        lambda command, **_kwargs: run_calls.append(command),
+    )
+
+    stub = _StubAgent()
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis"],
+        app={"app_name": "a", "namespace": "demo"},
+        status_sequence=["diagnosis", "done"],
+    )
+    monkeypatch.setattr(driver, "get_current_stage_sync", lambda _api_base: "done")
+    driver._run(_args(application_workspace_mode="persistent"), agent_factory=lambda p, m, u: stub)
+
+    assert len(stub.calls) == 1
+    assert run_calls == []
+
+
+def test_run_autonomous_persistent_workspace_runs_observer_preflight_and_post_agent_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.setenv("SREGYM_AUTONOMOUS_SUBMIT", "1")
+    monkeypatch.setenv("SREGYM_EXP_ENV", str(tmp_path))
+    _write_observer_manifest(tmp_path)
+
+    run_calls: list[list[str]] = []
+
+    def _fake_run(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        run_calls.append(command)
+        if "run-once" in command:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=(
+                    '{"detector_id":"missing-endpoints","rule_id":"missing-endpoints",'
+                    '"status":"active","severity":"warn",'
+                    '"summary":"service frontend has no ready endpoints",'
+                    '"evidence":"namespace=demo service=frontend ready_endpoints=0",'
+                    '"primary_resource":{"kind":"Service","namespace":"demo","name":"frontend"},'
+                    '"playbooks":[".sds/playbooks/service-endpoints/README.md"]}\n'
+                ),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(driver.subprocess, "run", _fake_run)
+
+    stub = _StubAgent()
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis"],
+        app={"app_name": "a", "namespace": "demo"},
+        status_sequence=["diagnosis", "done"],
+    )
+    monkeypatch.setattr(driver, "get_current_stage_sync", lambda _api_base: "done")
+    driver._run(_args(application_workspace_mode="persistent"), agent_factory=lambda p, m, u: stub)
+
+    assert len(stub.calls) == 1
+    expected_check_commands = [
+        [
+            driver.sys.executable,
+            "-m",
+            "observer.updater.check_cli",
+            "test",
+            "--app",
+            str(tmp_path),
+        ],
+        [
+            driver.sys.executable,
+            "-m",
+            "observer.updater.check_cli",
+            "run-once",
+            "--app",
+            str(tmp_path),
+            "--namespace",
+            "demo",
+        ],
+    ]
+    assert run_calls == expected_check_commands + expected_check_commands
+    prompt = stub.calls[0]["prompt"]
+    assert "## Observer Preflight Findings" in prompt
+    assert "service frontend has no ready endpoints" in prompt
+    assert "detector: missing-endpoints" in prompt
+    assert "recommended playbooks:" in prompt
+    assert ".sds/playbooks/service-endpoints/README.md" in prompt
+
+
+def test_run_autonomous_persistent_workspace_reprompts_same_session_when_observer_check_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.setenv("SREGYM_AUTONOMOUS_SUBMIT", "1")
+    monkeypatch.setenv("SREGYM_EXP_ENV", str(tmp_path))
+    _write_observer_manifest(tmp_path)
+
+    run_calls: list[list[str]] = []
+
+    def _fake_run(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        run_calls.append(command)
+        if len(run_calls) == 3:
+            return subprocess.CompletedProcess(command, 1, stdout="build failed", stderr="missing method")
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(driver.subprocess, "run", _fake_run)
+
+    stub = _StubAgent()
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis"],
+        app={"app_name": "a", "namespace": "demo"},
+        status_sequence=["diagnosis", "done"],
+    )
+    monkeypatch.setattr(driver, "get_current_stage_sync", lambda _api_base: "done")
+    driver._run(_args(application_workspace_mode="persistent"), agent_factory=lambda p, m, u: stub)
+
+    assert len(stub.calls) == 2
+    repair_prompt = stub.calls[1]["prompt"]
+    assert "post-submission observer diagnostics check failed" in repair_prompt
+    assert "missing method" in repair_prompt
+    assert "target the directly observed Kubernetes symptom" in repair_prompt
+    assert "do not gate a generic symptom detector on unrelated application resources" in repair_prompt
+    assert "Do not call `submit_diagnosis`, `submit_mitigation`, or `submit_done`" in repair_prompt
+    assert stub.calls[1]["cwd"] == str(tmp_path)
+    assert len(run_calls) == 5
+
+
+def test_run_non_autonomous_persistent_workspace_skips_post_observer_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
+    monkeypatch.setenv("SREGYM_EXP_ENV", str(tmp_path))
+    _write_observer_manifest(tmp_path)
+
+    run_calls: list[list[str]] = []
+    monkeypatch.setattr(
+        driver.subprocess,
+        "run",
+        lambda command, **_kwargs: run_calls.append(command),
+    )
+
+    stub = _StubAgent()
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis"],
+        app={"app_name": "a", "namespace": "demo"},
+        status_sequence=["diagnosis", "done"],
+    )
+    driver._run(_args(application_workspace_mode="persistent"), agent_factory=lambda p, m, u: stub)
+
+    assert len(stub.calls) == 1
+    assert run_calls == []
 
 
 def test_run_happy_path_single_session(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -860,6 +1191,7 @@ def test_parse_args_reads_toml_agent_config(monkeypatch: pytest.MonkeyPatch) -> 
                 "model": "my-model",
                 "timeout_sec": 42,
                 "autonomous_prompt_profile": "direct",
+                "application_workspace_mode": "persistent",
             }
         ),
     )
@@ -868,6 +1200,7 @@ def test_parse_args_reads_toml_agent_config(monkeypatch: pytest.MonkeyPatch) -> 
     assert ns.model == "my-model"
     assert ns.timeout_sec == 42
     assert ns.autonomous_prompt_profile == "direct"
+    assert ns.application_workspace_mode == "persistent"
 
 
 def test_parse_args_cli_flag_beats_toml(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -916,6 +1249,11 @@ def test_parse_args_tolerates_sregym_launcher_flags() -> None:
     )
     assert ns.provider == "claude"
     assert ns.timeout_sec == 2000
+
+
+def test_parse_args_accepts_application_workspace_mode() -> None:
+    ns = driver._parse_args(["--application-workspace-mode", "ephemeral"])
+    assert ns.application_workspace_mode == "ephemeral"
 
 
 def test_parse_args_rejects_removed_memory_flags() -> None:

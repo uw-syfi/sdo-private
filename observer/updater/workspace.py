@@ -9,6 +9,7 @@ from pathlib import Path
 from observer.updater.manifest import ObserverDiagnosticsManifest, load_manifest
 
 MODULE_RE = re.compile(r"^\s*module\s+(\S+)\s*$", re.MULTILINE)
+DEFAULT_MODULE_PATH = "app-diagnostics"
 
 
 @dataclass(frozen=True)
@@ -76,11 +77,14 @@ def _reject_symlinks(root: Path) -> None:
 
 def _module_path(go_mod: Path) -> str:
     if not go_mod.is_file():
-        return "app-diagnostics"
+        return DEFAULT_MODULE_PATH
     match = MODULE_RE.search(go_mod.read_text(encoding="utf-8"))
     if not match:
-        return "app-diagnostics"
-    return match.group(1)
+        return DEFAULT_MODULE_PATH
+    module_path = match.group(1)
+    if module_path.startswith((".", "/")):
+        return DEFAULT_MODULE_PATH
+    return module_path
 
 
 def _write_go_mod(go_mod: Path, *, module_path: str, sdk_dir: Path, core_dir: Path) -> None:
@@ -95,6 +99,14 @@ def _write_go_mod(go_mod: Path, *, module_path: str, sdk_dir: Path, core_dir: Pa
         if not line.strip().startswith("replace sds.dev/observer/sdk =>")
         and not line.strip().startswith("replace sds.dev/observer/core =>")
     ]
+    module_line_found = False
+    for index, line in enumerate(lines):
+        if MODULE_RE.match(line):
+            lines[index] = f"module {module_path}"
+            module_line_found = True
+            break
+    if not module_line_found:
+        lines.insert(0, f"module {module_path}")
     content = "\n".join(lines).rstrip()
     if "sds.dev/observer/sdk" not in content:
         content += "\n\nrequire sds.dev/observer/sdk v0.0.0"

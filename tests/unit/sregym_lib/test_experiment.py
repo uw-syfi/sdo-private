@@ -532,6 +532,19 @@ def test_config_to_env_promotes_autonomous_submit_flag(tmp_path: Path) -> None:
     assert env["SREGYM_AUTONOMOUS_SUBMIT"] == "1"
 
 
+def test_config_to_env_forwards_cli_agent_application_workspace_mode(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        agent="cli_agent",
+        app_filter="hotel_reservation",
+        deploy_from_source=True,
+        application_workspace="persistent",
+    )
+    env = config_to_env(config, project_root=tmp_path)
+
+    decoded = json.loads(env["SREGYM_EXPERIMENT_AGENT_CONFIG"])
+    assert decoded["application_workspace_mode"] == "persistent"
+
+
 def test_config_to_env_omits_autonomous_submit_when_disabled(tmp_path: Path) -> None:
     config = ExperimentConfig(
         agent="cli_agent",

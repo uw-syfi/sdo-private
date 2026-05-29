@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -15,7 +13,16 @@ class GoRunner:
 
     @classmethod
     def from_environment(cls) -> GoRunner:
-        return cls(executable=os.environ.get("SDS_OBSERVER_GO", "go"))
+        configured = os.environ.get("SDS_OBSERVER_GO")
+        if configured:
+            return cls(executable=configured)
+        discovered = shutil.which("go")
+        if discovered:
+            return cls(executable=discovered)
+        local_install = Path("/usr/local/go/bin/go")
+        if local_install.is_file():
+            return cls(executable=str(local_install))
+        return cls()
 
     def run(self, args: list[str], *, cwd: Path) -> int:
         try:

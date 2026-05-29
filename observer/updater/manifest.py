@@ -24,7 +24,6 @@ class DetectorManifest(BaseModel):
     id: str
     package: str
     constructor: str = "New"
-    playbooks: list[str] = Field(default_factory=list)
 
     @field_validator("id")
     @classmethod
@@ -80,7 +79,6 @@ def load_manifest(path: Path, *, app_root: Path) -> ObserverDiagnosticsManifest:
         raise ManifestError(str(exc)) from exc
 
     _validate_detector_files(manifest, diagnostics_dir=diagnostics_dir)
-    _validate_playbooks(manifest, app_root=app_root)
     return manifest
 
 
@@ -91,14 +89,6 @@ def _validate_detector_files(manifest: ObserverDiagnosticsManifest, *, diagnosti
             raise ManifestError(f"detector {detector.id!r} package directory does not exist: {detector.package}")
         if not any(child.suffix == ".go" for child in package_dir.iterdir() if child.is_file()):
             raise ManifestError(f"detector {detector.id!r} package must contain at least one Go file")
-
-
-def _validate_playbooks(manifest: ObserverDiagnosticsManifest, *, app_root: Path) -> None:
-    for detector in manifest.detectors:
-        for playbook in detector.playbooks:
-            playbook_path = _safe_child_path(app_root, playbook, label="playbook")
-            if not playbook_path.is_file():
-                raise ManifestError(f"detector {detector.id!r} playbook does not exist: {playbook}")
 
 
 def _safe_child_path(root: Path, raw_path: str, *, label: str) -> Path:

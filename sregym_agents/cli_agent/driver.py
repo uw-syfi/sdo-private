@@ -20,10 +20,12 @@ and Opencode raise ``ValueError`` inside their constructor when
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import functools
 import json
 import logging
 import os
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -63,6 +65,34 @@ _POST_STAGE_TIMEOUT_S = 300
 _SUBMIT_MCP_SERVER_NAME = "sregym"
 _AUTONOMOUS_PROMPT_PROFILES = frozenset({"sds", "direct"})
 _DEFAULT_AUTONOMOUS_PROMPT_PROFILE = "sds"
+_APPLICATION_WORKSPACE_MODES = frozenset({"none", "persistent", "ephemeral"})
+_DEFAULT_APPLICATION_WORKSPACE_MODE = "none"
+_OBSERVER_CHECK_TIMEOUT_S = 300
+_OBSERVER_REPAIR_ATTEMPTS = 1
+
+
+@dataclasses.dataclass(frozen=True)
+class _ObserverCheckResult:
+    command: list[str]
+    returncode: int
+    stdout: str
+    stderr: str
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0
+
+
+@dataclasses.dataclass(frozen=True)
+class _ObserverFinding:
+    detector_id: str
+    rule_id: str
+    status: str
+    severity: str
+    summary: str
+    evidence: str
+    primary_resource: str
+    playbooks: tuple[str, ...]
 
 
 # --- Pure helpers ----------------------------------------------------------
@@ -91,6 +121,8 @@ def _build_prompt(
     autonomous_prompt_profile: str = _DEFAULT_AUTONOMOUS_PROMPT_PROFILE,
     submit_done_returns_feedback: bool = False,
     memory_enabled: bool = False,
+    observer_detectors_enabled: bool = False,
+    observer_preflight_report: str = "",
 ) -> str:
     """Render the single-session prompt handed to the wrapped CLI agent.
 
@@ -126,6 +158,8 @@ def _build_prompt(
             submit_mcp_server_name=_SUBMIT_MCP_SERVER_NAME,
             submit_done_returns_feedback=submit_done_returns_feedback,
             memory_enabled=memory_enabled,
+            observer_detectors_enabled=observer_detectors_enabled,
+            observer_preflight_report=observer_preflight_report,
         )
     )
 
@@ -141,6 +175,39 @@ def _normalize_autonomous_prompt_profile(profile: Any) -> str:
         allowed = ", ".join(sorted(_AUTONOMOUS_PROMPT_PROFILES))
         raise ValueError(f"Unknown autonomous prompt profile {profile!r}. Expected one of: {allowed}")
     return normalized
+
+
+def _normalize_application_workspace_mode(mode: Any) -> str:
+    """Normalize and validate the application-workspace mode forwarded by the runner."""
+    if mode is None:
+        return _DEFAULT_APPLICATION_WORKSPACE_MODE
+    if isinstance(mode, bool):
+        return "persistent" if mode else "none"
+    normalized = str(mode).strip().lower()
+    if not normalized:
+        return _DEFAULT_APPLICATION_WORKSPACE_MODE
+    if normalized == "true":
+        return "persistent"
+    if normalized == "false":
+        return "none"
+    if normalized not in _APPLICATION_WORKSPACE_MODES:
+        allowed = ", ".join(sorted(_APPLICATION_WORKSPACE_MODES))
+        raise ValueError(f"Unknown application workspace mode {mode!r}. Expected one of: {allowed}")
+    return normalized
+
+
+def _observer_detectors_enabled(
+    *,
+    autonomous: bool,
+    autonomous_prompt_profile: str,
+    application_workspace_mode: str,
+) -> bool:
+    """Enable observer-detector authoring only for autonomous persistent `.sds` runs."""
+    return (
+        autonomous
+        and _normalize_autonomous_prompt_profile(autonomous_prompt_profile) == "sds"
+        and _normalize_application_workspace_mode(application_workspace_mode) == "persistent"
+    )
 
 
 # --- Memory helpers --------------------------------------------------------
@@ -239,6 +306,258 @@ def _maybe_write_lesson(
         )
     except Exception:
         logger.exception("Memory: lesson extraction/write failed; continuing")
+
+
+# --- Observer diagnostics helpers -----------------------------------------
+
+
+def _observer_manifest_path(app_root: Path) -> Path:
+    return app_root / ".sds" / "diagnostics" / "manifest.yaml"
+
+
+def _run_observer_check_commands(
+    *,
+    app_root: Path,
+    namespace: str,
+    timeout: int = _OBSERVER_CHECK_TIMEOUT_S,
+) -> list[_ObserverCheckResult]:
+    commands = [
+        [
+            sys.executable,
+            "-m",
+            "observer.updater.check_cli",
+            "test",
+            "--app",
+            str(app_root),
+        ],
+        [
+            sys.executable,
+            "-m",
+            "observer.updater.check_cli",
+            "run-once",
+            "--app",
+            str(app_root),
+            "--namespace",
+            namespace,
+        ],
+    ]
+    results: list[_ObserverCheckResult] = []
+    for command in commands:
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=app_root,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            result = _ObserverCheckResult(
+                command=command,
+                returncode=completed.returncode,
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+            )
+        except subprocess.TimeoutExpired as exc:
+            result = _ObserverCheckResult(
+                command=command,
+                returncode=124,
+                stdout=exc.stdout or "",
+                stderr=(exc.stderr or "") + f"\nobserver check timed out after {timeout}s",
+            )
+        results.append(result)
+        if not result.ok:
+            break
+    return results
+
+
+def _format_observer_check_results(results: list[_ObserverCheckResult], *, max_chars: int = 12000) -> str:
+    sections: list[str] = []
+    for result in results:
+        status = "passed" if result.ok else f"failed with exit {result.returncode}"
+        section = (
+            f"$ {' '.join(result.command)}\n"
+            f"status: {status}\n"
+            f"stdout:\n{result.stdout.strip() or '<empty>'}\n"
+            f"stderr:\n{result.stderr.strip() or '<empty>'}"
+        )
+        sections.append(section)
+    text = "\n\n".join(sections)
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 200] + "\n\n...[observer check output truncated]..."
+
+
+def _format_observer_resource(resource: Any) -> str:
+    if not isinstance(resource, dict):
+        return ""
+    kind = str(resource.get("kind") or "").strip()
+    namespace = str(resource.get("namespace") or "").strip()
+    name = str(resource.get("name") or "").strip()
+    if not kind and not name:
+        return ""
+    qualified = f"{kind}/{name}" if kind and name else kind or name
+    if namespace:
+        return f"{qualified} namespace={namespace}"
+    return qualified
+
+
+def _parse_observer_findings(stdout: str) -> list[_ObserverFinding]:
+    findings: list[_ObserverFinding] = []
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or "rule_id" not in payload:
+            continue
+        playbooks_raw = payload.get("playbooks")
+        playbooks = tuple(str(item) for item in playbooks_raw if item) if isinstance(playbooks_raw, list) else ()
+        findings.append(
+            _ObserverFinding(
+                detector_id=str(payload.get("detector_id") or payload.get("detector") or ""),
+                rule_id=str(payload.get("rule_id") or ""),
+                status=str(payload.get("status") or ""),
+                severity=str(payload.get("severity") or ""),
+                summary=str(payload.get("summary") or ""),
+                evidence=str(payload.get("evidence") or ""),
+                primary_resource=_format_observer_resource(payload.get("primary_resource")),
+                playbooks=playbooks,
+            )
+        )
+    return findings
+
+
+def _format_observer_preflight_report(results: list[_ObserverCheckResult], *, max_chars: int = 12000) -> str:
+    if not results:
+        return ""
+    failed = next((result for result in results if not result.ok), None)
+    if failed is not None:
+        return (
+            "Observer preflight failed before producing reliable findings. "
+            "Do not let this block incident mitigation; after submission, repair `.sds/diagnostics/` if needed.\n\n"
+            f"{_format_observer_check_results(results, max_chars=max_chars)}"
+        )
+
+    findings: list[_ObserverFinding] = []
+    for result in results:
+        findings.extend(_parse_observer_findings(result.stdout))
+
+    if not findings:
+        return "Observer preflight completed successfully.\nNo observer findings were emitted."
+
+    lines = ["Observer preflight completed successfully.", f"{len(findings)} observer finding(s):"]
+    for index, finding in enumerate(findings, start=1):
+        heading_bits = [
+            bit
+            for bit in [
+                finding.severity,
+                finding.status,
+                finding.rule_id,
+            ]
+            if bit
+        ]
+        heading = " ".join(heading_bits) or "finding"
+        lines.append(f"{index}. [{heading}] {finding.summary or '<no summary>'}")
+        detector_id = finding.detector_id or finding.rule_id
+        if detector_id:
+            lines.append(f"   detector: {detector_id}")
+        if finding.primary_resource:
+            lines.append(f"   resource: {finding.primary_resource}")
+        if finding.evidence:
+            lines.append(f"   evidence: {finding.evidence}")
+        if finding.playbooks:
+            lines.append("   recommended playbooks:")
+            lines.extend(f"   - {playbook}" for playbook in finding.playbooks)
+        else:
+            lines.append("   recommended playbooks: <none>")
+
+    text = "\n".join(lines)
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 200] + "\n\n...[observer preflight report truncated]..."
+
+
+def _maybe_build_observer_preflight_report(
+    *,
+    app_root: Path,
+    namespace: str,
+    check_timeout: int = _OBSERVER_CHECK_TIMEOUT_S,
+) -> str:
+    if not _observer_manifest_path(app_root).is_file():
+        logger.info("Observer diagnostics: no manifest found; skipping preflight check")
+        return ""
+    if not namespace:
+        logger.info("Observer diagnostics: namespace missing; skipping preflight check")
+        return ""
+
+    logger.info("Observer diagnostics: running preflight check")
+    results = _run_observer_check_commands(app_root=app_root, namespace=namespace, timeout=check_timeout)
+    if all(result.ok for result in results):
+        logger.info("Observer diagnostics: preflight check passed")
+    else:
+        logger.warning("Observer diagnostics: preflight check failed; including failure in agent prompt")
+    return _format_observer_preflight_report(results)
+
+
+def _observer_repair_prompt(results: list[_ObserverCheckResult]) -> str:
+    return (
+        "The post-submission observer diagnostics check failed.\n\n"
+        "Fix only the `.sds/diagnostics/` detector code, `.sds/playbooks/` files, "
+        "or related `.sds/` routing needed to make these observer checks pass. "
+        "Do not change application manifests or live cluster state unless the observer "
+        "check failure proves those files are directly involved.\n\n"
+        "Keep detector-to-playbook routing precise while repairing: target the directly "
+        "observed Kubernetes symptom, avoid speculative subsystem-specific labels, and "
+        "do not gate a generic symptom detector on unrelated application resources.\n\n"
+        "Do not call `submit_diagnosis`, `submit_mitigation`, or `submit_done`; "
+        "the benchmark submission is already complete.\n\n"
+        "After editing, stop. The driver will rerun the observer checks.\n\n"
+        "Observer check output:\n\n"
+        "```text\n"
+        f"{_format_observer_check_results(results)}\n"
+        "```\n"
+    )
+
+
+def _maybe_repair_observer_diagnostics(
+    *,
+    session: Any,
+    app_root: Path,
+    namespace: str,
+    repair_timeout: int,
+    check_timeout: int = _OBSERVER_CHECK_TIMEOUT_S,
+) -> list[_ObserverCheckResult]:
+    if not _observer_manifest_path(app_root).is_file():
+        logger.info("Observer diagnostics: no manifest found; skipping post-agent check")
+        return []
+    if not namespace:
+        logger.info("Observer diagnostics: namespace missing; skipping post-agent check")
+        return []
+
+    logger.info("Observer diagnostics: running post-agent check")
+    results = _run_observer_check_commands(app_root=app_root, namespace=namespace, timeout=check_timeout)
+    if all(result.ok for result in results):
+        logger.info("Observer diagnostics: post-agent check passed")
+        return results
+
+    for attempt in range(1, _OBSERVER_REPAIR_ATTEMPTS + 1):
+        logger.warning(
+            "Observer diagnostics: check failed; asking agent to repair (attempt %d/%d)",
+            attempt,
+            _OBSERVER_REPAIR_ATTEMPTS,
+        )
+        session.generate(_observer_repair_prompt(results), cwd=str(app_root), timeout=repair_timeout)
+        results = _run_observer_check_commands(app_root=app_root, namespace=namespace, timeout=check_timeout)
+        if all(result.ok for result in results):
+            logger.info("Observer diagnostics: check passed after repair attempt %d", attempt)
+            return results
+
+    logger.warning("Observer diagnostics: still failing after repair attempt(s)")
+    return results
 
 
 # --- Conductor I/O ---------------------------------------------------------
@@ -351,6 +670,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--application-workspace-mode",
+        choices=sorted(_APPLICATION_WORKSPACE_MODES),
+        default=_normalize_application_workspace_mode(toml_cfg.get("application_workspace_mode")),
+        help=(
+            "Application workspace mode forwarded by the benchmark runner. "
+            "Observer detector guidance is enabled only for autonomous persistent workspaces "
+            "(default: none)."
+        ),
+    )
+    parser.add_argument(
         "--memory-enabled",
         action=argparse.BooleanOptionalAction,
         default=bool(toml_cfg.get("memory_enabled", False)),
@@ -452,6 +781,20 @@ def _run(
     # tools that return a neutral ack, and must self-verify via kubectl.
     autonomous = os.getenv("SREGYM_AUTONOMOUS_SUBMIT", "").strip() == "1"
     submit_done_returns_feedback = os.getenv("SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK", "").strip() == "1"
+    application_workspace_mode = _normalize_application_workspace_mode(
+        getattr(args, "application_workspace_mode", _DEFAULT_APPLICATION_WORKSPACE_MODE)
+    )
+    observer_detectors_enabled = _observer_detectors_enabled(
+        autonomous=autonomous,
+        autonomous_prompt_profile=args.autonomous_prompt_profile,
+        application_workspace_mode=application_workspace_mode,
+    )
+    observer_preflight_report = ""
+    if observer_detectors_enabled:
+        observer_preflight_report = _maybe_build_observer_preflight_report(
+            app_root=Path(os.getcwd()),
+            namespace=str(app_info.get("namespace") or ""),
+        )
     prompt = _build_prompt(
         planned_stages,
         app_info,
@@ -459,6 +802,8 @@ def _run(
         autonomous_prompt_profile=args.autonomous_prompt_profile,
         submit_done_returns_feedback=submit_done_returns_feedback,
         memory_enabled=memory_enabled,
+        observer_detectors_enabled=observer_detectors_enabled,
+        observer_preflight_report=observer_preflight_report,
     )
     started = time.monotonic()
     crashed_with: str | None = None
@@ -498,6 +843,14 @@ def _run(
         completed,
         bool(crashed_with),
     )
+
+    if observer_detectors_enabled and crashed_with is None and session is not None:
+        _maybe_repair_observer_diagnostics(
+            session=session,
+            app_root=Path(os.getcwd()),
+            namespace=str(app_info.get("namespace") or ""),
+            repair_timeout=args.timeout_sec,
+        )
 
     # Verified-only write (§3): extract a lesson only when the environment
     # confirmed the outcome, and never if the agent crashed mid-run.

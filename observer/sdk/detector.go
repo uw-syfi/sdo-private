@@ -61,6 +61,7 @@ func ObjectRefFrom(kind string, apiVersion string, object metav1.Object) ObjectR
 }
 
 type Finding struct {
+	DetectorID       string          `json:"detector_id,omitempty"`
 	RuleID           string          `json:"rule_id"`
 	Status           FindingStatus   `json:"status"`
 	Severity         FindingSeverity `json:"severity"`

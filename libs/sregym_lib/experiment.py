@@ -294,7 +294,12 @@ def effective_agent_config(config: ExperimentConfig) -> dict[str, Any]:
         no_inject_summary=config.no_inject_summary,
         crucible_seed_kb_dir=config.env.crucible_seed_kb_dir,
     )
-    return copy.deepcopy(agent_config.get(config.agent, {}))
+    selected = copy.deepcopy(agent_config.get(config.agent, {}))
+    if config.agent == "cli_agent":
+        workspace_mode = application_workspace_mode(config.application_workspace)
+        if workspace_mode is not None:
+            selected["application_workspace_mode"] = workspace_mode
+    return selected
 
 
 _SNAPSHOT_FILENAME = "experiment_config.toml"

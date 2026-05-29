@@ -13,6 +13,17 @@ You are not alone in this working directory. Other agents may be editing nearby 
 
 Before you start investigating, call the `recall` MCP tool (from the `memory` server) with a short description of what you are currently observing — the symptoms, which resources look unhealthy, and any recent change (rollout/deploy). It returns lessons from past incidents on this application as HYPOTHESES to verify against the live cluster, not answers: the current fault may differ, and competing causes can share symptoms. Use them as leads to check first, never as conclusions. Re-call `recall` if your understanding of the situation changes.
 {% endif %}
+{% if observer_preflight_report %}
+## Observer Preflight Findings
+
+The driver already ran existing observer diagnostics before this session. Treat these findings as leads to verify against the live cluster, not as final conclusions. Do not run observer commands yourself during preflight.
+Each finding lists the detector that fired and the exact recommended playbook(s). If a fired detector helped with this incident, do not add a second detector or overlapping playbook for the same symptom after submission; revise that existing detector/playbook only if its check, wording, or routing was incomplete or noisy.
+
+```text
+{{ observer_preflight_report }}
+```
+
+{% endif %}
 ## Scope
 
 You have up to 2 tasks to complete:
@@ -36,36 +47,151 @@ Start every run with this preflight workflow.
 Operate in an iterative loop:
 1. Read the application source code and deployment manifests to contextualize the Kubernetes resources you are seeing. Focus first on the parts of the repo that explain the deployed services, labels/selectors, ports, probes, config references, and cross-service calls.
    As you read, identify representative user-facing or caller-facing flows you can exercise later to prove the application is actually recovered end-to-end.
-2. Check whether `.sds/diagnose.sh` or related `.sds/` diagnostics already exist from prior runs.
-3. If `.sds/diagnose.sh` exists, run it at the beginning of the session to quickly triage the cluster and flag previously seen issues. Use its output to guide your initial investigation, but verify its claims against the live cluster before relying on them.
-4. Once you identify a new symptom pattern or recurring manual check, prefer encoding it immediately into `.sds/diagnose.sh` or a helper script, then rerun diagnostics so the rest of the investigation benefits from the new automation.
-5. Once you identify a repeatable remediation step, prefer encoding the reusable part into a playbook-linked script and use that scripted path for subsequent iterations when appropriate.
-6. Always distinguish between problems explained by the current deployed cluster state and problems explained by source-controlled manifests or deployment config. Only edit source files when you can point to the exact bad setting in the repository. If the fault lives in source-controlled manifests or deployment config, fix the real file in place first, then apply or redeploy the updated manifests/source and verify the running cluster now reflects that source change before you consider the fix complete. Use `.sds` scripts to diagnose, automate, and verify, not to replace the real source of truth.
-7. Update the diagnosis-to-playbook routing logic so `.sds/diagnose.sh` flags one or more potentially relevant playbooks for each durable check you add or revise, and print which playbook file(s) under `.sds/playbooks/` are relevant for each finding.
+2. Check whether `.sds/playbooks/` already exists from prior runs. Read only playbooks that are directly relevant to the live symptom you can observe.
+3. {% if observer_detectors_enabled %}Use the Observer Preflight Findings section above when present; the driver runs existing observer detectors before the session starts.{% else %}Use existing playbooks as context only; do not spend incident time building repository-local diagnostic tooling.{% endif %}
+4. During the live incident, use direct `kubectl`, source/manifests, logs, and targeted shell commands as the broad triage path.
+5. Once you identify a repeatable remediation step, prefer encoding the reusable part into a playbook-linked script under the relevant `.sds/playbooks/<issue-class>/scripts/` directory and use that scripted path for subsequent iterations when appropriate.
+6. Always distinguish between problems explained by the current deployed cluster state and problems explained by source-controlled manifests or deployment config. Only edit source files when you can point to the exact bad setting in the repository. If the fault lives in source-controlled manifests or deployment config, fix the real file in place first, then apply or redeploy the updated manifests/source and verify the running cluster now reflects that source change before you consider the fix complete. Use playbook-local helpers to automate focused diagnosis, mitigation, or verification, not to replace the real source of truth.
+{% if observer_detectors_enabled -%}
+7. Keep diagnosis-to-playbook routing high precision: any detector finding or playbook-linked helper output should name only the `.sds/playbooks/` entries that are directly relevant to the detected symptom.
+{% else -%}
+7. Keep diagnosis-to-playbook routing high precision: any playbook-linked helper output should name only the `.sds/playbooks/` entries that are directly relevant to the detected symptom.
+{% endif -%}
 8. Repeat starting from step 1. Do diagnosis, mitigation, and verification until all user traffic is healthy across all relevant paths you can identify in the system, and the system internals also appear healthy.
 
+## Command Notes
+
+- Do not use `kubectl run -it ... --rm` or `kubectl exec -it ...` in this autonomous, non-interactive session. Interactive attach can hang after the pod completes, especially when piped through commands like `head`.
+- For temporary curl/debug pods, use non-interactive commands with deterministic pod names, `timeout`, and explicit cleanup:
+  ```bash
+  kubectl run curl-test -n {{ namespace }} --restart=Never --image=curlimages/curl:latest --command -- curl -fsS http://frontend:5000/
+  kubectl delete pod curl-test -n {{ namespace }} --ignore-not-found
+  ```
+- When possible, prefer `kubectl exec` without `-i` or `-t`, for example `kubectl exec -n {{ namespace }} deploy/frontend -- wget -qO- http://localhost:5000/`.
+{% if observer_detectors_enabled %}
+
+## Observer Detector Workflow
+
+This run is using a persistent application workspace, so durable typed diagnostics should live under `.sds/diagnostics/`. This observer-detector mechanism supersedes the old top-level shell triage entrypoint; do not create a root triage script under `.sds`.
+
+- Existing observer detectors are run by the driver before the session starts. Use any reported findings and recommended playbooks as leads, then verify them against the live cluster.
+- Defer creating or revising observer detectors until after `submit_done` returns.
+- If an existing detector fired and helped, treat that detector ID as the owner of this issue class. Do not create a new overlapping detector or playbook for the same observed symptom; update the fired detector and its playbook only when the existing artifact was incomplete, noisy, or wrong.
+- During the incident, use direct `kubectl`, source/manifests, logs, and targeted shell commands as the broad triage path. Use the driver-provided observer preflight findings as quick structured leads over services, pods, deployments, endpoints, endpoint slices, events, and related Kubernetes state.
+- After submission, when you identify a reusable Kubernetes namespace-state check, add or revise a Go detector under `.sds/diagnostics/detectors/`. The detector code should route each finding to the exact relevant `.sds/playbooks/` entry by setting `sdk.Finding.Playbooks`.
+- Prefer detectors for the directly observed Kubernetes symptom that would have shortened this incident. Do not create detectors or playbooks for exploratory hypotheses, speculative secondary causes, workaround side effects, or changes you tried unless the original live cluster evidence showed that specific issue was causal.
+- For Service endpoint incidents, prefer a detector/playbook named around the Service endpoint symptom, such as `service-endpoints`, and include selector mismatch checks in that playbook. Do not name or gate that detector on Consul, gRPC, HTTP, or another application subsystem unless the detector can directly observe that subsystem-specific failure and the subsystem was the precise root cause.
+- A detector should not require unrelated resources to exist before checking its target symptom. For example, a Service-with-no-ready-endpoints detector should iterate the observed namespace Services and should not skip findings because some application-specific dependency is absent or in a different namespace.
+
+Minimal detector example to adapt after submission:
+
+```text
+.sds/diagnostics/
+  go.mod
+  manifest.yaml
+  detectors/missing_endpoints/detector.go
+```
+
+File: `.sds/diagnostics/go.mod`
+
+```go
+module app-diagnostics
+
+go 1.24
+
+require sds.dev/observer/sdk v0.0.0
+```
+
+Use Go-safe detector package directory names with underscores, such as `missing_endpoints` or `service_endpoints`; keep hyphenated human-facing names for detector IDs and playbook directories if useful. Do not make detector files `package main`; the Go package declaration should match the final directory segment.
+
+Detector file: `.sds/diagnostics/detectors/missing_endpoints/detector.go`
+
+```yaml
+apiVersion: sds.dev/v1alpha1
+kind: ObserverDiagnostics
+sdkVersion: v0.1
+detectors:
+  - id: missing-endpoints
+    package: ./detectors/missing_endpoints
+    constructor: New
+```
+
+```go
+package missing_endpoints
+
+import (
+    "context"
+    "fmt"
+
+    "sds.dev/observer/sdk"
+)
+
+func New() sdk.Detector { return Detector{} }
+
+type Detector struct{}
+
+func (Detector) Spec() sdk.DetectorSpec {
+    return sdk.DetectorSpec{
+        ID:          "missing-endpoints",
+        Description: "services with no ready endpoints",
+    }
+}
+
+func (Detector) Detect(ctx context.Context, snap sdk.DetectionContext) ([]sdk.Finding, error) {
+    if err := ctx.Err(); err != nil {
+        return nil, err
+    }
+    findings := []sdk.Finding{}
+    for _, svc := range snap.Services() {
+        if snap.ReadyEndpointCountForService(svc.Namespace, svc.Name) > 0 {
+            continue
+        }
+        findings = append(findings, sdk.Finding{
+            RuleID:   "missing-endpoints",
+            Status:   sdk.FindingActive,
+            Severity: sdk.SeverityWarning,
+            Summary:  fmt.Sprintf("service %s has no ready endpoints", svc.Name),
+            Evidence: fmt.Sprintf("namespace=%s service=%s ready_endpoints=0", svc.Namespace, svc.Name),
+            PrimaryResource: sdk.ObjectRefFrom("Service", "v1", &svc),
+            Playbooks: []string{".sds/playbooks/service-endpoints/README.md"},
+        })
+    }
+    return findings, nil
+}
+```
+{% endif %}
+
 Additional guidelines:
-- Treat `.sds` as a maintained operational toolkit. Put persistent diagnostics, mitigation helpers, and playbook automation under `.sds/`, with `.sds/diagnose.sh` as the broad top-level triage entrypoint.
-- Keep repository-local diagnostic scripts quick to run, well-organized, and readable. Follow good Bash script best practices, prefer small functions, and dispatch into helper scripts when that keeps the entrypoint clear, so the overall toolkit stays readable, maintainable, and easy to extend.
+- Treat `.sds` as a maintained operational toolkit.
+{% if observer_detectors_enabled %}- Put typed diagnostics under `.sds/diagnostics/`, with precise detector-to-playbook mappings.
+{% endif %}- Put playbook documentation plus playbook-local helper scripts under `.sds/playbooks/`.
+- Do not create a top-level triage script under `.sds`; use targeted live commands during the incident and durable detector/playbook artifacts after submission.
+- Keep playbook-local helper scripts quick to run, well-organized, and readable. Follow good Bash script best practices, prefer small functions, and keep helpers scoped to the specific playbook so the toolkit stays readable, maintainable, and easy to extend.
 - Focus on real errors that cause user-visible impact. The application may not follow best practices, but do not get distracted by every minor deviation from ideal patterns. Instead, focus on diagnosing and fixing the issues that are actually causing the observed faults.
 - Use `.sds/` for tooling and documentation, not as a replacement for the application's real manifests or deployment source.
 - Assume any script you inherit or write may be incomplete or partially wrong. Revise it when the live cluster proves it wrong.
-- Do not expect `.sds/diagnose.sh` or related scripts to automatically find every issue or fully determine every root cause. They are meant to be quick, reasonably reliable triage aids that surface issues for you to investigate further.
 - Do not hard-code detection for every one-off edge case you encounter. Prefer checks that cover general symptom patterns, recurring failure modes, and reusable operational invariants.
 - Keep diagnostics generic and low-risk. Do not encode benchmark IDs, injected-fault-specific keys, or exact oracle answers.
-- Each durable diagnosis check in `.sds/diagnose.sh` should route to one or more potentially relevant playbook file(s) and script(s) under `.sds/playbooks/`.
-- When you add or revise a diagnosis check, also add or revise the corresponding diagnosis-to-playbook mapping so the output names the candidate playbooks explicitly.
+{% if observer_detectors_enabled %}- Each durable observer detector finding should route only to playbook file(s) and script(s) under `.sds/playbooks/` that are directly relevant to the detected symptom.
+{% endif %}
+- Only flag playbooks that are directly relevant to the detected symptom; do not flag broad, generic, or merely plausible playbooks just to be safe.
+- Playbooks should be self-contained and avoid overlapping each other. Prefer splitting or tightening playbooks when two entries cover substantially the same diagnosis or mitigation path.
+{% if observer_detectors_enabled %}- When you add or revise a detector or playbook-local check, also add or revise the corresponding diagnosis-to-playbook mapping so the output names the relevant playbooks explicitly.
+{% else %}- When you add or revise a playbook-local check, also add or revise the corresponding diagnosis-to-playbook mapping so the output names the relevant playbooks explicitly.
+{% endif %}
 - Keep scripts quick, well-organized, and maintainable.
 
 ## Recommended `.sds` Layout
 
 ```text
 .sds/
-  diagnose.sh                  # top-level triage entrypoint; broad, fast, maintained over time
-  helpers/                     # shared diagnostic helper scripts sourced or called by diagnose.sh
-    lib.sh
-    kubernetes.sh
-    logs.sh
+{% if observer_detectors_enabled %}
+  diagnostics/                 # typed observer detectors for reusable Kubernetes checks
+    manifest.yaml
+    go.mod
+    detectors/
+      <issue_class>/detector.go
+{% endif %}
   playbooks/
     README.md                  # short routing index for humans and agents
     <issue-class>/
@@ -121,4 +247,4 @@ Ordering: `submit_mitigation` and `submit_diagnosis` may be interleaved and happ
 
 ## After Submission
 
-**Only after `submit_done` returns** — first reflect on whether you can add a new diagnostic check, or enhance an existing one, so this class of error would surface much faster on a future run. Prefer quick, well-organized checks under `.sds/`, with `.sds/diagnose.sh` as the entrypoint. Then write down the incident as a generalizable Markdown playbook under `.sds/playbooks/`. The playbook should cover both diagnosis and mitigation guidance for this class of issue,{% if submit_done_returns_feedback %} using the ground-truth feedback to correct any mistakes in your own understanding before writing it.{% else %} using what you verified from the live cluster and source tree rather than assuming `submit_done` will correct mistakes for you.{% endif %} Keep the playbook generic enough to help with future related incidents, not just this exact benchmark instance. Also update `.sds/playbooks/README` so it remains a concise routing index for the available playbooks. Review whether the playbooks flagged by `.sds/diagnose.sh` were actually useful for this incident; if the routing was noisy, misleading, or incomplete, edit the diagnosis-to-playbook mapping logic accordingly. If you changed files under `.sds/`, commit those `.sds/` changes before exiting. If you also changed real manifests or deployment source files earlier in the incident, leave those changes in their original locations; do not copy them into `.sds/`.
+**Only after `submit_done` returns** — first reflect on whether you can add a new diagnostic check, or enhance an existing one, so this class of error would surface much faster on a future run.{% if observer_detectors_enabled %} For reusable Kubernetes namespace-state checks, add or revise observer detectors under `.sds/diagnostics/`, and have each finding point to the exact relevant `.sds/playbooks/` entry with `sdk.Finding.Playbooks`. The driver will validate observer detectors after you exit and will reprompt this same session if they fail. If observer preflight findings helped, update the fired detector/playbook instead of adding a duplicate detector or overlapping playbook for the same symptom.{% endif %} Then write down the incident as a generalizable Markdown playbook under `.sds/playbooks/`. The playbook should cover both diagnosis and mitigation guidance for this class of issue,{% if submit_done_returns_feedback %} using the ground-truth feedback to correct any mistakes in your own understanding before writing it.{% else %} using what you verified from the live cluster and source tree rather than assuming `submit_done` will correct mistakes for you.{% endif %} Keep the playbook generic enough to help with future related incidents, not just this exact benchmark instance. Also update `.sds/playbooks/README` so it remains a concise routing index for the available playbooks. Review whether detector-to-playbook or helper-to-playbook routing was useful for this incident; if the routing was noisy, misleading, or incomplete, edit the mapping logic accordingly. If you changed files under `.sds/`, commit those `.sds/` changes before exiting. If you also changed real manifests or deployment source files earlier in the incident, leave those changes in their original locations; do not copy them into `.sds/`.
