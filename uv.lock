@@ -39,11 +39,15 @@ wheels = [
 
 [[package]]
 name = "agentshim"
-version = "0.4.0"
-source = { git = "https://github.com/vic-lsh/agentshim?rev=d7f5c1b03b5e982faae0315955a9b2151342117d#d7f5c1b03b5e982faae0315955a9b2151342117d" }
+version = "0.5.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "litellm" },
     { name = "loguru" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ce/fe/19af1a03cf826d883641da3b3d6b81ef6ff7e9fa12ae2fdc6c631e8a6781/agentshim-0.5.1.tar.gz", hash = "sha256:712adda9ad3de01cb311b6f11c0115be5c785ef9089de71addb05b49bb576533", size = 235789, upload-time = "2026-05-29T06:44:52.441Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/45/89/db9ba958f148e5d903644c5e7717445c130a4eedcdb3c328bef5dc3550a6/agentshim-0.5.1-py3-none-any.whl", hash = "sha256:4c31023a7183040237c6d3ebb620a2394d837c9f0f8a8cac99e4e700a74875ad", size = 49708, upload-time = "2026-05-29T06:44:51.138Z" },
 ]
 
 [[package]]
@@ -3020,7 +3024,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim?rev=d7f5c1b03b5e982faae0315955a9b2151342117d" },
+    { name = "agentshim", specifier = ">=0.2.0" },
     { name = "litellm", specifier = ">=1.0.0" },
     { name = "loguru", specifier = ">=0.7.2" },
 ]
@@ -5719,7 +5723,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim?rev=d7f5c1b03b5e982faae0315955a9b2151342117d" },
+    { name = "agentshim", specifier = ">=0.5.1" },
     { name = "click", specifier = ">=8.0.0" },
     { name = "deepagents", marker = "python_full_version >= '3.11'", specifier = ">=0.5.0a1" },
     { name = "dspy-ai", specifier = ">=2.4.0" },

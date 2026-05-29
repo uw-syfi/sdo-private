@@ -1034,6 +1034,99 @@ def test_run_logs_crash_when_agent_exception(tmp_path: Path, monkeypatch: pytest
     assert data["completed"] is False
 
 
+# --- Usage metrics (token + step/turn accounting) --------------------------
+
+
+class _UsageStubSession(BaseAgentSession):
+    """Session stand-in that mirrors agentshim's real ``CLIAgentSession``:
+    each ``generate`` writes the run's usage back onto ``agent.last_usage``
+    (see ``agentshim/cli_agent.py``: ``self.agent.last_usage = ...``).
+    """
+
+    def __init__(self, agent: _UsageStubAgent, cwd: str | None, timeout: int) -> None:
+        self.agent = agent
+        self._cwd = cwd
+        self._timeout = timeout
+        self.session_id = "stub-session"
+
+    def generate(
+        self,
+        prompt: str,
+        cwd: str | None = None,
+        timeout: int | None = None,
+        silent: bool | None = None,
+        on_process_started: Any | None = None,
+    ) -> str:
+        self.agent.calls.append({"prompt": prompt})
+        # Mirror agentshim: populate last_usage from the just-finished run.
+        self.agent.last_usage = self.agent.next_usage
+        return self.agent.response
+
+
+class _UsageStubAgent(BaseCodingAgent):
+    """CodingAgent stand-in that exposes ``last_usage`` like the real
+    ``CLICodingAgent`` (initialized to a zero ``ProviderUsage`` in
+    ``__init__``, overwritten by each ``generate``)."""
+
+    def __init__(self, usage: Any) -> None:
+        from agentshim.usage import ProviderUsage
+
+        self.response = "ok"
+        self.calls: list[dict[str, Any]] = []
+        self.next_usage = usage
+        self.last_usage = ProviderUsage()
+
+    def start_session(self, cwd: str | None = None, timeout: int = 300, silent: bool = False) -> _UsageStubSession:
+        return _UsageStubSession(self, cwd, timeout)
+
+    def generate(self, prompt: str, cwd: str | None = None, timeout: int = 300, silent: bool = False) -> str:
+        self.calls.append({"prompt": prompt})
+        self.last_usage = self.next_usage
+        return self.response
+
+
+def test_run_serializes_usage_metrics_with_tokens_and_turns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The results JSON must carry token usage AND step count (turns).
+
+    Regression: every result file in production showed ``usage_metrics:
+    null``. The driver already reads ``agent.last_usage`` and serializes
+    ``.to_dict()``; this pins the contract so a populated session usage
+    survives into the written JSON.
+    """
+    from agentshim.usage import ProviderUsage, TokenUsage
+
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
+
+    usage = ProviderUsage(
+        tokens=TokenUsage(input_tokens=1500, output_tokens=300, cached_input_tokens=200, turns=7),
+        total_cost_usd=0.42,
+        provider="claude",
+    )
+    stub = _UsageStubAgent(usage)
+    _patch_conductor(
+        monkeypatch,
+        stages=["diagnosis", "mitigation"],
+        problem_id="p-7",
+        status_sequence=["diagnosis", "done"],
+    )
+    driver._run(_args(logs_dir=str(tmp_path)), agent_factory=lambda p, m, u: stub)
+
+    files = list(tmp_path.glob("cli_agent_results_p-7_*.json"))
+    assert len(files) == 1
+    data = json.loads(files[0].read_text())
+    assert data["usage_metrics"] is not None, "usage_metrics must not be null"
+    total = data["usage_metrics"]["total"]
+    assert total["turns"] == 7, "step count (turns) must be recorded"
+    assert total["input_tokens"] == 1500
+    assert total["output_tokens"] == 300
+    assert total["cached_input_tokens"] == 200
+    assert total["total_cost_usd"] == 0.42
+    assert total["provider"] == "claude"
+
+
 # --- Memory (incident lessons) ---------------------------------------------
 
 
