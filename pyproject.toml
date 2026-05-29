@@ -29,6 +29,7 @@ dependencies = [
     "fastmcp>=2.9.2",
     "deepagents>=0.5.0a1; python_version >= '3.11'",
     "rlms>=0.1.0; python_version >= '3.11'",
+    "pydantic>=2.0.0",
     "numpy>=2.2.6",
     "matplotlib>=3.10.8",
 ]
@@ -50,6 +51,7 @@ test = [
 
 [project.scripts]
 operator = "app_operator.__main__:main"
+sds-observer-check = "observer.updater.check_cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -65,7 +67,7 @@ agentshim = { git = "https://github.com/vic-lsh/agentshim", rev = "d7f5c1b03b5e9
 members = ["libs/sds_core", "libs/pydantic_agent", "libs/agent_mw", "libs/model_config", "libs/sregym_lib", "libs/llm_rt"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["app_operator", "app_operator_dspy", "lego_agent", "libs"]
+packages = ["app_operator", "app_operator_dspy", "lego_agent", "libs", "observer"]
 
 [tool.ruff]
 line-length = 120

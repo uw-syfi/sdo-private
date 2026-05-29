@@ -37,6 +37,10 @@ depends_on = []
 path = "libs.llm_rt"
 depends_on = []
 
+[[modules]]
+path = "observer.updater"
+depends_on = []
+
 # --- app_operator catch-all (strict tripwire) ---
 # Any app_operator.* path not matched by a more specific [[modules]] block
 # below falls into this catch-all.  With `depends_on = []` it acts as a

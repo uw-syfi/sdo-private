@@ -78,6 +78,7 @@ Full schema in `app_operator/config.py`. Provider credentials, runtime tradeoffs
 | `./sds_operator analyze-prompts` | Report trajectory metrics |
 | `./sds_operator optimize-prompts` | Run **DSPy** offline **prompt optimization** |
 | `./sds_lego_agent --prompt "..."` | Generate and run an agent workflow (CLI) |
+| `uv run sds-observer-check test --app <app>` | Validate app-authored `.sds/diagnostics` detectors without rolling out an observer |
 | `./scripts/start_lego_ui.sh` | Launch the **`lego_agent`** web UI |
 
 Full option reference for each command is in `docs/architecture.md`.
@@ -92,6 +93,7 @@ After `sds_operator run`, the app directory contains a `.sds/` folder:
 .sds/
 ├── deploy.sh            # AI-generated deployment script
 ├── health_check.sh      # AI-generated health check script
+├── diagnostics/         # Optional observer detector code and manifest
 ├── code_analysis.md     # CodeAnalyzerAgent output (feeds DeploymentAgent)
 ├── logs/                # Per-attempt logs for deployment and monitoring
 └── trajectories/        # JSON recordings of every agent call
