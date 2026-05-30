@@ -21,9 +21,9 @@ import subprocess
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from agentshim import BaseCodingAgent
 from agentshim.base import BaseAgentSession, register_provider
 
+from agentshim import BaseCodingAgent
 from sregym_agents.cli_agent import driver
 
 if TYPE_CHECKING:
@@ -241,7 +241,8 @@ def test_build_prompt_autonomous_observer_detectors_when_enabled() -> None:
     assert "func New() sdk.Detector" in prompt
     assert "func (Detector) Detect(ctx context.Context, snap sdk.DetectionContext)" in prompt
     assert "snap.ReadyEndpointCountForService" in prompt
-    assert "directly observed Kubernetes symptom" in prompt
+    assert "Prefer the sharpest check that identifies a single root cause" in prompt
+    assert "A symptom detector must fire only on a persistent condition" in prompt
     assert "exploratory hypotheses" in prompt
     assert "For Service endpoint incidents" in prompt
     assert "should not skip findings because some application-specific dependency is absent" in prompt

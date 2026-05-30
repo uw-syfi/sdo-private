@@ -447,7 +447,14 @@ def _format_observer_preflight_report(results: list[_ObserverCheckResult], *, ma
         findings.extend(_parse_observer_findings(result.stdout))
 
     if not findings:
-        return "Observer preflight completed successfully.\nNo observer findings were emitted."
+        return (
+            "Observer preflight ran, but no existing observer detector matched this incident — "
+            "there is no detector→playbook mapping for the fault present here. "
+            "This does NOT mean the cluster is healthy: a fault is present and the cluster is in an "
+            "unhealthy state. Diagnose and mitigate it directly from the live cluster and source, "
+            "then after submission produce a detector that would have caught this incident and map it "
+            "to a playbook — an existing playbook if one fits, or a new one you author."
+        )
 
     lines = ["Observer preflight completed successfully.", f"{len(findings)} observer finding(s):"]
     for index, finding in enumerate(findings, start=1):
