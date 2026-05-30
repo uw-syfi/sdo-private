@@ -763,8 +763,9 @@ def _default_agent_factory(
     """
     # Deferred imports keep `--help` fast and avoid triggering heavy
     # provider imports until the driver actually needs a backend.
-    from agentshim import CodingAgent
     from agentshim.mcp_config import HttpMcpServer
+
+    from agentshim import CodingAgent
 
     mcp_servers: list[Any] = [HttpMcpServer(name=_SUBMIT_MCP_SERVER_NAME, url=submit_mcp_url)]
     if extra_mcp_servers:
@@ -1060,8 +1061,13 @@ def _run(
         logs_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out = logs_dir / f"cli_agent_results_{problem_id}_{ts}.json"
-        last_usage = getattr(agent, "last_usage", None) if agent is not None else None
-        usage_metrics: dict[str, Any] | None = {"total": last_usage.to_dict()} if last_usage is not None else None
+        # Prefer cumulative usage (summed across every CLI invocation,
+        # including post-submit detector-repair reprompts); fall back to the
+        # last invocation only if the backend predates cumulative tracking.
+        run_usage = getattr(agent, "cumulative_usage", None) if agent is not None else None
+        if run_usage is None and agent is not None:
+            run_usage = getattr(agent, "last_usage", None)
+        usage_metrics: dict[str, Any] | None = {"total": run_usage.to_dict()} if run_usage is not None else None
         with open(out, "w") as f:
             json.dump(
                 {
