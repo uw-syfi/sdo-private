@@ -373,7 +373,7 @@ def render_report(
         lines.append("- No non-generic reusable fragments found.")
 
     lines.extend(["", "## Instructions For Review", ""])
-    for record in sorted(records, key=lambda r: (r.score if r.score is not None else -1.0), reverse=True):
+    for record in sorted(records, key=lambda r: r.score if r.score is not None else -1.0, reverse=True):
         lines.extend(
             [
                 f"### {record.candidate_id}",
