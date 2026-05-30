@@ -15,6 +15,7 @@ from libs.sregym_lib.experiment import (
     _serialize_config,
     config_to_env,
     config_to_main_args,
+    effective_agent_config,
     load_experiment_config,
     resolve_config,
 )
@@ -264,16 +265,32 @@ def test_config_to_main_args_emits_application_workspace_flag(tmp_path: Path) ->
     assert "--application-workspace" in args
 
 
-def test_config_to_main_args_emits_application_workspace_mode(tmp_path: Path) -> None:
+def test_config_to_main_args_ephemeral_emits_bare_flag_no_value(tmp_path: Path) -> None:
+    """Ephemeral mode must render the BARE ``--application-workspace`` flag.
+
+    ``main.py`` declares ``--application-workspace`` with ``action="store_true"``
+    (boolean), so a trailing mode token like ``ephemeral`` is an argparse usage
+    error (exit code 2) — which previously aborted the ephemeral control stage
+    of a pipeline. The workspace *mode* is delivered to the cli_agent via
+    ``effective_agent_config`` (``application_workspace_mode``), never on the
+    main.py CLI.
+    """
     config = ExperimentConfig(
+        agent="cli_agent",
         parallel=1,
         app_filter="hotel_reservation",
         deploy_from_source=True,
         application_workspace="ephemeral",
     )
     args = config_to_main_args(config, exp_dir=tmp_path, tasklist_path=None)
+    assert "--application-workspace" in args
+    # No bare mode token may follow the flag (would break main.py argparse).
     idx = args.index("--application-workspace")
-    assert args[idx + 1] == "ephemeral"
+    after = args[idx + 1] if idx + 1 < len(args) else None
+    assert after != "ephemeral"
+    assert "ephemeral" not in args
+    # The mode is carried via the agent config channel instead.
+    assert effective_agent_config(config).get("application_workspace_mode") == "ephemeral"
 
 
 def test_config_to_main_args_omits_deploy_from_source_when_disabled(tmp_path: Path) -> None:

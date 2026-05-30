@@ -398,11 +398,13 @@ def config_to_main_args(
         args.extend(["--app-filter", config.app_filter])
     if config.deploy_from_source:
         args.append("--deploy-from-source")
-    workspace_mode = application_workspace_mode(config.application_workspace)
-    if workspace_mode == "persistent":
+    # main.py declares --application-workspace as store_true (boolean enable);
+    # it takes no value. Emit the bare flag for every enabled mode. The mode
+    # (persistent vs ephemeral) is forwarded to the cli_agent via
+    # effective_agent_config (application_workspace_mode), not the CLI — a
+    # trailing mode token here is an argparse usage error (exit 2).
+    if application_workspace_mode(config.application_workspace) is not None:
         args.append("--application-workspace")
-    elif workspace_mode is not None:
-        args.extend(["--application-workspace", workspace_mode])
     if config.repeat > 1:
         args.extend(["--repeat", str(config.repeat)])
 
