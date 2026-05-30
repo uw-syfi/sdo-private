@@ -70,6 +70,15 @@ _DEFAULT_APPLICATION_WORKSPACE_MODE = "none"
 _OBSERVER_CHECK_TIMEOUT_S = 300
 _OBSERVER_REPAIR_ATTEMPTS = 1
 
+# The observer preflight samples the cluster over a short window instead of a
+# single snapshot. Fault symptoms such as CrashLoopBackOff, OOMKilled, and
+# FailedScheduling only mature seconds-to-minutes after injection, so a single
+# early snapshot misses the sharp cause-specific detectors and leaves only the
+# broad symptom detectors (e.g. zero-endpoints) firing — which mislead the
+# agent. Overridable via env for tuning without code changes.
+_OBSERVER_WINDOW_ITERATIONS = max(1, int(os.getenv("SDS_OBSERVER_WINDOW_ITERATIONS", "5") or "5"))
+_OBSERVER_WINDOW_INTERVAL_S = max(0, int(os.getenv("SDS_OBSERVER_WINDOW_INTERVAL_S", "30") or "30"))
+
 
 @dataclasses.dataclass(frozen=True)
 class _ObserverCheckResult:
@@ -93,6 +102,17 @@ class _ObserverFinding:
     evidence: str
     primary_resource: str
     playbooks: tuple[str, ...]
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        """Identity used to track the same finding across window samples."""
+        return (self.detector_id or self.rule_id, self.rule_id, self.primary_resource)
+
+
+@dataclasses.dataclass(frozen=True)
+class _ObserverIterationSample:
+    index: int
+    findings: tuple[_ObserverFinding, ...]
 
 
 # --- Pure helpers ----------------------------------------------------------
@@ -315,38 +335,18 @@ def _observer_manifest_path(app_root: Path) -> Path:
     return app_root / ".sds" / "diagnostics" / "manifest.yaml"
 
 
-def _run_observer_check_commands(
+def _exec_observer_commands(
+    commands: list[list[str]],
     *,
-    app_root: Path,
-    namespace: str,
-    timeout: int = _OBSERVER_CHECK_TIMEOUT_S,
+    cwd: Path,
+    timeout: int,
 ) -> list[_ObserverCheckResult]:
-    commands = [
-        [
-            sys.executable,
-            "-m",
-            "observer.updater.check_cli",
-            "test",
-            "--app",
-            str(app_root),
-        ],
-        [
-            sys.executable,
-            "-m",
-            "observer.updater.check_cli",
-            "run-once",
-            "--app",
-            str(app_root),
-            "--namespace",
-            namespace,
-        ],
-    ]
     results: list[_ObserverCheckResult] = []
     for command in commands:
         try:
             completed = subprocess.run(
                 command,
-                cwd=app_root,
+                cwd=cwd,
                 check=False,
                 capture_output=True,
                 text=True,
@@ -369,6 +369,63 @@ def _run_observer_check_commands(
         if not result.ok:
             break
     return results
+
+
+def _run_observer_check_commands(
+    *,
+    app_root: Path,
+    namespace: str,
+    timeout: int = _OBSERVER_CHECK_TIMEOUT_S,
+) -> list[_ObserverCheckResult]:
+    commands = [
+        [sys.executable, "-m", "observer.updater.check_cli", "test", "--app", str(app_root)],
+        [
+            sys.executable,
+            "-m",
+            "observer.updater.check_cli",
+            "run-once",
+            "--app",
+            str(app_root),
+            "--namespace",
+            namespace,
+        ],
+    ]
+    return _exec_observer_commands(commands, cwd=app_root, timeout=timeout)
+
+
+def _observer_window_timeout(*, iterations: int, interval_s: int) -> int:
+    """Budget for the windowed preflight: build cost plus the full sampling span."""
+    return _OBSERVER_CHECK_TIMEOUT_S + iterations * (interval_s + 60)
+
+
+def _run_observer_window_commands(
+    *,
+    app_root: Path,
+    namespace: str,
+    iterations: int = _OBSERVER_WINDOW_ITERATIONS,
+    interval_s: int = _OBSERVER_WINDOW_INTERVAL_S,
+    timeout: int | None = None,
+) -> list[_ObserverCheckResult]:
+    if timeout is None:
+        timeout = _observer_window_timeout(iterations=iterations, interval_s=interval_s)
+    commands = [
+        [sys.executable, "-m", "observer.updater.check_cli", "test", "--app", str(app_root)],
+        [
+            sys.executable,
+            "-m",
+            "observer.updater.check_cli",
+            "watch",
+            "--app",
+            str(app_root),
+            "--namespace",
+            namespace,
+            "--iterations",
+            str(iterations),
+            "--interval-s",
+            str(interval_s),
+        ],
+    ]
+    return _exec_observer_commands(commands, cwd=app_root, timeout=timeout)
 
 
 def _format_observer_check_results(results: list[_ObserverCheckResult], *, max_chars: int = 12000) -> str:
@@ -402,6 +459,21 @@ def _format_observer_resource(resource: Any) -> str:
     return qualified
 
 
+def _finding_from_payload(payload: dict[str, Any]) -> _ObserverFinding:
+    playbooks_raw = payload.get("playbooks")
+    playbooks = tuple(str(item) for item in playbooks_raw if item) if isinstance(playbooks_raw, list) else ()
+    return _ObserverFinding(
+        detector_id=str(payload.get("detector_id") or payload.get("detector") or ""),
+        rule_id=str(payload.get("rule_id") or ""),
+        status=str(payload.get("status") or ""),
+        severity=str(payload.get("severity") or ""),
+        summary=str(payload.get("summary") or ""),
+        evidence=str(payload.get("evidence") or ""),
+        primary_resource=_format_observer_resource(payload.get("primary_resource")),
+        playbooks=playbooks,
+    )
+
+
 def _parse_observer_findings(stdout: str) -> list[_ObserverFinding]:
     findings: list[_ObserverFinding] = []
     for raw_line in stdout.splitlines():
@@ -414,21 +486,137 @@ def _parse_observer_findings(stdout: str) -> list[_ObserverFinding]:
             continue
         if not isinstance(payload, dict) or "rule_id" not in payload:
             continue
-        playbooks_raw = payload.get("playbooks")
-        playbooks = tuple(str(item) for item in playbooks_raw if item) if isinstance(playbooks_raw, list) else ()
-        findings.append(
-            _ObserverFinding(
-                detector_id=str(payload.get("detector_id") or payload.get("detector") or ""),
-                rule_id=str(payload.get("rule_id") or ""),
-                status=str(payload.get("status") or ""),
-                severity=str(payload.get("severity") or ""),
-                summary=str(payload.get("summary") or ""),
-                evidence=str(payload.get("evidence") or ""),
-                primary_resource=_format_observer_resource(payload.get("primary_resource")),
-                playbooks=playbooks,
+        findings.append(_finding_from_payload(payload))
+    return findings
+
+
+def _parse_observer_iterations(stdout: str) -> list[_ObserverIterationSample]:
+    """Parse the per-iteration time series emitted by ``check_cli watch``.
+
+    Each iteration is a single JSON line ``{"observer_iteration": N,
+    "findings": [...]}``. Lines that are not iteration records (build logs,
+    legacy single-shot finding lines) are ignored.
+    """
+    samples: list[_ObserverIterationSample] = []
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("{") or "observer_iteration" not in line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or "observer_iteration" not in payload:
+            continue
+        raw_findings = payload.get("findings")
+        findings = (
+            tuple(
+                _finding_from_payload(item) for item in raw_findings if isinstance(item, dict) and item.get("rule_id")
+            )
+            if isinstance(raw_findings, list)
+            else ()
+        )
+        samples.append(_ObserverIterationSample(index=int(payload["observer_iteration"]), findings=findings))
+    samples.sort(key=lambda sample: sample.index)
+    return samples
+
+
+_OBSERVER_NO_MATCH_MESSAGE = (
+    "no existing observer detector matched this incident — "
+    "there is no detector→playbook mapping for the fault present here. "
+    "This does NOT mean the cluster is healthy: a fault is present and the cluster is in an "
+    "unhealthy state. Diagnose and mitigate it directly from the live cluster and source, "
+    "then after submission produce a detector that would have caught this incident and map it "
+    "to a playbook — an existing playbook if one fits, or a new one you author."
+)
+
+
+def _format_observer_finding_block(finding: _ObserverFinding, *, index: int, annotation: str = "") -> list[str]:
+    heading_bits = [bit for bit in [finding.severity, finding.status, finding.rule_id] if bit]
+    heading = " ".join(heading_bits) or "finding"
+    lines = [f"{index}. [{heading}] {finding.summary or '<no summary>'}"]
+    if annotation:
+        lines.append(f"   {annotation}")
+    detector_id = finding.detector_id or finding.rule_id
+    if detector_id:
+        lines.append(f"   detector: {detector_id}")
+    if finding.primary_resource:
+        lines.append(f"   resource: {finding.primary_resource}")
+    if finding.evidence:
+        lines.append(f"   evidence: {finding.evidence}")
+    if finding.playbooks:
+        lines.append("   recommended playbooks:")
+        lines.extend(f"   - {playbook}" for playbook in finding.playbooks)
+    else:
+        lines.append("   recommended playbooks: <none>")
+    return lines
+
+
+def _persistence_annotation(*, fired_iters: list[int], total: int) -> str:
+    count = len(fired_iters)
+    iters_str = ",".join(str(i) for i in fired_iters)
+    if count >= total:
+        kind = "persistent"
+    elif fired_iters[0] > 0 and fired_iters[-1] == total - 1:
+        kind = "late-appearing — a fault state that matured during the window; likely the true root cause"
+    elif fired_iters[0] == 0 and fired_iters[-1] < total - 1:
+        kind = "fading — an early/transient symptom that cleared; may be downstream, not the root cause"
+    elif count == 1:
+        kind = "one-off — possibly transient; verify before trusting"
+    else:
+        kind = "intermittent"
+    return f"persistence: fired {count}/{total} samples (iters {iters_str}) — {kind}"
+
+
+def _format_observer_window_report(samples: list[_ObserverIterationSample], *, max_chars: int) -> str:
+    total = len(samples)
+    # Aggregate each distinct finding across the window, keeping the most
+    # recent observation for its summary/evidence/playbooks.
+    fired_iters: dict[tuple[str, str, str], list[int]] = {}
+    latest: dict[tuple[str, str, str], _ObserverFinding] = {}
+    for sample in samples:
+        for finding in sample.findings:
+            fired_iters.setdefault(finding.key, []).append(sample.index)
+            latest[finding.key] = finding
+
+    header = (
+        f"Observer preflight sampled the cluster over {total} iteration(s) "
+        f"{_OBSERVER_WINDOW_INTERVAL_S}s apart, because fault symptoms "
+        "(CrashLoopBackOff, OOMKilled, FailedScheduling) often take time to mature into a "
+        "detectable state. Each finding below is annotated with how many samples it fired in. "
+        "Treat persistent findings as the most reliable leads; a finding that only appears in "
+        "later samples is likely the true root cause maturing, while one that fades early is "
+        "more likely a downstream symptom. Verify every finding against the live cluster."
+    )
+
+    if not fired_iters:
+        return f"Observer preflight completed successfully, but {_OBSERVER_NO_MATCH_MESSAGE}\n\n{header}"
+
+    timeline = ["Per-iteration timeline (detector ids that fired):"]
+    for sample in samples:
+        ids = ", ".join(sorted((f.detector_id or f.rule_id) for f in sample.findings)) or "<none>"
+        timeline.append(f"  iter{sample.index}: {ids}")
+
+    # Most-persistent findings first, then by first-appearance so late-maturing
+    # detectors still surface prominently.
+    ordered_keys = sorted(
+        fired_iters,
+        key=lambda k: (-len(fired_iters[k]), fired_iters[k][0], k),
+    )
+    finding_lines = [f"{len(ordered_keys)} distinct observer finding(s):"]
+    for index, key in enumerate(ordered_keys, start=1):
+        finding_lines.extend(
+            _format_observer_finding_block(
+                latest[key],
+                index=index,
+                annotation=_persistence_annotation(fired_iters=sorted(fired_iters[key]), total=total),
             )
         )
-    return findings
+
+    text = "\n".join([header, "", *timeline, "", *finding_lines])
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 200] + "\n\n...[observer preflight report truncated]..."
 
 
 def _format_observer_preflight_report(results: list[_ObserverCheckResult], *, max_chars: int = 12000) -> str:
@@ -442,45 +630,24 @@ def _format_observer_preflight_report(results: list[_ObserverCheckResult], *, ma
             f"{_format_observer_check_results(results, max_chars=max_chars)}"
         )
 
+    # Windowed preflight (check_cli watch) emits a per-iteration time series.
+    samples: list[_ObserverIterationSample] = []
+    for result in results:
+        samples.extend(_parse_observer_iterations(result.stdout))
+    if samples:
+        return _format_observer_window_report(samples, max_chars=max_chars)
+
+    # Fallback: legacy single-shot run-once output.
     findings: list[_ObserverFinding] = []
     for result in results:
         findings.extend(_parse_observer_findings(result.stdout))
 
     if not findings:
-        return (
-            "Observer preflight ran, but no existing observer detector matched this incident — "
-            "there is no detector→playbook mapping for the fault present here. "
-            "This does NOT mean the cluster is healthy: a fault is present and the cluster is in an "
-            "unhealthy state. Diagnose and mitigate it directly from the live cluster and source, "
-            "then after submission produce a detector that would have caught this incident and map it "
-            "to a playbook — an existing playbook if one fits, or a new one you author."
-        )
+        return f"Observer preflight ran, but {_OBSERVER_NO_MATCH_MESSAGE}"
 
     lines = ["Observer preflight completed successfully.", f"{len(findings)} observer finding(s):"]
     for index, finding in enumerate(findings, start=1):
-        heading_bits = [
-            bit
-            for bit in [
-                finding.severity,
-                finding.status,
-                finding.rule_id,
-            ]
-            if bit
-        ]
-        heading = " ".join(heading_bits) or "finding"
-        lines.append(f"{index}. [{heading}] {finding.summary or '<no summary>'}")
-        detector_id = finding.detector_id or finding.rule_id
-        if detector_id:
-            lines.append(f"   detector: {detector_id}")
-        if finding.primary_resource:
-            lines.append(f"   resource: {finding.primary_resource}")
-        if finding.evidence:
-            lines.append(f"   evidence: {finding.evidence}")
-        if finding.playbooks:
-            lines.append("   recommended playbooks:")
-            lines.extend(f"   - {playbook}" for playbook in finding.playbooks)
-        else:
-            lines.append("   recommended playbooks: <none>")
+        lines.extend(_format_observer_finding_block(finding, index=index))
 
     text = "\n".join(lines)
     if len(text) <= max_chars:
@@ -492,7 +659,8 @@ def _maybe_build_observer_preflight_report(
     *,
     app_root: Path,
     namespace: str,
-    check_timeout: int = _OBSERVER_CHECK_TIMEOUT_S,
+    iterations: int = _OBSERVER_WINDOW_ITERATIONS,
+    interval_s: int = _OBSERVER_WINDOW_INTERVAL_S,
 ) -> str:
     if not _observer_manifest_path(app_root).is_file():
         logger.info("Observer diagnostics: no manifest found; skipping preflight check")
@@ -501,8 +669,17 @@ def _maybe_build_observer_preflight_report(
         logger.info("Observer diagnostics: namespace missing; skipping preflight check")
         return ""
 
-    logger.info("Observer diagnostics: running preflight check")
-    results = _run_observer_check_commands(app_root=app_root, namespace=namespace, timeout=check_timeout)
+    logger.info(
+        "Observer diagnostics: running windowed preflight check (%d iterations, %ds apart)",
+        iterations,
+        interval_s,
+    )
+    results = _run_observer_window_commands(
+        app_root=app_root,
+        namespace=namespace,
+        iterations=iterations,
+        interval_s=interval_s,
+    )
     if all(result.ok for result in results):
         logger.info("Observer diagnostics: preflight check passed")
     else:

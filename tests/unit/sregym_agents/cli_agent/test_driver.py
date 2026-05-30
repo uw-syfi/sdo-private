@@ -274,6 +274,70 @@ def test_build_prompt_autonomous_includes_observer_preflight_report() -> None:
     assert ".sds/playbooks/service-endpoints/README.md" in prompt
 
 
+def _iteration_line(index: int, *detectors: str) -> str:
+    findings = [
+        {
+            "detector_id": d,
+            "rule_id": d,
+            "status": "active",
+            "severity": "critical" if d == "service-selector-mismatch" else "warn",
+            "summary": f"{d} summary",
+            "evidence": f"evidence for {d}",
+            "primary_resource": {"kind": "Pod", "namespace": "demo", "name": "mongodb-rate"},
+            "playbooks": [f".sds/playbooks/{d}/README.md"],
+        }
+        for d in detectors
+    ]
+    return json.dumps({"observer_iteration": index, "returncode": 0, "findings": findings})
+
+
+def test_parse_observer_iterations_orders_and_ignores_noise() -> None:
+    stdout = "\n".join(
+        [
+            "go: downloading something",  # build noise — ignored
+            _iteration_line(1, "oom-killed-container"),
+            _iteration_line(0, "service-selector-mismatch"),
+            "{not json",  # ignored
+        ]
+    )
+    samples = driver._parse_observer_iterations(stdout)
+    assert [s.index for s in samples] == [0, 1]
+    assert samples[0].findings[0].detector_id == "service-selector-mismatch"
+    assert samples[1].findings[0].detector_id == "oom-killed-container"
+
+
+def test_format_observer_preflight_window_marks_persistent_and_late_appearing() -> None:
+    # Broad symptom fires early then fades; the sharp cause-specific detector
+    # appears only once the failure matures — exactly the regression pattern.
+    stdout = "\n".join(
+        [
+            _iteration_line(0, "service-selector-mismatch"),
+            _iteration_line(1, "service-selector-mismatch"),
+            _iteration_line(2, "service-selector-mismatch", "oom-killed-container"),
+            _iteration_line(3, "oom-killed-container"),
+            _iteration_line(4, "oom-killed-container"),
+        ]
+    )
+    result = driver._ObserverCheckResult(command=["watch"], returncode=0, stdout=stdout, stderr="")
+    report = driver._format_observer_preflight_report([result])
+
+    assert "sampled the cluster over 5 iteration(s)" in report
+    assert "Per-iteration timeline" in report
+    assert "iter2: oom-killed-container, service-selector-mismatch" in report
+    # service-selector-mismatch fired iters 0,1,2 then stopped -> fading
+    assert "fired 3/5 samples (iters 0,1,2) — fading" in report
+    # oom-killed-container fired iters 2,3,4 (ends on last) -> late-appearing
+    assert "fired 3/5 samples (iters 2,3,4) — late-appearing" in report
+
+
+def test_format_observer_preflight_window_no_findings_uses_no_match_message() -> None:
+    stdout = "\n".join([_iteration_line(0), _iteration_line(1)])
+    result = driver._ObserverCheckResult(command=["watch"], returncode=0, stdout=stdout, stderr="")
+    report = driver._format_observer_preflight_report([result])
+    assert "no existing observer detector matched this incident" in report
+    assert "sampled the cluster over 2 iteration(s)" in report
+
+
 def test_build_prompt_autonomous_requires_preflight_for_prior_diagnostics() -> None:
     prompt = driver._build_prompt(
         planned_stages=["diagnosis"],
@@ -741,22 +805,30 @@ def test_run_autonomous_persistent_workspace_runs_observer_preflight_and_post_ag
 
     run_calls: list[list[str]] = []
 
+    _finding_payload = (
+        '{"detector_id":"missing-endpoints","rule_id":"missing-endpoints",'
+        '"status":"active","severity":"warn",'
+        '"summary":"service frontend has no ready endpoints",'
+        '"evidence":"namespace=demo service=frontend ready_endpoints=0",'
+        '"primary_resource":{"kind":"Service","namespace":"demo","name":"frontend"},'
+        '"playbooks":[".sds/playbooks/service-endpoints/README.md"]}'
+    )
+
     def _fake_run(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         run_calls.append(command)
-        if "run-once" in command:
+        if "watch" in command:
+            # Windowed preflight emits a per-iteration time series.
             return subprocess.CompletedProcess(
                 command,
                 0,
                 stdout=(
-                    '{"detector_id":"missing-endpoints","rule_id":"missing-endpoints",'
-                    '"status":"active","severity":"warn",'
-                    '"summary":"service frontend has no ready endpoints",'
-                    '"evidence":"namespace=demo service=frontend ready_endpoints=0",'
-                    '"primary_resource":{"kind":"Service","namespace":"demo","name":"frontend"},'
-                    '"playbooks":[".sds/playbooks/service-endpoints/README.md"]}\n'
+                    '{"observer_iteration":0,"returncode":0,"findings":[' + _finding_payload + "]}\n"
+                    '{"observer_iteration":1,"returncode":0,"findings":[' + _finding_payload + "]}\n"
                 ),
                 stderr="",
             )
+        if "run-once" in command:
+            return subprocess.CompletedProcess(command, 0, stdout=_finding_payload + "\n", stderr="")
         return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(driver.subprocess, "run", _fake_run)
@@ -772,15 +844,33 @@ def test_run_autonomous_persistent_workspace_runs_observer_preflight_and_post_ag
     driver._run(_args(application_workspace_mode="persistent"), agent_factory=lambda p, m, u: stub)
 
     assert len(stub.calls) == 1
-    expected_check_commands = [
+    test_command = [
+        driver.sys.executable,
+        "-m",
+        "observer.updater.check_cli",
+        "test",
+        "--app",
+        str(tmp_path),
+    ]
+    preflight_commands = [
+        test_command,
         [
             driver.sys.executable,
             "-m",
             "observer.updater.check_cli",
-            "test",
+            "watch",
             "--app",
             str(tmp_path),
+            "--namespace",
+            "demo",
+            "--iterations",
+            str(driver._OBSERVER_WINDOW_ITERATIONS),
+            "--interval-s",
+            str(driver._OBSERVER_WINDOW_INTERVAL_S),
         ],
+    ]
+    post_agent_commands = [
+        test_command,
         [
             driver.sys.executable,
             "-m",
@@ -792,9 +882,12 @@ def test_run_autonomous_persistent_workspace_runs_observer_preflight_and_post_ag
             "demo",
         ],
     ]
-    assert run_calls == expected_check_commands + expected_check_commands
+    assert run_calls == preflight_commands + post_agent_commands
     prompt = stub.calls[0]["prompt"]
     assert "## Observer Preflight Findings" in prompt
+    assert "sampled the cluster over" in prompt
+    assert "Per-iteration timeline" in prompt
+    assert "persistence: fired 2/2 samples" in prompt
     assert "service frontend has no ready endpoints" in prompt
     assert "detector: missing-endpoints" in prompt
     assert "recommended playbooks:" in prompt
