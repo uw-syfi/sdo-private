@@ -76,6 +76,22 @@ Or use the helper script:
 .sds/playbooks/broken-pvc-claimname/scripts/mitigate.sh <namespace> <svc>
 ```
 
+## Secondary Effect: Corrupted Memcached Cache
+
+When MongoDB is unavailable long enough for services to process requests, caching layers (e.g. memcached-profile) may accumulate corrupted entries. In hotel-reservation, the profile service appends empty hotel structs (with nil `Address`) even on MongoDB errors and writes them to memcached. After MongoDB recovers, cached lookups return the corrupt empty structs, causing nil-pointer panics in the frontend's `geoJSONResponse`.
+
+**Tell**: After MongoDB pods recover, the frontend still panics with `nil pointer dereference` in `geoJSONResponse` / `server.go:412` even though all pods are Running.
+
+**Fix**: Restart memcached-profile (or any other memcached used by DB-backed services) to flush stale entries. The service will repopulate the cache from the now-healthy MongoDB.
+
+```bash
+kubectl rollout restart deployment/memcached-profile -n <namespace>
+# After memcached restarts, the profile service should reconnect and recover automatically.
+# Verify with:
+kubectl exec -n <namespace> deploy/frontend -- curl -fsS \
+  "http://localhost:5000/hotels?inDate=2015-04-09&outDate=2015-04-10&lat=37.7749&lon=-122.4194"
+```
+
 ## Verification
 
 ```bash
@@ -88,13 +104,24 @@ kubectl get endpoints -n <namespace>
 # Application pod should recover (may take 1-2 min for CrashLoopBackOff backoff)
 kubectl get pods -n <namespace>
 
-# End-to-end test
-kubectl exec -n <namespace> deploy/frontend -- curl -fsS http://localhost:5000/
+# End-to-end hotel search (verifies geo + reservation + profile chain)
+kubectl exec -n <namespace> deploy/frontend -- curl -fsS \
+  "http://localhost:5000/hotels?inDate=2015-04-09&outDate=2015-04-10&lat=37.7749&lon=-122.4194"
+
+# End-to-end recommendations, login, reservation
+kubectl exec -n <namespace> deploy/frontend -- curl -fsS \
+  "http://localhost:5000/recommendations?require=rate&lat=37.7749&lon=-122.4194"
+kubectl exec -n <namespace> deploy/frontend -- curl -fsS -X POST \
+  "http://localhost:5000/user?username=Cornell_1&password=1111111111"
+kubectl exec -n <namespace> deploy/frontend -- curl -fsS -X POST \
+  "http://localhost:5000/reservation?inDate=2015-04-11&outDate=2015-04-12&hotelId=1&customerName=Cornell_1&username=Cornell_1&password=1111111111&number=1"
 ```
 
 ## Notes
 
 - The volume index (`/spec/template/spec/volumes/0/...`) in the JSON patch path assumes the PVC volume is at index 0. Verify with `kubectl get deployment -o json` if there are multiple volumes.
+- When removing an extra injected volume, also remove its corresponding `volumeMount` from the container spec — the patch will fail validation if a volumeMount references a volume that no longer exists.
 - A `nodeSelector` conflict with PV node affinity will keep the pod Pending even after the PVC name is fixed. Always check both constraints.
 - Source manifests are clean — this is a live-cluster-only injection. Re-applying the source manifest is always a safe fallback for compound faults.
 - After fixing MongoDB pods, application pods in CrashLoopBackOff will self-recover once their MongoDB backend is reachable (Kubernetes exponential backoff — may take 1-5 minutes).
+- Always flush memcached for DB-backed services after a prolonged MongoDB outage. Cached empty/corrupt structs survive pod restarts and cause downstream panics even when MongoDB is healthy again.
