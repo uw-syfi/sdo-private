@@ -1259,6 +1259,20 @@ def _run(
         if run_usage is None and agent is not None:
             run_usage = getattr(agent, "last_usage", None)
         usage_metrics: dict[str, Any] | None = {"total": run_usage.to_dict()} if run_usage is not None else None
+
+        # The parent stream's turn/tool counts exclude Task/Workflow sub-agents
+        # (they run as sidechains written only to on-disk transcripts). Recover
+        # them post-run, keyed on the Claude session id, so effort metrics
+        # reflect the real work rather than just the orchestrator's turns.
+        session_id = getattr(agent, "session_id", None) if agent is not None else None
+        subagent_usage: dict[str, Any] | None = None
+        if args.provider == "claude" and session_id:
+            try:
+                from agentshim.claude.transcripts import gather_subagent_usage
+
+                subagent_usage = gather_subagent_usage(session_id).to_dict()
+            except Exception:
+                logger.exception("cli_agent: failed to gather sub-agent usage")
         with open(out, "w") as f:
             json.dump(
                 {
@@ -1270,7 +1284,9 @@ def _run(
                     "completed": completed,
                     "final_stage": final_stage,
                     "crashed_with": crashed_with,
+                    "session_id": session_id,
                     "usage_metrics": usage_metrics,
+                    "subagent_usage": subagent_usage,
                 },
                 f,
                 indent=2,

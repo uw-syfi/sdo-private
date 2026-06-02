@@ -14,6 +14,7 @@ Quick reference for diagnosing and mitigating recurring fault classes in this en
 | [injected-init-container](injected-init-container/README.md) | Pod stuck in `Init:0/1` forever; init container hangs | Init container added to deployment that blocks main container start |
 | [broken-pvc-claimname](broken-pvc-claimname/README.md) | Stateful pod (e.g. MongoDB) stuck in `Pending`; dependent app pods CrashLoopBackOff with "no reachable servers" | `kubectl describe pod` shows PVC `<name>-broken` not found; actual PVCs exist and are Bound |
 | [injected-scheduling-constraint](injected-scheduling-constraint/README.md) | Pod(s) stuck in `Pending` from cluster start; `Insufficient memory` or `no free ports` in scheduler events | Injected absurd `resources.requests.memory` or `hostPort` in deployment spec |
+| [duplicate-pvc-mounts](duplicate-pvc-mounts/README.md) | One pod of a multi-replica deployment stuck in `Pending`; first replica runs, second cannot schedule | Scheduler events show both `anti-affinity rules` AND `volume node affinity conflict`; deployment has injected RWO PVC + `podAntiAffinity` |
 | [wrong-mongodb-image](wrong-mongodb-image/README.md) | All MongoDB pods in `Error`/`CrashLoopBackOff` from cluster start; app services crash connecting to DB | Pod logs: `"Wrong mongod version" ... featureCompatibilityVersion: "4.4"` — MongoDB image major version incompatible with PVC data |
 
 ## Usage
