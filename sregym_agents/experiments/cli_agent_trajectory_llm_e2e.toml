@@ -1,0 +1,60 @@
+# E2E: does the agent retrieve a prior run's trajectory? — LLM (filesystem) mode.
+#
+# Two stages, the SAME single problem in each:
+#   1. record   — run the problem with retrieval OFF; the run is recorded to
+#                 {pipeline_dir}/trajectories/{app}/ (shared at the pipeline root
+#                 across stages by _inject_trajectory_defaults).
+#   2. retrieve — run the SAME problem again with retrieval = "llm": the agent is
+#                 told in its prompt where the trajectory dir is and reads the
+#                 prior run's JSONL with its own file tools (no MCP tool).
+#
+# Check it worked: in stage 2's problem_runs/.../run_*.log the agent should `ls`
+# the trajectory dir and read stage 1's *.jsonl before investigating.
+
+[pipeline]
+name = "cli-agent-trajectory-llm-e2e"
+
+[defaults]
+agent = "cli_agent"
+model = "claude-sonnet-4-6"
+parallel = 1
+app_filter = "hotel_reservation"
+deploy_from_source = true
+problems = ["wrong_service_selector_hotel_reservation"]
+
+[defaults.variants]
+enabled = false
+count = 0
+offset = 0
+seed = 42
+order = "round_robin"
+
+[defaults.env]
+worker_cpu_limit = "16"
+reuse_cluster = true
+judge_model_id = "vertex-ai-gemini-2.5-flash"
+
+[defaults.agent_config.cli_agent]
+provider = "claude"
+timeout_sec = 2000
+autonomous_submit = true
+trajectory_enabled = true
+# llm-mode search sub-agent defaults to the SAME cli agent (provider=claude,
+# the model above). Set trajectory_llm_search_model to a litellm id (e.g.
+# "vertex_ai/gemini-2.5-flash") to override with a cheaper/different model.
+
+[[stages]]
+name = "record"
+chain_kb = false
+chain_application_workspace = false
+
+[stages.agent_config.cli_agent]
+trajectory_retrieval_mode = "off"
+
+[[stages]]
+name = "retrieve"
+chain_kb = false
+chain_application_workspace = false
+
+[stages.agent_config.cli_agent]
+trajectory_retrieval_mode = "llm"

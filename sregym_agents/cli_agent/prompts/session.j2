@@ -8,6 +8,9 @@ This benchmark grades your work in {{ planned_stages | length }} stage{{ "s" if 
 {% if memory_enabled %}
 Before you start investigating, call the `recall` MCP tool (from the `memory` server) with a short description of what you are currently observing — the symptoms, which resources look unhealthy, and any recent change (rollout/deploy). It returns lessons from past incidents on this application as HYPOTHESES to verify against the live cluster, not answers: the current fault may differ, and competing causes can share symptoms. Use them as leads to check first, never as conclusions. Re-call `recall` if your understanding of the situation changes.
 {% endif %}
+{% if trajectory_retrieval_mode in ["rag", "llm"] %}
+Before you start investigating, call the `search_trajectories` MCP tool (from the `trajectory` server) with a short description of what you are currently observing — the symptoms, which resources look unhealthy, and any recent change (rollout/deploy). It returns relevant past investigations on this application; call `read_trajectory(path)` to read the full transcript of any that look relevant. Treat them as HYPOTHESES and worked examples to verify against the live cluster, not answers: the current fault may differ, and competing causes can share symptoms.
+{% endif %}
 {% if planned_stages == ["diagnosis"] -%}
 Task: Investigate and identify the root cause of the fault. Call the `submit` tool with a concise one-line description of the fault.
 {%- elif planned_stages == ["mitigation"] -%}

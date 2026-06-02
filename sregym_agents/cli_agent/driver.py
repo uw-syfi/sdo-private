@@ -141,6 +141,7 @@ def _build_prompt(
     autonomous_prompt_profile: str = _DEFAULT_AUTONOMOUS_PROMPT_PROFILE,
     submit_done_returns_feedback: bool = False,
     memory_enabled: bool = False,
+    trajectory_retrieval_mode: str = "off",
     observer_detectors_enabled: bool = False,
     observer_preflight_report: str = "",
 ) -> str:
@@ -178,6 +179,7 @@ def _build_prompt(
             submit_mcp_server_name=_SUBMIT_MCP_SERVER_NAME,
             submit_done_returns_feedback=submit_done_returns_feedback,
             memory_enabled=memory_enabled,
+            trajectory_retrieval_mode=trajectory_retrieval_mode,
             observer_detectors_enabled=observer_detectors_enabled,
             observer_preflight_report=observer_preflight_report,
         )
@@ -248,6 +250,28 @@ def _resolve_memory_dir(args: argparse.Namespace, *, base_cwd: str) -> Path:
     raw = getattr(args, "memory_dir", None)
     if not raw:
         return _default_memory_dir()
+    path = Path(raw).expanduser()
+    return path if path.is_absolute() else (Path(base_cwd) / path).resolve()
+
+
+# --- Trajectory helpers ----------------------------------------------------
+
+
+def _default_trajectory_dir() -> Path:
+    """Persistent default trajectory-store root, outside any ephemeral workdir."""
+    return Path.home() / ".sds" / "cli_agent_trajectories"
+
+
+def _resolve_trajectory_dir(args: argparse.Namespace, *, base_cwd: str) -> Path:
+    """Resolve the trajectory-store dir to an absolute path.
+
+    Like ``--memory-dir``, a relative ``--trajectory-dir`` is anchored to
+    ``base_cwd`` (the cwd *before* the driver chdir's into the ephemeral
+    ``SREGYM_EXP_ENV`` workdir) so recorded runs accumulate across problems.
+    """
+    raw = getattr(args, "trajectory_dir", None)
+    if not raw:
+        return _default_trajectory_dir()
     path = Path(raw).expanduser()
     return path if path.is_absolute() else (Path(base_cwd) / path).resolve()
 
@@ -754,8 +778,12 @@ def _default_agent_factory(
     model: str,
     submit_mcp_url: str,
     extra_mcp_servers: list[Any] | None = None,
+    event_handler: Any | None = None,
 ) -> BaseCodingAgent:
     """Build a ``CodingAgent`` with the sregym submit MCP server wired in.
+
+    ``event_handler`` (optional) observes the live run — used by the trajectory
+    recorder to capture the agent's turn-by-turn investigation.
 
     Raises ``ValueError`` if the requested provider does not support MCP
     (e.g. ``gemini``/``opencode``) — the underlying class raises it from
@@ -771,7 +799,7 @@ def _default_agent_factory(
     if extra_mcp_servers:
         mcp_servers.extend(extra_mcp_servers)
     try:
-        return CodingAgent(provider=provider, model=model, mcp_servers=mcp_servers)
+        return CodingAgent(provider=provider, model=model, mcp_servers=mcp_servers, event_handler=event_handler)
     except ValueError as exc:
         raise ValueError(f"Unknown cli_agent provider {provider!r}: {exc}") from exc
 
@@ -883,6 +911,47 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "workdir (default: ~/.sds/cli_agent_memory)."
         ),
     )
+    parser.add_argument(
+        "--trajectory-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=bool(toml_cfg.get("trajectory_enabled", False)),
+        help=(
+            "Record this run's raw turn-by-turn trajectory (thinking, tool calls, "
+            "results, usage) to a per-app JSONL store that accumulates across runs "
+            "(default: off). Recording alone adds no agent-visible tool; pair with "
+            "--trajectory-retrieval-mode to let the agent retrieve past runs."
+        ),
+    )
+    parser.add_argument(
+        "--trajectory-dir",
+        default=toml_cfg.get("trajectory_dir"),
+        help=(
+            "Directory holding recorded trajectories ({app}/{problem}__{ts}.jsonl). "
+            "Must persist across runs and live OUTSIDE the ephemeral SREGYM_EXP_ENV "
+            "workdir (default: ~/.sds/cli_agent_trajectories)."
+        ),
+    )
+    parser.add_argument(
+        "--trajectory-retrieval-mode",
+        choices=("off", "llm", "rag"),
+        default=str(toml_cfg.get("trajectory_retrieval_mode", "off")),
+        help=(
+            "Expose a `search_trajectories` MCP tool over recorded past runs: "
+            "`off` (record only), `llm` (an LLM sub-agent reads prior runs and "
+            "synthesises the relevant ones), or `rag` (embedding similarity top-k). "
+            "Requires --trajectory-enabled and an MCP-capable provider (default: off)."
+        ),
+    )
+    parser.add_argument(
+        "--trajectory-llm-search-model",
+        default=toml_cfg.get("trajectory_llm_search_model"),
+        help=(
+            "Override the `llm` retrieval mode's in-tool search sub-agent with a "
+            "litellm model id (e.g. vertex_ai/gemini-2.5-flash). Unset (default) reuses "
+            "the SAME agent as the cli_agent — its provider/model; also honors "
+            "$SDS_TRAJECTORY_LLM_SEARCH_MODEL."
+        ),
+    )
     # No-op flags accepted for compatibility with sregym's agent launcher
     # (`bench/sregym/main.py` ~L1314-L1330), which appends these to every
     # agent's argv depending on the experiment config — cli_agent has no
@@ -954,10 +1023,81 @@ def _run(
         extra_mcp_servers.append(HttpMcpServer(name="memory", url=recall_server.url))
         logger.info("Memory enabled: store=%s recall=%s", store_dir, recall_server.url)
 
+    # Trajectory recording + optional retrieval (opt-in). The recorder is an
+    # agentshim event handler that streams this run into a per-app JSONL store;
+    # when a retrieval mode is set we also expose a `search_trajectories` MCP
+    # tool over the *prior* runs in that store (the in-flight run is excluded).
+    trajectory_enabled = bool(getattr(args, "trajectory_enabled", False))
+    retrieval_mode = str(getattr(args, "trajectory_retrieval_mode", "off"))
+    trajectory_recorder = None
+    trajectory_writer = None
+    trajectory_server = None
+    if trajectory_enabled:
+        from sregym_agents.cli_agent.trajectory.store import (
+            TrajectoryMeta,
+            TrajectoryRecorder,
+            TrajectoryStore,
+        )
+
+        traj_dir = _resolve_trajectory_dir(args, base_cwd=base_cwd)
+        traj_store = TrajectoryStore(traj_dir)
+        traj_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        trajectory_writer = traj_store.open_run(
+            TrajectoryMeta(
+                app=app_name,
+                problem_id=problem_id,
+                ts=traj_ts,
+                model=args.model,
+                provider=args.provider,
+                task=f"diagnose/remediate {app_name} ({problem_id})",
+            )
+        )
+        trajectory_recorder = TrajectoryRecorder(trajectory_writer)
+
+        if retrieval_mode in ("rag", "llm"):
+            # Both retrieval modes are MCP tools (so every call is logged
+            # server-side and verifiable): `rag` ranks by embedding similarity,
+            # `llm` has an in-tool sub-agent read the candidate runs and
+            # synthesise the relevant ones. The in-flight run is excluded.
+            from agentshim.mcp_config import HttpMcpServer
+
+            from sregym_agents.cli_agent.trajectory.llm_search import default_searcher
+            from sregym_agents.cli_agent.trajectory.retrieval import TrajectoryRetrievalServer
+
+            searcher = None
+            if retrieval_mode == "llm":
+                # Default: reuse the same agent as the cli_agent (args.provider /
+                # args.model). An explicit litellm model overrides for a cheaper path.
+                searcher = default_searcher(
+                    litellm_model=getattr(args, "trajectory_llm_search_model", None) or None,
+                    provider=args.provider,
+                    model=args.model,
+                )
+            trajectory_server = TrajectoryRetrievalServer(
+                traj_store,
+                app_name,
+                mode=retrieval_mode,
+                searcher=searcher,
+                exclude_path=str(trajectory_writer.path),
+            )
+            trajectory_server.start()
+            extra_mcp_servers.append(HttpMcpServer(name="trajectory", url=trajectory_server.url))
+
+        logger.info(
+            "Trajectory enabled: store=%s record=%s retrieval=%s",
+            traj_dir,
+            trajectory_writer.path.name,
+            retrieval_mode,
+        )
+
     if agent_factory is not None:
         factory = agent_factory
     else:
-        factory = functools.partial(_default_agent_factory, extra_mcp_servers=extra_mcp_servers)
+        factory = functools.partial(
+            _default_agent_factory,
+            extra_mcp_servers=extra_mcp_servers,
+            event_handler=trajectory_recorder,
+        )
 
     # Single CLI session for the whole problem. In the default mode the
     # agent calls a stage-routing `submit` tool and reads the oracle verdict
@@ -987,6 +1127,7 @@ def _run(
         autonomous_prompt_profile=args.autonomous_prompt_profile,
         submit_done_returns_feedback=submit_done_returns_feedback,
         memory_enabled=memory_enabled,
+        trajectory_retrieval_mode=retrieval_mode if trajectory_enabled else "off",
         observer_detectors_enabled=observer_detectors_enabled,
         observer_preflight_report=observer_preflight_report,
     )
@@ -1055,6 +1196,20 @@ def _run(
         finally:
             if recall_server is not None:
                 recall_server.stop()
+
+    # Finalize the recorded trajectory: stamp the outcome and shut the retrieval
+    # server down. Unlike memory, this is recorded unconditionally (even on a
+    # crash) — the raw run is a corpus entry, not a verified lesson.
+    if trajectory_enabled and trajectory_writer is not None:
+        if crashed_with is not None:
+            outcome = "crashed"
+        elif completed:
+            outcome = "completed"
+        else:
+            outcome = final_stage or "incomplete"
+        trajectory_writer.close(outcome=str(outcome), elapsed_s=elapsed)
+        if trajectory_server is not None:
+            trajectory_server.stop()
 
     if args.logs_dir:
         logs_dir = Path(args.logs_dir)

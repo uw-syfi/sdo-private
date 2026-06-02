@@ -1,0 +1,60 @@
+# E2E: does the agent retrieve a prior run's trajectory? — RAG (embedding) mode.
+#
+# Two stages, the SAME single problem in each:
+#   1. record   — run the problem with retrieval OFF; the run is recorded to
+#                 {pipeline_dir}/trajectories/{app}/ (shared at the pipeline root
+#                 across stages by _inject_trajectory_defaults).
+#   2. retrieve — run the SAME problem again with retrieval = "rag": the driver
+#                 serves a `search_trajectories` MCP tool (embedding top-k) over
+#                 the prior runs, and the prompt tells the agent to call it.
+#
+# Embeddings: set SDS_TRAJECTORY_EMBED_MODEL (e.g. a litellm embedding model) for
+# semantic retrieval; otherwise an offline lexical hashing embedder is used.
+#
+# Check it worked: in stage 2's problem_runs/.../run_*.log the agent should call
+# search_trajectories / read_trajectory before investigating.
+
+[pipeline]
+name = "cli-agent-trajectory-rag-e2e"
+
+[defaults]
+agent = "cli_agent"
+model = "claude-sonnet-4-6"
+parallel = 1
+app_filter = "hotel_reservation"
+deploy_from_source = true
+problems = ["wrong_service_selector_hotel_reservation"]
+
+[defaults.variants]
+enabled = false
+count = 0
+offset = 0
+seed = 42
+order = "round_robin"
+
+[defaults.env]
+worker_cpu_limit = "16"
+reuse_cluster = true
+judge_model_id = "vertex-ai-gemini-2.5-flash"
+
+[defaults.agent_config.cli_agent]
+provider = "claude"
+timeout_sec = 2000
+autonomous_submit = true
+trajectory_enabled = true
+
+[[stages]]
+name = "record"
+chain_kb = false
+chain_application_workspace = false
+
+[stages.agent_config.cli_agent]
+trajectory_retrieval_mode = "off"
+
+[[stages]]
+name = "retrieve"
+chain_kb = false
+chain_application_workspace = false
+
+[stages.agent_config.cli_agent]
+trajectory_retrieval_mode = "rag"

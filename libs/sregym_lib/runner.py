@@ -74,6 +74,35 @@ def _inject_memory_defaults(env: dict[str, str], agent_name: str, memory_log_dir
     return env
 
 
+def _inject_trajectory_defaults(env: dict[str, str], agent_name: str, trajectory_log_dir: Path) -> dict[str, str]:
+    """Default cli_agent's trajectory-store dir when recording is enabled but unset.
+
+    Like ``_inject_memory_defaults``: the store must persist across the many
+    per-problem driver processes of a run so trajectories accumulate, so it
+    lives at the experiment/pipeline root, not inside a per-problem
+    ``SREGYM_EXP_ENV`` workdir. Only applied for ``cli_agent``, only when
+    ``trajectory_enabled`` is set and no explicit ``trajectory_dir`` was given.
+    """
+    import json
+
+    if agent_name != _MEMORY_AGENT:
+        return env
+    try:
+        cfg = json.loads(env.get("SREGYM_EXPERIMENT_AGENT_CONFIG", "{}"))
+    except json.JSONDecodeError:
+        cfg = {}
+    if not isinstance(cfg, dict):
+        return env
+    cfg = cast("dict[str, Any]", cfg)
+    if not cfg.get("trajectory_enabled") or cfg.get("trajectory_dir"):
+        return env
+
+    env = dict(env)
+    cfg["trajectory_dir"] = str(trajectory_log_dir / "trajectories")
+    env["SREGYM_EXPERIMENT_AGENT_CONFIG"] = json.dumps(cfg)
+    return env
+
+
 def _load_agent_hooks(agent_name: str, project_root: Path) -> tuple[str | None, str | None]:
     """Return (before_benchmark, after_benchmark) for *agent_name*."""
     import yaml
@@ -217,6 +246,7 @@ def run_single_experiment(
     cli_args.extend(extra_args)
     env = config_to_env(config, project_root, exp_dir=exp_dir)
     env = _inject_memory_defaults(env, config.agent, exp_dir)
+    env = _inject_trajectory_defaults(env, config.agent, exp_dir)
 
     _print_experiment_info(config, env)
     print()
@@ -278,6 +308,7 @@ def _run_stage(
     if (stage_exp_dir.parent / "pipeline_state.json").exists():
         memory_log_dir = stage_exp_dir.parent
     env = _inject_memory_defaults(env, exp_config.agent, memory_log_dir)
+    env = _inject_trajectory_defaults(env, exp_config.agent, memory_log_dir)
     if extra_env:
         env.update(extra_env)
 

@@ -60,6 +60,11 @@ build-backend = "hatchling.build"
 [tool.uv]
 prerelease = "if-necessary-or-explicit"
 
+[tool.uv.sources]
+# Use the in-repo agentshim checkout (editable) instead of the published
+# wheel, so local changes take effect across all `uv run` invocations.
+agentshim = { path = "agentshim", editable = true }
+
 [tool.uv.workspace]
 members = ["libs/sds_core", "libs/pydantic_agent", "libs/agent_mw", "libs/model_config", "libs/sregym_lib", "libs/llm_rt"]
 

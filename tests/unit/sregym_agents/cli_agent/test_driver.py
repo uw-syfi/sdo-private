@@ -1364,6 +1364,136 @@ def test_memory_wires_recall_server_into_agent(tmp_path: Path, monkeypatch: pyte
     assert "memory" in names
 
 
+# --- Trajectory recording / retrieval --------------------------------------
+
+
+def _traj_args(tmp_path: Path, **overrides: Any) -> argparse.Namespace:
+    base: dict[str, Any] = {
+        "trajectory_enabled": True,
+        "trajectory_dir": str(tmp_path),
+        "trajectory_retrieval_mode": "off",
+    }
+    base.update(overrides)
+    return _args(**base)
+
+
+def _traj_files(tmp_path: Path, app: str = "myapp") -> list[Path]:
+    return sorted((tmp_path / app).rglob("*.jsonl"))
+
+
+def test_trajectory_records_run_when_enabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A recorded run writes one per-app JSONL file with a stamped outcome."""
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
+
+    stub = _StubAgent()
+    _patch_conductor(monkeypatch, stages=["diagnosis"], status_sequence=["diagnosis", "done"])
+    driver._run(_traj_args(tmp_path), agent_factory=lambda p, m, u: stub)
+
+    from sregym_agents.cli_agent.trajectory.store import TrajectoryStore
+
+    files = _traj_files(tmp_path)
+    assert len(files) == 1
+    digest = TrajectoryStore(tmp_path).digest(files[0])
+    assert digest is not None
+    assert digest.app == "myapp"
+    assert digest.run_id  # non-identifying hash; problem_id is not surfaced
+    assert digest.outcome == "completed"
+    # The leaking problem_id never reaches the agent-readable file.
+    assert "p-1" not in files[0].read_text()
+
+
+def test_trajectory_disabled_records_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
+
+    stub = _StubAgent()
+    _patch_conductor(monkeypatch, stages=["diagnosis"], status_sequence=["diagnosis", "done"])
+    # trajectory_dir set but trajectory_enabled defaults off (plain _args).
+    driver._run(_args(trajectory_dir=str(tmp_path)), agent_factory=lambda p, m, u: stub)
+
+    assert _traj_files(tmp_path) == []
+
+
+def test_trajectory_records_outcome_on_crash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A crashed run is still recorded (corpus entry, not a verified lesson)."""
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
+
+    class _Boom(BaseCodingAgent):
+        def start_session(self, cwd=None, timeout=300, silent=False) -> Any:
+            raise RuntimeError("kaboom")
+
+        def generate(self, prompt: str, cwd=None, timeout=300, silent=False) -> str:
+            return ""
+
+    _patch_conductor(monkeypatch, stages=["diagnosis"], status_sequence=["diagnosis", "diagnosis"])
+    driver._run(_traj_args(tmp_path), agent_factory=lambda p, m, u: _Boom())
+
+    from sregym_agents.cli_agent.trajectory.store import TrajectoryStore
+
+    files = _traj_files(tmp_path)
+    assert len(files) == 1
+    digest = TrajectoryStore(tmp_path).digest(files[0])
+    assert digest is not None
+    assert digest.outcome == "crashed"
+
+
+def test_trajectory_llm_mode_uses_search_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """LLM retrieval is an MCP tool (not filesystem browse): the prompt instructs
+    calling `search_trajectories`, same as RAG."""
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
+
+    stub = _StubAgent()
+    _patch_conductor(monkeypatch, stages=["diagnosis"], status_sequence=["diagnosis", "done"])
+    driver._run(_traj_args(tmp_path, trajectory_retrieval_mode="llm"), agent_factory=lambda p, m, u: stub)
+
+    prompt = stub.calls[0]["prompt"]
+    assert "search_trajectories" in prompt
+
+
+def test_trajectory_wires_retrieval_server_when_mode_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With RAG mode, the default factory must hand the agent a
+    `trajectory` MCP server in addition to the sregym submit server."""
+    monkeypatch.setenv("API_HOSTNAME", "localhost")
+    monkeypatch.setenv("API_PORT", "8000")
+    monkeypatch.setenv("MCP_SERVER_PORT", "9954")
+    monkeypatch.delenv("SREGYM_EXP_ENV", raising=False)
+    monkeypatch.delenv("SREGYM_AUTONOMOUS_SUBMIT", raising=False)
+
+    captured: dict[str, Any] = {}
+
+    @register_provider("fake_traj_provider")
+    class _FakeCls(BaseCodingAgent):
+        def __init__(self, *, model: str, mcp_servers: list[Any], event_handler: Any = None) -> None:
+            captured["mcp_servers"] = mcp_servers
+            captured["event_handler"] = event_handler
+
+        def start_session(self, cwd=None, timeout=300, silent=False) -> Any:
+            return _StubSession(_StubAgent(), cwd, timeout)
+
+        def generate(self, prompt: str, cwd=None, timeout=300, silent=False) -> str:
+            return ""
+
+    _patch_conductor(monkeypatch, stages=["diagnosis"], status_sequence=["diagnosis", "done"])
+    driver._run(_traj_args(tmp_path, provider="fake_traj_provider", trajectory_retrieval_mode="rag"))
+
+    names = {s.name for s in captured["mcp_servers"]}
+    assert driver._SUBMIT_MCP_SERVER_NAME in names
+    assert "trajectory" in names
+    # The recorder is forwarded as the agent's event handler.
+    assert captured["event_handler"] is not None
+
+
 # --- Argument parsing ------------------------------------------------------
 
 
