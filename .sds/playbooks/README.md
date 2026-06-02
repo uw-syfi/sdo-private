@@ -5,7 +5,8 @@ Quick reference for diagnosing and mitigating recurring fault classes in this en
 | Playbook | Symptom | Key Signal |
 |----------|---------|------------|
 | [wrong-dns-policy](wrong-dns-policy/README.md) | Pod CrashLoopBackOff; logs show DNS lookup failure for internal service names using a public resolver (e.g. `8.8.8.8`) | `dnsPolicy: None` + external nameserver in deployment spec |
-| [wrong-liveness-probe](wrong-liveness-probe/README.md) | Pod repeatedly killed and restarted despite running; liveness probe fails | Liveness probe path/port mismatch vs actual service endpoint |
+| [wrong-liveness-probe](wrong-liveness-probe/README.md) | Pod repeatedly killed and restarted despite running; liveness probe fails | Liveness probe path/port mismatch vs actual service endpoint, or httpGet probe on a gRPC port (malformed HTTP response) |
+| [wrong-memory-limit](wrong-memory-limit/README.md) | Pod in OOMKilled loop; dependent service loses endpoint | Memory limit injected far below process working set (e.g. 10Mi for MongoDB); `kubectl get endpoints` shows `<none>` |
 | [missing-configmap](missing-configmap/README.md) | Pod stuck in `CreateContainerConfigError`; missing configmap volume mount | `configmap not found` in pod events |
 | [mongodb-startup-race](mongodb-startup-race/README.md) | App service pod crashes immediately at startup; MongoDB connection refused | Service starts before MongoDB is ready; pod logs show connection error |
 | [wrong-container-command](wrong-container-command/README.md) | Pod in `CrashLoopBackOff`; `exec: "<binary>": executable file not found` | Container command references wrong binary name for the image |
