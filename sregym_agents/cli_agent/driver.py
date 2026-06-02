@@ -142,6 +142,7 @@ def _build_prompt(
     submit_done_returns_feedback: bool = False,
     memory_enabled: bool = False,
     trajectory_retrieval_mode: str = "off",
+    trajectory_record_findings: bool = False,
     observer_detectors_enabled: bool = False,
     observer_preflight_report: str = "",
 ) -> str:
@@ -180,6 +181,7 @@ def _build_prompt(
             submit_done_returns_feedback=submit_done_returns_feedback,
             memory_enabled=memory_enabled,
             trajectory_retrieval_mode=trajectory_retrieval_mode,
+            trajectory_record_findings=trajectory_record_findings,
             observer_detectors_enabled=observer_detectors_enabled,
             observer_preflight_report=observer_preflight_report,
         )
@@ -943,6 +945,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--trajectory-record-findings",
+        action=argparse.BooleanOptionalAction,
+        default=bool(toml_cfg.get("trajectory_record_findings", False)),
+        help=(
+            "Expose a `record_findings` MCP tool so the agent emits a structured "
+            "summary (situation/tell/root_cause/fix/affected_resource) of its run. "
+            "That summary becomes the retrieval-facing digest, so a future "
+            "symptom-shaped query matches it instead of raw tool mechanics. Set in "
+            "pipelines that use RAG/LLM retrieval; requires --trajectory-enabled "
+            "(default: off)."
+        ),
+    )
+    parser.add_argument(
         "--trajectory-llm-search-model",
         default=toml_cfg.get("trajectory_llm_search_model"),
         help=(
@@ -1029,9 +1044,11 @@ def _run(
     # tool over the *prior* runs in that store (the in-flight run is excluded).
     trajectory_enabled = bool(getattr(args, "trajectory_enabled", False))
     retrieval_mode = str(getattr(args, "trajectory_retrieval_mode", "off"))
+    record_findings_enabled = bool(getattr(args, "trajectory_record_findings", False))
     trajectory_recorder = None
     trajectory_writer = None
     trajectory_server = None
+    record_findings_server = None
     if trajectory_enabled:
         from sregym_agents.cli_agent.trajectory.store import (
             TrajectoryMeta,
@@ -1083,11 +1100,25 @@ def _run(
             trajectory_server.start()
             extra_mcp_servers.append(HttpMcpServer(name="trajectory", url=trajectory_server.url))
 
+        if record_findings_enabled:
+            # Let the agent emit a structured summary of this run via a tool;
+            # it becomes the retrieval-facing digest for future runs. Distinct
+            # MCP server name from the retrieval server so both can coexist when
+            # a recording run also retrieves (e.g. the retrieve stage).
+            from agentshim.mcp_config import HttpMcpServer
+
+            from sregym_agents.cli_agent.trajectory.record_server import RecordFindingsServer
+
+            record_findings_server = RecordFindingsServer(trajectory_writer)
+            record_findings_server.start()
+            extra_mcp_servers.append(HttpMcpServer(name="trajectory_record", url=record_findings_server.url))
+
         logger.info(
-            "Trajectory enabled: store=%s record=%s retrieval=%s",
+            "Trajectory enabled: store=%s record=%s retrieval=%s record_findings=%s",
             traj_dir,
             trajectory_writer.path.name,
             retrieval_mode,
+            record_findings_enabled,
         )
 
     if agent_factory is not None:
@@ -1128,6 +1159,7 @@ def _run(
         submit_done_returns_feedback=submit_done_returns_feedback,
         memory_enabled=memory_enabled,
         trajectory_retrieval_mode=retrieval_mode if trajectory_enabled else "off",
+        trajectory_record_findings=trajectory_enabled and record_findings_enabled,
         observer_detectors_enabled=observer_detectors_enabled,
         observer_preflight_report=observer_preflight_report,
     )
@@ -1198,9 +1230,13 @@ def _run(
                 recall_server.stop()
 
     # Finalize the recorded trajectory: stamp the outcome and shut the retrieval
-    # server down. Unlike memory, this is recorded unconditionally (even on a
-    # crash) — the raw run is a corpus entry, not a verified lesson.
+    # and record-findings servers down. Stop the record-findings server before
+    # committing so a late tool call can't race the close (it would be a no-op
+    # anyway). Unlike memory, this is recorded unconditionally (even on a crash)
+    # — the raw run is a corpus entry, not a verified lesson.
     if trajectory_enabled and trajectory_writer is not None:
+        if record_findings_server is not None:
+            record_findings_server.stop()
         if crashed_with is not None:
             outcome = "crashed"
         elif completed:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from sregym_agents.cli_agent.trajectory.store import (
+    TrajectoryFindings,
     TrajectoryMeta,
     TrajectoryRecorder,
     TrajectoryStore,
@@ -38,6 +39,104 @@ def test_recorder_captures_events_and_digest(tmp_path: Path) -> None:
     assert digest.outcome == "completed"
     assert digest.tool_calls == ["bash"]
     assert "looking at pods" in digest.text  # the agent's own narration is the signal
+
+
+def test_findings_drive_structured_digest(tmp_path: Path) -> None:
+    """When the agent records findings, the digest text is built from those
+    symptom-register fields (not the raw tool mechanics)."""
+    store = TrajectoryStore(tmp_path)
+    writer = store.open_run(_meta())
+    rec = TrajectoryRecorder(writer)
+    rec.on_thinking("looking at pods")
+    rec.on_tool_call("bash", {"command": "kubectl get endpoints"})
+    writer.findings(
+        TrajectoryFindings(
+            situation="frontend returns 503; the profile service has no ready endpoints",
+            tell="the profile Service selector did not match the deployment pod labels",
+            root_cause="wrong service selector on the profile Service",
+            fix="corrected the profile Service selector to match the deployment labels",
+            affected_resource="service/profile",
+        )
+    )
+    writer.close(outcome="completed")
+
+    digest = store.digest(writer.path)
+    assert digest is not None
+    assert "situation: frontend returns 503" in digest.text
+    assert "no ready endpoints" in digest.text
+    assert "root_cause: wrong service selector" in digest.text
+    assert "selector did not match" in digest.text
+    # The structured digest supersedes the mechanics fallback.
+    assert "tools:" not in digest.text
+    # Still leak-safe: no problem_id reaches the digest or the file.
+    assert "wrong_service_selector_demo" not in digest.text
+    assert "wrong_service_selector_demo" not in writer.path.read_text()
+
+
+def test_digest_falls_back_to_mechanics_without_findings(tmp_path: Path) -> None:
+    """A run with no recorded findings keeps the tool-mechanics digest."""
+    store = TrajectoryStore(tmp_path)
+    writer = store.open_run(_meta())
+    rec = TrajectoryRecorder(writer)
+    rec.on_thinking("looking at pods")
+    rec.on_tool_call("bash", {"command": "kubectl get pods"})
+    writer.close(outcome="completed")
+
+    digest = store.digest(writer.path)
+    assert digest is not None
+    assert "tools: bash" in digest.text
+    assert "looking at pods" in digest.text
+
+
+def test_findings_last_write_wins(tmp_path: Path) -> None:
+    """A revised record_findings call overwrites the earlier one for retrieval."""
+    store = TrajectoryStore(tmp_path)
+    writer = store.open_run(_meta())
+    writer.findings(TrajectoryFindings(root_cause="tempting wrong first guess"))
+    writer.findings(TrajectoryFindings(root_cause="the confirmed root cause"))
+    writer.close(outcome="completed")
+
+    digest = store.digest(writer.path)
+    assert digest is not None
+    assert "the confirmed root cause" in digest.text
+    assert "tempting wrong first guess" not in digest.text
+
+
+def test_empty_findings_keep_mechanics_digest(tmp_path: Path) -> None:
+    """A findings record with no content does not blank out the digest."""
+    store = TrajectoryStore(tmp_path)
+    writer = store.open_run(_meta())
+    TrajectoryRecorder(writer).on_tool_call("bash", "kubectl get pods")
+    writer.findings(TrajectoryFindings())  # agent called the tool with nothing
+    writer.close(outcome="completed")
+
+    digest = store.digest(writer.path)
+    assert digest is not None
+    assert "tools: bash" in digest.text
+
+
+def test_findings_appear_in_read_full(tmp_path: Path) -> None:
+    store = TrajectoryStore(tmp_path)
+    writer = store.open_run(_meta())
+    TrajectoryRecorder(writer).on_thinking("investigating")
+    writer.findings(TrajectoryFindings(root_cause="missing DB_HOST env", fix="set DB_HOST"))
+    writer.close(outcome="completed")
+
+    text = store.read_full(writer.path)
+    assert "investigating" in text
+    assert "root_cause: missing DB_HOST env" in text
+    assert "fix: set DB_HOST" in text
+
+
+def test_findings_after_close_is_a_noop(tmp_path: Path) -> None:
+    """A late record_findings call (after the writer committed) is dropped, not raised."""
+    store = TrajectoryStore(tmp_path)
+    writer = store.open_run(_meta())
+    writer.close(outcome="completed")
+    writer.findings(TrajectoryFindings(root_cause="too late"))  # no-op
+    digest = store.digest(writer.path)
+    assert digest is not None
+    assert "too late" not in digest.text
 
 
 def test_problem_id_does_not_leak_into_file_or_digest(tmp_path: Path) -> None:

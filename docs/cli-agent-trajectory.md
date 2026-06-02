@@ -42,6 +42,49 @@ to a `.jsonl.partial` staging file and atomically committed to `.jsonl` only on
 close, so an agent never reads its own partial run and a `*.jsonl` listing shows
 only completed prior runs.
 
+## What retrieval ranks on: the digest
+
+Retrieval never embeds/searches the raw run — it operates on a compact
+**digest** per run (`TrajectoryStore.digest`). By default the digest is built
+from run *mechanics*: `app` + outcome + the tool-call name sequence + a window of
+the agent's reasoning. That ranks poorly against a symptom-shaped query, because
+the query ("frontend 503s, profile has no endpoints after a deploy") and the
+document ("tools: kubectl, kubectl, grep") live in different registers.
+
+### Structured findings (`trajectory_record_findings`)
+
+When enabled, the driver exposes a **`record_findings` MCP tool** (server name
+`trajectory_record`) and the prompt instructs the agent to call it once, near the
+end, with a structured summary of its run:
+
+| field | meaning |
+| --- | --- |
+| `situation` | symptoms observed, including any recent rollout/deploy |
+| `tell` | the check/output that discriminated the true cause from the wrong guess |
+| `root_cause` | the confirmed root cause |
+| `fix` | the action that resolved it |
+| `affected_resource` | the resource the fix touched, e.g. `deployment/profile` |
+
+These fields (the same schema as a memory `Lesson`) become the digest text, so a
+later **symptom query matches a past run's symptoms** — the asymmetry is gone.
+The agent still drills into the full transcript via `read_trajectory`; findings
+change only *ranking*, not the payload.
+
+Notes:
+
+- **Agent-authored, so leak-safe by construction** — the agent writes its own
+  words; no `problem_id` enters (same guarantee as the rest of the file).
+- **Last write wins** — a revised `record_findings` call supersedes the earlier
+  one.
+- **Fallback** — a run with no findings (or an empty call), e.g. a crashed or
+  unconfirmed run, keeps the mechanics digest and stays retrievable.
+- **Set it at the pipeline `[defaults]` level**, not per-stage: the digest is
+  *produced* in the record stage (`trajectory_retrieval_mode = "off"`) and
+  *consumed* in a later retrieve stage, so the recording run is the one that must
+  expose the tool.
+- The `record_findings` server and the `search_trajectories` retrieval server use
+  distinct MCP names, so both coexist when a recording run also retrieves.
+
 ## Where it's stored
 
 Like the lesson store, the trajectory store **must live outside the ephemeral
@@ -76,11 +119,13 @@ In the `[agent.cli_agent]` block of an experiment TOML:
 [agent.cli_agent]
 trajectory_enabled = true
 trajectory_retrieval_mode = "rag"   # "off" | "llm" | "rag"
+trajectory_record_findings = true   # agent emits a structured digest via record_findings
 # trajectory_dir = "~/.sds/cli_agent_trajectories"   # optional; for cross-experiment accumulation
 ```
 
 Or via CLI flags on the driver: `--trajectory-enabled`,
-`--trajectory-retrieval-mode {off,llm,rag}`, `--trajectory-dir PATH`.
+`--trajectory-retrieval-mode {off,llm,rag}`, `--trajectory-record-findings`,
+`--trajectory-dir PATH`.
 
 A common workflow: run a baseline set with `trajectory_retrieval_mode = "off"`
 to build the corpus, then a second experiment with `"llm"` or `"rag"` pointed at
@@ -99,10 +144,11 @@ End-to-end example configs (two stages, same problem — record then retrieve):
 
 Line 0 is a `meta` record; the body is one `event` record per agent event
 (`thinking` / `tool_call` / `tool_result` / `usage`) in arrival order; an
-optional trailing `summary` holds the outcome (`completed` / `crashed` / a stage
-name). Append-only and torn-write tolerant. Unlike memory, a trajectory is
-recorded **unconditionally** (even on crash) — it is a corpus entry, not a
-verified lesson.
+optional `findings` record holds the agent's structured summary (when
+`trajectory_record_findings` is on); an optional trailing `summary` holds the
+outcome (`completed` / `crashed` / a stage name). Append-only and torn-write
+tolerant. Unlike memory, a trajectory is recorded **unconditionally** (even on
+crash) — it is a corpus entry, not a verified lesson.
 
 ### No answer leak
 
@@ -126,11 +172,14 @@ signal. Only the benchmark's ground-truth label is withheld.
 ## Code
 
 - `sregym_agents/cli_agent/trajectory/store.py` — `TrajectoryStore`,
-  `TrajectoryRecorder` (agentshim event handler), `TrajectoryDigest`.
+  `TrajectoryRecorder` (agentshim event handler), `TrajectoryDigest`,
+  `TrajectoryFindings` (the structured digest schema).
 - `sregym_agents/cli_agent/trajectory/embedding.py` — pluggable embedder
   (litellm + offline hashing fallback) + cosine top-k.
 - `sregym_agents/cli_agent/trajectory/retrieval.py` — `search_trajectories` /
   `read_trajectory` MCP tools + `TrajectoryRetrievalServer`.
+- `sregym_agents/cli_agent/trajectory/record_server.py` — `record_findings` MCP
+  tool + `RecordFindingsServer`.
 - `sregym_agents/cli_agent/trajectory/demo.py` — end-to-end record→retrieve demo
   (`uv run python -m sregym_agents.cli_agent.trajectory.demo`).
 - Driver wiring: `sregym_agents/cli_agent/driver.py`; runner default:

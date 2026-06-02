@@ -114,6 +114,36 @@ class TrajectoryEvent:
 
 
 @dataclass
+class TrajectoryFindings:
+    """Agent-authored structured summary of a run, recorded via the
+    ``record_findings`` tool near the end of an investigation.
+
+    These symptom-register fields (mirroring ``memory.extract``'s lesson schema)
+    become the retrieval-facing :attr:`TrajectoryDigest.text`, so a future
+    symptom-shaped query matches them — unlike the raw tool mechanics the digest
+    falls back to. Every field is the agent's own words: no ``problem_id`` enters
+    here, so findings are leak-safe like the rest of the file.
+    """
+
+    situation: str = ""
+    root_cause: str = ""
+    tell: str = ""
+    fix: str = ""
+    affected_resource: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def has_content(self) -> bool:
+        return any(str(v).strip() for v in self.to_dict().values())
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> TrajectoryFindings:
+        known = set(cls.__dataclass_fields__)  # type: ignore[attr-defined]
+        return cls(**{k: v for k, v in raw.items() if k in known})
+
+
+@dataclass
 class TrajectoryDigest:
     """Compact, retrieval-facing view of one trajectory.
 
@@ -183,6 +213,15 @@ class TrajectoryWriter:
 
     def event(self, event: TrajectoryEvent) -> None:
         self._append({"type": "event", **event.to_dict()})
+
+    def findings(self, findings: TrajectoryFindings) -> None:
+        """Append the agent's structured findings for this run (last write wins).
+
+        Written mid-run via the ``record_findings`` tool and made durable on
+        :meth:`close` like every other record. Per-field truncation keeps a
+        verbose agent from bloating the digest."""
+        record = {k: _truncate(v, _MAX_TEXT) for k, v in findings.to_dict().items()}
+        self._append({"type": "findings", **record})
 
     def next_seq(self) -> int:
         with self._lock:
@@ -326,10 +365,13 @@ class TrajectoryStore:
         return files
 
     @staticmethod
-    def _read_records(path: Path) -> tuple[TrajectoryMeta | None, list[TrajectoryEvent], dict[str, Any]]:
+    def _read_records(
+        path: Path,
+    ) -> tuple[TrajectoryMeta | None, list[TrajectoryEvent], dict[str, Any], dict[str, Any] | None]:
         meta: TrajectoryMeta | None = None
         events: list[TrajectoryEvent] = []
         summary: dict[str, Any] = {}
+        findings: dict[str, Any] | None = None
         try:
             with path.open("r", encoding="utf-8") as fh:
                 for line in fh:
@@ -347,23 +389,40 @@ class TrajectoryStore:
                         events.append(TrajectoryEvent.from_dict(rec))
                     elif rtype == "summary":
                         summary = rec
+                    elif rtype == "findings":
+                        findings = rec  # last write wins
         except OSError:
             logger.warning("trajectory: could not read %s", path)
-        return meta, events, summary
+        return meta, events, summary, findings
 
-    def digest(self, path: Path) -> TrajectoryDigest | None:
-        """Build the compact retrieval view for one trajectory file."""
-        meta, events, summary = self._read_records(path)
-        if meta is None:
-            return None
-        tool_calls = [e.tool for e in events if e.kind == "tool_call" and e.tool]
-        thinking = [e.text for e in events if e.kind == "thinking" and e.text]
-        outcome = str(summary.get("outcome", "")) if summary else ""
+    @staticmethod
+    def _digest_text(
+        meta: TrajectoryMeta,
+        findings: dict[str, Any] | None,
+        outcome: str,
+        tool_calls: list[str],
+        thinking: list[str],
+    ) -> str:
+        """The retrieval text. Prefer the agent's structured findings — their
+        symptom register matches a symptom-shaped query — and fall back to run
+        mechanics (outcome + tool sequence + a window of the agent's narration)
+        when no findings were recorded. Either way no ``problem_id`` / ``task``
+        enters (that would leak the answer); the signal comes from the recorded
+        investigation itself. Kept compact so the embedder gets a focused vector
+        and many digests fit at once."""
+        if findings is not None:
+            f = TrajectoryFindings.from_dict(findings)
+            if f.has_content():
+                parts = [
+                    f"app: {meta.app}",
+                    f"situation: {f.situation}" if f.situation else "",
+                    f"tell: {f.tell}" if f.tell else "",
+                    f"root_cause: {f.root_cause}" if f.root_cause else "",
+                    f"fix: {f.fix}" if f.fix else "",
+                    f"affected_resource: {f.affected_resource}" if f.affected_resource else "",
+                ]
+                return _truncate("\n".join(p for p in parts if p), _MAX_TEXT)
 
-        # The retrieval text: outcome + tool sequence + a window of the agent's
-        # own narration. No problem_id / task — those would leak the answer; the
-        # signal comes from the recorded investigation itself. Kept compact so the
-        # embedder gets a focused vector and many digests fit at once.
         parts = [
             f"app: {meta.app}",
             f"outcome: {outcome}" if outcome else "",
@@ -373,7 +432,18 @@ class TrajectoryStore:
             head = thinking[0]
             tail = thinking[-1] if len(thinking) > 1 else ""
             parts.append(f"reasoning: {head} … {tail}")
-        text = _truncate("\n".join(p for p in parts if p), _MAX_TEXT)
+        return _truncate("\n".join(p for p in parts if p), _MAX_TEXT)
+
+    def digest(self, path: Path) -> TrajectoryDigest | None:
+        """Build the compact retrieval view for one trajectory file."""
+        meta, events, summary, findings = self._read_records(path)
+        if meta is None:
+            return None
+        tool_calls = [e.tool for e in events if e.kind == "tool_call" and e.tool]
+        thinking = [e.text for e in events if e.kind == "thinking" and e.text]
+        outcome = str(summary.get("outcome", "")) if summary else ""
+
+        text = self._digest_text(meta, findings, outcome, tool_calls, thinking)
 
         return TrajectoryDigest(
             app=meta.app,
@@ -402,10 +472,18 @@ class TrajectoryStore:
         """A medium-detail view for the LLM searcher: the agent's reasoning, the
         tool sequence, and the outcome — no raw tool output, no leaking metadata.
         Bounded to ``budget`` chars so many candidates fit one search prompt."""
-        meta, events, summary = self._read_records(Path(path))
+        meta, events, summary, findings = self._read_records(Path(path))
         if meta is None:
             return ""
         lines: list[str] = []
+        if findings is not None:
+            f = TrajectoryFindings.from_dict(findings)
+            if f.has_content():
+                lines.append(
+                    f"- findings: situation={f.situation!r}; tell={f.tell!r}; "
+                    f"root_cause={f.root_cause!r}; fix={f.fix!r}; "
+                    f"affected_resource={f.affected_resource!r}"
+                )
         for e in events:
             if e.kind == "thinking" and e.text:
                 lines.append(f"- reasoning: {e.text}")
@@ -418,7 +496,7 @@ class TrajectoryStore:
 
     def read_full(self, path: str | Path) -> str:
         """Return the full, human-readable transcript of one trajectory."""
-        meta, events, summary = self._read_records(Path(path))
+        meta, events, summary, findings = self._read_records(Path(path))
         if meta is None:
             return ""
         lines = [f"# trajectory: {meta.app} / run {meta.run_id} ({meta.ts})"]
@@ -433,4 +511,12 @@ class TrajectoryStore:
                 lines.append(f"[result{code}] {body}".rstrip())
         if summary:
             lines.append(f"\n[outcome] {summary.get('outcome', '')}")
+        if findings is not None:
+            f = TrajectoryFindings.from_dict(findings)
+            if f.has_content():
+                lines.append(
+                    f"\n[findings]\nsituation: {f.situation}\ntell: {f.tell}\n"
+                    f"root_cause: {f.root_cause}\nfix: {f.fix}\n"
+                    f"affected_resource: {f.affected_resource}"
+                )
         return "\n".join(lines)

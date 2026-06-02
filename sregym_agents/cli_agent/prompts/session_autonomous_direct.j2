@@ -97,3 +97,15 @@ Ordering: `submit_mitigation` and `submit_diagnosis` may be interleaved and happ
 ## After Submission
 
 Only after `submit_done` returns, stop. You do not need to create follow-up diagnostic scripts, playbooks, or other repository-local incident tooling unless that work was part of the actual source fix you already verified.
+{% if trajectory_record_findings %}
+## Record findings
+
+After `submit_done` returns, call the `record_findings` MCP tool (from the `trajectory_record` server) exactly once to store a concise structured summary of this run, so a future investigation facing a similar situation on this application can retrieve and learn from it:
+- `situation`: the symptoms you observed, including any recent change (rollout/deploy).
+- `tell`: the specific check or output that discriminated the true cause from the obvious wrong guess.
+- `root_cause`: the confirmed root cause.
+- `fix`: the action that resolved it.
+- `affected_resource`: the resource the fix touched (e.g. `deployment/profile`).
+
+Keep each field to one or two sentences, in your own words, recording only what you verified against the live cluster.
+{% endif %}

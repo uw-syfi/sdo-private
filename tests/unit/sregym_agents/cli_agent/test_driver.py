@@ -117,6 +117,28 @@ def test_build_prompt_autonomous_includes_recall_guidance_when_memory_enabled() 
     assert "`recall`" in prompt
 
 
+def test_build_prompt_omits_record_findings_by_default() -> None:
+    prompt = driver._build_prompt(
+        planned_stages=["diagnosis", "mitigation"],
+        app_info={"app_name": "a", "namespace": "n"},
+    )
+    assert "record_findings" not in prompt
+
+
+def test_build_prompt_includes_record_findings_when_enabled() -> None:
+    for autonomous in (False, True):
+        prompt = driver._build_prompt(
+            planned_stages=["diagnosis", "mitigation"],
+            app_info={"app_name": "a", "namespace": "n"},
+            autonomous=autonomous,
+            trajectory_record_findings=True,
+        )
+        assert "`record_findings`" in prompt
+        assert "trajectory_record" in prompt
+        assert "situation" in prompt
+        assert "root_cause" in prompt
+
+
 # --- Autonomous-submit prompt variant ---------------------------------------
 
 

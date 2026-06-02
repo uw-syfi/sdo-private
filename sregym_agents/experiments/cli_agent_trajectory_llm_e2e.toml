@@ -39,6 +39,11 @@ provider = "claude"
 timeout_sec = 2000
 autonomous_submit = true
 trajectory_enabled = true
+# Agent emits a structured findings summary (situation/tell/root_cause/fix/
+# affected_resource) via the `record_findings` tool; that summary becomes the
+# retrieval-facing digest the stage-2 searcher reads. Set at the defaults level
+# so the record stage (where the data is produced) also exposes the tool.
+trajectory_record_findings = true
 # llm-mode search sub-agent defaults to the SAME cli agent (provider=claude,
 # the model above). Set trajectory_llm_search_model to a litellm id (e.g.
 # "vertex_ai/gemini-2.5-flash") to override with a cheaper/different model.

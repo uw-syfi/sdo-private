@@ -28,3 +28,6 @@ Workflow — do these in order, calling `submit` exactly {{ planned_stages | len
 
 Submission:
 You have access to an MCP tool named `submit` (from the `{{ submit_mcp_server_name }}` server). It reports your answer to the benchmark and returns the grading verdict in its response. The benchmark routes each submission to whichever stage is currently active — you do not pass a stage name. Do not exit until you have called `submit` for every stage; a missed submission is graded as a failure.
+{% if trajectory_record_findings %}
+After your final `submit`, call the `record_findings` MCP tool (from the `trajectory_record` server) exactly once with a concise structured summary of this run, so future investigations on this application can retrieve and learn from it: `situation` (symptoms observed, including any recent rollout/deploy), `tell` (the check or output that discriminated the true cause from the obvious wrong guess), `root_cause` (the confirmed cause), `fix` (what resolved it), and `affected_resource` (e.g. `deployment/profile`). Keep each field to one or two sentences, in your own words, recording only what you verified against the live cluster.
+{% endif %}

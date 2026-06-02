@@ -16,6 +16,7 @@ from __future__ import annotations
 from .store import (
     TrajectoryDigest,
     TrajectoryEvent,
+    TrajectoryFindings,
     TrajectoryMeta,
     TrajectoryRecorder,
     TrajectoryStore,
@@ -24,6 +25,7 @@ from .store import (
 __all__ = [
     "TrajectoryDigest",
     "TrajectoryEvent",
+    "TrajectoryFindings",
     "TrajectoryMeta",
     "TrajectoryRecorder",
     "TrajectoryStore",

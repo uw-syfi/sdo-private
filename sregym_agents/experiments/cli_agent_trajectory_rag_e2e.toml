@@ -42,6 +42,12 @@ provider = "claude"
 timeout_sec = 2000
 autonomous_submit = true
 trajectory_enabled = true
+# Agent emits a structured findings summary (situation/tell/root_cause/fix/
+# affected_resource) via the `record_findings` tool; that summary becomes the
+# retrieval-facing digest, so the stage-2 symptom query matches it rather than
+# the raw tool mechanics. Set at the defaults level so the record stage (where
+# the data is produced) also exposes the tool.
+trajectory_record_findings = true
 
 [[stages]]
 name = "record"
