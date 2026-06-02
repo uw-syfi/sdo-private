@@ -10,9 +10,11 @@ Quick reference for diagnosing and mitigating recurring fault classes in this en
 | [missing-configmap](missing-configmap/README.md) | Pod stuck in `CreateContainerConfigError`; missing configmap volume mount | `configmap not found` in pod events |
 | [mongodb-startup-race](mongodb-startup-race/README.md) | App service pod crashes immediately at startup; MongoDB connection refused | Service starts before MongoDB is ready; pod logs show connection error |
 | [wrong-container-command](wrong-container-command/README.md) | Pod in `CrashLoopBackOff`; `exec: "<binary>": executable file not found` | Container command references wrong binary name for the image |
-| [mongodb-access-revoked](mongodb-access-revoked/README.md) | App pod CrashLoopBackOff at startup (or runtime auth failures); logs show `not authorized on <db> to execute command` | `failure-admin-<svc>` ConfigMap present; `db.getUser('admin')` missing readWrite role on service DB |
+| [mongodb-access-revoked](mongodb-access-revoked/README.md) | App pod CrashLoopBackOff; logs show `Authentication failed` (user deleted) or `not authorized on <db>` (role revoked) | `failure-admin-<svc>` ConfigMap present; check `db.getUsers()` via `root`/`root` — admin user missing (Variant B) or lacks readWrite role (Variant A) |
 | [injected-init-container](injected-init-container/README.md) | Pod stuck in `Init:0/1` forever; init container hangs | Init container added to deployment that blocks main container start |
 | [broken-pvc-claimname](broken-pvc-claimname/README.md) | Stateful pod (e.g. MongoDB) stuck in `Pending`; dependent app pods CrashLoopBackOff with "no reachable servers" | `kubectl describe pod` shows PVC `<name>-broken` not found; actual PVCs exist and are Bound |
+| [injected-scheduling-constraint](injected-scheduling-constraint/README.md) | Pod(s) stuck in `Pending` from cluster start; `Insufficient memory` or `no free ports` in scheduler events | Injected absurd `resources.requests.memory` or `hostPort` in deployment spec |
+| [wrong-mongodb-image](wrong-mongodb-image/README.md) | All MongoDB pods in `Error`/`CrashLoopBackOff` from cluster start; app services crash connecting to DB | Pod logs: `"Wrong mongod version" ... featureCompatibilityVersion: "4.4"` — MongoDB image major version incompatible with PVC data |
 
 ## Usage
 

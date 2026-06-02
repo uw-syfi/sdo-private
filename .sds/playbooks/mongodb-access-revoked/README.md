@@ -2,41 +2,48 @@
 
 ## Symptom
 
-An application service pod crashes (CrashLoopBackOff / Error) at startup, or fails requests at runtime, with a MongoDB authorization error in the logs:
+An application service pod crashes (CrashLoopBackOff / Error) at startup with a MongoDB authentication or authorization error in the logs:
 
-```
-not authorized on <db-name> to execute command { ... }
-```
-
-The service can connect to MongoDB (session opens successfully) but cannot read or write to its database.
+- **Variant A — role revoked**: `not authorized on <db-name> to execute command { ... }` — user connects but has no readWrite permission
+- **Variant B — user deleted**: `server returned error on SASL authentication step: Authentication failed.` — user does not exist at all
 
 ## Root Cause
 
-The MongoDB `admin` user (used by Hotel Reservation services) has had its `readWrite` role revoked from the service's database (e.g. `geo-db`, `rate-db`). This is a live MongoDB privilege change — the deployment image and manifests are correct.
+The MongoDB `admin` user (used by Hotel Reservation services) has been tampered with in one of two ways:
 
-**Key signal**: `failure-admin-<service>` ConfigMap exists in the namespace. Its `revoke-admin-<service>-mongo.sh` script documents the injected fault (revoking `readWrite` on `<service>-db`).
+- **Variant A**: `readWrite` role revoked from the service's database (e.g. `rate-db`, `geo-db`)
+- **Variant B**: `admin` user deleted entirely from the `admin` database
+
+This is a live MongoDB state change — deployment image and manifests are correct.
+
+**Key signal**: `failure-admin-<service>` ConfigMap exists in the namespace. Its scripts (`revoke-admin-*.sh`, `remove-admin-mongo.sh`) document which fault variant was injected.
 
 ## Diagnosis
 
-1. Check pod logs for the auth error:
+1. Check pod logs for the error type:
    ```bash
    kubectl logs -n hotel-reservation -l io.kompose.service=<service> --previous
    ```
+   - "Authentication failed" → Variant B (user deleted)
+   - "not authorized" → Variant A (role revoked)
+
 2. Confirm the ConfigMap is present:
    ```bash
    kubectl get configmap -n hotel-reservation | grep failure-admin
    ```
-3. Confirm the role is missing on the MongoDB pod:
+
+3. Check what users exist in MongoDB (use `root`/`root` if `admin`/`admin` fails):
    ```bash
    kubectl exec -n hotel-reservation deploy/mongodb-<service> -- \
-     mongo admin -u admin -p admin --authenticationDatabase admin \
-     --eval "db.getUser('admin')"
+     mongo admin -u root -p root --authenticationDatabase admin \
+     --eval "db.getUsers()"
    ```
-   The `roles` array should contain `{role: "readWrite", db: "<service>-db"}`. If it is absent, the fault is confirmed.
+   - If `admin` user is absent → Variant B
+   - If `admin` user exists but lacks `{role: "readWrite", db: "<service>-db"}` → Variant A
 
 ## Mitigation
 
-Grant the `readWrite` role back to the `admin` user:
+### Variant A — Restore readWrite role
 
 ```bash
 kubectl exec -n hotel-reservation deploy/mongodb-<service> -- \
@@ -44,10 +51,20 @@ kubectl exec -n hotel-reservation deploy/mongodb-<service> -- \
   --eval "db.grantRolesToUser('admin', [{role: 'readWrite', db: '<service>-db'}]);"
 ```
 
-The pod will recover on its next CrashLoopBackOff restart. Verify:
+### Variant B — Recreate deleted admin user
 
 ```bash
-kubectl get pod -n hotel-reservation -l io.kompose.service=<service>
+kubectl exec -n hotel-reservation deploy/mongodb-<service> -- \
+  mongo admin -u root -p root --authenticationDatabase admin \
+  --eval "db.createUser({user: 'admin', pwd: 'admin', roles:[{role:'userAdminAnyDatabase',db:'admin'}]});
+          db.grantRolesToUser('admin', [{role: 'readWrite', db: '<service>-db'}]);"
+```
+
+After either fix, restart the deployment so it picks up fresh credentials:
+
+```bash
+kubectl rollout restart deployment/<service> -n hotel-reservation
+kubectl rollout status deployment/<service> -n hotel-reservation
 ```
 
 ## Verification
@@ -68,4 +85,5 @@ Expect a JSON `FeatureCollection` with hotel results.
 
 - The geo and rate services hard-code `admin:admin` credentials in `cmd/geo/db.go` and `cmd/rate/db.go` respectively.
 - If both `failure-admin-geo` and `failure-admin-rate` ConfigMaps exist, check both databases — the fault may be injected on multiple services simultaneously.
-- A service that started *before* the revocation (e.g. rate initialized DB data before the role was revoked) may appear healthy but could silently fail on cache-miss writes. Verify with the end-to-end test.
+- A service that started *before* the deletion/revocation may appear healthy but could silently fail on later writes. Always verify end-to-end.
+- The `root`/`root` user always remains present and can be used as a recovery pivot when `admin`/`admin` no longer works.
