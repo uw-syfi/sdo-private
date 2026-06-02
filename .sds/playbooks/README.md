@@ -17,6 +17,7 @@ Quick reference for diagnosing and mitigating recurring fault classes in this en
 | [duplicate-pvc-mounts](duplicate-pvc-mounts/README.md) | One pod of a multi-replica deployment stuck in `Pending`; first replica runs, second cannot schedule | Scheduler events show both `anti-affinity rules` AND `volume node affinity conflict`; deployment has injected RWO PVC + `podAntiAffinity` |
 | [wrong-mongodb-image](wrong-mongodb-image/README.md) | All MongoDB pods in `Error`/`CrashLoopBackOff` from cluster start; app services crash connecting to DB | Pod logs: `"Wrong mongod version" ... featureCompatibilityVersion: "4.4"` — MongoDB image major version incompatible with PVC data |
 | [wrong-service-command](wrong-service-command/README.md) | Pod Running/Ready but RPC calls to it fail; upstream logs show `GetX failed` 500 errors; consul has no entry for the expected service | `kubectl describe deployment <name>` shows wrong `Command:` (e.g. `geo` in `profile` deployment); pod logs show wrong `cmd/<other>/main.go` and wrong consul registration |
+| [injected-service-selector](injected-service-selector/README.md) | All traffic to a service fails ("Connection refused"); pods are Running/Ready but `kubectl get endpoints <svc>` shows empty | Extra label key in `.spec.selector` that pods do not carry; selector ANDs to zero matches |
 
 ## Usage
 

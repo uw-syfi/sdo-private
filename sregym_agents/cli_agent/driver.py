@@ -1263,8 +1263,12 @@ def _run(
         # The parent stream's turn/tool counts exclude Task/Workflow sub-agents
         # (they run as sidechains written only to on-disk transcripts). Recover
         # them post-run, keyed on the Claude session id, so effort metrics
-        # reflect the real work rather than just the orchestrator's turns.
-        session_id = getattr(agent, "session_id", None) if agent is not None else None
+        # reflect the real work rather than just the orchestrator's turns. The
+        # session id is captured on the *session* (ClaudeGenerationSession), not
+        # the agent — fall back to the agent only for backends that expose it there.
+        session_id = getattr(session, "session_id", None) if session is not None else None
+        if not session_id and agent is not None:
+            session_id = getattr(agent, "session_id", None)
         subagent_usage: dict[str, Any] | None = None
         if args.provider == "claude" and session_id:
             try:

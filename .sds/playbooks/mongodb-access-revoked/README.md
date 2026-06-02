@@ -81,9 +81,34 @@ kubectl delete pod curl-test -n hotel-reservation --ignore-not-found
 
 Expect a JSON `FeatureCollection` with hotel results.
 
+## Stealth variant: services survive revocation if pods aren't restarted
+
+The fault injection sequence always:
+1. Runs the revoke script inside the MongoDB pod
+2. **Deletes the service pod** to force a restart that will fail
+
+Without step 2, the service continues serving from warm state:
+- **geo**: loads all hotels into an in-memory index at startup — never queries MongoDB during request handling
+- **rate**: caches per-hotel rate plans in memcached — only queries MongoDB on cache misses; once the cache is warm (~seconds after startup) there are zero cache misses
+
+**Tell**: If `failure-admin-<svc>` ConfigMap is present but `admin` still has `readWrite` in MongoDB AND the service pod creation timestamp matches the original cluster deployment time (not a later date), the revoke script likely ran but the pod was never deleted (fault injection aborted midway, or scripts not executed at all).
+
+Check pod creation timestamps to discriminate:
+```bash
+kubectl get pods -n hotel-reservation -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.creationTimestamp}{"\n"}{end}' | sort
+```
+If the `geo` or `rate` pod was re-created *after* the cluster started (later timestamp than mongodb pods), it was deleted as part of fault injection. If all pods share the same ~2-second creation window, no pod was deleted — the fault is either not yet applied or was applied only at the MongoDB level.
+
+Confirm via MongoDB audit log (localhost connections = kubectl exec / scripts):
+```bash
+kubectl logs -n hotel-reservation deploy/mongodb-rate | grep "revokeRoles\|ACCESS"
+```
+`revokeRolesFromUser` entries in the log confirm the script ran; their absence means it did not.
+
 ## Notes
 
 - The geo and rate services hard-code `admin:admin` credentials in `cmd/geo/db.go` and `cmd/rate/db.go` respectively.
 - If both `failure-admin-geo` and `failure-admin-rate` ConfigMaps exist, check both databases — the fault may be injected on multiple services simultaneously.
 - A service that started *before* the deletion/revocation may appear healthy but could silently fail on later writes. Always verify end-to-end.
 - The `root`/`root` user always remains present and can be used as a recovery pivot when `admin`/`admin` no longer works.
+- `configmap present + readWrite intact + pod age matches cluster start` = fault prepared but not applied (or fully recovered).
