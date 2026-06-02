@@ -51,17 +51,48 @@ grep -A3 "command:" kubernetes/<service>/<service>-deployment.yaml
 kubectl apply -f kubernetes/<service>/<service>-deployment.yaml
 ```
 
+## Stale Consul Cleanup
+
+After patching, the old pod's consul registrations may persist briefly as "passing" because consul's TTL check hasn't expired. This causes two categories of stale entries:
+
+1. **Stale wrong-service entry**: The old pod registered as the wrong service name (e.g. `srv-geo` from a pod that was supposed to be `profile`). If this IP is gone but the entry shows passing, it will route traffic to a dead backend.
+2. **Stale correct-service entry**: Prior rollout pods may have registered under the correct name but their IP is now gone.
+
+Check for and remove stale entries:
+```bash
+# List all instances for a given service including unhealthy
+kubectl exec -n <namespace> deploy/<frontend-pod> -- sh -c \
+  "curl -s 'http://consul:8500/v1/health/service/srv-<name>?passing=1'" | \
+  python3 -c "import json,sys; [print(d['Service']['ID'], d['Service']['Address']) for d in json.load(sys.stdin)]"
+
+# Cross-reference IPs with live pods
+kubectl get pods -n <namespace> -o wide | grep <ip>
+
+# Deregister stale entry if no pod has that IP
+kubectl exec -n <namespace> deploy/<any-pod-with-curl> -- sh -c \
+  "curl -s -X PUT http://consul:8500/v1/agent/service/deregister/<service-id>"
+```
+
+After cleanup, each service should have exactly 1 passing instance.
+
 ## Verification
 
-After patching, confirm the pod restarts and registers correctly:
+After patching and stale cleanup, confirm the pod registers correctly and traffic flows:
 
 ```bash
-# Pod should restart with 0 new restarts after rollout
+# Pod should be Running/Ready
 kubectl get pods -n <namespace> -l io.kompose.service=<name>
 
 # Logs should show correct service starting
 kubectl logs -n <namespace> deployment/<name> | grep -E "cmd/|registered in consul|srv-"
 
+# Exactly 1 passing instance per service in consul
+for svc in srv-search srv-geo srv-profile srv-rate srv-recommendation srv-reservation srv-user; do
+  count=$(kubectl exec -n <namespace> deploy/frontend -- sh -c \
+    "curl -s 'http://consul:8500/v1/health/service/${svc}?passing=1'" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
+  echo "$svc: $count instances"
+done
+
 # Test the affected user-facing flow end-to-end
-# e.g. GET /hotels?... should return hotel data, not 500
+# e.g. GET /hotels?... should return hotel data with names, not 500
 ```
