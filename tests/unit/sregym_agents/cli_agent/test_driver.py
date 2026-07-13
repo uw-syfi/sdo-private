@@ -21,9 +21,9 @@ import subprocess
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from agentshim import BaseCodingAgent
 from agentshim.base import BaseAgentSession, register_provider
 
-from agentshim import BaseCodingAgent
 from sregym_agents.cli_agent import driver
 
 if TYPE_CHECKING:

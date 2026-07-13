@@ -47,6 +47,9 @@ func (r Runner) RunOnce(ctx context.Context) error {
 			if finding.DetectorID == "" {
 				finding.DetectorID = spec.ID
 			}
+			if err := ValidateFinding(spec, finding); err != nil {
+				return fmt.Errorf("validate detector %q finding: %w", spec.ID, err)
+			}
 			if err := r.Sink.Emit(ctx, finding); err != nil {
 				return fmt.Errorf("emit detector %q finding: %w", spec.ID, err)
 			}

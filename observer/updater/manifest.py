@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -11,11 +11,49 @@ from observer.updater.errors import ObserverUpdaterError
 
 
 class ManifestError(ObserverUpdaterError):
-    """Raised when .sds/diagnostics/manifest.yaml is invalid."""
+    """Raised when an operational-memory diagnostics manifest is invalid."""
 
 
 DETECTOR_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 GO_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+DURATION_PART_RE = re.compile(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)")
+DURATION_FACTORS = {
+    "ns": 1,
+    "us": 1_000,
+    "µs": 1_000,
+    "ms": 1_000_000,
+    "s": 1_000_000_000,
+    "m": 60_000_000_000,
+    "h": 3_600_000_000_000,
+}
+
+
+class DetectorWatchManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_version: str = Field(alias="apiVersion", min_length=1)
+    kind: str = Field(min_length=1)
+    namespace: str = ""
+
+
+class PersistenceManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    firing: int = Field(ge=1)
+    clearing: int = Field(ge=1)
+
+
+class BatchingManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    severity: Literal["info", "warn", "critical"]
+    debounce: str
+
+    @field_validator("debounce")
+    @classmethod
+    def validate_debounce(cls, value: str) -> str:
+        duration_nanoseconds(value, allow_zero=True)
+        return value
 
 
 class DetectorManifest(BaseModel):
@@ -24,6 +62,15 @@ class DetectorManifest(BaseModel):
     id: str
     package: str
     constructor: str = "New"
+    detector_class: Literal["health", "incident"] = Field(alias="class")
+    owner: Literal["health_judge", "responder"]
+    watches: list[DetectorWatchManifest]
+    interval: str
+    persistence: PersistenceManifest
+    batching: BatchingManifest
+    possible_playbooks: list[str] = Field(alias="possiblePlaybooks")
+    originating_incident: str | None = Field(default=None, alias="originatingIncident")
+    originating_commit: str = Field(alias="originatingCommit", min_length=1)
 
     @field_validator("id")
     @classmethod
@@ -38,6 +85,26 @@ class DetectorManifest(BaseModel):
         if not GO_IDENTIFIER_RE.fullmatch(value):
             raise ValueError("must be a Go identifier")
         return value
+
+    @field_validator("interval")
+    @classmethod
+    def validate_interval(cls, value: str) -> str:
+        duration_nanoseconds(value)
+        return value
+
+    @model_validator(mode="after")
+    def validate_ownership_and_uniqueness(self) -> DetectorManifest:
+        expected_owner = "health_judge" if self.detector_class == "health" else "responder"
+        if self.owner != expected_owner:
+            raise ValueError(f"class {self.detector_class!r} must be owned by {expected_owner!r}")
+        if self.detector_class == "incident" and not self.originating_incident:
+            raise ValueError("incident detectors require originatingIncident")
+        watch_keys = [(watch.api_version, watch.kind, watch.namespace) for watch in self.watches]
+        if len(watch_keys) != len(set(watch_keys)):
+            raise ValueError("detector watches must be unique")
+        if len(self.possible_playbooks) != len(set(self.possible_playbooks)):
+            raise ValueError("possiblePlaybooks must be unique")
+        return self
 
 
 class ObserverDiagnosticsManifest(BaseModel):
@@ -110,3 +177,15 @@ def _safe_child_path(root: Path, raw_path: str, *, label: str) -> Path:
 
 def manifest_to_dict(manifest: ObserverDiagnosticsManifest) -> dict[str, Any]:
     return manifest.model_dump(by_alias=True)
+
+
+def duration_nanoseconds(value: str, *, allow_zero: bool = False) -> int:
+    if value == "0" and allow_zero:
+        return 0
+    matches = list(DURATION_PART_RE.finditer(value))
+    if not matches or "".join(match.group(0) for match in matches) != value:
+        raise ValueError("must be a Go-style duration such as 500ms, 30s, or 1m")
+    nanoseconds = sum(float(match.group(1)) * DURATION_FACTORS[match.group(2)] for match in matches)
+    if nanoseconds <= 0 and not allow_zero:
+        raise ValueError("duration must be positive")
+    return int(nanoseconds)

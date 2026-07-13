@@ -137,6 +137,29 @@ def test_crucible_agent_config_loaded_from_toml(tmp_path: Path) -> None:
     assert config.agent_config["crucible"]["seed_kb_dir"] == "/tmp/seed-kb"
 
 
+def test_sdo_codex_exports_required_kind_images_for_prefault_preflight(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        agent="sdo_codex",
+        agent_config={
+            "sdo_codex": {
+                "controller_image": "controller:run-123",
+                "responder_image": "responder:run-123",
+                "validator_image": "validator:run-123",
+            }
+        },
+    )
+
+    env = config_to_env(config, tmp_path)
+
+    assert json.loads(env["SREGYM_KIND_REQUIRED_IMAGES"]) == [
+        "controller:run-123",
+        "responder:run-123",
+        "validator:run-123",
+    ]
+    assert env["SREGYM_KIND_REQUIRE_NETWORK_POLICY"] == "1"
+    assert env["SREGYM_KIND_NETWORK_POLICY_CANARY_IMAGE"] == "validator:run-123"
+
+
 def test_legacy_crucible_runner_fields_are_promoted_to_agent_config(tmp_path: Path) -> None:
     toml = _write_toml(
         tmp_path,
@@ -504,6 +527,15 @@ def test_submit_done_feedback_env_override() -> None:
     assert resolved.env.submit_done_returns_feedback is True
 
 
+def test_cleanup_timeout_process_env_overrides_stale_persisted_config(tmp_path: Path) -> None:
+    stale = ExperimentConfig(env=RunnerEnv(cleanup_defer_timeout_seconds=600))
+
+    resolved = resolve_config(stale, env_overrides={"SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS": "1800"})
+
+    assert resolved.env.cleanup_defer_timeout_seconds == 1800
+    assert config_to_env(resolved, project_root=tmp_path)["SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS"] == "1800"
+
+
 def test_deploy_from_source_env_override_enables() -> None:
     config = ExperimentConfig(deploy_from_source=False)
     resolved = resolve_config(config, env_overrides={"SREGYM_DEPLOY_FROM_SOURCE": "1"})
@@ -528,6 +560,14 @@ def test_config_to_env_emits_submit_done_feedback_flag_when_enabled(tmp_path: Pa
     config = ExperimentConfig(env=RunnerEnv(submit_done_returns_feedback=True))
     env = config_to_env(config, project_root=tmp_path)
     assert env["SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK"] == "1"
+
+
+def test_config_to_env_emits_cleanup_deferral_timeout(tmp_path: Path) -> None:
+    config = ExperimentConfig(env=RunnerEnv(cleanup_defer_timeout_seconds=1800))
+
+    env = config_to_env(config, project_root=tmp_path)
+
+    assert env["SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS"] == "1800"
 
 
 def test_config_to_env_omits_reuse_flags_when_false(tmp_path: Path) -> None:

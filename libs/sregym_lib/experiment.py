@@ -90,6 +90,7 @@ class RunnerEnv:
     reuse_cluster: bool = False
     force_recreate_cluster: bool = False
     submit_done_returns_feedback: bool = False
+    cleanup_defer_timeout_seconds: int = 0
 
 
 def promote_crucible_legacy_config(
@@ -210,6 +211,7 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         reuse_cluster=bool(env_raw.get("reuse_cluster", False)),
         force_recreate_cluster=bool(env_raw.get("force_recreate_cluster", False)),
         submit_done_returns_feedback=bool(env_raw.get("submit_done_returns_feedback", False)),
+        cleanup_defer_timeout_seconds=int(env_raw.get("cleanup_defer_timeout_seconds", 0)),
     )
 
     agent = runner.get("agent", "crucible")
@@ -252,7 +254,8 @@ def resolve_config(
 
     Recognized env vars: MODEL, PARALLEL, JUDGE_MODEL_ID,
     SREGYM_WORKER_CPU_LIMIT, SREGYM_REUSE_CLUSTER,
-    SREGYM_FORCE_RECREATE_CLUSTER, SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK.
+    SREGYM_FORCE_RECREATE_CLUSTER, SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK,
+    SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS.
     """
     if env_overrides is None:
         env_overrides = dict(os.environ)
@@ -278,6 +281,8 @@ def resolve_config(
         env_updates["submit_done_returns_feedback"] = _parse_bool_env(
             env_overrides["SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK"]
         )
+    if "SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS" in env_overrides:
+        env_updates["cleanup_defer_timeout_seconds"] = int(env_overrides["SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS"])
     if updates or env_updates:
         new_env = dataclasses.replace(config.env, **env_updates) if env_updates else config.env
         config = dataclasses.replace(config, **updates, env=new_env)
@@ -374,7 +379,7 @@ def _resolve_tasklist_source(tasklist_ref: str, sregym_dir: Path) -> Path:
     )
 
 
-_EXTERNAL_AGENTS = {"crucible", "pydantic_agent", "cli_agent"}
+_EXTERNAL_AGENTS = {"crucible", "pydantic_agent", "cli_agent", "sdo_codex"}
 
 
 def config_to_main_args(
@@ -463,6 +468,8 @@ def config_to_env(config: ExperimentConfig, project_root: Path, exp_dir: Path | 
     if config.env.force_recreate_cluster:
         env["SREGYM_FORCE_RECREATE_CLUSTER"] = "1"
     env["SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK"] = "1" if config.env.submit_done_returns_feedback else "0"
+    if config.env.cleanup_defer_timeout_seconds > 0:
+        env["SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS"] = str(config.env.cleanup_defer_timeout_seconds)
 
     env["SREGYM_PROGRESS_MODE"] = "rich"
     if exp_dir is not None:
@@ -472,6 +479,22 @@ def config_to_env(config: ExperimentConfig, project_root: Path, exp_dir: Path | 
     agent_cfg = effective_agent_config(config)
     if agent_cfg:
         env["SREGYM_EXPERIMENT_AGENT_CONFIG"] = json.dumps(agent_cfg)
+    if config.agent == "sdo_codex":
+        sdo_cfg = config.agent_config.get("sdo_codex") or {}
+        validator_image = str(sdo_cfg.get("validator_image", "sdo-observer-validator:v0.1.0"))
+        env["SREGYM_KIND_REQUIRED_IMAGES"] = json.dumps(
+            [
+                str(sdo_cfg.get("controller_image", "sdo-controller:v0.1.0")),
+                str(sdo_cfg.get("responder_image", "sdo-responder:v0.1.0")),
+                validator_image,
+            ]
+        )
+        # Production validator Jobs execute untrusted detector code behind a
+        # deny-all NetworkPolicy. A CNI that merely accepts NetworkPolicy
+        # objects without enforcing them is not a production-equivalent test
+        # environment, so SDO workers require a real enforcement preflight.
+        env["SREGYM_KIND_REQUIRE_NETWORK_POLICY"] = "1"
+        env["SREGYM_KIND_NETWORK_POLICY_CANARY_IMAGE"] = validator_image
 
     # Promote cli_agent's autonomous_submit flag to a dedicated env var. The
     # MCP server that registers submit_* tools is launched in the worker
@@ -538,6 +561,7 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"reuse_cluster = {_toml_value(config.env.reuse_cluster)}")
     lines.append(f"force_recreate_cluster = {_toml_value(config.env.force_recreate_cluster)}")
     lines.append(f"submit_done_returns_feedback = {_toml_value(config.env.submit_done_returns_feedback)}")
+    lines.append(f"cleanup_defer_timeout_seconds = {_toml_value(config.env.cleanup_defer_timeout_seconds)}")
 
     agent_configs = promote_crucible_legacy_config(
         agent=config.agent,

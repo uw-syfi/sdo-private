@@ -131,6 +131,28 @@ depends_on = [
     "app_operator.core",
 ]
 
+[[modules]]
+path = "app_operator.lifecycle"
+depends_on = [
+    "app_operator.memory",
+]
+
+[[modules]]
+path = "app_operator.protocol"
+depends_on = []
+
+[[modules]]
+path = "app_operator.memory"
+depends_on = [
+    "app_operator.protocol",
+]
+
+[[modules]]
+path = "app_operator.responder"
+depends_on = [
+    "app_operator.memory",
+]
+
 # --- app_operator Layer 2: shared infrastructure subpackages ---
 
 [[modules]]
@@ -227,6 +249,16 @@ depends_on = [
     "app_operator.llm",
     "app_operator.prompts",
     "app_operator.trajectory",
+]
+
+[[modules]]
+path = "app_operator.sdo_sregym"
+depends_on = [
+    "app_operator.lifecycle",
+    "app_operator.memory",
+    "app_operator.protocol",
+    "app_operator.responder",
+    "libs.sregym_lib",
 ]
 
 # --- app_operator Layer 4: factory + commands ---

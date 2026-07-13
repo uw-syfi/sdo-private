@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"sds.dev/observer/sdk"
 	"sds.dev/observer/sdk/sdktest"
@@ -16,7 +17,7 @@ type testDetector struct {
 }
 
 func (d testDetector) Spec() sdk.DetectorSpec {
-	return sdk.DetectorSpec{ID: d.id}
+	return sdk.DetectorSpec{ID: d.id, Interval: time.Second}
 }
 
 func (d testDetector) Detect(context.Context, sdk.DetectionContext) ([]sdk.Finding, error) {
@@ -36,12 +37,13 @@ func (d testDetector) Detect(context.Context, sdk.DetectionContext) ([]sdk.Findi
 }
 
 type findingsDetector struct {
-	id       string
-	findings []sdk.Finding
+	id        string
+	findings  []sdk.Finding
+	playbooks []string
 }
 
 func (d findingsDetector) Spec() sdk.DetectorSpec {
-	return sdk.DetectorSpec{ID: d.id}
+	return sdk.DetectorSpec{ID: d.id, Interval: time.Second, Playbooks: d.playbooks}
 }
 
 func (d findingsDetector) Detect(context.Context, sdk.DetectionContext) ([]sdk.Finding, error) {
@@ -90,7 +92,8 @@ func TestRunWithOptionsValidatesFindingPlaybooks(t *testing.T) {
 	var stdout bytes.Buffer
 	err := RunWithOptions(context.Background(), []sdk.Detector{
 		findingsDetector{
-			id: "missing-endpoints",
+			id:        "missing-endpoints",
+			playbooks: []string{".sds/playbooks/service-endpoints/README.md"},
 			findings: []sdk.Finding{
 				{
 					RuleID:    "missing-endpoints",
@@ -122,7 +125,8 @@ func TestRunWithOptionsValidatesFindingPlaybooks(t *testing.T) {
 func TestRunWithOptionsRejectsMissingFindingPlaybook(t *testing.T) {
 	err := RunWithOptions(context.Background(), []sdk.Detector{
 		findingsDetector{
-			id: "missing-endpoints",
+			id:        "missing-endpoints",
+			playbooks: []string{".sds/playbooks/missing/README.md"},
 			findings: []sdk.Finding{
 				{
 					RuleID:    "missing-endpoints",

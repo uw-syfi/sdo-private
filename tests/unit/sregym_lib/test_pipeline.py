@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -24,6 +25,7 @@ from libs.sregym_lib.pipeline import (
     write_pipeline_snapshot,
     write_pipeline_state,
 )
+from libs.sregym_lib.runner import _stage_results_error
 
 if TYPE_CHECKING:
     from libs.sregym_lib.experiment import ExperimentConfig
@@ -81,6 +83,167 @@ chain_application_workspace = true
 [stages.runner]
 tasklist = "count_train"
 """
+
+
+def test_stage_results_error_rejects_agent_crash_even_when_benchmark_exits_zero(tmp_path: Path) -> None:
+    result = tmp_path / "problem_runs" / "run-1" / "results_1.csv"
+    result.parent.mkdir(parents=True)
+    result.write_text('"agent_error","agent_exit_code","problem_id"\nTrue,1,"problem"\n', encoding="utf-8")
+
+    assert "agent_error" in (_stage_results_error(tmp_path) or "")
+
+
+def _valid_strict_receipt() -> dict[str, object]:
+    canary = {
+        "passed": True,
+        "observed_at": "2026-07-12T12:00:00+00:00",
+        "details": "enforcement observed",
+    }
+    return {
+        "schema_version": "sdo.production-receipt/v1",
+        "pre_cutover": False,
+        "validator_mode": "kubernetes-job",
+        "lifecycle_provenance": True,
+        "production_job_dispatch": True,
+        "completed": True,
+        "proposal_commit": "proposal",
+        "outcome_commit": "outcome",
+        "reflection_commit": "reflection",
+        "validator_evidence_commit": "reflection",
+        "same_session_reflection": True,
+        "detector_clear": [{"status": "clear", "fingerprints": []}],
+        "independent_verification": [{"passed": True}],
+        "validator_network_policy_canaries": [
+            {**canary, "mode": "allow", "job_name": "validator-allow"},
+            {**canary, "mode": "deny", "job_name": "validator-deny"},
+        ],
+        "acknowledged": True,
+        "cleaned": True,
+        "remaining_worktrees": [],
+        "responder_jobs": ["sdo-incident-job"],
+        "controller_update_required": False,
+    }
+
+
+def test_stage_results_error_accepts_completed_semantic_result(tmp_path: Path) -> None:
+    result = tmp_path / "problem_runs" / "run-1" / "results_1.csv"
+    result.parent.mkdir(parents=True)
+    result.write_text(
+        '"Diagnosis.success","Mitigation.success","agent_error","agent_exit_code","problem_id"\n'
+        'True,True,False,0,"problem"\n',
+        encoding="utf-8",
+    )
+
+    assert _stage_results_error(tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    ("header", "values", "expected"),
+    [
+        ('"problem_id"', '"problem"', "Diagnosis.success"),
+        (
+            '"Diagnosis.success","Mitigation.success","problem_id"',
+            ',True,"problem"',
+            "Diagnosis.success",
+        ),
+        (
+            '"Diagnosis.success","Mitigation.success","problem_id"',
+            'definitely,True,"problem"',
+            "Diagnosis.success",
+        ),
+        (
+            '"Diagnosis.success","Mitigation.success","problem_id"',
+            'True,False,"problem"',
+            "Mitigation.success",
+        ),
+    ],
+)
+def test_stage_results_error_rejects_missing_blank_malformed_or_false_semantics(
+    tmp_path: Path,
+    header: str,
+    values: str,
+    expected: str,
+) -> None:
+    result = tmp_path / "problem_runs" / "run-1" / "results_1.csv"
+    result.parent.mkdir(parents=True)
+    result.write_text(f"{header}\n{values}\n", encoding="utf-8")
+
+    assert expected in (_stage_results_error(tmp_path) or "")
+
+
+def test_stage_results_error_accepts_nested_json_semantics(tmp_path: Path) -> None:
+    result = tmp_path / "problem_runs" / "run-1" / "results_1.csv"
+    result.parent.mkdir(parents=True)
+    with result.open("w", newline="", encoding="utf-8") as stream:
+        import csv
+
+        writer = csv.DictWriter(stream, fieldnames=["Diagnosis", "Mitigation", "problem_id"])
+        writer.writeheader()
+        writer.writerow(
+            {
+                "Diagnosis": json.dumps({"success": True}),
+                "Mitigation": json.dumps({"success": True}),
+                "problem_id": "problem",
+            }
+        )
+
+    assert _stage_results_error(tmp_path) is None
+
+
+def test_stage_results_error_rejects_failed_diagnosis_or_mitigation(tmp_path: Path) -> None:
+    result = tmp_path / "problem_runs" / "run-1" / "results_1.csv"
+    result.parent.mkdir(parents=True)
+    result.write_text(
+        '"Diagnosis.success","Mitigation.success","problem_id"\nTrue,False,"problem"\n',
+        encoding="utf-8",
+    )
+
+    assert "Mitigation.success=true" in (_stage_results_error(tmp_path) or "")
+
+
+def test_stage_results_error_requires_one_strict_receipt_per_sdo_problem(tmp_path: Path) -> None:
+    run = tmp_path / "problem_runs" / "run-1"
+    run.mkdir(parents=True)
+    (run / "results_1.csv").write_text(
+        '"Diagnosis.success","Mitigation.success","problem_id"\nTrue,True,"problem"\n',
+        encoding="utf-8",
+    )
+
+    assert "strict receipt" in (_stage_results_error(tmp_path, require_strict_receipt=True) or "")
+
+    agent = run / "agent"
+    agent.mkdir()
+    (agent / "sdo_production_receipt_strict.json").write_text(
+        json.dumps(_valid_strict_receipt()) + "\n",
+        encoding="utf-8",
+    )
+    assert _stage_results_error(tmp_path, require_strict_receipt=True) is None
+
+
+@pytest.mark.parametrize(
+    "receipt_text",
+    [
+        "not-json\n",
+        "[]\n",
+        "{}\n",
+        json.dumps({**_valid_strict_receipt(), "completed": False}) + "\n",
+    ],
+)
+def test_stage_results_error_rejects_malformed_or_invalid_strict_receipt(
+    tmp_path: Path,
+    receipt_text: str,
+) -> None:
+    run = tmp_path / "problem_runs" / "run-1"
+    agent = run / "agent"
+    agent.mkdir(parents=True)
+    (run / "results_1.csv").write_text(
+        '"Diagnosis.success","Mitigation.success","problem_id"\nTrue,True,"problem"\n',
+        encoding="utf-8",
+    )
+    (agent / "sdo_production_receipt_strict.json").write_text(receipt_text, encoding="utf-8")
+
+    assert "strict receipt" in (_stage_results_error(tmp_path, require_strict_receipt=True) or "")
+
 
 SINGLE_EXPERIMENT_TOML = """\
 [runner]
@@ -511,12 +674,24 @@ class TestPipelineRunner:
             ],
         )
 
+    @staticmethod
+    def _write_success_result(argv: list[str]) -> None:
+        experiment_dir = Path(argv[argv.index("--experiment-dir") + 1])
+        problem_run = experiment_dir / "problem_runs" / "run"
+        problem_run.mkdir(parents=True, exist_ok=True)
+        (problem_run / "results_test.csv").write_text(
+            '"Diagnosis.success","Mitigation.success","agent_error","agent_exit_code","problem_id"\n'
+            'True,True,False,0,"problem"\n',
+            encoding="utf-8",
+        )
+
     def test_runs_stages_sequentially(self, sregym_dir, tmp_path: Path) -> None:
         config = self._make_config()
         calls = []
 
         def mock_run(argv, cwd=None, env=None):
             calls.append(argv)
+            self._write_success_result(argv)
             return type("Result", (), {"returncode": 0})()
 
         pipeline_dir = tmp_path / "pipeline"
@@ -584,6 +759,7 @@ class TestPipelineRunner:
 
         def mock_run(argv, cwd=None, env=None):
             calls.append(argv)
+            self._write_success_result(argv)
             return type("Result", (), {"returncode": 0})()
 
         pipeline_dir = tmp_path / "pipeline"
@@ -808,6 +984,58 @@ class TestPipelineRunner:
         assert rc == 0
         assert captured_envs[0] == {}
         assert captured_envs[1]["SREGYM_APP_WORKSPACE_SEED_DIR"].endswith("/stage_0_build/application_workspace")
+
+    def test_runtime_retry_prefers_validated_lifecycle_seed_for_current_stage(self, sregym_dir, tmp_path: Path) -> None:
+        config = PipelineConfig(
+            name="test",
+            defaults={
+                "agent": "sdo_codex",
+                "model": "gpt-5.4",
+                "parallel": 1,
+                "app_filter": "hotel_reservation",
+                "deploy_from_source": True,
+                "application_workspace": "persistent",
+            },
+            stages=[
+                StageConfig(name="build", chain_application_workspace=False),
+                StageConfig(name="eval", chain_application_workspace=True),
+            ],
+        )
+        pipeline_dir = tmp_path / "pipeline"
+        pipeline_dir.mkdir()
+        stage0_dir = pipeline_dir / "stage_0_build"
+        workspace = stage0_dir / "application_workspace"
+        workspace.mkdir(parents=True)
+        runner_mod.write_snapshot(merge_stage_config(config.defaults, {}), stage0_dir)
+        seed = pipeline_dir / "lifecycle_seed_stage1"
+        (seed / ".git").mkdir(parents=True)
+        (seed / ".sdo").mkdir()
+        (seed / ".sdo" / "lifecycle-provenance.yaml").write_text("validated\n", encoding="utf-8")
+        captured_envs = []
+
+        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root, extra_env=None):
+            captured_envs.append(extra_env or {})
+            return 0
+
+        with patch.object(runner_mod, "_run_stage", side_effect=mock_run_stage):
+            state = PipelineState(
+                stages=[
+                    StageState(index=0, name="build", status="completed", experiment_dir=str(stage0_dir)),
+                    StageState(index=1, name="eval"),
+                ]
+            )
+            write_pipeline_state(state, pipeline_dir)
+            write_pipeline_snapshot(config, pipeline_dir)
+            rc = runner_mod.run_pipeline(
+                config,
+                project_root=tmp_path,
+                sregym_dir=sregym_dir,
+                pipeline_dir=pipeline_dir,
+                state=state,
+            )
+
+        assert rc == 0
+        assert captured_envs[0]["SREGYM_APP_WORKSPACE_SEED_DIR"] == str(seed)
 
     def test_chain_application_workspace_missing_source_fails(self, sregym_dir, tmp_path: Path) -> None:
         config = PipelineConfig(

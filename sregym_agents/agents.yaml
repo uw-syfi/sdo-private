@@ -30,3 +30,13 @@ agents:
     # hasn't exited by then.
     # No defer_cleanup: the agent submits and exits; the conductor tears
     # down synchronously.
+  - name: sdo_codex
+    kickoff_command: uv run python -m app_operator.sdo_sregym.driver
+    kickoff_workdir: ../..
+    kickoff_env:
+      PYTHONUNBUFFERED: "1"
+    # The registered adapter launches the generated long-running Go controller;
+    # Kubernetes responder Jobs, independent detector closure, durable outcome
+    # persistence, and same-session reflection complete before cleanup.
+    defer_cleanup: true
+    wait_for_natural_exit: true

@@ -793,9 +793,8 @@ def _default_agent_factory(
     """
     # Deferred imports keep `--help` fast and avoid triggering heavy
     # provider imports until the driver actually needs a backend.
-    from agentshim.mcp_config import HttpMcpServer
-
     from agentshim import CodingAgent
+    from agentshim.mcp_config import HttpMcpServer
 
     mcp_servers: list[Any] = [HttpMcpServer(name=_SUBMIT_MCP_SERVER_NAME, url=submit_mcp_url)]
     if extra_mcp_servers:

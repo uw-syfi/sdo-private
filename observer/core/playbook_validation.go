@@ -58,8 +58,10 @@ func validatePlaybookPath(appRoot string, playbook string) error {
 	if clean == "." || strings.HasPrefix(clean, "../") || clean == ".." {
 		return fmt.Errorf("path must stay inside app root")
 	}
-	if clean != ".sds/playbooks" && !strings.HasPrefix(clean, ".sds/playbooks/") {
-		return fmt.Errorf("path must be under .sds/playbooks")
+	canonical := clean == ".sdo/playbooks" || strings.HasPrefix(clean, ".sdo/playbooks/")
+	legacy := clean == ".sds/playbooks" || strings.HasPrefix(clean, ".sds/playbooks/")
+	if !canonical && !legacy {
+		return fmt.Errorf("path must be under .sdo/playbooks or legacy .sds/playbooks")
 	}
 	fullPath := filepath.Join(appRoot, filepath.FromSlash(clean))
 	rel, err := filepath.Rel(appRoot, fullPath)

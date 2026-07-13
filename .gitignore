@@ -104,4 +104,5 @@ exp_config/*/*.log
 # tach cache
 .tach/
 sregym_agents/experiments/*
+!sregym_agents/experiments/sdo_codex_four_e2e.toml
 !sregym_agents/experiments/hotel_reservation_workspace_cli_agent_pipeline.toml

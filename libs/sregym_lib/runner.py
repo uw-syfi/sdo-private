@@ -13,7 +13,9 @@ definition; this module stays agent-agnostic.
 from __future__ import annotations
 
 import copy
+import csv
 import dataclasses
+import json
 import os
 import subprocess
 import sys
@@ -39,6 +41,10 @@ from libs.sregym_lib.pipeline import (
     reconcile_pipeline_state,
     write_pipeline_snapshot,
     write_pipeline_state,
+)
+from libs.sregym_lib.production_receipt import (
+    ProductionReceiptValidationError,
+    validate_production_receipt,
 )
 
 _APP_WORKSPACE_SEED_ENV_VAR = "SREGYM_APP_WORKSPACE_SEED_DIR"
@@ -328,7 +334,97 @@ def _run_stage(
             except (ValueError, AttributeError):
                 sig_name = f"signal {-result.returncode}"
             print(f"  ⚠️  Process was killed by {sig_name}", flush=True)
+    if result.returncode == 0:
+        stage_error = _stage_results_error(
+            stage_exp_dir,
+            require_strict_receipt=exp_config.agent == "sdo_codex",
+        )
+        if stage_error is not None:
+            print(f"  ⚠️  Stage artifacts failed validation: {stage_error}", flush=True)
+            return 1
     return result.returncode
+
+
+def _csv_semantic_success(row: dict[str, str | None], stage: str) -> bool:
+    """Return whether a benchmark row explicitly records a successful stage.
+
+    SREGym's current writer flattens conductor outcomes into columns such as
+    ``Diagnosis.success``.  Older/external harnesses can preserve the outcome
+    as a JSON object in a ``Diagnosis`` column instead.  Only explicit boolean
+    truth is accepted; absent, blank, malformed, or contradictory values must
+    never turn an incomplete benchmark row into a successful pipeline stage.
+    """
+
+    flattened = f"{stage}.success"
+    if flattened in row:
+        raw: object = row[flattened]
+    elif stage in row:
+        nested_raw = row[stage]
+        if not isinstance(nested_raw, str) or not nested_raw.strip():
+            return False
+        try:
+            nested = json.loads(nested_raw)
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(nested, dict) or "success" not in nested:
+            return False
+        raw = nested["success"]
+    else:
+        return False
+
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, int):
+        return raw == 1
+    if not isinstance(raw, str):
+        return False
+    return raw.strip().lower() in {"true", "1", "yes"}
+
+
+def _strict_receipt_error(receipt_path: Path) -> str | None:
+    """Parse and validate one SDO receipt at the production schema boundary."""
+
+    try:
+        document = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return f"strict receipt is unreadable or malformed: {exc}"
+    if not isinstance(document, dict):
+        return "strict receipt must contain one JSON object"
+
+    try:
+        validate_production_receipt(document)
+    except ProductionReceiptValidationError as exc:
+        return f"strict receipt failed production validation: {exc}"
+    return None
+
+
+def _stage_results_error(stage_exp_dir: Path, *, require_strict_receipt: bool = False) -> str | None:
+    """Reject benchmark-zero stages without complete, valid per-problem evidence."""
+    results = sorted((stage_exp_dir / "problem_runs").glob("*/results_*.csv"))
+    if not results:
+        return "no per-problem result CSV was produced"
+    for result in results:
+        with result.open(newline="", encoding="utf-8") as stream:
+            rows = list(csv.DictReader(stream))
+        if not rows:
+            return f"{result.name} contains no result rows"
+        for row in rows:
+            if str(row.get("agent_error", "")).strip().lower() in {"1", "true", "yes"}:
+                problem = row.get("problem_id") or result.parent.name
+                return f"problem {problem} recorded agent_error=true"
+            for stage in ("Diagnosis", "Mitigation"):
+                if not _csv_semantic_success(row, stage):
+                    problem = row.get("problem_id") or result.parent.name
+                    return f"problem {problem} requires {stage}.success=true"
+        if require_strict_receipt:
+            receipts = sorted((result.parent / "agent").glob("sdo_production_receipt_*.json"))
+            expected = result.parent / "agent" / "sdo_production_receipt_strict.json"
+            if receipts != [expected]:
+                return f"problem {result.parent.name} must produce exactly one standalone strict receipt"
+            receipt_error = _strict_receipt_error(expected)
+            if receipt_error is not None:
+                return f"problem {result.parent.name} {receipt_error}"
+    return None
 
 
 def _resolve_workspace_seed_env(
@@ -362,6 +458,13 @@ def _resolve_workspace_seed_env(
             "chain_application_workspace requires matching app_filter values between consecutive stages "
             f"(previous={prev_config.app_filter!r}, current={exp_config.app_filter!r})"
         )
+
+    current_exp_dir = state.stages[current_stage].experiment_dir
+    if current_exp_dir:
+        pipeline_dir = Path(current_exp_dir).parent
+        lifecycle_seed = pipeline_dir / f"lifecycle_seed_stage{current_stage}"
+        if (lifecycle_seed / ".git").exists() and (lifecycle_seed / ".sdo" / "lifecycle-provenance.yaml").is_file():
+            return {_APP_WORKSPACE_SEED_ENV_VAR: str(lifecycle_seed)}
 
     return {_APP_WORKSPACE_SEED_ENV_VAR: str(prev_workspace_dir)}
 

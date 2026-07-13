@@ -25,6 +25,7 @@ behavior is loaded from ``sregym_agents.<agent_name>`` packages.
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -47,7 +48,7 @@ from libs.sregym_lib import (
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-_SREGYM_DIR = _PROJECT_ROOT / "bench" / "sregym"
+_SREGYM_DIR = Path(os.environ.get("SDS_SREGYM_DIR", _PROJECT_ROOT / "bench" / "sregym")).resolve()
 
 
 # ---------------------------------------------------------------------------

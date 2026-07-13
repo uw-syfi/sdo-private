@@ -60,11 +60,6 @@ build-backend = "hatchling.build"
 [tool.uv]
 prerelease = "if-necessary-or-explicit"
 
-[tool.uv.sources]
-# Use the in-repo agentshim checkout (editable) instead of the published
-# wheel, so local changes take effect across all `uv run` invocations.
-agentshim = { path = "agentshim", editable = true }
-
 [tool.uv.workspace]
 members = ["libs/sds_core", "libs/pydantic_agent", "libs/agent_mw", "libs/model_config", "libs/sregym_lib", "libs/llm_rt"]
 
@@ -100,6 +95,9 @@ exclude_lines = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+    "live_codex: opt-in tests that invoke the real Codex CLI and consume model tokens",
+]
 testpaths = ["tests"]
 norecursedirs = ["apps", ".venv", "venv", "build", "dist", ".hypothesis"]
 python_files = ["test_*.py"]

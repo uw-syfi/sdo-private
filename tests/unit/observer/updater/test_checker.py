@@ -5,16 +5,23 @@ from pathlib import Path
 
 import pytest
 
+from observer.updater.check_cli import _diagnostics_fingerprint
 from observer.updater.check_cli import main as check_main
 from observer.updater.go_runner import GoRunner
 from observer.updater.manifest import ManifestError, load_manifest
+from observer.updater.paths import find_app_root
 from observer.updater.workspace import BuildWorkspace, BuildWorkspaceConfig
 
 
-def _write_app_diagnostics(app_root: Path, *, package_path: str = "./detectors/missing_endpoints") -> None:
-    diagnostics = app_root / ".sds" / "diagnostics"
+def _write_app_diagnostics(
+    app_root: Path,
+    *,
+    package_path: str = "./detectors/missing_endpoints",
+    memory_dir: str = ".sds",
+) -> None:
+    diagnostics = app_root / memory_dir / "diagnostics"
     detector_dir = diagnostics / "detectors" / "missing_endpoints"
-    playbook_dir = app_root / ".sds" / "playbooks"
+    playbook_dir = app_root / memory_dir / "playbooks"
     detector_dir.mkdir(parents=True)
     playbook_dir.mkdir(parents=True)
 
@@ -36,6 +43,19 @@ detectors:
   - id: missing-endpoints
     package: {package_path}
     constructor: New
+    class: incident
+    owner: responder
+    watches: []
+    interval: 1m
+    persistence:
+      firing: 2
+      clearing: 2
+    batching:
+      severity: critical
+      debounce: 500ms
+    possiblePlaybooks: []
+    originatingIncident: incident-seed
+    originatingCommit: abc123
 """,
         encoding="utf-8",
     )
@@ -44,6 +64,7 @@ detectors:
 
 import (
     "context"
+    "time"
 
     "sds.dev/observer/sdk"
 )
@@ -55,7 +76,18 @@ func New() sdk.Detector {
 type Detector struct{}
 
 func (Detector) Spec() sdk.DetectorSpec {
-    return sdk.DetectorSpec{ID: "missing-endpoints"}
+    return sdk.DetectorSpec{
+        ID: "missing-endpoints",
+        Class: sdk.DetectorClassIncident,
+        Owner: sdk.DetectorOwnerResponder,
+        Interval: time.Minute,
+        Persistence: sdk.PersistencePolicy{Firing: 2, Clearing: 2},
+        Batching: sdk.BatchingPolicy{Severity: sdk.SeverityCritical, Debounce: 500 * time.Millisecond},
+        OriginatingIncident: "incident-seed",
+        OriginatingCommit: "abc123",
+        Watches: []sdk.WatchKind{},
+        Playbooks: []string{},
+    }
 }
 
 func (Detector) Detect(context.Context, sdk.DetectionContext) ([]sdk.Finding, error) {
@@ -69,6 +101,7 @@ func (Detector) Detect(context.Context, sdk.DetectionContext) ([]sdk.Finding, er
 def _write_tool_root(tool_root: Path) -> None:
     (tool_root / "observer" / "sdk").mkdir(parents=True)
     (tool_root / "observer" / "core").mkdir(parents=True)
+    (tool_root / "observer" / "controller").mkdir(parents=True)
 
 
 def test_manifest_rejects_detector_package_escape(tmp_path: Path) -> None:
@@ -117,10 +150,67 @@ def test_build_workspace_generates_registration_without_mutating_app_go_mod(tmp_
         assert 'd0 "app-diagnostics/detectors/missing_endpoints"' in generated_source
         assert "return []sdk.Detector{" in generated_source
         assert "d0.New()," in generated_source
+        generated_contract = (workspace.path / "generated" / "registrations_test.go").read_text(encoding="utf-8")
+        assert "assertRegistration(t, detectors[0].Spec(), registration{" in generated_contract
+        assert 'class: "incident"' in generated_contract
         assert f"replace sds.dev/observer/sdk => {tool_root / 'observer' / 'sdk'}" in workspace_go_mod
         assert f"replace sds.dev/observer/core => {tool_root / 'observer' / 'core'}" in workspace_go_mod
+        assert f"replace sds.dev/observer/controller => {tool_root / 'observer' / 'controller'}" in workspace_go_mod
+        generated_main = (workspace.path / "cmd" / "observer" / "main.go").read_text(encoding="utf-8")
+        assert '"sds.dev/observer/controller"' in generated_main
+        assert "controller.Run(generated.All())" in generated_main
 
     assert app_go_mod.read_text(encoding="utf-8") == original_go_mod
+
+
+def test_build_workspace_prefers_canonical_sdo_diagnostics(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    tool_root = tmp_path / "sds"
+    _write_app_diagnostics(app_root, memory_dir=".sds")
+    _write_app_diagnostics(app_root, memory_dir=".sdo")
+    legacy_manifest = app_root / ".sds" / "diagnostics" / "manifest.yaml"
+    legacy_manifest.write_text(
+        legacy_manifest.read_text(encoding="utf-8").replace("id: missing-endpoints", "id: legacy-detector"),
+        encoding="utf-8",
+    )
+    _write_tool_root(tool_root)
+
+    config = BuildWorkspaceConfig(
+        app_root=app_root,
+        sdk_dir=tool_root / "observer" / "sdk",
+        core_dir=tool_root / "observer" / "core",
+    )
+    with BuildWorkspace.create(config) as workspace:
+        assert [detector.id for detector in workspace.manifest.detectors] == ["missing-endpoints"]
+
+    assert find_app_root(app_root / ".sdo" / "diagnostics" / "detectors") == app_root
+
+
+def test_controller_update_rollout_triggers_only_for_accepted_diagnostics_changes(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    _write_app_diagnostics(app_root, memory_dir=".sdo")
+    playbook = app_root / ".sdo" / "playbooks" / "service-endpoints.md"
+    detector = app_root / ".sdo" / "diagnostics" / "detectors" / "missing_endpoints" / "detector.go"
+    initial = _diagnostics_fingerprint(app_root)
+
+    playbook.write_text(playbook.read_text(encoding="utf-8") + "\nplaybook refinement\n", encoding="utf-8")
+    assert _diagnostics_fingerprint(app_root) == initial
+
+    detector.write_text(detector.read_text(encoding="utf-8") + "\n// false-negative regression\n", encoding="utf-8")
+    assert _diagnostics_fingerprint(app_root) != initial
+    source = (Path(__file__).resolve().parents[4] / "observer" / "updater" / "check_cli.py").read_text(encoding="utf-8")
+    assert "controller_update_rollout" in source
+    assert 'rollout_args.duration = "30s"' in source
+
+
+def test_missing_configmap_sdo_fixture_compiles_in_clean_workspace() -> None:
+    repository_root = Path(__file__).resolve().parents[4]
+    fixture_root = repository_root / "tests" / "fixtures" / "sdo" / "missing_configmap_app"
+    fixture_go_sum = fixture_root / ".sdo" / "diagnostics" / "go.sum"
+
+    assert not fixture_go_sum.exists()
+    assert check_main(["test", "--app", str(fixture_root)]) == 0
+    assert not fixture_go_sum.exists()
 
 
 def test_build_workspace_uses_default_module_for_invalid_local_module_path(tmp_path: Path) -> None:
@@ -246,7 +336,7 @@ printf '%s|%s\\n' "$PWD" "$*" >> "$SDS_GO_CALLS_LOG"
     calls = calls_log.read_text(encoding="utf-8").splitlines()
     assert [line.split("|", maxsplit=1)[1] for line in calls] == [
         "mod tidy",
-        f"run -buildvcs=false ./cmd/observer --namespace demo --app-root {app_root}",
+        f"run -buildvcs=false ./cmd/observer --run-once --namespace demo --app-root {app_root}",
     ]
     assert all(not line.startswith(str(app_root)) for line in calls)
 
@@ -264,10 +354,10 @@ def test_check_cli_watch_builds_once_and_samples_window(
     _write_tool_root(tool_root)
 
     calls_log = tmp_path / "go-calls.log"
-    count_file = tmp_path / "obs-call-count"
+    run_log = tmp_path / "observer-runs.log"
     # Fake `go`: on the `build -o <bin>` step, materialize a stub detector
-    # binary. The stub emits detector `a` every run and detector `b` only from
-    # the 3rd run onward, simulating a fault that matures during the window.
+    # controller. The controller emits the full evaluation window from one
+    # long-running process.
     fake_go = tmp_path / "go"
     fake_go.write_text(
         """#!/usr/bin/env bash
@@ -278,13 +368,15 @@ for a in "$@"; do
   if [ "$prev" = "-o" ]; then
     cat > "$a" <<'BIN'
 #!/usr/bin/env bash
-n=0
-[ -f "$SDS_OBS_COUNT" ] && n=$(cat "$SDS_OBS_COUNT")
-echo '{"detector_id":"a","rule_id":"a","status":"active"}'
-if [ "$n" -ge 2 ]; then
-  echo '{"detector_id":"b","rule_id":"b","status":"active"}'
-fi
-echo $((n + 1)) > "$SDS_OBS_COUNT"
+echo run >> "$SDO_RUN_LOG"
+echo '{"observer_iteration":0,"returncode":0,"findings":[{"detector_id":"a","rule_id":"a","status":"active"}]}'
+echo '{"observer_iteration":1,"returncode":0,"findings":[{"detector_id":"a","rule_id":"a","status":"active"}]}'
+echo '{"observer_iteration":2,"returncode":0,"findings":['\
+'{"detector_id":"a","rule_id":"a","status":"active"},'\
+'{"detector_id":"b","rule_id":"b","status":"active"}]}'
+echo '{"observer_iteration":3,"returncode":0,"findings":['\
+'{"detector_id":"a","rule_id":"a","status":"active"},'\
+'{"detector_id":"b","rule_id":"b","status":"active"}]}'
 BIN
     chmod +x "$a"
   fi
@@ -298,7 +390,7 @@ done
     monkeypatch.setenv("SDS_OBSERVER_TOOL_ROOT", str(tool_root))
     monkeypatch.setenv("SDS_OBSERVER_GO", str(fake_go))
     monkeypatch.setenv("SDS_GO_CALLS_LOG", str(calls_log))
-    monkeypatch.setenv("SDS_OBS_COUNT", str(count_file))
+    monkeypatch.setenv("SDO_RUN_LOG", str(run_log))
 
     exit_code = check_main(
         [
@@ -315,15 +407,82 @@ done
     )
 
     assert exit_code == 0
-    # The detector binary is built exactly once (mod tidy + a single build),
-    # then re-executed per iteration without rebuilding.
+    # The detector controller is built and executed exactly once for the full
+    # bounded observation window.
     go_invocations = [line.split("|", maxsplit=1)[1] for line in calls_log.read_text(encoding="utf-8").splitlines()]
     assert len(go_invocations) == 2, go_invocations
     assert go_invocations[0] == "mod tidy"
     assert go_invocations[1].startswith("build -buildvcs=false -o ")
     assert go_invocations[1].endswith("./cmd/observer")
+    assert run_log.read_text(encoding="utf-8").splitlines() == ["run"]
 
     iterations = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
     assert [it["observer_iteration"] for it in iterations] == [0, 1, 2, 3]
     fired = [sorted(f["detector_id"] for f in it["findings"]) for it in iterations]
     assert fired == [["a"], ["a"], ["a", "b"], ["a", "b"]]
+
+
+def test_check_cli_controller_builds_once_and_runs_production_job_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_root = tmp_path / "workspace" / "application"
+    tool_root = tmp_path / "sds"
+    _write_app_diagnostics(app_root)
+    _write_tool_root(tool_root)
+
+    calls_log = tmp_path / "go-calls.log"
+    controller_log = tmp_path / "controller.log"
+    fake_go = tmp_path / "go"
+    fake_go.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s|%s\\n' "$PWD" "$*" >> "$SDS_GO_CALLS_LOG"
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ]; then
+    printf '#!/usr/bin/env bash\\nprintf "%%s\\n" "$*" > "$SDO_CONTROLLER_LOG"\\n' > "$a"
+    chmod +x "$a"
+  fi
+  prev="$a"
+done
+""",
+        encoding="utf-8",
+    )
+    fake_go.chmod(fake_go.stat().st_mode | 0o111)
+    monkeypatch.setenv("SDS_OBSERVER_TOOL_ROOT", str(tool_root))
+    monkeypatch.setenv("SDS_OBSERVER_GO", str(fake_go))
+    monkeypatch.setenv("SDS_GO_CALLS_LOG", str(calls_log))
+    monkeypatch.setenv("SDO_CONTROLLER_LOG", str(controller_log))
+
+    exit_code = check_main(
+        [
+            "controller",
+            "--app",
+            str(app_root),
+            "--namespace",
+            "demo",
+            "--responder-image",
+            "sdo-responder:v1",
+            "--repository-pvc",
+            "sdo-repository",
+            "--credentials-secret",
+            "sdo-codex-credentials",
+            "--worktree-root",
+            str(tmp_path / "workspace" / "worktrees"),
+        ]
+    )
+
+    assert exit_code == 0
+    calls = [line.split("|", maxsplit=1)[1] for line in calls_log.read_text(encoding="utf-8").splitlines()]
+    assert calls[0] == "mod tidy"
+    assert calls[1].startswith("build -buildvcs=false -o ")
+    argv = controller_log.read_text(encoding="utf-8")
+    assert "--dispatcher-mode job" in argv
+    assert (
+        f"--dispatcher {os.sys.executable} --dispatcher-arg -m --dispatcher-arg app_operator.protocol.job_responder"
+        in argv
+    )
+    assert f"--broker {os.sys.executable} --broker-arg -m --broker-arg app_operator.responder.broker_cli" in argv
+    assert f"--app-root {app_root}" in argv
+    assert f"--broker-worktree-root {tmp_path / 'workspace' / 'worktrees'}" in argv

@@ -1,20 +1,25 @@
 package sdktest
 
 import (
+	"sort"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/labels"
 )
 
 type Snapshot struct {
 	NamespaceName     string
+	ConfigMapList     []corev1.ConfigMap
 	ServiceList       []corev1.Service
 	PodList           []corev1.Pod
 	DeploymentList    []appsv1.Deployment
 	ReplicaSetList    []appsv1.ReplicaSet
 	EndpointList      []corev1.Endpoints
 	EndpointSliceList []discoveryv1.EndpointSlice
+	NetworkPolicyList []networkingv1.NetworkPolicy
 	EventList         []corev1.Event
 }
 
@@ -22,37 +27,111 @@ func (s Snapshot) Namespace() string {
 	return s.NamespaceName
 }
 
+func (s Snapshot) ConfigMaps() []corev1.ConfigMap {
+	configMaps := make([]corev1.ConfigMap, len(s.ConfigMapList))
+	for index := range s.ConfigMapList {
+		configMaps[index] = *s.ConfigMapList[index].DeepCopy()
+	}
+	sort.Slice(configMaps, func(left int, right int) bool {
+		if configMaps[left].Namespace != configMaps[right].Namespace {
+			return configMaps[left].Namespace < configMaps[right].Namespace
+		}
+		return configMaps[left].Name < configMaps[right].Name
+	})
+	return configMaps
+}
+
 func (s Snapshot) Services() []corev1.Service {
-	return s.ServiceList
+	items := make([]corev1.Service, len(s.ServiceList))
+	for index := range s.ServiceList {
+		items[index] = *s.ServiceList[index].DeepCopy()
+	}
+	sort.Slice(items, func(left int, right int) bool {
+		return lessObject(items[left].Namespace, items[left].Name, items[right].Namespace, items[right].Name)
+	})
+	return items
 }
 
 func (s Snapshot) Pods() []corev1.Pod {
-	return s.PodList
+	items := make([]corev1.Pod, len(s.PodList))
+	for index := range s.PodList {
+		items[index] = *s.PodList[index].DeepCopy()
+	}
+	sort.Slice(items, func(left int, right int) bool {
+		return lessObject(items[left].Namespace, items[left].Name, items[right].Namespace, items[right].Name)
+	})
+	return items
 }
 
 func (s Snapshot) Deployments() []appsv1.Deployment {
-	return s.DeploymentList
+	items := make([]appsv1.Deployment, len(s.DeploymentList))
+	for index := range s.DeploymentList {
+		items[index] = *s.DeploymentList[index].DeepCopy()
+	}
+	sort.Slice(items, func(left int, right int) bool {
+		return lessObject(items[left].Namespace, items[left].Name, items[right].Namespace, items[right].Name)
+	})
+	return items
 }
 
 func (s Snapshot) ReplicaSets() []appsv1.ReplicaSet {
-	return s.ReplicaSetList
+	items := make([]appsv1.ReplicaSet, len(s.ReplicaSetList))
+	for index := range s.ReplicaSetList {
+		items[index] = *s.ReplicaSetList[index].DeepCopy()
+	}
+	sort.Slice(items, func(left int, right int) bool {
+		return lessObject(items[left].Namespace, items[left].Name, items[right].Namespace, items[right].Name)
+	})
+	return items
 }
 
 func (s Snapshot) Endpoints() []corev1.Endpoints {
-	return s.EndpointList
+	items := make([]corev1.Endpoints, len(s.EndpointList))
+	for index := range s.EndpointList {
+		items[index] = *s.EndpointList[index].DeepCopy()
+	}
+	sort.Slice(items, func(left int, right int) bool {
+		return lessObject(items[left].Namespace, items[left].Name, items[right].Namespace, items[right].Name)
+	})
+	return items
 }
 
 func (s Snapshot) EndpointSlices() []discoveryv1.EndpointSlice {
-	return s.EndpointSliceList
+	items := make([]discoveryv1.EndpointSlice, len(s.EndpointSliceList))
+	for index := range s.EndpointSliceList {
+		items[index] = *s.EndpointSliceList[index].DeepCopy()
+	}
+	sort.Slice(items, func(left int, right int) bool {
+		return lessObject(items[left].Namespace, items[left].Name, items[right].Namespace, items[right].Name)
+	})
+	return items
+}
+
+func (s Snapshot) NetworkPolicies() []networkingv1.NetworkPolicy {
+	items := make([]networkingv1.NetworkPolicy, len(s.NetworkPolicyList))
+	for index := range s.NetworkPolicyList {
+		items[index] = *s.NetworkPolicyList[index].DeepCopy()
+	}
+	sort.Slice(items, func(left int, right int) bool {
+		return lessObject(items[left].Namespace, items[left].Name, items[right].Namespace, items[right].Name)
+	})
+	return items
 }
 
 func (s Snapshot) Events() []corev1.Event {
-	return s.EventList
+	items := make([]corev1.Event, len(s.EventList))
+	for index := range s.EventList {
+		items[index] = *s.EventList[index].DeepCopy()
+	}
+	sort.Slice(items, func(left int, right int) bool {
+		return lessObject(items[left].Namespace, items[left].Name, items[right].Namespace, items[right].Name)
+	})
+	return items
 }
 
 func (s Snapshot) ReadyEndpointCountForService(namespace string, service string) int {
 	ready := 0
-	for _, endpoints := range s.EndpointList {
+	for _, endpoints := range s.Endpoints() {
 		if endpoints.Namespace != namespace || endpoints.Name != service {
 			continue
 		}
@@ -65,7 +144,7 @@ func (s Snapshot) ReadyEndpointCountForService(namespace string, service string)
 
 func (s Snapshot) PodsForService(namespace string, service string) []corev1.Pod {
 	var selector labels.Selector
-	for _, candidate := range s.ServiceList {
+	for _, candidate := range s.Services() {
 		if candidate.Namespace == namespace && candidate.Name == service {
 			selector = labels.SelectorFromSet(candidate.Spec.Selector)
 			break
@@ -76,7 +155,7 @@ func (s Snapshot) PodsForService(namespace string, service string) []corev1.Pod 
 	}
 
 	pods := make([]corev1.Pod, 0)
-	for _, pod := range s.PodList {
+	for _, pod := range s.Pods() {
 		if pod.Namespace == namespace && selector.Matches(labels.Set(pod.Labels)) {
 			pods = append(pods, pod)
 		}
@@ -86,11 +165,18 @@ func (s Snapshot) PodsForService(namespace string, service string) []corev1.Pod 
 
 func (s Snapshot) RecentEventsFor(namespace string, kind string, name string) []corev1.Event {
 	events := make([]corev1.Event, 0)
-	for _, event := range s.EventList {
+	for _, event := range s.Events() {
 		ref := event.InvolvedObject
 		if ref.Namespace == namespace && ref.Kind == kind && ref.Name == name {
 			events = append(events, event)
 		}
 	}
 	return events
+}
+
+func lessObject(leftNamespace string, leftName string, rightNamespace string, rightName string) bool {
+	if leftNamespace != rightNamespace {
+		return leftNamespace < rightNamespace
+	}
+	return leftName < rightName
 }

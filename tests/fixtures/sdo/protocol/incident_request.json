@@ -1,0 +1,88 @@
+{
+  "schema_version": "sdo.dev/v1alpha1",
+  "application": "hotel-reservation",
+  "namespace": "hotel-reservation",
+  "incident_id": "inc-20260709-0001",
+  "findings": [
+    {
+      "detector_id": "missing-configmap",
+      "rule_id": "missing-configmap",
+      "status": "active",
+      "severity": "critical",
+      "summary": "Deployment references an absent required ConfigMap",
+      "evidence": "Deployment hotel-reservation/geo requires ConfigMap geo-config",
+      "primary_resource": {
+        "api_version": "apps/v1",
+        "kind": "Deployment",
+        "namespace": "hotel-reservation",
+        "name": "geo"
+      },
+      "related_resources": [
+        {
+          "api_version": "v1",
+          "kind": "ConfigMap",
+          "namespace": "hotel-reservation",
+          "name": "geo-config"
+        }
+      ],
+      "playbooks": [".sdo/playbooks/missing-configmap/README.md"],
+      "parameter_bindings": {
+        "missing_config_map": {
+          "api_version": "v1",
+          "kind": "ConfigMap",
+          "namespace": "hotel-reservation",
+          "name": "geo-config"
+        },
+        "target_resource": {
+          "api_version": "apps/v1",
+          "kind": "Deployment",
+          "namespace": "hotel-reservation",
+          "name": "geo"
+        }
+      },
+      "fingerprint": "hotel-reservation/geo/geo-config",
+      "metadata": {"reference_type": "envFrom"}
+    }
+  ],
+  "detector_history": [
+    {
+      "detector_id": "missing-configmap",
+      "evaluated_at": "2026-07-09T18:00:00Z",
+      "status": "firing",
+      "fingerprints": ["hotel-reservation/geo/geo-config"]
+    },
+    {
+      "detector_id": "missing-configmap",
+      "evaluated_at": "2026-07-09T18:00:30Z",
+      "status": "firing",
+      "fingerprints": ["hotel-reservation/geo/geo-config"]
+    }
+  ],
+  "surfaced_playbooks": [
+    {
+      "path": ".sdo/playbooks/missing-configmap/README.md",
+      "parameter_bindings": {
+        "missing_config_map": {
+          "api_version": "v1",
+          "kind": "ConfigMap",
+          "namespace": "hotel-reservation",
+          "name": "geo-config"
+        },
+        "target_resource": {
+          "api_version": "apps/v1",
+          "kind": "Deployment",
+          "namespace": "hotel-reservation",
+          "name": "geo"
+        }
+      }
+    }
+  ],
+  "source_commit": "1111111111111111111111111111111111111111",
+  "deployed_commit": "2222222222222222222222222222222222222222",
+  "architecture_summary_path": ".sdo/arch.md",
+  "health_objective_path": ".sdo/goal.md",
+  "repository_worktree": "/workspace/inc-20260709-0001",
+  "repository_base_commit": "1111111111111111111111111111111111111111",
+  "response_deadline": "2026-07-09T18:30:00Z",
+  "cancellation_token": "cancel-inc-20260709-0001"
+}
