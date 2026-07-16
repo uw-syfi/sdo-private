@@ -7,13 +7,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from app_operator.commands import (
-    analyze_prompts,
     chat,
     classify_runs,
-    e2e_optimize,
     init_exp,
-    lineage_report,
-    optimize_prompts,
     plot_exp,
     run,
     run_exp,
@@ -97,20 +93,6 @@ Examples:
     init_exp_parser = subparsers.add_parser("init-exp", help="Initialize a new experiment from an existing application")
     init_exp.add_arguments(init_exp_parser)
 
-    # 'analyze-prompts' command
-    analyze_prompts_parser = subparsers.add_parser(
-        "analyze-prompts", help="Analyze prompt performance from trajectory data"
-    )
-    analyze_prompts.add_arguments(analyze_prompts_parser)
-
-    # 'optimize-prompts' command
-    optimize_prompts_parser = subparsers.add_parser("optimize-prompts", help="Optimize prompts using DSPy")
-    optimize_prompts.add_arguments(optimize_prompts_parser)
-
-    # 'e2e-optimize' command
-    e2e_optimize_parser = subparsers.add_parser("e2e-optimize", help="Run end-to-end optimization loop")
-    e2e_optimize.add_arguments(e2e_optimize_parser)
-
     # 'run-exp' command
     run_exp_parser = subparsers.add_parser("run-exp", help="Run experiments defined in a TOML config file")
     run_exp.add_arguments(run_exp_parser)
@@ -124,13 +106,6 @@ Examples:
         "classify-runs", help="Classify experiment runs into quality categories"
     )
     classify_runs.add_arguments(classify_runs_parser)
-
-    # 'lineage-report' command
-    lineage_report_parser = subparsers.add_parser(
-        "lineage-report",
-        help="Render and validate prompt lineage DAG metadata",
-    )
-    lineage_report.add_arguments(lineage_report_parser)
 
     if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
         sys.argv.insert(1, "run")
@@ -147,20 +122,12 @@ Examples:
         return chat.run_command(args)
     if args.command == "init-exp":
         return init_exp.run_command(args)
-    if args.command == "analyze-prompts":
-        return analyze_prompts.run_command(args)
-    if args.command == "optimize-prompts":
-        return optimize_prompts.run_command(args)
-    if args.command == "e2e-optimize":
-        return e2e_optimize.run_command(args)
     if args.command == "run-exp":
         return run_exp.run_command(args)
     if args.command == "plot-exp":
         return plot_exp.run_command(args)
     if args.command == "classify-runs":
         return classify_runs.run_command(args)
-    if args.command == "lineage-report":
-        return lineage_report.run_command(args)
     parser.print_help()
     return 1
 

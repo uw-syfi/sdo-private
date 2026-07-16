@@ -1,6 +1,6 @@
 # Fault Injection for Training Data
 
-The operator includes an SREGym-inspired fault injection module that modifies Docker Compose files before operator runs to generate diverse training trajectories for GEPA/DSPy optimization.
+The operator includes an SREGym-inspired fault injection module that modifies Docker Compose files before operator runs to generate diverse failure scenarios.
 
 ## Fault Taxonomy (22 types)
 

@@ -400,7 +400,7 @@ def build_tools(repo_path: Path, filesystem: FileSystemInterface | None = None) 
 
 
 def build_readonly_tools(repo_path: Path, filesystem: FileSystemInterface | None = None) -> list[Callable[..., Any]]:
-    """Build read-only tools for external consumers (e.g. lego_agent).
+    """Build read-only tools for external consumers.
 
     Returns tools for reading the repository without any write or execute access.
     """

@@ -5,7 +5,6 @@ SDS autonomously explores, validates, and evolves infrastructure using agentic L
 ## Projects
 
 - [`app_operator/`](app_operator/AGENTS.md) — Deploy + monitor target apps with LLM agents
-- [`lego_agent/`](lego_agent/AGENTS.md) — Autonomous script generation (Web UI + TUI + CLI)
 - [`sregym_agents/`](sregym_agents/AGENTS.md) — SRE Gym competition agents
 - `libs/` — Shared libraries: `agent_cli`, `agent_mw`, `model_config`, `pydantic_agent`, `sds_core`
 - `apps/` — Target applications (hotelReservation, socialNetwork, ...)
@@ -25,10 +24,6 @@ SDS autonomously explores, validates, and evolves infrastructure using agentic L
 ## Usage Guide for LLM Agents
 
 - **Debugging deployment**: Check `.sds/deploy.sh` and `.sds/logs/`
-- **Debugging lego_agent**: Check `lego_agent_runs/<timestamp>/lego_agent.py`
-- **Optimizing prompts**: `analyze-prompts` baseline → `optimize-prompts --dry-run` → compare
-- **Adding DSPy signatures**: Add to `dspy_integration/signatures.py`, register in `SIGNATURES` dict
-- **Extending metrics**: Modify `dspy_integration/metrics.py`, ensure weights sum to 1.0
 - **Adding fault types**: Add to `COMPOSE_FAULTS`, implement `_inject_*`, register in dispatch table, add tests
 
 ## Remote repo access

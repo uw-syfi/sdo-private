@@ -16,12 +16,15 @@ from app_operator.cli_agent.rlm.metrics import (
     RLMEfficiencyMetric,
 )
 from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
-from app_operator.dspy_integration.metrics import (
-    DeploymentSuccessMetric,
-    IterationEfficiencyMetric,
-    TokenEfficiencyMetric,
-)
 from app_operator.trajectory_utils import extract_rlm_statistics_from_trajectory
+
+
+class _ConstantMetric:
+    def __init__(self, score: float):
+        self.score = score
+
+    def __call__(self, example, prediction, trace=None):
+        return self.score
 
 
 class TestRLMContext:
@@ -640,9 +643,9 @@ class TestRLMMetrics:
             token_weight=0.15,
             rlm_efficiency_weight=0.15,
             rlm_context_weight=0.15,
-            success_metric=DeploymentSuccessMetric(),
-            efficiency_metric=IterationEfficiencyMetric(),
-            token_metric=TokenEfficiencyMetric(),
+            success_metric=_ConstantMetric(1.0),
+            efficiency_metric=_ConstantMetric(0.9),
+            token_metric=_ConstantMetric(0.8),
         )
 
         class MockExample:
@@ -715,9 +718,9 @@ class TestRLMMetrics:
     def test_rlm_composite_metric_none_prediction(self):
         """Test composite metric with None prediction."""
         metric = RLMCompositeMetric(
-            success_metric=DeploymentSuccessMetric(),
-            efficiency_metric=IterationEfficiencyMetric(),
-            token_metric=TokenEfficiencyMetric(),
+            success_metric=_ConstantMetric(1.0),
+            efficiency_metric=_ConstantMetric(1.0),
+            token_metric=_ConstantMetric(1.0),
         )
 
         class MockExample:
@@ -1203,31 +1206,6 @@ class TestREPLNativeFinalization:
             result = agent.run_task("test task", context, "/tmp")
 
         assert "Unknown final variable" in result
-
-
-class TestRLMDeployerFixErrorSignature:
-    """Tests for the RLMDeployerFixError DSPy signature."""
-
-    def test_signature_registered(self):
-        from app_operator.dspy_integration.signatures import SIGNATURES
-
-        assert "rlm_deployer_fix_error" in SIGNATURES
-
-    def test_signature_has_required_fields(self):
-        from app_operator.dspy_integration.signatures import (
-            RLMDeployerFixErrorSignature,
-        )
-
-        sig = RLMDeployerFixErrorSignature
-        # DSPy stores fields in model_fields
-        field_names = set(sig.model_fields.keys())
-        assert "repo_path" in field_names
-        assert "available_variables" in field_names
-        assert "error_log_size" in field_names
-        assert "attempt" in field_names
-        assert "max_attempts" in field_names
-        assert "has_original_script" in field_names
-        assert "rendered_prompt" in field_names
 
 
 class TestExtractRLMStatisticsFromTrajectory:

@@ -280,68 +280,6 @@ class TestConfigIntegration:
         config = AgentConfig(model_config=ModelConfig(provider="openai", model="模型-v1"))
         assert config.model == "模型-v1"
 
-    def test_config_from_dict_with_gepa_section(self):
-        """Config.from_dict should parse [gepa] section."""
-        config = Config.from_dict({"agent": {"model": "test-model"}, "gepa": {"max_steps": 100, "num_candidates": 20}})
-        assert config.gepa.max_steps == 100
-        assert config.gepa.num_candidates == 20
-
-    def test_config_gepa_defaults(self):
-        """Default Config should include valid GEPAConfig defaults."""
-        config = Config(agent=AgentConfig(model_config=ModelConfig(provider="openai", model="test-model")))
-        assert config.gepa.max_steps == 50
-        assert config.gepa.num_candidates == 10
-        assert config.gepa.reflection_provider == "gemini"
-
-    def test_config_from_dict_validates_gepa_fields(self):
-        """Config.from_dict should validate gepa field values."""
-        with pytest.raises(ValueError, match="max_steps must be positive"):
-            Config.from_dict({"gepa": {"max_steps": 0}})
-
-    def test_config_from_dict_rejects_unknown_gepa_field(self):
-        """Config.from_dict should reject unknown fields in [gepa]."""
-        from app_operator.config import UnrecognizedFieldError
-
-        with pytest.raises(UnrecognizedFieldError, match="unknown_field"):
-            Config.from_dict({"gepa": {"unknown_field": "value"}})
-
-    def test_config_gepa_diversity_probability(self):
-        """Config.from_dict should accept diversity_probability."""
-        config = Config.from_dict({"agent": {"model": "test-model"}, "gepa": {"diversity_probability": 0.3}})
-        assert config.gepa.diversity_probability == 0.3
-
-    def test_config_gepa_diversity_probability_invalid(self):
-        """Config.from_dict should reject invalid diversity_probability."""
-        with pytest.raises(ValueError, match="diversity_probability must be in range"):
-            Config.from_dict({"gepa": {"diversity_probability": 2.0}})
-
-    def test_config_gepa_patience(self):
-        """Config.from_dict should accept patience."""
-        config = Config.from_dict({"agent": {"model": "test-model"}, "gepa": {"patience": 20}})
-        assert config.gepa.patience == 20
-
-    def test_config_gepa_patience_invalid(self):
-        """Config.from_dict should reject non-positive patience."""
-        with pytest.raises(ValueError, match="patience must be positive"):
-            Config.from_dict({"gepa": {"patience": 0}})
-
-    def test_config_gepa_checkpoint_interval(self):
-        """Config.from_dict should accept checkpoint_interval."""
-        config = Config.from_dict({"agent": {"model": "test-model"}, "gepa": {"checkpoint_interval": 10}})
-        assert config.gepa.checkpoint_interval == 10
-
-    def test_config_gepa_checkpoint_interval_invalid(self):
-        """Config.from_dict should reject non-positive checkpoint_interval."""
-        with pytest.raises(ValueError, match="checkpoint_interval must be positive"):
-            Config.from_dict({"gepa": {"checkpoint_interval": -1}})
-
-    def test_config_gepa_new_defaults(self):
-        """Default Config should include valid defaults for new GEPAConfig fields."""
-        config = Config(agent=AgentConfig(model_config=ModelConfig(provider="openai", model="test-model")))
-        assert config.gepa.diversity_probability == 0.1
-        assert config.gepa.patience == 10
-        assert config.gepa.checkpoint_interval == 5
-
 
 class TestOperatorConfigIntervalProperty:
     """Property-based tests for OperatorConfig interval boundary sweep."""
@@ -437,7 +375,7 @@ class TestConfigFromDictRoundTripProperty:
 
     @given(
         section_name=st.text(min_size=1, max_size=30).filter(
-            lambda s: s not in {"agent", "operator", "deployment", "runtime", "gepa", "dspy", "fault_injection"}
+            lambda s: s not in {"agent", "operator", "deployment", "runtime", "fault_injection"}
         ),
     )
     @settings(max_examples=50, deadline=1000)

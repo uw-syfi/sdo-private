@@ -132,7 +132,7 @@ class TrajectoryRecorder:
         # Pending status for the current phase (set by set_phase_status)
         self._pending_phase_status: str | None = None
 
-        # Prompt version tracking for DSPy integration
+        # Prompt rendering metadata
         self._current_prompt_version: str | None = None
         self._current_prompt_kwargs: dict[str, Any] | None = None
         self._current_rendered_prompt: str | None = None
@@ -309,15 +309,15 @@ class TrajectoryRecorder:
         self._pending_phase_status = status
 
     def set_prompt_version(self, version: str) -> None:
-        """Record which prompt version was used (jinja2 or dspy_vN).
+        """Record which prompt version was used.
 
         Args:
-            version: Version identifier (e.g., 'jinja2', 'dspy_v1')
+            version: Version identifier (e.g., 'jinja2')
         """
         self._current_prompt_version = version
 
     def record_fallback(self) -> None:
-        """Record that a fallback from DSPy to Jinja2 occurred."""
+        """Record that a prompt-rendering fallback occurred."""
         self._fallback_occurred = True
 
     def record_prompt_kwargs(self, kwargs: dict[str, Any]) -> None:
@@ -336,7 +336,7 @@ class TrajectoryRecorder:
         """Record the rendered prompt string returned by the prompt renderer.
 
         This is the string sent to the coding agent as its instruction prompt.
-        Stored in the trajectory as ground-truth output for DSPy optimization.
+        Stored in the trajectory for debugging and analysis.
 
         Args:
             rendered_prompt: The rendered prompt string.

@@ -1,6 +1,4 @@
 from app_operator.prompts._core import (
-    SEED_TEMPLATE_MAP,
-    DSPyConfigProtocol,
     PromptLoader,
     get_loader,
     override_loader,
@@ -29,9 +27,7 @@ from app_operator.prompts.subagent import (
 from app_operator.prompts.trajectory_prompts import get_system_prompt
 
 __all__ = [
-    "DSPyConfigProtocol",
     "PromptLoader",
-    "SEED_TEMPLATE_MAP",
     "analyze_repository",
     "create_consolidation_prompt",
     "create_fix_prompt",

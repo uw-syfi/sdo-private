@@ -70,7 +70,7 @@ class PydanticAIOperator(OperatorBase):
 
         # Build deps
         self._shutdown_requested = False
-        loader = PromptLoader(dspy_config=self.config.dspy)
+        loader = PromptLoader()
         self.deps = OperatorDeps(
             repo_path=self.repo_path,
             filesystem=self.filesystem,

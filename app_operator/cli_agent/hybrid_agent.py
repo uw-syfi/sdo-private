@@ -21,7 +21,6 @@ from app_operator.cli_agent.rlm.environment import RLMContext
 from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
 from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
 from app_operator.prompts import (
-    DSPyConfigProtocol,
     render_error_log_analyst_prompt,
     render_fix_error_task_prompt,
     render_repo_analyst_prompt,
@@ -60,7 +59,7 @@ class HybridCodingAgent(CodingAgent):
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
         location: str | None = None,
-        dspy_config: DSPyConfigProtocol | None = None,
+        dspy_config: object | None = None,
         rlm_mode: str = "compatibility",
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
@@ -165,7 +164,7 @@ class HybridCodingAgent(CodingAgent):
             # Use the RLM-specific task prompt instead of the standard deployer_fix_error
             # output. The 270-line non-RLM prompt was written for agents that receive logs
             # as raw text; the RLM handles context management natively via REPL variables,
-            # so a simpler RLM-specific prompt is more appropriate and can be GEPA-optimised
+            # so a simpler RLM-specific prompt is more appropriate and can be optimized
             # independently from the non-RLM deployer_fix_error prompt.
             rlm_task = render_fix_error_task_prompt(
                 available_specialists=", ".join(sorted(self._SPECIALISTS)),

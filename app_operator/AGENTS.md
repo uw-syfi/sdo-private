@@ -6,9 +6,6 @@ Core operator that deploys and monitors target applications using agentic LLMs.
 
 ```bash
 uv run -m app_operator run /path/to/app        # deploy + monitor
-uv run -m app_operator analyze-prompts         # baseline metrics
-uv run -m app_operator optimize-prompts \
-    --prompts deployer_fix_error --optimizer BootstrapFewShot
 ```
 
 ## sds.toml Configuration
@@ -39,16 +36,13 @@ See [`../docs/feature-flags.md`](../docs/feature-flags.md) for all feature flags
 - **CodeAnalyzerAgent** (`cli_agent/agents/code_analyzer.py`): Proactive codebase analysis, generates `.sds/code_analysis.md`.
 - **AppMonitor** (`cli_agent/agents/app_monitor.py`): Periodic health checks.
 - **Trajectory** (`trajectory.py`): Records all agent calls with sequential IDs, saves to `.sds/trajectories/*.json`.
-- **PromptLoader** (`prompts/__init__.py`): Supports both Jinja2 (default) and DSPy-optimized rendering with fallback.
+- **PromptLoader** (`prompts/__init__.py`): Renders operator prompts.
 
-See [`../docs/dspy-optimization.md`](../docs/dspy-optimization.md) and [`../docs/fault-injection.md`](../docs/fault-injection.md) for details.
+See [`../docs/fault-injection.md`](../docs/fault-injection.md) for details.
 
 ## Usage Guide
 
 - **Debugging deployment**: Check `.sds/deploy.sh` and `.sds/logs/`
-- **Optimizing prompts**: `analyze-prompts` baseline → `optimize-prompts --dry-run` → compare
-- **Adding DSPy signatures**: Add to `dspy_integration/signatures.py`, register in `SIGNATURES` dict
-- **Extending metrics**: Modify `dspy_integration/metrics.py`, ensure weights sum to 1.0
 - **Adding fault types**: Add to `COMPOSE_FAULTS`, implement `_inject_*`, register in dispatch table, add tests
 
 ## Notes

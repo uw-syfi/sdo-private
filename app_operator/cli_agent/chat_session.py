@@ -4,15 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
 from app_operator.cli_agent.rlm.environment import RLMContext
 from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
 from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
-
-if TYPE_CHECKING:
-    from app_operator.prompts import DSPyConfigProtocol
 
 DEFAULT_CHAT_INTRO_PROMPT = (
     "You are a terminal codebase assistant for this repository. "
@@ -50,7 +46,7 @@ class HybridTerminalChatSession:
         repo_path: str,
         model: str | None = None,
         location: str | None = None,
-        dspy_config: DSPyConfigProtocol | None = None,
+        dspy_config: object | None = None,
         rlm_mode: str = "compatibility",
         intro_prompt: str = DEFAULT_CHAT_INTRO_PROMPT,
     ):

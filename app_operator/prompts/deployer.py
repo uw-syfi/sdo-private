@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from app_operator.prompts._core import DSPyConfigProtocol, get_loader
+from app_operator.prompts._core import get_loader
 
 if TYPE_CHECKING:
     from app_operator.types import CommandResult
@@ -70,7 +70,7 @@ def create_generate_script_prompt(
     repo_context: str,
     target_dir: str,
     platform: str,
-    dspy_config: DSPyConfigProtocol | None = None,
+    dspy_config: object | None = None,
     recorder=None,
     previous_violations: str | None = None,
     system_prompt: str | None = None,
@@ -82,7 +82,7 @@ def create_generate_script_prompt(
         repo_context: Context string describing the repository.
         target_dir: The directory where scripts will be generated.
         platform: The deployment platform (e.g., 'docker', 'kubernetes').
-        dspy_config: Optional DSPy configuration for optimized prompts.
+        dspy_config: Ignored compatibility argument.
         recorder: Optional trajectory recorder for kwargs capture.
         previous_violations: Optional preflight violations from a prior attempt
             that caused the scripts to be regenerated; injected as hard constraints.
@@ -102,7 +102,7 @@ def create_generate_script_prompt(
     has_code_analysis = (sds_dir / "code_analysis.md").exists()
     has_deployment_issues = (sds_dir / "deployment_issues.md").exists()
 
-    prompt = get_loader(dspy_config).render(
+    prompt = get_loader().render(
         template_name,
         script_name=script_name,
         repo_context=repo_context,
@@ -136,7 +136,7 @@ def create_fix_prompt(
     deploy_script_path: Path,
     health_check_script_path: Path,
     platform: str = "auto",
-    dspy_config: DSPyConfigProtocol | None = None,
+    dspy_config: object | None = None,
     recorder=None,
     deployment_progress_path: Path | None = None,
     structured_output: bool = False,
@@ -153,7 +153,7 @@ def create_fix_prompt(
         deploy_script_path: Path to the deploy script.
         health_check_script_path: Path to the health check script.
         platform: Deployment platform (e.g., 'docker', 'k8s').
-        dspy_config: Optional DSPy configuration for optimized prompts.
+        dspy_config: Ignored compatibility argument.
         recorder: Optional trajectory recorder for kwargs capture.
         deployment_progress_path: Path to deployment_progress.md (None if feature disabled).
         structured_output: If True, instruct the agent to use structured output instead of XML tags.
@@ -165,7 +165,7 @@ def create_fix_prompt(
     has_code_analysis = (repo_path / ".sds" / "code_analysis.md").exists()
     has_deployment_progress = deployment_progress_path is not None and deployment_progress_path.exists()
 
-    prompt = get_loader(dspy_config).render(
+    prompt = get_loader().render(
         "repair_agent/user.jinja2",
         repo_path=repo_path,
         attempt=attempt,

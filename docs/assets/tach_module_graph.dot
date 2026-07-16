@@ -8,18 +8,10 @@ digraph tach_modules {
     "libs.agent_cli" -> "libs.sds_core";
     "app_operator.trajectory" -> "app_operator.prompts";
     "app_operator.trajectory" -> "libs.agent_cli";
-    "app_operator.dspy_integration" -> "app_operator.prompts";
-    "app_operator.dspy_integration" -> "app_operator.trajectory";
     "app_operator.cli_agent" -> "app_operator.prompts";
     "app_operator.cli_agent" -> "app_operator.trajectory";
     "app_operator.cli_agent" -> "libs.agent_cli";
-    "app_operator.gepa" -> "app_operator.cli_agent";
-    "app_operator.gepa" -> "app_operator.prompts";
-    "app_operator.gepa" -> "app_operator.trajectory";
-    "app_operator.commands" -> "app_operator.dspy_integration";
     "app_operator.__main__" -> "app_operator.commands";
-    "lego_agent" -> "libs.model_config";
-    "lego_agent" -> "libs.sds_core";
     "sregym_agents" -> "libs.pydantic_agent";
     "sregym_agents" -> "libs.agent_mw";
     "sregym_agents" -> "libs.agent_cli";

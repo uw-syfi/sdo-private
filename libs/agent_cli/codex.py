@@ -1,7 +1,9 @@
 from .base import register_provider
 from .cli_agent import CLICodingAgent
+from .events import AgentEventHandler
 from .mcp_config import HttpMcpServer, McpServerConfig
 from .sandbox import SandboxConfig
+from .trajectory import TrajectoryRecorderProtocol
 
 
 @register_provider("openai", "codex")
@@ -11,6 +13,8 @@ class CodexCodingAgent(CLICodingAgent):
     def __init__(
         self,
         model: str | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+        event_handler: AgentEventHandler | None = None,
         mcp_servers: list[McpServerConfig] | None = None,
         sandbox: bool | SandboxConfig = False,
     ):
@@ -23,7 +27,7 @@ class CodexCodingAgent(CLICodingAgent):
         """
         if sandbox:
             raise NotImplementedError("sandbox is not supported for CodexCodingAgent")
-        super().__init__("codex", model, mcp_servers=mcp_servers)
+        super().__init__("codex", model, recorder, event_handler, mcp_servers=mcp_servers)
 
     @property
     def codex_path(self) -> str:

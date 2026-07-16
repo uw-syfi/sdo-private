@@ -10,7 +10,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from app_operator.cli_agent.agents.context import AgentContext
-    from app_operator.dspy_integration import DSPyConfig
     from app_operator.types import CommandResult, HealthVerdict
     from libs.agent_cli.base import CodingAgent
 
@@ -58,7 +57,7 @@ class MonitorLike(Protocol):
     agent: CodingAgent
     filesystem: FileSystemInterface
     recorder: TrajectoryRecorderProtocol
-    dspy_config: DSPyConfig | None
+    dspy_config: object | None
     ui: OperatorUI
     check_count: int
     health_check_script: Path
@@ -299,7 +298,7 @@ class HealthCheckTask(MonitoringTask):
         repo_path: Path,
         health_result: CommandResult,
         check_count: int,
-        dspy_config: DSPyConfig | None = None,
+        dspy_config: object | None = None,
         recorder=None,
     ) -> str:
         """Create a prompt for the coding agent to analyze health check results.
@@ -309,20 +308,16 @@ class HealthCheckTask(MonitoringTask):
             repo_path: Repository path
             health_result: Raw health check result dict
             check_count: Current monitoring iteration
-            dspy_config: Optional DSPy configuration
+            dspy_config: Ignored compatibility argument.
             recorder: Optional trajectory recorder for kwargs capture
 
         Returns:
             Rendered prompt string
         """
-        # Pass both Jinja2 fields (context, repo_path) and DSPy fields
-        # (health_check_output, exit_code, iteration) to support both renderers
-        prompt = get_loader(dspy_config).render(
+        prompt = get_loader().render(
             "monitor/analyze_health.jinja2",
-            # Jinja2 fields (for backward compatibility)
             repo_path=repo_path,
             context=context,
-            # DSPy fields (for DSPy signature)
             health_check_output=health_result["stdout"],
             exit_code=health_result["exit_code"],
             iteration=check_count,
@@ -394,7 +389,7 @@ class AppMonitor:
         deployment_config: DeploymentConfig | None = None,
         operator_config: OperatorConfig | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
-        dspy_config: DSPyConfig | None = None,
+        dspy_config: object | None = None,
         ui: OperatorUI | None = None,
         ctx: AgentContext | None = None,
     ):
@@ -407,7 +402,7 @@ class AppMonitor:
             deployment_config: Optional deployment configuration.
             operator_config: Optional operator configuration for timeouts.
             recorder: Trajectory recorder instance.
-            dspy_config: Optional DSPy configuration for optimized prompts.
+            dspy_config: Ignored compatibility argument.
             ui: Optional UI interface.
         """
         if ctx is not None:

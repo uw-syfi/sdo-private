@@ -16,7 +16,6 @@ dependencies = [
     "jinja2>=3.1.0",
     "click>=8.0.0",
     "textual>=0.52.0",
-    "dspy-ai>=2.4.0",
     "pandas>=2.0.0",
     "tabulate>=0.9.0",
     "fastapi>=0.109.0",
@@ -60,7 +59,7 @@ prerelease = "if-necessary-or-explicit"
 members = ["libs/agent_cli", "libs/sds_core", "libs/pydantic_agent", "libs/agent_mw", "libs/model_config"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["app_operator", "app_operator_dspy", "lego_agent", "libs"]
+packages = ["app_operator", "libs"]
 
 [tool.ruff]
 line-length = 120
@@ -75,7 +74,7 @@ select = ["E", "F", "W", "I", "UP", "PIE", "C4", "ERA", "B", "RUF010", "RUF013",
 ignore = ["SIM117", "SIM105", "SIM108", "PT009"]
 
 [tool.coverage.run]
-source = ["app_operator", "lego_agent", "libs"]
+source = ["app_operator", "libs"]
 omit = ["*/apps/*", "*/__main__.py", "*/ui/*"]
 
 [tool.coverage.report]

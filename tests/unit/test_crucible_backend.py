@@ -377,7 +377,7 @@ class TestAgentCLIDriverConstruction:
     def test_invalid_provider_raises(self):
         from sregym_agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
-        with pytest.raises(ValueError, match="currently only supports Claude Code"):
+        with pytest.raises(ValueError, match="is not registered"):
             AgentCLIDriver(provider="unsupported-provider")
 
     def test_aliases_accepted(self):
@@ -385,6 +385,7 @@ class TestAgentCLIDriverConstruction:
 
         AgentCLIDriver(provider="claude-code")
         AgentCLIDriver(provider="anthropic")
+        AgentCLIDriver(provider="codex")
 
 
 class TestAgentCLIDriverToolRole:

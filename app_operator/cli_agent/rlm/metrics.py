@@ -1,4 +1,4 @@
-"""DSPy metrics for RLM optimization.
+"""Metrics for RLM prompt evaluation.
 
 These metrics evaluate how well RLM-based prompts utilize the RLM paradigm:
 - Recursion efficiency (fewer, more targeted calls)
@@ -164,7 +164,7 @@ class RLMContextUtilizationMetric:
 class RLMCompositeMetric:
     """Composite metric combining RLM-specific metrics with standard metrics.
 
-    This is the primary metric for optimizing RLM-based prompts with DSPy.
+    This combines RLM-specific metrics with caller-provided standard metrics.
     """
 
     def __init__(
@@ -205,22 +205,13 @@ class RLMCompositeMetric:
         self.rlm_efficiency_weight = rlm_efficiency_weight
         self.rlm_context_weight = rlm_context_weight
 
-        # Callers must inject standard metrics — rlm must not import dspy_integration.
+        # Callers must inject standard metrics; this module only owns RLM-specific scoring.
         if success_metric is None:
-            raise ValueError(
-                "success_metric is required. Pass an instance of DeploymentSuccessMetric "
-                "from app_operator.dspy_integration.metrics."
-            )
+            raise ValueError("success_metric is required.")
         if efficiency_metric is None:
-            raise ValueError(
-                "efficiency_metric is required. Pass an instance of IterationEfficiencyMetric "
-                "from app_operator.dspy_integration.metrics."
-            )
+            raise ValueError("efficiency_metric is required.")
         if token_metric is None:
-            raise ValueError(
-                "token_metric is required. Pass an instance of TokenEfficiencyMetric "
-                "from app_operator.dspy_integration.metrics."
-            )
+            raise ValueError("token_metric is required.")
 
         # Initialize metrics
         self.success_metric = success_metric

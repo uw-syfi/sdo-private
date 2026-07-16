@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import inspect
 import json
 import logging
 import os
@@ -157,11 +158,10 @@ class _AgentCLIEventHandler:
 
 
 class AgentCLIDriver(AgentDriver):
-    """``AgentDriver`` backed by a CLI coding agent (Claude Code).
+    """``AgentDriver`` backed by a registered CLI coding agent.
 
     Constructor parameters:
-        provider: CLI agent provider name (currently only ``"claude"``
-            is supported).
+        provider: CLI agent provider name from ``libs.agent_cli``.
         model: Model ID string passed to the CLI agent.
         cwd: Working directory for the CLI agent subprocess.
     """
@@ -173,11 +173,15 @@ class AgentCLIDriver(AgentDriver):
         cwd: str | None = None,
         sandbox: bool | Any = False,
     ) -> None:
-        if provider not in ("claude", "claude-code", "anthropic"):
+        import libs.agent_cli  # noqa: F401  # ensure provider modules are registered
+        from libs.agent_cli.base import AGENT_REGISTRY
+
+        provider_key = provider.lower()
+        if provider_key not in AGENT_REGISTRY:
             raise ValueError(
-                f"AgentCLIDriver currently only supports Claude Code (provider='claude'), got {provider!r}"
+                f"AgentCLIDriver provider {provider!r} is not registered. Available providers: {sorted(AGENT_REGISTRY)}"
             )
-        self._provider = provider
+        self._provider = provider_key
         self._model = model
         self._cwd = cwd
         self._sandbox = sandbox
@@ -471,12 +475,24 @@ class AgentCLIDriver(AgentDriver):
         if mcp_args is not None:
             mcp_servers.append(StdioMcpServer(name="crucible-tools", command="uv", args=list(mcp_args)))
 
-        return agent_cls(
-            model=self._model,
-            event_handler=handler,
-            mcp_servers=mcp_servers,
-            sandbox=self._sandbox,
-        )
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "event_handler": handler,
+            "mcp_servers": mcp_servers,
+        }
+        if "sandbox" in inspect.signature(agent_cls).parameters:
+            kwargs["sandbox"] = self._sandbox
+        try:
+            return agent_cls(**kwargs)
+        except NotImplementedError as exc:
+            if "sandbox" not in str(exc).lower() or "sandbox" not in kwargs:
+                raise
+            logger.warning(
+                "Provider %s does not support sandbox configuration; running without driver sandbox.",
+                self._provider,
+            )
+            kwargs.pop("sandbox", None)
+            return agent_cls(**kwargs)
 
     async def run(
         self,

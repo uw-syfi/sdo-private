@@ -21,7 +21,7 @@ from app_operator.cli_agent.rlm.environment import (
     _validate_file_refs,
 )
 from app_operator.logger import logger
-from app_operator.prompts import DSPyConfigProtocol, render_fix_error_task_prompt
+from app_operator.prompts import render_fix_error_task_prompt
 from app_operator.trajectory import TrajectoryRecorderProtocol
 from libs.agent_cli.llm_client import LiteLLMClient
 
@@ -48,7 +48,7 @@ class RecursiveDeploymentAgent:
         compaction: bool = False,
         compaction_threshold: float = 0.85,
         model_context_tokens: int = 32_768,
-        dspy_config: DSPyConfigProtocol | None = None,
+        dspy_config: object | None = None,
         specialist_dispatcher: Callable[[str, str], str] | None = None,
         available_specialists: dict[str, str] | None = None,
         rlm_mode: str = "compatibility",

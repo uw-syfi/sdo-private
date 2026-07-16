@@ -17,7 +17,6 @@ from loguru import logger
 
 from app_operator.cli_agent._rlm_utils import _DIRECT_TEXT_RE, _FILE_GEN_RE, _FIX_ERROR_RE
 from app_operator.prompts import (
-    DSPyConfigProtocol,
     render_error_log_analyst_prompt,
     render_repo_analyst_prompt,
     render_root_synthesis_prompt,
@@ -51,7 +50,7 @@ class SubagentCodingAgent(CodingAgent):
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
         location: str | None = None,
-        dspy_config: DSPyConfigProtocol | None = None,
+        dspy_config: object | None = None,
     ):
         self.model = model or "vertex_ai/gemini-2.0-flash"
         self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()

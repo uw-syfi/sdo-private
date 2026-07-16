@@ -1,7 +1,7 @@
 """Fault injection module for SDS training data diversification.
 
 Provides Docker Compose fault injection inspired by SREGym's fault taxonomy
-to generate diverse training trajectories for GEPA/DSPy prompt optimization.
+to generate diverse failure scenarios.
 """
 
 from app_operator.fault_injection.config import FaultInjectionConfig

@@ -8,7 +8,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from app_operator.dspy_integration import DSPyConfig
     from app_operator.types import CommandResult
     from libs.agent_cli.base import CodingAgent
 
@@ -56,7 +55,7 @@ class DeploymentAgent:
         deployment_config: DeploymentConfig | None = None,
         operator_config: OperatorConfig | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
-        dspy_config: DSPyConfig | None = None,
+        dspy_config: object | None = None,
         ui: OperatorUI | None = None,
         *,
         ctx: AgentContext | None = None,

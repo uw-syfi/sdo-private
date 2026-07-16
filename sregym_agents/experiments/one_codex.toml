@@ -1,0 +1,35 @@
+[runner]
+agent = "crucible"
+model = "gpt-5.5"
+parallel = 1
+enable_summary = true
+no_inject_summary = false
+problems = ["faulty_image_correlated"]
+
+[runner.env]
+judge_model_id = "vertex-ai-gemini-2.5-pro"
+crucible_seed_kb_dir = ""
+worker_cpu_limit = "16"
+reuse_cluster = true
+
+[agent.crucible]
+prompt_version = "v3"
+backend = "agent-cli"
+agent_cli_provider = "codex"
+enable_judge = false
+enable_ltm_retrieval = false
+enable_ltm_verified_direct_submit = false
+max_hypotheses = 3
+max_submissions = 3
+kb_type = "structured"
+include_benchmark_results = false
+enable_reflection = false
+inject_heuristics = true
+include_incident_files = true
+per_app = false
+max_diagnosis_iterations = 3
+max_mitigation_iterations = 3
+wait_stage_timeout = 300
+enable_playbooks = false
+recovery_phase2_enabled = false
+enable_playbook_shortcut = false

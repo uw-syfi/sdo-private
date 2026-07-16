@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app_operator.dspy_integration import DSPyConfig
     from libs.agent_cli.base import CodingAgent
 
 from app_operator.cli_agent.agents.context import AgentContext
@@ -157,7 +156,7 @@ def generate_scripts(
     deployment_config: DeploymentConfig | None = None,
     operator_config: OperatorConfig | None = None,
     recorder: TrajectoryRecorderProtocol | None = None,
-    dspy_config: DSPyConfig | None = None,
+    dspy_config: object | None = None,
 ) -> tuple[bool, str]:
     """Generate deploy.sh and health_check.sh scripts using a coding agent.
 
@@ -170,7 +169,7 @@ def generate_scripts(
         deployment_config: Optional deployment configuration. If None, uses default.
         operator_config: Optional operator configuration for timeouts. If None, uses default.
         recorder: Optional trajectory recorder.
-        dspy_config: Optional DSPy configuration for optimized prompts.
+        dspy_config: Ignored compatibility argument.
 
     Returns:
         Tuple of (success: bool, message: str).

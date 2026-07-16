@@ -4,10 +4,10 @@ SDS is a research project exploring how AI agents can autonomously take over sys
 
 SDS targets online applications. Microservices are the first class studied; benchmark apps live in `apps/`.
 
-Two components in this repo:
+Core components in this repo:
 
-- **`sds_operator`** — the primary research artifact. Deploys applications, self-heals on errors, monitors health, and improves its own prompts over time using trajectory data.
-- **`lego_agent`** — an experimental agent workflow generator, designed as potential shared infrastructure across future SDS components.
+- **`sds_operator`** — deploys applications, self-heals on errors, and monitors health.
+- **`sregym_agents`** — SRE Gym agents and experiment harnesses for incident diagnosis, mitigation, and operational-memory experiments.
 
 ---
 
@@ -23,7 +23,7 @@ sds_operator run <app>
 
 All agents share a single LLM provider (gemini, claude, codex…) configured in `sds.toml` and accessed via `libs/agent_cli/`. Provider choice and runtime choice are independent — switching from Claude to Gemini or from `cli_agent` to `pydantic_ai` requires only editing `sds.toml`.
 
-**Trajectories** are structured JSON recordings of every agent call — the raw material for offline prompt optimization with DSPy.
+**Trajectories** are structured JSON recordings of every agent call.
 
 ---
 
@@ -70,10 +70,6 @@ Full schema in `app_operator/config.py`. Provider credentials, runtime tradeoffs
 | `./sds_operator run <app>` | Deploy and monitor an application |
 | `./sds_operator init-exp <app> <name>` | Create an isolated experiment copy |
 | `./sds_operator run-exp <name>` | Run multiple experiments in parallel |
-| `./sds_operator analyze-prompts` | Report trajectory metrics |
-| `./sds_operator optimize-prompts` | Run DSPy offline prompt optimization |
-| `./sds_lego_agent --prompt "..."` | Generate and run an agent workflow (CLI) |
-| `./scripts/start_lego_ui.sh` | Launch the lego_agent web UI |
 
 Full option reference for each command is in `docs/architecture.md`.
 
@@ -90,10 +86,10 @@ After `sds_operator run`, the app directory contains a `.sds/` folder:
 ├── code_analysis.md     # CodeAnalyzerAgent output (feeds DeploymentAgent)
 ├── logs/                # Per-attempt logs for deployment and monitoring
 └── trajectories/        # JSON recordings of every agent call
-    └── *.json           # One file per run; used for analyze-prompts / optimize-prompts
+    └── *.json           # One file per run
 ```
 
-Trajectory files contain phase, prompt, response, token counts, and success/failure for each agent call. They are the input to DSPy prompt optimization.
+Trajectory files contain phase, prompt, response, token counts, and success/failure for each agent call.
 
 ---
 
@@ -102,9 +98,6 @@ Trajectory files contain phase, prompt, response, token counts, and success/fail
 | Question | Document |
 |---|---|
 | How do runtimes, providers, and agents relate? | `docs/architecture.md` |
-| How do I optimize prompts with DSPy? | `docs/dspy-optimization.md` |
-| How do I use lego_agent? | `docs/lego-agent.md` |
 | How do I inject faults? | `docs/fault-injection.md` |
-| How do I use RLM for large logs? | `docs/rlm-integration.md` |
 | How do I write tests? | `docs/testing-guide.md` |
 | What feature flags are available? | `docs/feature-flags.md` |

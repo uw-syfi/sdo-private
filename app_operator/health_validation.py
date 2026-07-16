@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from app_operator.dspy_integration import DSPyConfig
     from app_operator.trajectory import TrajectoryRecorderProtocol
     from app_operator.types import CommandResult
     from libs.agent_cli.base import CodingAgent
@@ -64,7 +63,7 @@ def validate_health_check_result(
     repo_path: Path,
     check_context: str,
     timeout: int,
-    dspy_config: DSPyConfig | None = None,
+    dspy_config: object | None = None,
     recorder: TrajectoryRecorderProtocol | None = None,
 ) -> HealthValidationResult:
     """Validate health check output using deterministic rules + agent verdict.
@@ -188,11 +187,11 @@ def _agent_assessment(
     repo_path: Path,
     check_context: str,
     timeout: int,
-    dspy_config: DSPyConfig | None,
+    dspy_config: object | None,
     recorder: TrajectoryRecorderProtocol | None,
 ) -> dict[str, Any] | None:
     """Ask the coding agent for a strict health verdict."""
-    prompt = get_loader(dspy_config).render(
+    prompt = get_loader().render(
         "monitor/validate_health.jinja2",
         repo_path=repo_path,
         check_context=check_context,

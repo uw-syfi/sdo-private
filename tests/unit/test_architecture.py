@@ -35,8 +35,6 @@ _REPO_ROOT = Path(__file__).parent.parent.parent
 
 _PROJECT_PACKAGES: dict[str, Path] = {
     "app_operator": _REPO_ROOT / "app_operator",
-    "app_operator_dspy": _REPO_ROOT / "app_operator_dspy",
-    "lego_agent": _REPO_ROOT / "lego_agent",
     "libs": _REPO_ROOT / "libs",
     "sregym_agents": _REPO_ROOT / "sregym_agents",
 }

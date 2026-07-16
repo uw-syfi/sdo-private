@@ -405,27 +405,14 @@ class TestSubagentRegistration:
         assert isinstance(agent, SubagentCodingAgent)
         assert agent.location == "us-west1"  # type: ignore[attr-defined]
 
-    def test_factory_forwards_dspy_config(self):
-        from app_operator.cli_agent.factory import create_agent_from_config
-        from app_operator.config import AgentConfig, Config, DSPyConfig
-
-        dspy_cfg = DSPyConfig()
-        config = Config(
-            agent=AgentConfig(backend="subagent", model_config=ModelConfig.from_string("test-model")),
-            dspy=dspy_cfg,
-        )
-        agent = create_agent_from_config("/tmp", config=config)
-        assert isinstance(agent, SubagentCodingAgent)
-        assert agent.dspy_config is dspy_cfg  # type: ignore[attr-defined]
-
 
 # ---------------------------------------------------------------------------
-# dspy_config storage
+# dspy_config compatibility
 # ---------------------------------------------------------------------------
 
 
 class TestSubagentDspyConfig:
-    """Tests that SubagentCodingAgent stores and uses dspy_config."""
+    """Tests that SubagentCodingAgent accepts the legacy dspy_config argument."""
 
     def test_stores_dspy_config(self):
         cfg = mock.MagicMock()

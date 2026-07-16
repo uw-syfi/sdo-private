@@ -12,7 +12,6 @@ from app_operator.config import (
     _FAULT_VALID_CATEGORIES,
     _FAULT_VALID_SEVERITIES,
     AgentConfig,
-    DSPyOptimizationConfig,
     FaultInjectionConfig,
     OperatorConfig,
 )
@@ -23,41 +22,6 @@ VALID_PROVIDERS = AgentConfig.VALID_BACKENDS
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------
-@st.composite
-def valid_metric_weights_strategy(draw):
-    """Generate metric_weights dict with 4 keys summing to ~1.0."""
-    # Draw 3 values in [0,1] and compute the 4th to ensure sum == 1.0
-    a = draw(st.floats(min_value=0.0, max_value=0.97, allow_nan=False))
-    b = draw(st.floats(min_value=0.0, max_value=1.0 - a, allow_nan=False))
-    c = draw(st.floats(min_value=0.0, max_value=1.0 - a - b, allow_nan=False))
-    d = round(1.0 - a - b - c, 10)
-    assume(0.0 <= d <= 1.0)
-    assume(0.99 <= a + b + c + d <= 1.01)
-    return {
-        "success": a,
-        "efficiency": b,
-        "tokens": c,
-        "health_check": d,
-    }
-
-
-@st.composite
-def invalid_sum_metric_weights_strategy(draw):
-    """Generate metric_weights dict with 4 keys summing outside [0.99, 1.01]."""
-    a = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
-    b = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
-    c = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
-    d = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
-    total = a + b + c + d
-    assume(not (0.99 <= total <= 1.01))
-    return {
-        "success": a,
-        "efficiency": b,
-        "tokens": c,
-        "health_check": d,
-    }
-
-
 @st.composite
 def valid_fault_injection_args_strategy(draw):
     """Generate valid FaultInjectionConfig constructor arguments."""
@@ -105,31 +69,6 @@ class TestAgentConfigProperties:
         assume(provider.lower() not in VALID_PROVIDERS)
         with pytest.raises(ValueError, match="Invalid backend"):
             AgentConfig(backend=provider)
-
-
-# ---------------------------------------------------------------------------
-# DSPyOptimizationConfig
-# ---------------------------------------------------------------------------
-
-
-class TestDSPyOptimizationConfigProperties:
-    """Property-based tests for DSPyOptimizationConfig metric_weights validation."""
-
-    @given(weights=valid_metric_weights_strategy())
-    @settings(max_examples=50, deadline=1000)
-    def test_valid_weights_sum_accepted(self, weights):
-        """metric_weights dict summing within [0.99, 1.01] is always accepted."""
-        total = sum(weights.values())
-        assume(0.99 <= total <= 1.01)
-        config = DSPyOptimizationConfig(metric_weights=weights)
-        assert config.metric_weights == weights
-
-    @given(weights=invalid_sum_metric_weights_strategy())
-    @settings(max_examples=50, deadline=1000)
-    def test_invalid_weights_sum_raises_value_error(self, weights):
-        """metric_weights dict summing outside tolerance always raises ValueError."""
-        with pytest.raises(ValueError, match="metric_weights must sum to"):
-            DSPyOptimizationConfig(metric_weights=weights)
 
 
 # ---------------------------------------------------------------------------

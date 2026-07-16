@@ -120,7 +120,6 @@ class AppOperator(OperatorBase):
             filesystem=self.filesystem,
             operator_config=self.config.operator,
             recorder=self.recorder,
-            dspy_config=self.config.dspy,
             ui=self.ui,
         )
 

@@ -6,12 +6,9 @@ Comprehensive guide for writing and running tests in the SDS project.
 
 - **Unit tests** (`tests/unit/`): Fast, isolated tests for individual components
 - **Integration tests** (`tests/integration/`): Test component interactions and real behavior
-- **Frontend tests** (`lego_agent/ui/app/components/__tests__/`): Jest/React Testing Library tests for UI components.
 - Test organization by component:
   - `tests/unit/config/`: Configuration validation tests
   - `tests/unit/agents/`: Agent-specific tests (deployment, monitoring)
-  - `tests/unit/lego_agent/`: LegoAgent module tests (engine, runtime, CLI, prompts)
-  - `tests/unit/dspy_tests/`: DSPy integration tests (config, data loader, metrics, optimizer, signatures)
   - `tests/unit/fault_injection/`: Fault injection tests (models, config, compose faults, registry, reporter, injector, data loader)
   - `tests/integration/`: End-to-end scenarios, signal handling, concurrency
 
@@ -20,7 +17,6 @@ Comprehensive guide for writing and running tests in the SDS project.
 - Run all tests (backend + frontend): `scripts/run_tests.sh`
 - Run python tests: `uv run pytest tests/`
 - Run specific category: `uv run pytest tests/unit/` or `uv run pytest tests/integration/`
-- Run frontend tests: `cd lego_agent/ui && npm test`
 - Run with coverage: `uv run pytest tests/ --cov=app_operator`
 - Check if tests pass after you've modified the codebase's behavior.
 - Don't run the sds_operator directly to test; it is a long-running process that will not terminate.
@@ -40,25 +36,7 @@ def test_deployment_succeeds_after_retry():
     assert "deployment successful" in log_file.read_text()
 ```
 
-### 2. Write Testable, Robust, Clean Frontend Code
-
-For the `lego_agent` UI, we prioritize robustness and testability:
-
-- **Component Isolation**: Build components (e.g., `TerminalLog`, `InputArea`) that rely on props rather than global state where possible.
-- **Interaction Testing**: Use `@testing-library/react` to test user interactions (clicks, inputs) rather than internal component state.
-- **Robustness**: Ensure components handle loading states, empty data, and error states gracefully (e.g., connection loss).
-- **Clean Code**: Keep components small and focused. Extract logic into hooks (e.g., `useLegoAgent`) to separate concerns from the view layer.
-
-```typescript
-// ✅ GOOD: Testing user interaction and prop handling
-it('calls onSendPrompt when submitting prompt', () => {
-  render(<InputArea onSendPrompt={mockSend} status="connected" />);
-  fireEvent.click(screen.getByText('Run'));
-  expect(mockSend).toHaveBeenCalled();
-});
-```
-
-### 3. Prefer Test Doubles Over Mocks for Maintainability
+### 2. Prefer Test Doubles Over Mocks for Maintainability
 
 Use **simple test double classes** instead of mock frameworks for clearer, more maintainable tests. Implement features in a test-double-friendly way.
 

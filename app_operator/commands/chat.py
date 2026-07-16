@@ -56,7 +56,6 @@ def run_command(args: argparse.Namespace) -> int:
             repo_path=args.directory,
             model=config.agent.model,
             location=config.agent.location,
-            dspy_config=config.dspy,
             rlm_mode=config.rlm.mode,
             intro_prompt=args.intro_prompt,
         )

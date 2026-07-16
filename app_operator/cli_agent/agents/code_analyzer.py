@@ -7,7 +7,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from app_operator.cli_agent.agents.context import AgentContext
-    from app_operator.dspy_integration import DSPyConfig
     from libs.agent_cli.base import CodingAgent
 
 from app_operator.config import OperatorConfig
@@ -33,7 +32,7 @@ class CodeAnalyzerAgent:
         coding_agent: CodingAgent,
         filesystem: FileSystemInterface | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
-        dspy_config: DSPyConfig | None = None,
+        dspy_config: object | None = None,
         ui: OperatorUI | None = None,
         operator_config: OperatorConfig | None = None,
         ctx: AgentContext | None = None,
@@ -45,7 +44,7 @@ class CodeAnalyzerAgent:
             coding_agent: The coding agent to use for analysis.
             filesystem: Optional filesystem abstraction. If None, uses RealFilesystem.
             recorder: Trajectory recorder instance.
-            dspy_config: Optional DSPy configuration for optimized prompts.
+            dspy_config: Ignored compatibility argument.
             ui: Optional UI interface.
         """
         if ctx is not None:
@@ -149,13 +148,13 @@ class CodeAnalyzerAgent:
                 repo_content = self._gather_repo_content()
 
                 # Create the prompt
-                system_prompt = get_loader(self.dspy_config).render(
+                system_prompt = get_loader().render(
                     "code_analyzer/system.jinja2",
                     repo_path=self.repo_path,
                     agent_name=self.agent.__class__.__name__,  # Added for signature
                     recorder=self.recorder,
                 )
-                user_prompt = get_loader(self.dspy_config).render(
+                user_prompt = get_loader().render(
                     "code_analyzer/user.jinja2",
                     repo_path=self.repo_path,
                     file_tree=file_tree,

@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from app_operator.dspy_integration import DSPyConfig
     from libs.agent_cli.base import CodingAgent
 
 from app_operator.config import OperatorConfig
@@ -27,7 +26,7 @@ class AgentContext:
     filesystem: FileSystemInterface = field(default_factory=RealFilesystem)
     operator_config: OperatorConfig = field(default_factory=OperatorConfig)
     recorder: TrajectoryRecorderProtocol = field(default_factory=NullTrajectoryRecorder)
-    dspy_config: DSPyConfig | None = None
+    dspy_config: object | None = None
     ui: OperatorUI = field(default_factory=NullOperatorUI)
 
     @property

@@ -290,31 +290,6 @@ class TestPhaseControlEdgeCases:
         assert operator.config.operator.phase.code_analysis is False
         assert operator.config.fault_injection.enabled is True
 
-    def test_dspy_optimized_prompts_with_analysis_disabled(self, temp_repo):
-        """Test that DSPy signatures handle empty analysis context."""
-        config = Config.from_dict(
-            {
-                "agent": {"backend": "codex", "model": "test-model"},
-                "operator": {"phase": {"code_analysis": False}},
-                "dspy": {"use_optimized": True, "optimized_version": "v1"},
-            }
-        )
-
-        # DSPy prompts should handle missing analysis gracefully
-        # Signatures expect analysis_summary and issues_summary which may be empty
-
-        assert config.operator.phase.code_analysis is False
-        assert config.dspy.use_optimized is True
-
-        # When analysis is disabled, analysis context will be empty strings
-        # DSPy signatures should handle this gracefully
-        analysis_summary = ""
-        issues_summary = ""
-
-        # These empty values should not cause errors in DSPy signatures
-        assert isinstance(analysis_summary, str)
-        assert isinstance(issues_summary, str)
-
     def test_conditional_edge_routing(self, temp_repo):
         """Test that conditional edges route correctly based on phase config."""
         config = Config.from_dict(

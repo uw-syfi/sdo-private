@@ -7,7 +7,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from app_operator.cli_agent.agents.context import AgentContext
-    from app_operator.dspy_integration import DSPyConfig
     from libs.agent_cli.base import CodingAgent
 
 from app_operator.config import DeploymentConfig, OperatorConfig
@@ -95,7 +94,7 @@ class AppHealthJudge:
         filesystem: FileSystemInterface | None = None,
         operator_config: OperatorConfig | None = None,
         recorder: TrajectoryRecorderProtocol | None = None,
-        dspy_config: DSPyConfig | None = None,
+        dspy_config: object | None = None,
         ui: OperatorUI | None = None,
         deployment_config: DeploymentConfig | None = None,
     ):
@@ -202,7 +201,7 @@ class AppHealthJudge:
         """Render the health assessment prompt template."""
         platform = self.deployment_config.platform
         health_system_prompt = create_health_system_prompt()
-        user_prompt = get_loader(self.dspy_config).render(
+        user_prompt = get_loader().render(
             "health_judge_agent/user.jinja2",
             repo_path=self.repo_path,
             health_check_script=self.health_check_script,

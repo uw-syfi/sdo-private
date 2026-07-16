@@ -16,7 +16,6 @@ from loguru import logger
 from app_operator.cli_agent._rlm_utils import _FILE_GEN_RE, _FIX_ERROR_RE
 from app_operator.cli_agent.rlm.environment import RLMContext
 from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
-from app_operator.prompts import DSPyConfigProtocol
 from libs.agent_cli.base import CodingAgent
 from libs.agent_cli.events import AgentEventHandler
 from libs.agent_cli.llm_client import LiteLLMClient
@@ -42,7 +41,7 @@ class RLMCodingAgent(CodingAgent):
         recorder: TrajectoryRecorderProtocol | None = None,
         event_handler: AgentEventHandler | None = None,
         location: str | None = None,
-        dspy_config: DSPyConfigProtocol | None = None,
+        dspy_config: object | None = None,
         rlm_mode: str = "compatibility",
     ):
         """Initialise the RLM coding agent.
@@ -57,7 +56,7 @@ class RLMCodingAgent(CodingAgent):
                 interface consistency).
             location: Vertex AI location (e.g. ``"global"``, ``"us-central1"``).
                 Forwarded as ``vertex_location`` to litellm.
-            dspy_config: Optional DSPy configuration for optimised prompts.
+            dspy_config: Ignored compatibility argument.
         """
         self.model = model or "vertex_ai/gemini-2.0-flash"
         self.recorder: TrajectoryRecorderProtocol = recorder or NullTrajectoryRecorder()

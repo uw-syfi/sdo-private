@@ -311,19 +311,6 @@ class TestHybridRegistration:
         agent = create_agent_from_config("/tmp", config=config)
         assert agent.location == "us-west1"  # type: ignore[attr-defined]
 
-    def test_factory_forwards_dspy_config(self):
-        from app_operator.cli_agent.factory import create_agent_from_config
-        from app_operator.config import AgentConfig, Config, DSPyConfig
-
-        dspy_cfg = DSPyConfig()
-        config = Config(
-            agent=AgentConfig(backend="hybrid", model_config=ModelConfig.from_string("test-model")),
-            dspy=dspy_cfg,
-        )
-        agent = create_agent_from_config("/tmp", config=config)
-        assert isinstance(agent, HybridCodingAgent)
-        assert agent.dspy_config is dspy_cfg  # type: ignore[attr-defined]
-
     def test_factory_forwards_rlm_mode(self):
         from app_operator.cli_agent.factory import create_agent_from_config
         from app_operator.config import AgentConfig, Config, RLMConfig
@@ -338,7 +325,7 @@ class TestHybridRegistration:
 
 
 # ---------------------------------------------------------------------------
-# dspy_config storage
+# dspy_config compatibility
 # ---------------------------------------------------------------------------
 
 
