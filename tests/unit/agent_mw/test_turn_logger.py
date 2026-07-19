@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Unit tests for TurnLoggingMiddleware."""
 
 from __future__ import annotations
@@ -17,12 +18,12 @@ from libs.pydantic_agent import BaseAgent
 # ---------------------------------------------------------------------------
 
 
-def echo(ctx, message: str) -> str:
+def echo(ctx: Any, message: str) -> str:
     return f"echo: {message}"
 
 
-def _make_agent(middleware=None, call_tools: Any = "all"):
-    class ConcreteAgent(BaseAgent):
+def _make_agent(middleware: list[Any] | None = None, call_tools: Any = "all") -> BaseAgent[Any]:
+    class ConcreteAgent(BaseAgent[Any]):
         def __init__(self):
             super().__init__(None, agent_name="test-agent", middleware=middleware or [])
             self._agent = Agent(

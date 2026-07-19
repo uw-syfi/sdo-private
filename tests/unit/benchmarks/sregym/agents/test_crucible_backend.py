@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Unit tests for the Crucible backend abstractions (Phase 1).
 
 Tests the new ``backend/`` package without modifying any existing code.
@@ -5,7 +6,7 @@ Tests the new ``backend/`` package without modifying any existing code.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,6 +17,9 @@ from benchmarks.sregym.agents.crucible.agents.base import (
     RunSubagent,
     ShortCircuitSignal,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ── AgentResult ──────────────────────────────────────────────────────────
 
@@ -44,7 +48,7 @@ class TestAgentResult:
 
     def test_interrupted(self):
         exc = RuntimeError("short-circuit")
-        r = AgentResult(completed=False, interrupt_data=exc)
+        r = AgentResult[Any](completed=False, interrupt_data=exc)
         assert not r.completed
         assert r.interrupt_data is exc
 
@@ -62,7 +66,7 @@ class TestAgentResult:
         assert r.unwrap("my-agent") == 42
 
     def test_unwrap_not_completed(self):
-        r = AgentResult(completed=False)
+        r = AgentResult[Any](completed=False)
         with pytest.raises(RuntimeError, match="did not produce output"):
             r.unwrap()
 
@@ -72,7 +76,7 @@ class TestAgentResult:
             r.unwrap()
 
     def test_unwrap_error_includes_agent_name(self):
-        r = AgentResult(completed=False)
+        r = AgentResult[Any](completed=False)
         with pytest.raises(RuntimeError, match="my-agent"):
             r.unwrap("my-agent")
 
@@ -130,10 +134,10 @@ class TestRunSubagentProtocol:
         async def my_subagent(
             *,
             prompt: str,
-            output_type: type,
-            tools: list | None = None,
+            output_type: type[Any],
+            tools: list[Any] | None = None,
             agent_name: str = "",
-            model_settings: dict | None = None,
+            model_settings: dict[str, Any] | None = None,
             usage_collector: Any | None = None,
         ) -> Any:
             return "result"
@@ -577,7 +581,7 @@ class TestAgentCLIDriverJsonParsing:
 
         class MyModel(BaseModel):
             name: str
-            meta: dict
+            meta: dict[str, Any]
 
         text = 'Result: {"name": "deep", "meta": {"inner": {"level": 3}}}'
         result = AgentCLIDriver._parse_json_from_text(text, MyModel)
@@ -632,7 +636,7 @@ class TestAgentCLIDriverInterruptReconstruction:
 
 
 class TestAgentCLIDriverResultFile:
-    def test_read_valid(self, tmp_path):
+    def test_read_valid(self, tmp_path: Path):
         from benchmarks.sregym.agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         path = tmp_path / "result.json"
@@ -647,7 +651,7 @@ class TestAgentCLIDriverResultFile:
         result = AgentCLIDriver._read_result_file("/nonexistent/path")
         assert result is None
 
-    def test_read_empty(self, tmp_path):
+    def test_read_empty(self, tmp_path: Path):
         from benchmarks.sregym.agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         path = tmp_path / "result.json"
@@ -655,7 +659,7 @@ class TestAgentCLIDriverResultFile:
         result = AgentCLIDriver._read_result_file(str(path))
         assert result is None
 
-    def test_read_invalid_json(self, tmp_path):
+    def test_read_invalid_json(self, tmp_path: Path):
         from benchmarks.sregym.agents.crucible.agents.drivers.agent_cli_driver import AgentCLIDriver
 
         path = tmp_path / "result.json"
@@ -709,7 +713,7 @@ class TestAgentCLIDriverGetJsonSchema:
             y: int
             z: float
             flag: bool
-            items: list
+            items: list  # pyright: ignore[reportMissingTypeArgument]
 
         schema = AgentCLIDriver._get_json_schema(D)
         assert schema["type"] == "object"
@@ -752,7 +756,7 @@ class TestCreateDriverFactory:
 
 
 class TestMCPServerIPC:
-    def test_write_and_read_result_file(self, tmp_path):
+    def test_write_and_read_result_file(self, tmp_path: Path):
         from benchmarks.sregym.agents.crucible.tools.mcp_server import _write_result_file
 
         path = str(tmp_path / "result.json")

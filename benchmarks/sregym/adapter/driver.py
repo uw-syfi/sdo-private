@@ -12,7 +12,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from benchmarks.sregym.adapter.runtime import RuntimeConfig, run_production_runtime
@@ -23,6 +23,15 @@ from sdo.agent_runtime.lifecycle import reuse_initial_lifecycle_if_valid, run_in
 logger = logging.getLogger(__name__)
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+def _string_object_mapping(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    mapping = cast("dict[object, object]", value)
+    if not all(isinstance(key, str) for key in mapping):
+        return None
+    return cast("dict[str, object]", mapping)
 
 
 def _cleanup_defer_timeout_seconds() -> float:
@@ -76,10 +85,11 @@ def _configuration() -> dict[str, Any]:
     raw = os.getenv("SREGYM_EXPERIMENT_AGENT_CONFIG", "").strip()
     if not raw:
         return {}
-    decoded = json.loads(raw)
-    if not isinstance(decoded, dict):
+    decoded: object = json.loads(raw)
+    config = _string_object_mapping(decoded)
+    if config is None:
         raise ValueError("SREGYM_EXPERIMENT_AGENT_CONFIG must contain a JSON object")
-    return decoded
+    return cast("dict[str, Any]", config)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -156,21 +166,25 @@ def _deployed_health_objective(
         details = completed.stderr.strip() or completed.stdout.strip()
         raise RuntimeError(f"cannot inventory deployed SREGym resources: {details}")
     try:
-        payload = json.loads(completed.stdout)
+        payload: object = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError("kubectl returned an invalid deployed-resource inventory") from exc
-    items = payload.get("items") if isinstance(payload, dict) else None
+    inventory = _string_object_mapping(payload)
+    if inventory is None:
+        raise RuntimeError("kubectl deployed-resource inventory is not a JSON object")
+    items = inventory.get("items")
     if not isinstance(items, list):
         raise RuntimeError("kubectl deployed-resource inventory has no items list")
+    inventory_items = cast("list[object]", items)
 
     def names(kind: str) -> list[str]:
         return sorted(
             {
                 name
-                for item in items
-                if isinstance(item, dict) and item.get("kind") == kind
-                for metadata in [item.get("metadata")]
-                if isinstance(metadata, dict)
+                for item in inventory_items
+                if (item_document := _string_object_mapping(item)) is not None and item_document.get("kind") == kind
+                for metadata_value in [item_document.get("metadata")]
+                if (metadata := _string_object_mapping(metadata_value)) is not None
                 for name in [metadata.get("name")]
                 if isinstance(name, str) and name
             }

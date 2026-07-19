@@ -1,7 +1,9 @@
+# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -14,11 +16,19 @@ from sdo.operational_memory.broker_service import (
     BrokerServiceError,
     ControllerRolloutRecord,
 )
-from sdo.operational_memory.commit_broker import CommitBroker
+from sdo.operational_memory.commit_broker import CommitBroker, CommitResult
 from sdo.operational_memory.models import OutcomeClassification, ValidatorNetworkPolicyCanary
 from sdo.operational_memory.repository import MemoryRepository
 from sdo.operational_memory.validation import MemoryValidator
 from tests.unit.sdo.operational_memory.test_memory import _git, _init_repository, _write_memory
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from sdo.agent_runtime.responder.reflection import CodexSessionBackend
+    from sdo.operational_memory.broker_service import OutcomeReflector
+    from sdo.operational_memory.models import ArtifactOwner
+    from sdo.operational_memory.sandbox import KubernetesJobSandboxRunner
 
 
 class AcceptRepairValidator:
@@ -191,13 +201,27 @@ def _closure(worktree: Path, base_commit: str) -> BrokerClosure:
     )
 
 
-def _service(target: Path, worktrees: Path, validator: AcceptRepairValidator, **kwargs: object) -> BrokerService:
+def _service(
+    target: Path,
+    worktrees: Path,
+    validator: AcceptRepairValidator,
+    *,
+    checkpoint: Callable[[str], None] | None = None,
+    reflector: OutcomeReflector | None = None,
+) -> BrokerService:
     broker = CommitBroker(
         target,
         validator=MemoryValidator(run_diagnostics=False),
         proposal_validator=validator,
     )
-    return BrokerService(target, worktrees, broker=broker, responder_model="gpt-5", **kwargs)
+    return BrokerService(
+        target,
+        worktrees,
+        broker=broker,
+        responder_model="gpt-5",
+        checkpoint=checkpoint,
+        reflector=reflector,
+    )
 
 
 def test_production_broker_configures_same_session_reflector() -> None:
@@ -208,10 +232,11 @@ def test_production_broker_configures_same_session_reflector() -> None:
         timeout_seconds=321,
     )
 
-    assert reflector.backend.executable == "codex-custom"
-    assert reflector.backend.model == "gpt-5"
-    assert reflector.backend.reasoning_effort == "high"
-    assert reflector.backend.timeout_seconds == 321
+    backend = cast("CodexSessionBackend", reflector.backend)
+    assert backend.executable == "codex-custom"
+    assert backend.model == "gpt-5"
+    assert backend.reasoning_effort == "high"
+    assert backend.timeout_seconds == 321
 
 
 def test_in_cluster_broker_uses_isolated_kubernetes_validator_job() -> None:
@@ -223,7 +248,7 @@ def test_in_cluster_broker_uses_isolated_kubernetes_validator_job() -> None:
         repository_mount_path=Path("/workspace"),
     )
 
-    sandbox = validator.sandbox_runner
+    sandbox = cast("KubernetesJobSandboxRunner", validator.sandbox_runner)
     assert sandbox.__class__.__name__ == "KubernetesJobSandboxRunner"
     assert sandbox.namespace == "demo"
     assert sandbox.image == "sdo-detector-validator:test"
@@ -253,6 +278,47 @@ def test_closure_persists_validator_network_policy_canaries_in_durable_ledger(tm
     reloaded = service._load("inc-20260709-0001")
     assert reloaded is not None
     assert reloaded.validator_network_policy_canaries == state.validator_network_policy_canaries
+
+
+def test_closure_rejects_missing_outcome_commit_sha(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    broker = CommitBroker(
+        target,
+        validator=MemoryValidator(run_diagnostics=False),
+        proposal_validator=AcceptRepairValidator(),
+    )
+    original_commit = broker.commit
+
+    def commit_without_outcome_sha(
+        *,
+        incident_worktree: Path,
+        incident_id: str,
+        actor: ArtifactOwner,
+        phase: str = "memory",
+    ) -> CommitResult:
+        result = original_commit(
+            incident_worktree=incident_worktree,
+            incident_id=incident_id,
+            actor=actor,
+            phase=phase,
+        )
+        if phase == "outcome":
+            object.__setattr__(result, "commit_sha", None)
+        return result
+
+    monkeypatch.setattr(broker, "commit", commit_without_outcome_sha)
+    service = BrokerService(target, worktrees, broker=broker)
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    with pytest.raises(BrokerServiceError, match="did not produce an outcome commit"):
+        service.process_closure(_closure(workspace.path, workspace.base_commit))
 
 
 @pytest.mark.parametrize(

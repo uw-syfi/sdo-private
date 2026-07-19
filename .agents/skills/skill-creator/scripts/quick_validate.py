@@ -6,11 +6,27 @@ Quick validation script for skills - minimal version
 import re
 import sys
 from pathlib import Path
+from typing import Any, TypeAlias, cast
 
 import yaml
 
+ValidationResult: TypeAlias = tuple[bool, str]
+YamlObject: TypeAlias = dict[str, object]
 
-def validate_skill(skill_path):
+ALLOWED_PROPERTIES = {"name", "description", "license", "allowed-tools", "metadata"}
+
+
+def _yaml_object(value: Any) -> YamlObject | None:
+    """Narrow a dynamically decoded YAML value to a string-key mapping."""
+    if not isinstance(value, dict):
+        return None
+    mapping = cast("dict[object, object]", value)
+    if not all(isinstance(key, str) for key in mapping):
+        return None
+    return cast("YamlObject", mapping)
+
+
+def validate_skill(skill_path: str | Path) -> ValidationResult:
     """Basic validation of a skill"""
     skill_path = Path(skill_path)
 
@@ -33,14 +49,12 @@ def validate_skill(skill_path):
 
     # Parse YAML frontmatter
     try:
-        frontmatter = yaml.safe_load(frontmatter_text)
-        if not isinstance(frontmatter, dict):
+        decoded: Any = yaml.safe_load(frontmatter_text)
+        frontmatter = _yaml_object(decoded)
+        if frontmatter is None:
             return False, "Frontmatter must be a YAML dictionary"
     except yaml.YAMLError as e:
         return False, f"Invalid YAML in frontmatter: {e}"
-
-    # Define allowed properties
-    ALLOWED_PROPERTIES = {"name", "description", "license", "allowed-tools", "metadata"}
 
     # Check for unexpected properties (excluding nested keys under metadata)
     unexpected_keys = set(frontmatter.keys()) - ALLOWED_PROPERTIES

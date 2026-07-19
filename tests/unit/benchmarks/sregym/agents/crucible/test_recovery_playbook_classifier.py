@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Tests for the recovery-path playbook classifier.
 
 The classifier picks a KB slug (from ``long_term_summary.md``) for a recovered
@@ -8,6 +9,7 @@ Only slugs present in the summary are accepted; anything else falls back to
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -16,6 +18,9 @@ from benchmarks.sregym.agents.crucible.recovery_playbook_classifier import (
     RecoveryPlaybookMatch,
     classify_recovery_playbook,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _SUMMARY = """\
 # Long Term Summary
@@ -130,7 +135,7 @@ class TestClassifyRecoveryPlaybook:
         assert picked is None
 
     @pytest.mark.anyio
-    async def test_orchestrator_shortcut_invokes_playbook_on_classifier_hit(self, tmp_path):
+    async def test_orchestrator_shortcut_invokes_playbook_on_classifier_hit(self, tmp_path: Path):
         from unittest.mock import patch
 
         from benchmarks.sregym.agents.crucible.knowledge_base.base import InjectedKB
@@ -189,7 +194,7 @@ class TestClassifyRecoveryPlaybook:
         assert mock_shortcut.await_args.kwargs["slug"] == "redis_oom"
 
     @pytest.mark.anyio
-    async def test_orchestrator_shortcut_returns_none_when_classifier_misses(self, tmp_path):
+    async def test_orchestrator_shortcut_returns_none_when_classifier_misses(self, tmp_path: Path):
         from unittest.mock import patch
 
         from benchmarks.sregym.agents.crucible.knowledge_base.base import InjectedKB

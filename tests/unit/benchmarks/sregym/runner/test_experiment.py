@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Tests for benchmarks.sregym.runner.experiment."""
 
 from __future__ import annotations

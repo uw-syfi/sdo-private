@@ -8,7 +8,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generic, Protocol, TypeVar, overload
+from typing import Any, Generic, Protocol, TypeVar, cast, overload
 
 import yaml
 
@@ -22,6 +22,19 @@ RUNTIME_BUILD_ROOT = "/workspace/.sdo-runtime/build"
 RUNTIME_TMPDIR = f"{RUNTIME_BUILD_ROOT}/tmp"
 RUNTIME_GO_TMPDIR = f"{RUNTIME_BUILD_ROOT}/go-tmp"
 RUNTIME_GO_CACHE = f"{RUNTIME_BUILD_ROOT}/go-cache"
+
+
+def _mapping(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    return cast("dict[str, object]", value)
+
+
+def _json_mapping(text: str) -> dict[str, object]:
+    value = _mapping(cast("object", json.loads(text)))
+    if value is None:
+        raise TypeError("Kubernetes JSON response must be an object")
+    return value
 
 
 @dataclass(frozen=True)
@@ -346,12 +359,18 @@ def _controller_job_logs(namespace: str) -> str:
         check=False,
     )
     if pods_result.returncode == 0:
-        items = json.loads(pods_result.stdout).get("items", [])
-        succeeded = sorted(
-            str(item.get("metadata", {}).get("name", ""))
-            for item in items
-            if isinstance(item, dict) and item.get("status", {}).get("phase") == "Succeeded"
-        )
+        items = _json_mapping(pods_result.stdout).get("items", [])
+        succeeded: list[str] = []
+        if isinstance(items, list):
+            for raw_item in cast("list[object]", items):
+                item = _mapping(raw_item)
+                if item is None:
+                    continue
+                metadata = _mapping(item.get("metadata"))
+                status = _mapping(item.get("status"))
+                if metadata is not None and status is not None and status.get("phase") == "Succeeded":
+                    succeeded.append(str(metadata.get("name", "")))
+        succeeded.sort()
         if succeeded:
             return kubectl(["logs", f"pod/{succeeded[-1]}"], namespace=namespace, check=False).stdout
     return kubectl(["logs", "job/sdo-controller-run"], namespace=namespace, check=False).stdout
@@ -377,7 +396,7 @@ def _wait_for_controller_job(config: ControllerInstallConfig) -> None:
         if completed.returncode != 0:
             time.sleep(2)
             continue
-        state = _job_state(json.loads(completed.stdout))
+        state = _job_state(_json_mapping(completed.stdout))
         if state == "complete":
             return
         if state == "failed":
@@ -396,35 +415,38 @@ def _wait_for_repository_sync(namespace: str, timeout_seconds: int = 180) -> Non
             namespace=namespace,
             check=False,
         )
-        if completed.returncode == 0 and _pod_is_ready(json.loads(completed.stdout)):
+        if completed.returncode == 0 and _pod_is_ready(_json_mapping(completed.stdout)):
             return
         time.sleep(2)
     raise ControllerInstallError("repository sync Pod did not become ready")
 
 
-def _pod_is_ready(pod: dict[str, Any]) -> bool:
-    status = pod.get("status")
-    if not isinstance(status, dict):
+def _pod_is_ready(pod: dict[str, object]) -> bool:
+    status = _mapping(pod.get("status"))
+    if status is None:
         return False
     conditions = status.get("conditions", [])
-    return isinstance(conditions, list) and any(
-        isinstance(condition, dict) and condition.get("type") == "Ready" and condition.get("status") == "True"
-        for condition in conditions
-    )
+    if not isinstance(conditions, list):
+        return False
+    for raw_condition in cast("list[object]", conditions):
+        condition = _mapping(raw_condition)
+        if condition is not None and condition.get("type") == "Ready" and condition.get("status") == "True":
+            return True
+    return False
 
 
-def _job_state(job: dict[str, Any]) -> str:
-    status = job.get("status")
-    if not isinstance(status, dict):
+def _job_state(job: dict[str, object]) -> str:
+    status = _mapping(job.get("status"))
+    if status is None:
         return "running"
     if status.get("succeeded", 0):
         return "complete"
     conditions = status.get("conditions", [])
-    if isinstance(conditions, list) and any(
-        isinstance(condition, dict) and condition.get("type") == "Failed" and condition.get("status") == "True"
-        for condition in conditions
-    ):
-        return "failed"
+    if isinstance(conditions, list):
+        for raw_condition in cast("list[object]", conditions):
+            condition = _mapping(raw_condition)
+            if condition is not None and condition.get("type") == "Failed" and condition.get("status") == "True":
+                return "failed"
     return "running"
 
 

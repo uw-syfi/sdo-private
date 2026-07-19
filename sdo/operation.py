@@ -8,7 +8,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from sdo.agent_runtime.lifecycle import (
     CodexDeploymentBackend,
@@ -36,6 +36,11 @@ class OperationError(RuntimeError):
     """Raised when the production operation path cannot be started."""
 
 
+def _require_type(value: object, expected: type[object], message: str) -> None:
+    if not isinstance(value, expected):
+        raise TypeError(message)
+
+
 @dataclass(frozen=True)
 class OperationConfig:
     repository: Path
@@ -52,8 +57,7 @@ class OperationConfig:
     timeout_seconds: int = 1800
 
     def __post_init__(self) -> None:
-        if not isinstance(self.repository, Path):
-            raise TypeError("repository must be a Path")
+        _require_type(self.repository, Path, "repository must be a Path")
         object.__setattr__(self, "repository", self.repository.resolve())
         for name in (
             "namespace",
@@ -71,12 +75,10 @@ class OperationConfig:
                 raise TypeError(f"{name} must be a string")
             if not value.strip():
                 raise ValueError(f"{name} must not be empty")
-        if not isinstance(self.max_attempts, int):
-            raise TypeError("max_attempts must be an integer")
+        _require_type(self.max_attempts, int, "max_attempts must be an integer")
         if self.max_attempts < 1:
             raise ValueError("max_attempts must be positive")
-        if not isinstance(self.timeout_seconds, int):
-            raise TypeError("timeout_seconds must be an integer")
+        _require_type(self.timeout_seconds, int, "timeout_seconds must be an integer")
         if self.timeout_seconds < 1:
             raise ValueError("timeout_seconds must be positive")
 
@@ -281,11 +283,12 @@ def _finding_payloads(stdout: str) -> list[dict[str, object]]:
         if not raw_line.strip():
             continue
         try:
-            payload = json.loads(raw_line)
+            decoded = cast("object", json.loads(raw_line))
         except json.JSONDecodeError as exc:
             raise ValueError(f"invalid finding JSON on line {line_number}: {exc.msg}") from exc
-        if not isinstance(payload, dict):
+        if not isinstance(decoded, dict):
             raise ValueError(f"invalid finding JSON on line {line_number}: expected an object")
+        payload = cast("dict[str, object]", decoded)
         findings.append(payload)
     return findings
 

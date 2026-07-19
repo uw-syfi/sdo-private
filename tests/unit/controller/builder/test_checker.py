@@ -1,6 +1,8 @@
+# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -295,7 +297,11 @@ printf '%s|%s\\n' "$PWD" "$*" >> "$SDO_GO_CALLS_LOG"
 
 def test_go_runner_uses_common_local_go_install_when_go_not_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SDO_CONTROLLER_GO", raising=False)
-    monkeypatch.setattr("controller.builder.go_runner.shutil.which", lambda _name: None)
+
+    def missing_binary(_name: str) -> None:
+        return None
+
+    monkeypatch.setattr("controller.builder.go_runner.shutil.which", missing_binary)
 
     original_is_file = Path.is_file
 
@@ -482,9 +488,7 @@ done
     assert calls[1].startswith("build -buildvcs=false -o ")
     argv = controller_log.read_text(encoding="utf-8")
     assert "--dispatcher-mode job" in argv
-    assert (
-        f"--dispatcher {os.sys.executable} --dispatcher-arg -m --dispatcher-arg sdo.agent_runtime.responder.job" in argv
-    )
-    assert f"--broker {os.sys.executable} --broker-arg -m --broker-arg sdo.agent_runtime.responder.broker_cli" in argv
+    assert f"--dispatcher {sys.executable} --dispatcher-arg -m --dispatcher-arg sdo.agent_runtime.responder.job" in argv
+    assert f"--broker {sys.executable} --broker-arg -m --broker-arg sdo.agent_runtime.responder.broker_cli" in argv
     assert f"--app-root {app_root}" in argv
     assert f"--broker-worktree-root {tmp_path / 'workspace' / 'worktrees'}" in argv

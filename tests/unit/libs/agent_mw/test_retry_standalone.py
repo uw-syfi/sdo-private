@@ -1,7 +1,9 @@
+# pyright: reportPrivateUsage=false
 """Tests for standalone retry wrappers: arun_with_retry, run_with_retry_sync."""
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -94,7 +96,7 @@ class TestArunWithRetry:
 
     @pytest.mark.asyncio
     @patch("libs.agent_mw._retry.asyncio.sleep", new_callable=AsyncMock)
-    async def test_retries_exhausted_propagates(self, mock_sleep):
+    async def test_retries_exhausted_propagates(self, mock_sleep: Any):
         agent = Agent(TestModel(call_tools=[]), output_type=str)
 
         with patch.object(agent, "iter") as mock_iter:
@@ -111,7 +113,7 @@ class TestArunWithRetry:
 
         events_received: list[object] = []
 
-        async def handler(ctx, events):
+        async def handler(ctx: Any, events: Any) -> None:
             events_received.extend([event async for event in events])
 
         result = await arun_with_retry(agent, "hello", event_stream_handler=handler)
@@ -131,13 +133,13 @@ class TestRunWithRetrySync:
         assert result.output is not None
 
     @patch("libs.agent_mw._retry.time.sleep")
-    def test_retries_then_succeeds(self, mock_sleep):
+    def test_retries_then_succeeds(self, mock_sleep: Any):
         agent = Agent(TestModel(call_tools=[]), output_type=str)
 
         call_count = 0
         original_run_sync = agent.run_sync
 
-        def _failing_then_ok(*args, **kwargs):
+        def _failing_then_ok(*args: Any, **kwargs: Any) -> Any:
             nonlocal call_count
             call_count += 1
             if call_count <= 2:
@@ -151,7 +153,7 @@ class TestRunWithRetrySync:
         assert mock_sleep.call_count == 2
 
     @patch("libs.agent_mw._retry.time.sleep")
-    def test_non_retryable_propagates(self, mock_sleep):
+    def test_non_retryable_propagates(self, mock_sleep: Any):
         agent = Agent(TestModel(call_tools=[]), output_type=str)
 
         with patch.object(agent, "run_sync", side_effect=_make_http_error(400)):
@@ -160,7 +162,7 @@ class TestRunWithRetrySync:
         mock_sleep.assert_not_called()
 
     @patch("libs.agent_mw._retry.time.sleep")
-    def test_retries_exhausted_propagates(self, mock_sleep):
+    def test_retries_exhausted_propagates(self, mock_sleep: Any):
         agent = Agent(TestModel(call_tools=[]), output_type=str)
 
         with patch.object(agent, "run_sync", side_effect=_make_http_error(429)):

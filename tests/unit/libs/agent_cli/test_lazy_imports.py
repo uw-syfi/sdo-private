@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import importlib
 import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pytest
 
 
-def test_agent_cli_import_does_not_require_litellm(monkeypatch) -> None:
+def test_agent_cli_import_does_not_require_litellm(monkeypatch: pytest.MonkeyPatch) -> None:
     import libs.agent_cli as agent_cli
 
     monkeypatch.setitem(sys.modules, "litellm", None)

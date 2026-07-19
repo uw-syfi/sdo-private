@@ -22,9 +22,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _write_task(pending_dir: Path, problem_id: str = "test_problem", **overrides) -> Path:
+def _write_task(pending_dir: Path, problem_id: str = "test_problem", **overrides: object) -> Path:
     """Helper to write a valid KB update task file."""
-    task = {
+    task: dict[str, object] = {
         "session_files": {"diagnosis": None, "mitigation": None},
         "stage_outputs_file": None,
         "kb_dir": str(pending_dir.parent),
@@ -131,11 +131,11 @@ class TestRunWorker:
     async def test_writes_pid_file(self, tmp_path: Path):
         """PID file is written on startup."""
         pid_path = tmp_path / "kb_worker.pid"
-        pid_seen = []
+        pid_seen: list[int] = []
 
         original_sleep = asyncio.sleep
 
-        async def _capture_pid_and_timeout(*args, **kwargs):
+        async def _capture_pid_and_timeout(*_args: object, **_kwargs: object) -> None:
             if pid_path.exists():
                 pid_seen.append(int(pid_path.read_text().strip()))
             await original_sleep(0)
@@ -229,10 +229,10 @@ class TestEnsureKbWorker:
         kb_dir.mkdir()
         (kb_dir / "pending").mkdir()
 
-        results = []
+        results: list[int] = []
         barrier = threading.Barrier(4)
 
-        def _call():
+        def _call() -> None:
             barrier.wait()
             ensure_kb_worker(kb_dir)
             pid = int((kb_dir / "kb_worker.pid").read_text().strip())

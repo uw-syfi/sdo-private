@@ -1,8 +1,10 @@
+# pyright: reportPrivateUsage=false
 """Unit tests for benchmarks.sregym.agents.crucible.middleware."""
 
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from libs.agent_mw import (
@@ -13,7 +15,7 @@ from libs.agent_mw import (
 )
 
 
-def _make_event(tool_name: str, args: dict | None = None) -> MagicMock:
+def _make_event(tool_name: str, args: dict[str, Any] | None = None) -> MagicMock:
     event = MagicMock()
     event.part.tool_name = tool_name
     event.part.args = args if args is not None else {"cmd": "ls"}
@@ -42,7 +44,13 @@ def _make_ctx(run_step: int = 1) -> MagicMock:
 
 
 class TestLoopDetectionMiddleware:
-    def _call(self, mw: LoopDetectionMiddleware, n: int = 1, tool: str = "t", args: dict | None = None):
+    def _call(
+        self,
+        mw: LoopDetectionMiddleware,
+        n: int = 1,
+        tool: str = "t",
+        args: dict[str, Any] | None = None,
+    ) -> None:
         if args is None:
             args = {"cmd": "ls"}
         for _ in range(n):

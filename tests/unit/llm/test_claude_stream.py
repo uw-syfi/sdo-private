@@ -1,6 +1,8 @@
 import io
 import json
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,13 +12,13 @@ from libs.agent_cli.claude import ClaudeCodeCodingAgent
 
 
 @pytest.fixture
-def mock_env():
+def mock_env() -> Any:
     """Mock environment for agent initialization."""
     return {"PATH": "/usr/bin:/bin", "HOME": "/tmp", "USER": "test"}
 
 
 @pytest.fixture
-def mock_recorder():
+def mock_recorder() -> Any:
     """Mock TrajectoryRecorder."""
     recorder = MagicMock()
     recorder.add_tool_call = MagicMock()
@@ -26,9 +28,9 @@ def mock_recorder():
 
 
 @pytest.fixture
-def claude_agent(mock_llm_subprocess, mock_env, mock_recorder):
+def claude_agent(mock_llm_subprocess: Any, mock_env: Any, mock_recorder: Any) -> Iterator[ClaudeCodeCodingAgent]:
     """Create a ClaudeCodeCodingAgent instance with mocked environment."""
-    mock_popen, mock_which = mock_llm_subprocess
+    _mock_popen, mock_which = mock_llm_subprocess
     mock_which.return_value = "/usr/bin/claude"
 
     with patch(
@@ -40,7 +42,7 @@ def claude_agent(mock_llm_subprocess, mock_env, mock_recorder):
             yield agent
 
 
-def test_parse_system_event(claude_agent, mock_llm_subprocess):
+def test_parse_system_event(claude_agent: ClaudeCodeCodingAgent, mock_llm_subprocess: Any):
     """Test that system events are parsed and handled silently."""
     mock_popen, _ = mock_llm_subprocess
     mock_process = mock_popen.return_value
@@ -69,7 +71,7 @@ def test_parse_system_event(claude_agent, mock_llm_subprocess):
     assert "system" not in output.lower()
 
 
-def test_parse_text_streaming(claude_agent, mock_llm_subprocess):
+def test_parse_text_streaming(claude_agent: ClaudeCodeCodingAgent, mock_llm_subprocess: Any):
     """Test that multiple text events accumulate correctly."""
     mock_popen, _ = mock_llm_subprocess
     mock_process = mock_popen.return_value
@@ -118,7 +120,7 @@ def test_parse_text_streaming(claude_agent, mock_llm_subprocess):
     assert "[Claude] World" in output
 
 
-def test_parse_tool_use(claude_agent, mock_llm_subprocess):
+def test_parse_tool_use(claude_agent: ClaudeCodeCodingAgent, mock_llm_subprocess: Any):
     """Test that tool use events render with truncation and blue color."""
     mock_popen, _ = mock_llm_subprocess
     mock_process = mock_popen.return_value
@@ -163,7 +165,7 @@ def test_parse_tool_use(claude_agent, mock_llm_subprocess):
     assert "x" * 300 not in output
 
 
-def test_parse_tool_result(claude_agent, mock_llm_subprocess):
+def test_parse_tool_result(claude_agent: ClaudeCodeCodingAgent, mock_llm_subprocess: Any):
     """Test that tool results render with green color and record to trajectory."""
     mock_popen, _ = mock_llm_subprocess
     mock_process = mock_popen.return_value
@@ -234,7 +236,7 @@ def test_parse_tool_result(claude_agent, mock_llm_subprocess):
     assert "File contents here" in output
 
 
-def test_tool_result_mapping(claude_agent, mock_llm_subprocess):
+def test_tool_result_mapping(claude_agent: ClaudeCodeCodingAgent, mock_llm_subprocess: Any):
     """Test that tool_use_id correctly maps to tool names."""
     mock_popen, _ = mock_llm_subprocess
     mock_process = mock_popen.return_value
@@ -292,7 +294,7 @@ def test_tool_result_mapping(claude_agent, mock_llm_subprocess):
         logger.remove(handler_id)
 
 
-def test_final_result_returned(claude_agent, mock_llm_subprocess):
+def test_final_result_returned(claude_agent: ClaudeCodeCodingAgent, mock_llm_subprocess: Any):
     """Test that result event's 'result' field becomes return value."""
     mock_popen, _ = mock_llm_subprocess
     mock_process = mock_popen.return_value
@@ -329,7 +331,7 @@ def test_final_result_returned(claude_agent, mock_llm_subprocess):
     assert result == final_summary
 
 
-def test_prefix_handling(claude_agent, mock_llm_subprocess):
+def test_prefix_handling(claude_agent: ClaudeCodeCodingAgent, mock_llm_subprocess: Any):
     """Test that [Claude] prefix appears on new lines correctly."""
     mock_popen, _ = mock_llm_subprocess
     mock_process = mock_popen.return_value
@@ -375,7 +377,7 @@ def test_prefix_handling(claude_agent, mock_llm_subprocess):
     assert len(prefixed_lines) >= 2
 
 
-def test_multiline_streaming(claude_agent, mock_llm_subprocess):
+def test_multiline_streaming(claude_agent: ClaudeCodeCodingAgent, mock_llm_subprocess: Any):
     """Test that text with newlines preserves prefix behavior."""
     mock_popen, _ = mock_llm_subprocess
     mock_process = mock_popen.return_value
@@ -411,7 +413,7 @@ def test_multiline_streaming(claude_agent, mock_llm_subprocess):
     assert "[Claude] Line 3" in output
 
 
-def test_non_json_fallback(claude_agent, mock_llm_subprocess):
+def test_non_json_fallback(claude_agent: ClaudeCodeCodingAgent, mock_llm_subprocess: Any):
     """Test that non-JSON lines are logged as-is."""
     mock_popen, _ = mock_llm_subprocess
     mock_process = mock_popen.return_value
@@ -448,7 +450,7 @@ def test_non_json_fallback(claude_agent, mock_llm_subprocess):
     assert "[Claude] Valid JSON" in output
 
 
-def test_empty_tool_result(claude_agent, mock_llm_subprocess):
+def test_empty_tool_result(claude_agent: ClaudeCodeCodingAgent, mock_llm_subprocess: Any):
     """Test that empty tool results show success message."""
     mock_popen, _ = mock_llm_subprocess
     mock_process = mock_popen.return_value
@@ -508,7 +510,7 @@ def test_empty_tool_result(claude_agent, mock_llm_subprocess):
     assert "write_file ran successfully" in output
 
 
-def test_trajectory_recording(claude_agent, mock_llm_subprocess):
+def test_trajectory_recording(claude_agent: ClaudeCodeCodingAgent, mock_llm_subprocess: Any):
     """Test that tool calls are recorded with correct args and duration."""
     mock_popen, _ = mock_llm_subprocess
     mock_process = mock_popen.return_value
@@ -569,7 +571,7 @@ def test_trajectory_recording(claude_agent, mock_llm_subprocess):
     assert call_args["duration"] >= 0
 
 
-def test_parse_real_fixture(claude_agent, mock_llm_subprocess):
+def test_parse_real_fixture(claude_agent: ClaudeCodeCodingAgent, mock_llm_subprocess: Any):
     """Test parsing the real fixture file."""
     # Fix path since we moved the test file to tests/unit/llm
     fixture_path = Path(__file__).parents[2] / "fixtures" / "claude" / "example_stream_json.txt"

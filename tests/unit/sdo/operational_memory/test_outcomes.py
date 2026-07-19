@@ -19,26 +19,41 @@ def _contract_fixture(name: str) -> str:
     return (root / "tests" / "fixtures" / "sdo" / "contracts" / name).read_text(encoding="utf-8")
 
 
+def _mark_false_negative(facts: OutcomeFacts) -> OutcomeFacts:
+    return facts.model_copy(update={"missed_fault_detected": True})
+
+
+def _mark_failed(facts: OutcomeFacts) -> OutcomeFacts:
+    return facts.model_copy(update={"result": None, "dispatch_error": "job failed"})
+
+
+def _mark_cancelled(facts: OutcomeFacts) -> OutcomeFacts:
+    assert facts.result is not None
+    cancelled_result = facts.result.model_copy(update={"status": IncidentStatus.CANCELLED})
+    return facts.model_copy(update={"result": cancelled_result})
+
+
+def _mark_partial(facts: OutcomeFacts) -> OutcomeFacts:
+    return facts.model_copy(update={"health_verified": False, "verified_at": None})
+
+
+def _mark_false_positive(facts: OutcomeFacts) -> OutcomeFacts:
+    return facts.model_copy(update={"fault_confirmed": False})
+
+
+def _leave_successful(facts: OutcomeFacts) -> OutcomeFacts:
+    return facts
+
+
 @pytest.mark.parametrize(
     ("mutate", "expected"),
     [
-        (lambda facts: facts.model_copy(update={"missed_fault_detected": True}), OutcomeClassification.FALSE_NEGATIVE),
-        (
-            lambda facts: facts.model_copy(update={"result": None, "dispatch_error": "job failed"}),
-            OutcomeClassification.FAILED,
-        ),
-        (
-            lambda facts: facts.model_copy(
-                update={"result": facts.result.model_copy(update={"status": IncidentStatus.CANCELLED})}
-            ),
-            OutcomeClassification.CANCELLED,
-        ),
-        (
-            lambda facts: facts.model_copy(update={"health_verified": False, "verified_at": None}),
-            OutcomeClassification.PARTIAL,
-        ),
-        (lambda facts: facts.model_copy(update={"fault_confirmed": False}), OutcomeClassification.FALSE_POSITIVE),
-        (lambda facts: facts, OutcomeClassification.SUCCESS),
+        (_mark_false_negative, OutcomeClassification.FALSE_NEGATIVE),
+        (_mark_failed, OutcomeClassification.FAILED),
+        (_mark_cancelled, OutcomeClassification.CANCELLED),
+        (_mark_partial, OutcomeClassification.PARTIAL),
+        (_mark_false_positive, OutcomeClassification.FALSE_POSITIVE),
+        (_leave_successful, OutcomeClassification.SUCCESS),
     ],
 )
 def test_controller_facts_authoritatively_derive_all_outcome_classes(

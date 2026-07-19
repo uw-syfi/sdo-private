@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Tests for the generic BaseAgent and AgentMiddleware in libs/pydantic_agent."""
 
 from __future__ import annotations
@@ -15,22 +16,22 @@ from libs.pydantic_agent import AgentMiddleware, BaseAgent
 # ---------------------------------------------------------------------------
 
 
-def echo(ctx, message: str) -> str:
+def echo(ctx: Any, message: str) -> str:
     return f"echo: {message}"
 
 
-def shout(ctx, text: str) -> str:
+def shout(ctx: Any, text: str) -> str:
     return text.upper()
 
 
 def _make_agent(
-    middleware=None,
-    tools=None,
-    call_tools="all",
-    output_type=str,
-    agent_name="Test Agent",
-):
-    class ConcreteAgent(BaseAgent):
+    middleware: list[AgentMiddleware] | None = None,
+    tools: list[Any] | None = None,
+    call_tools: Any = "all",
+    output_type: Any = str,
+    agent_name: str = "Test Agent",
+) -> BaseAgent[Any]:
+    class ConcreteAgent(BaseAgent[Any]):
         def __init__(self):
             super().__init__(None, agent_name=agent_name, middleware=middleware or [])
             self._agent = Agent(
@@ -44,7 +45,7 @@ def _make_agent(
 
 
 class RecordingMiddleware(AgentMiddleware):
-    def __init__(self, name="mw"):
+    def __init__(self, name: str = "mw"):
         self.name = name
         self.tool_call_events: list[Any] = []
         self.tool_result_events: list[Any] = []
@@ -96,7 +97,7 @@ def test_after_run_called_with_none_ctx_by_default():
     mw = RecordingMiddleware()
     agent = _make_agent(middleware=[mw], call_tools=[])  # type: ignore[arg-type]
     agent._run("hi")
-    result, run_ctx = mw.after_run_calls[0]
+    _result, run_ctx = mw.after_run_calls[0]
     assert run_ctx is None
 
 
@@ -104,10 +105,10 @@ def test_after_run_called_in_registration_order():
     order: list[str] = []
 
     class OrderedMw(AgentMiddleware):
-        def __init__(self, label):
+        def __init__(self, label: str):
             self.label = label
 
-        def after_run(self, result, run_ctx=None):
+        def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
             order.append(self.label)
 
     mw0 = OrderedMw("first")
@@ -118,10 +119,10 @@ def test_after_run_called_in_registration_order():
 
 
 def test_after_run_receives_result():
-    received = []
+    received: list[Any] = []
 
     class CapturingMw(AgentMiddleware):
-        def after_run(self, result, run_ctx=None):
+        def after_run(self, result: Any, run_ctx: dict[str, Any] | None = None) -> None:
             received.append(result)
 
     agent = _make_agent(middleware=[CapturingMw()], call_tools=[])  # type: ignore[arg-type]
@@ -137,10 +138,10 @@ def test_no_middleware_runs_cleanly():
 
 
 def test_on_attach_called_on_init():
-    attached_agents = []
+    attached_agents: list[BaseAgent[Any]] = []
 
     class AttachRecordingMw(AgentMiddleware):
-        def on_attach(self, agent):
+        def on_attach(self, agent: BaseAgent[Any]) -> None:
             super().on_attach(agent)
             attached_agents.append(agent)
 
@@ -157,10 +158,10 @@ def test_agent_name_property():
 
 
 def test_agent_name_accessible_from_middleware():
-    names_seen = []
+    names_seen: list[str] = []
 
     class NameCaptureMw(AgentMiddleware):
-        def on_function_tool_call(self, event):
+        def on_function_tool_call(self, event: Any) -> None:
             names_seen.append(self._agent.agent_name)
 
     agent = _make_agent(middleware=[NameCaptureMw()], agent_name="Captured Agent")
@@ -172,10 +173,10 @@ def test_stream_events_called_in_registration_order():
     order: list[str] = []
 
     class OrderedMw(AgentMiddleware):
-        def __init__(self, label):
+        def __init__(self, label: str):
             self.label = label
 
-        def on_function_tool_call(self, event):
+        def on_function_tool_call(self, event: Any) -> None:
             order.append(self.label)
 
     mw0 = OrderedMw("mw0")

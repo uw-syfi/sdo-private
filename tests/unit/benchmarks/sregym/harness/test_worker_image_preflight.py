@@ -80,19 +80,25 @@ def test_reused_cluster_runs_required_image_preflight_before_return(
     module = _worker_infra()
     monkeypatch.setenv("SREGYM_REUSE_CLUSTER", "1")
     monkeypatch.setenv("SREGYM_KIND_REQUIRED_IMAGES", json.dumps(["controller:run"]))
-    monkeypatch.setattr(module, "stable_kubeconfig_path", lambda _worker: str(tmp_path / "stable"))
-    monkeypatch.setattr(module, "existing_cluster_is_reusable", lambda *_args: (True, ""))
-    monkeypatch.setattr(
-        module,
-        "_attach_existing_cluster",
-        lambda *_args: ("sregym-w0", str(tmp_path / "worker.kubeconfig")),
-    )
+
+    def stable_kubeconfig_path(_worker: int) -> str:
+        return str(tmp_path / "stable")
+
+    def existing_cluster_is_reusable(*_args: object) -> tuple[bool, str]:
+        return True, ""
+
+    def attach_existing_cluster(*_args: object) -> tuple[str, str]:
+        return "sregym-w0", str(tmp_path / "worker.kubeconfig")
+
+    monkeypatch.setattr(module, "stable_kubeconfig_path", stable_kubeconfig_path)
+    monkeypatch.setattr(module, "existing_cluster_is_reusable", existing_cluster_is_reusable)
+    monkeypatch.setattr(module, "_attach_existing_cluster", attach_existing_cluster)
     observed: list[tuple[str, list[str]]] = []
-    monkeypatch.setattr(
-        module,
-        "ensure_kind_images",
-        lambda cluster, images: observed.append((cluster, images)),
-    )
+
+    def record_images(cluster: str, images: list[str]) -> None:
+        observed.append((cluster, images))
+
+    monkeypatch.setattr(module, "ensure_kind_images", record_images)
 
     result = module.create_worker_cluster(0, str(tmp_path))
 
@@ -131,17 +137,16 @@ def test_cluster_preflight_loads_images_before_network_policy_canary(
     monkeypatch.setenv("SREGYM_KIND_REQUIRED_IMAGES", json.dumps(["controller:run", "validator:run"]))
     monkeypatch.setenv("SREGYM_KIND_REQUIRE_NETWORK_POLICY", "1")
     monkeypatch.setenv("SREGYM_KIND_NETWORK_POLICY_CANARY_IMAGE", "validator:run")
-    events: list[object] = []
-    monkeypatch.setattr(
-        module,
-        "ensure_kind_images",
-        lambda cluster, images: events.append(("images", cluster, images)),
-    )
-    monkeypatch.setattr(
-        module,
-        "verify_network_policy_enforcement",
-        lambda cluster, image: events.append(("network-policy", cluster, image)),
-    )
+    events: list[Any] = []
+
+    def record_images(cluster: str, images: list[str]) -> None:
+        events.append(("images", cluster, images))
+
+    def record_network_policy(cluster: str, image: str) -> None:
+        events.append(("network-policy", cluster, image))
+
+    monkeypatch.setattr(module, "ensure_kind_images", record_images)
+    monkeypatch.setattr(module, "verify_network_policy_enforcement", record_network_policy)
 
     module.preflight_cluster_requirements("sregym-w0")
 
@@ -163,26 +168,32 @@ def test_fresh_network_policy_cluster_installs_calico_before_ready_wait(
     )
     kubeconfig = tmp_path / "worker.kubeconfig"
     monkeypatch.setenv("SREGYM_KIND_REQUIRE_NETWORK_POLICY", "1")
-    monkeypatch.setattr(module, "worker_kind_config_path", lambda: str(source))
-    monkeypatch.setattr(module, "apply_worker_cpu_limit", lambda _cluster: None)
-    events: list[object] = []
+
+    def worker_kind_config_path() -> str:
+        return str(source)
+
+    def skip_cpu_limit(_cluster: str) -> None:
+        return None
+
+    monkeypatch.setattr(module, "worker_kind_config_path", worker_kind_config_path)
+    monkeypatch.setattr(module, "apply_worker_cpu_limit", skip_cpu_limit)
+    events: list[Any] = []
 
     def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         events.append(command)
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
-    monkeypatch.setattr(
-        module,
-        "install_calico",
-        lambda cluster, path: events.append(("install-calico", cluster, path)),
-    )
+
+    def record_calico_install(cluster: str, path: str) -> None:
+        events.append(("install-calico", cluster, path))
+
+    monkeypatch.setattr(module, "install_calico", record_calico_install)
 
     module.create_kind_cluster("sregym-w0", str(kubeconfig))
 
-    create = next(
-        command for command in events if isinstance(command, list) and command[:3] == ["kind", "create", "cluster"]
-    )
+    commands = [cast("list[str]", event) for event in events if isinstance(event, list)]
+    create = next(command for command in commands if command[:3] == ["kind", "create", "cluster"])
     assert "--wait" not in create
     assert ("install-calico", "sregym-w0", str(kubeconfig)) in events
     assert [
@@ -203,7 +214,7 @@ def test_calico_images_are_pulled_and_digest_verified_before_manifest_apply(
 ) -> None:
     module = _worker_infra()
     kubeconfig = tmp_path / "worker.kubeconfig"
-    events: list[object] = []
+    events: list[Any] = []
     manifest = b"apiVersion: v1\nkind: List\nitems: []\n"
     monkeypatch.setattr(module, "_CALICO_SHA256", hashlib.sha256(manifest).hexdigest())
 
@@ -214,11 +225,11 @@ def test_calico_images_are_pulled_and_digest_verified_before_manifest_apply(
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
-    monkeypatch.setattr(
-        module,
-        "ensure_kind_platform_images",
-        lambda cluster, images, platform: events.append(("verify-platform-images", cluster, images, platform)),
-    )
+
+    def record_platform_images(cluster: str, images: list[str], platform: str) -> None:
+        events.append(("verify-platform-images", cluster, images, platform))
+
+    monkeypatch.setattr(module, "ensure_kind_platform_images", record_platform_images)
 
     module.install_calico("sregym-w0", str(kubeconfig))
 
@@ -232,10 +243,9 @@ def test_calico_images_are_pulled_and_digest_verified_before_manifest_apply(
         "linux/arm64",
     )
     assert verified in events
+    commands = [cast("list[str]", event) for event in events if isinstance(event, list)]
     apply = next(
-        command
-        for command in events
-        if isinstance(command, list) and command[:4] == ["kubectl", "--kubeconfig", str(kubeconfig), "create"]
+        command for command in commands if command[:4] == ["kubectl", "--kubeconfig", str(kubeconfig), "create"]
     )
     assert events.index(verified) < events.index(apply)
 
@@ -277,7 +287,11 @@ def test_platform_image_preflight_loads_selected_archive_and_verifies_every_node
     archive = tmp_path / "image.tar"
     archive.write_bytes(b"archive")
     calls: list[list[str]] = []
-    monkeypatch.setattr(module, "platform_image_archive", lambda _image, _platform: (str(archive), digest))
+
+    def platform_image_archive(_image: str, _platform: str) -> tuple[str, str]:
+        return str(archive), digest
+
+    monkeypatch.setattr(module, "platform_image_archive", platform_image_archive)
 
     def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)

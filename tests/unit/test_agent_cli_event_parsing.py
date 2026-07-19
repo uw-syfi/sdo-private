@@ -105,7 +105,7 @@ class TestClaudeEventFromDict:
         assert event.result == "Task completed successfully."
 
     def test_unknown_event_type_returns_none(self):
-        data = {"type": "unknown_custom_type", "data": {}}
+        data: dict[str, object] = {"type": "unknown_custom_type", "data": {}}
         event = ClaudeEvent.from_dict(data)
         assert event is None
 
@@ -115,7 +115,7 @@ class TestClaudeEventFromDict:
         assert event is None
 
     def test_assistant_empty_content_returns_none(self):
-        data = {"type": "assistant", "message": {"content": []}}
+        data: dict[str, object] = {"type": "assistant", "message": {"content": []}}
         event = ClaudeEvent.from_dict(data)
         assert event is None
 

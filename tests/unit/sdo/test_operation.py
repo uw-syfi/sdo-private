@@ -3,18 +3,27 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 from sdo.__main__ import main
-from sdo.agent_runtime.lifecycle.deployment import DeploymentAttempt, DeploymentVerification
-from sdo.controller_install import ControllerInstallResult
+from sdo.agent_runtime.lifecycle.deployment import (
+    DeploymentAttempt,
+    DeploymentBackend,
+    DeploymentVerification,
+    DeploymentVerifier,
+)
+from sdo.controller_install import ControllerInstallConfig, ControllerInstallResult
 from sdo.operation import (
     ControllerDeploymentVerifier,
     OperationConfig,
     OperationError,
     operate,
 )
+
+if TYPE_CHECKING:
+    from sdo.agent_runtime.lifecycle import LifecycleAgentBackend
 
 
 def _repository(root: Path) -> Path:
@@ -44,8 +53,8 @@ def _config(repository: Path) -> OperationConfig:
 def test_operate_deploys_with_independent_verifier_then_starts_continuous_runtime(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     config = _config(repository)
-    verifier = object()
-    backend = object()
+    verifier = cast("DeploymentVerifier", object())
+    backend = cast("DeploymentBackend", object())
     calls: dict[str, object] = {}
     accepted = DeploymentAttempt(
         deployed=True,
@@ -54,13 +63,13 @@ def test_operate_deploys_with_independent_verifier_then_starts_continuous_runtim
         summary="deployed",
     )
 
-    def deployment_runner(root: Path, **kwargs: object) -> DeploymentAttempt:
-        calls["deployment_root"] = root
+    def deployment_runner(repository: Path, **kwargs: object) -> DeploymentAttempt:
+        calls["deployment_root"] = repository
         calls["deployment_kwargs"] = kwargs
         return accepted
 
-    def runtime_runner(runtime_config: object) -> ControllerInstallResult:
-        calls["runtime_config"] = runtime_config
+    def runtime_runner(config: ControllerInstallConfig) -> ControllerInstallResult:
+        calls["runtime_config"] = config
         return ControllerInstallResult(controller_logs="")
 
     result = operate(
@@ -83,7 +92,7 @@ def test_operate_deploys_with_independent_verifier_then_starts_continuous_runtim
         "verifier": verifier,
         "max_attempts": 4,
     }
-    runtime_config = calls["runtime_config"]
+    runtime_config = cast("ControllerInstallConfig", calls["runtime_config"])
     assert runtime_config.repository == repository.resolve()
     assert runtime_config.namespace == "demo"
     assert runtime_config.application == "example"
@@ -100,14 +109,14 @@ def test_operate_deploys_with_independent_verifier_then_starts_continuous_runtim
 def test_controller_verifier_bootstraps_memory_and_accepts_empty_finding_stream(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     calls: dict[str, object] = {}
-    backend = object()
+    backend = cast("LifecycleAgentBackend", object())
 
-    def reuse(root: Path, **kwargs: object) -> bool:
-        calls["reuse"] = (root, kwargs)
+    def reuse(app_root: Path, **kwargs: object) -> bool:
+        calls["reuse"] = (app_root, kwargs)
         return False
 
-    def lifecycle(root: Path, **kwargs: object) -> str:
-        calls["lifecycle"] = (root, kwargs)
+    def lifecycle(app_root: Path, **kwargs: object) -> str:
+        calls["lifecycle"] = (app_root, kwargs)
         return "memory-commit"
 
     def command(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -147,7 +156,7 @@ def test_controller_verifier_bootstraps_memory_and_accepts_empty_finding_stream(
             "backend": backend,
         },
     )
-    command_args, command_kwargs = calls["command"]
+    command_args, command_kwargs = cast("tuple[list[str], dict[str, Any]]", calls["command"])
     assert command_args == [
         sys.executable,
         "-m",
@@ -189,9 +198,16 @@ def test_controller_verifier_rejects_findings_and_errors(
     feedback: str,
 ) -> None:
     repository = _repository(tmp_path)
+
+    def reuse_existing(*_args: object, **_kwargs: object) -> bool:
+        return True
+
+    def run_command(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return completed
+
     verifier = ControllerDeploymentVerifier(
-        lifecycle_reuser=lambda *_args, **_kwargs: True,
-        command_runner=lambda *_args, **_kwargs: completed,
+        lifecycle_reuser=reuse_existing,
+        command_runner=run_command,
     )
 
     result = verifier.verify(
@@ -242,7 +258,7 @@ def test_cli_exposes_only_sdo_operate_and_maps_all_flags(tmp_path: Path) -> None
             "--timeout-seconds",
             "120",
         ],
-        operation_runner=lambda config: captured.append(config),
+        operation_runner=lambda config: captured.append(config),  # pyright: ignore[reportUnknownLambdaType]
     )
 
     assert exit_code == 0
@@ -271,7 +287,8 @@ def test_cli_reads_goal_file_and_returns_clear_operation_error(
     goal_file = tmp_path / "goal.md"
     goal_file.write_text("Users can complete requests.\n", encoding="utf-8")
 
-    def fail(_config: OperationConfig) -> None:
+    def fail(config: OperationConfig) -> None:
+        del config
         raise OperationError("controller rollout failed")
 
     exit_code = main(

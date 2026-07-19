@@ -136,8 +136,8 @@ def _write_generated_registration(
     generated_dir = workspace_path / "generated"
     generated_dir.mkdir(parents=True, exist_ok=True)
 
-    imports = ['\t"sdo.dev/controller/sdk"']
-    constructors = []
+    imports: list[str] = ['\t"sdo.dev/controller/sdk"']
+    constructors: list[str] = []
     for index, detector in enumerate(manifest.detectors):
         alias = f"d{index}"
         detector_import = f"{module_path}/{_clean_package_path(detector.package)}"
@@ -156,7 +156,7 @@ def _write_generated_registration(
 
 
 def _write_generated_contract_test(generated_dir: Path, manifest: DetectorManifest) -> None:
-    registrations = []
+    registrations: list[str] = []
     for index, detector in enumerate(manifest.detectors):
         watches = ", ".join(
             "{APIVersion: "

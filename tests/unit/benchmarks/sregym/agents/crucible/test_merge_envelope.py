@@ -234,7 +234,7 @@ class TestBuildMergeResult:
             build_merge_result(envelope, {}, {}, "body")
 
     def test_consolidate_empty_losers_raises(self):
-        envelope = {
+        envelope: dict[str, object] = {
             "primary_action": "noop",
             "primary_class_name": None,
             "reorganizations": [{"type": "consolidate", "winner": "Winner", "losers": []}],

@@ -1,5 +1,7 @@
 import io
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -12,15 +14,15 @@ FIXTURE_PATH = Path("tests/fixtures/gemini/example_stream_json.txt")
 
 
 @pytest.fixture
-def mock_env():
+def mock_env() -> Any:
     """Mock environment for agent initialization."""
     return {"PATH": "/usr/bin:/bin", "HOME": "/tmp", "USER": "test"}
 
 
 @pytest.fixture
-def gemini_agent(mock_llm_subprocess, mock_env):
+def gemini_agent(mock_llm_subprocess: Any, mock_env: Any) -> Iterator[GeminiCodingAgent]:
     """Create a GeminiCodingAgent instance with mocked environment."""
-    mock_popen, mock_which = mock_llm_subprocess
+    _mock_popen, mock_which = mock_llm_subprocess
     mock_which.return_value = "/usr/bin/gemini"
 
     with patch(
@@ -32,7 +34,7 @@ def gemini_agent(mock_llm_subprocess, mock_env):
             yield agent
 
 
-def test_generate_from_fixture(gemini_agent, mock_llm_subprocess):
+def test_generate_from_fixture(gemini_agent: GeminiCodingAgent, mock_llm_subprocess: Any):
     """Test parsing a real stream dump from a fixture file."""
 
     if not FIXTURE_PATH.exists():

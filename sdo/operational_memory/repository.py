@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, cast
 
 import yaml
 from pydantic import BaseModel, ValidationError
@@ -61,7 +61,7 @@ class MemoryRepository:
 
     def playbooks(self) -> list[MarkdownArtifact[PlaybookMetadata]]:
         playbook_root = self.memory_root / "playbooks"
-        artifacts = []
+        artifacts: list[MarkdownArtifact[PlaybookMetadata]] = []
         for path in sorted(playbook_root.glob("*/README.md")):
             relative = path.relative_to(self.memory_root).as_posix()
             artifacts.append(self._markdown(relative, PlaybookMetadata))
@@ -94,7 +94,7 @@ class MemoryRepository:
             lines = path.read_text(encoding="utf-8").splitlines()
         except OSError as exc:
             raise MemoryRepositoryError(f"read outcomes: {exc}") from exc
-        outcomes = []
+        outcomes: list[OutcomeRecord] = []
         for line_number, line in enumerate(lines, start=1):
             if not line.strip():
                 continue
@@ -141,9 +141,14 @@ def _parse_front_matter(text: str, path: Path) -> tuple[dict[str, object], str]:
     if closing is None:
         raise MemoryRepositoryError(f"{path} has unterminated YAML front matter")
     try:
-        metadata = yaml.safe_load("".join(lines[1:closing]))
+        metadata = cast("object", yaml.safe_load("".join(lines[1:closing])))
     except yaml.YAMLError as exc:
         raise MemoryRepositoryError(f"invalid YAML front matter in {path}: {exc}") from exc
     if not isinstance(metadata, dict):
         raise MemoryRepositoryError(f"front matter in {path} must be a mapping")
-    return metadata, "".join(lines[closing + 1 :]).lstrip("\n")
+    normalized: dict[str, object] = {}
+    for key, value in cast("dict[object, object]", metadata).items():
+        if not isinstance(key, str):
+            raise MemoryRepositoryError(f"front matter keys must be strings in {path}")
+        normalized[key] = value
+    return normalized, "".join(lines[closing + 1 :]).lstrip("\n")

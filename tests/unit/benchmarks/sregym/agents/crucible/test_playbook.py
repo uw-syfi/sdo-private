@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Tests for benchmarks.sregym.agents.crucible.knowledge_base.playbook."""
 
 from __future__ import annotations

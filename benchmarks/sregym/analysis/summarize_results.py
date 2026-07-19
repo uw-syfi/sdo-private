@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import csv
 import glob
@@ -5,38 +7,178 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
+from typing import Any, Protocol, TypeAlias, TypedDict, TypeVar, cast
 
-try:
-    import matplotlib.pyplot as plt
-    import numpy as np
+CsvRow: TypeAlias = dict[str, str | None]
+RunRow = TypedDict(
+    "RunRow",
+    {
+        "problem_id": str,
+        "Diagnosis.success": str | None,
+        "Mitigation.success": str | None,
+        "TTL": str,
+        "TTM": str,
+        "sequence_index": str | None,
+        "source_file": str,
+        "has_mitigation": bool,
+        "status": str,
+    },
+)
+RunMap: TypeAlias = dict[str, RunRow]
 
-    HAS_PLOTTING = True
 
-    _base = plt.rcParams["font.size"]  # default 10
-    plt.rcParams.update(
+class SequenceRow(TypedDict):
+    seq_idx: int
+    row: CsvRow
+    has_mitigation: bool
+
+
+class TimelineRow(TypedDict):
+    timestamp: str
+    start_minutes: float
+    problem_id: str
+    ttl: float | None
+    ttm: float | None
+    diag_success: bool
+    mitig_success: bool | None
+
+
+class IndexedTimelineRow(TimelineRow):
+    incident_idx: int
+
+
+ComparisonPoint: TypeAlias = tuple[str, float | None, float | None, bool | None, bool | None]
+TokenTimePoint: TypeAlias = tuple[int, float, str]
+TimelineSeries: TypeAlias = tuple[Sequence[int], Sequence[float | None]]
+T = TypeVar("T")
+
+
+class PlotRectangle(Protocol):
+    def get_height(self) -> float: ...
+
+    def get_x(self) -> float: ...
+
+    def get_width(self) -> float: ...
+
+
+class PlotFigure(Protocol):
+    def tight_layout(self, *args: object, **kwargs: object) -> None: ...
+
+    def savefig(self, *args: object, **kwargs: object) -> None: ...
+
+
+class PlotAxes(Protocol):
+    def scatter(self, *args: object, **kwargs: object) -> object: ...
+
+    def plot(self, *args: object, **kwargs: object) -> object: ...
+
+    def set_xlabel(self, *args: object, **kwargs: object) -> object: ...
+
+    def set_ylabel(self, *args: object, **kwargs: object) -> object: ...
+
+    def set_ylim(self, *args: object, **kwargs: object) -> object: ...
+
+    def set_yticks(self, *args: object, **kwargs: object) -> object: ...
+
+    def set_yticklabels(self, *args: object, **kwargs: object) -> object: ...
+
+    def set_title(self, *args: object, **kwargs: object) -> object: ...
+
+    def grid(self, *args: object, **kwargs: object) -> None: ...
+
+    def legend(self, *args: object, **kwargs: object) -> object: ...
+
+
+class Plotting(Protocol):
+    def figure(self, *args: object, **kwargs: object) -> object: ...
+
+    def plot(self, *args: object, **kwargs: object) -> object: ...
+
+    def scatter(self, *args: object, **kwargs: object) -> object: ...
+
+    def xlabel(self, *args: object, **kwargs: object) -> object: ...
+
+    def ylabel(self, *args: object, **kwargs: object) -> object: ...
+
+    def title(self, *args: object, **kwargs: object) -> object: ...
+
+    def grid(self, *args: object, **kwargs: object) -> None: ...
+
+    def legend(self, *args: object, **kwargs: object) -> object: ...
+
+    def savefig(self, *args: object, **kwargs: object) -> None: ...
+
+    def tight_layout(self, *args: object, **kwargs: object) -> None: ...
+
+    def close(self, *args: object, **kwargs: object) -> None: ...
+
+    def yticks(self, *args: object, **kwargs: object) -> object: ...
+
+    def xticks(self, *args: object, **kwargs: object) -> object: ...
+
+    def ylim(self, *args: object, **kwargs: object) -> object: ...
+
+    def bar(self, *args: object, **kwargs: object) -> Sequence[PlotRectangle]: ...
+
+    def annotate(self, *args: object, **kwargs: object) -> object: ...
+
+    def subplots(self, *args: object, **kwargs: object) -> tuple[PlotFigure, PlotAxes]: ...
+
+
+def _plotting() -> Plotting:
+    """Return pyplot behind the small surface this analysis module uses."""
+    import matplotlib.pyplot as plotting
+
+    return cast("Plotting", plotting)
+
+
+def _configure_plotting() -> bool:
+    try:
+        import matplotlib.pyplot as plotting
+        import numpy
+    except ImportError:
+        return False
+
+    del numpy
+    base = float(plotting.rcParams["font.size"])  # default 10
+    plotting.rcParams.update(
         {
-            "font.size": _base * 1.25,
-            "axes.titlesize": _base * 1.5,  # default "large" ~= 1.2x base
-            "axes.labelsize": _base * 1.25,
-            "xtick.labelsize": _base * 1.25,
-            "ytick.labelsize": _base * 1.25,
-            "legend.fontsize": _base * 1.25,
+            "font.size": base * 1.25,
+            "axes.titlesize": base * 1.5,  # default "large" ~= 1.2x base
+            "axes.labelsize": base * 1.25,
+            "xtick.labelsize": base * 1.25,
+            "ytick.labelsize": base * 1.25,
+            "legend.fontsize": base * 1.25,
         }
     )
-except ImportError:
-    HAS_PLOTTING = False
-    plt = None
-    np = None
-
-try:
-    import yaml
-
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
+    return True
 
 
-def load_results(target_path=None):
+def _yaml_available() -> bool:
+    try:
+        import yaml
+    except ImportError:
+        return False
+    del yaml
+    return True
+
+
+def _string_mapping(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    mapping = cast("dict[object, object]", value)
+    if not all(isinstance(key, str) for key in mapping):
+        return None
+    return cast("dict[str, object]", mapping)
+
+
+has_plotting = _configure_plotting()
+has_yaml = _yaml_available()
+
+
+def load_results(target_path: str | None = None) -> tuple[RunMap, list[RunRow]]:
     # Determine which files to process
     if target_path:
         if os.path.isdir(target_path):
@@ -57,7 +199,7 @@ def load_results(target_path=None):
         print("Searching for *_results.csv files recursively in current directory...")
         files = glob.glob("**/*_results.csv", recursive=True)
 
-    all_runs_raw = []
+    all_runs_raw: list[RunRow] = []
 
     print(f"Scanning {len(files)} CSV files for results...")
 
@@ -76,30 +218,43 @@ def load_results(target_path=None):
                 has_mitigation = "Mitigation.success" in reader.fieldnames or "Mitigation.judgment" in reader.fieldnames
 
                 for row in reader:
-                    pid = row.get("problem_id")
+                    csv_row = cast("CsvRow", row)
+                    pid = csv_row.get("problem_id")
                     if not pid:
                         continue
 
-                    row["source_file"] = os.path.basename(file_path)
-                    row["has_mitigation"] = has_mitigation
-
                     if has_results_columns:
                         if has_mitigation:
-                            row["status"] = (
+                            status = (
                                 "Completed"
-                                if (row.get("Diagnosis.success") and row.get("Mitigation.success"))
+                                if (csv_row.get("Diagnosis.success") and csv_row.get("Mitigation.success"))
                                 else "Incomplete"
                             )
                         else:
-                            row["status"] = (
+                            status = (
                                 "Completed"
-                                if (row.get("Diagnosis.success") is not None and row.get("Diagnosis.success") != "")
+                                if (
+                                    csv_row.get("Diagnosis.success") is not None
+                                    and csv_row.get("Diagnosis.success") != ""
+                                )
                                 else "Incomplete"
                             )
                     else:
-                        row["status"] = "Incomplete"
+                        status = "Incomplete"
 
-                    all_runs_raw.append(row)
+                    run: RunRow = {
+                        "problem_id": pid,
+                        "Diagnosis.success": csv_row.get("Diagnosis.success"),
+                        "Mitigation.success": csv_row.get("Mitigation.success"),
+                        "TTL": csv_row.get("TTL") or "",
+                        "TTM": csv_row.get("TTM") or "",
+                        "sequence_index": csv_row.get("sequence_index"),
+                        "source_file": os.path.basename(file_path),
+                        "has_mitigation": has_mitigation,
+                        "status": status,
+                    }
+
+                    all_runs_raw.append(run)
 
         except Exception as e:
             print(f"Error reading {file_path}: {e}")
@@ -108,7 +263,7 @@ def load_results(target_path=None):
     # In sequence mode (sequence_index present), treat each (problem_id, sequence_index) as distinct.
     has_sequence = any(r.get("sequence_index") for r in all_runs_raw)
 
-    runs_by_id = {}
+    runs_by_id: RunMap = {}
     for run in all_runs_raw:
         if has_sequence and run.get("sequence_index") is not None:
             key = f"{run['problem_id']}/{run.get('sequence_index', '')}"
@@ -117,15 +272,18 @@ def load_results(target_path=None):
         runs_by_id[key] = run
 
     sorted_runs = list(runs_by_id.values())
+
     # Sort by sequence_index (if present) then source_file for chronological order
-    sorted_runs.sort(
-        key=lambda x: (x.get("source_file", ""), int(x["sequence_index"]) if x.get("sequence_index") else 0)
-    )
+    def sort_key(row: RunRow) -> tuple[str, int]:
+        sequence_index = row["sequence_index"]
+        return row["source_file"], int(sequence_index) if sequence_index else 0
+
+    sorted_runs.sort(key=sort_key)
 
     return runs_by_id, sorted_runs
 
 
-def load_stratus_tokens(log_dir):
+def load_stratus_tokens(log_dir: str) -> dict[str, int]:
     """Load token usage from Stratus *_stratus_output.csv files.
     Sums diagnosis + mitigation (all agent rows) per problem.
     Returns dict[problem_id, total_tokens] or empty dict if none found.
@@ -135,7 +293,7 @@ def load_stratus_tokens(log_dir):
     if not files:
         return {}
 
-    tokens_by_pid = {}
+    tokens_by_pid: dict[str, int] = {}
     for file_path in files:
         # Extract problem_id: {MMDD_HHMM}_{problem_id}_stratus_output.csv
         basename = os.path.basename(file_path)
@@ -163,7 +321,7 @@ def load_stratus_tokens(log_dir):
     return tokens_by_pid
 
 
-def load_gemini_tokens(log_dir):
+def load_gemini_tokens(log_dir: str) -> dict[str, int]:
     """Load token usage from Gemini gemini_cli_results_*.json files.
     Returns dict[problem_id, total_tokens] or empty dict if none found.
     """
@@ -175,7 +333,7 @@ def load_gemini_tokens(log_dir):
         if not files:
             continue
 
-        tokens_by_pid = {}
+        tokens_by_pid: dict[str, int] = {}
         for file_path in files:
             basename = os.path.basename(file_path)
             m = re.match(r"gemini_cli_results_(.+)_\d{8}_\d{6}\.json", basename)
@@ -185,10 +343,15 @@ def load_gemini_tokens(log_dir):
 
             try:
                 with open(file_path, encoding="utf-8") as f:
-                    data = json.load(f)
-                um = data.get("usage_metrics", {})
-                inp = int(um.get("input_tokens", 0) or 0)
-                out = int(um.get("output_tokens", 0) or 0)
+                    decoded: Any = json.load(f)
+                data = _string_mapping(decoded)
+                if data is None:
+                    continue
+                usage_metrics = _string_mapping(data.get("usage_metrics")) or {}
+                input_tokens = usage_metrics.get("input_tokens", 0)
+                output_tokens = usage_metrics.get("output_tokens", 0)
+                inp = int(input_tokens) if isinstance(input_tokens, (str, int, float)) else 0
+                out = int(output_tokens) if isinstance(output_tokens, (str, int, float)) else 0
                 total = inp + out
                 if total > 0:
                     tokens_by_pid[problem_id] = total
@@ -199,41 +362,38 @@ def load_gemini_tokens(log_dir):
     return {}
 
 
-def load_problem_type_mapping():
+def load_problem_type_mapping() -> dict[str, str]:
     """Load problem type definitions from YAML files.
 
     Returns dict mapping problem_id -> type_name.
     """
-    if not HAS_YAML:
+    if not has_yaml:
         return {}
-    yaml_dir = os.path.join(
-        os.path.dirname(__file__),
-        "..",
-        "sregym",
-        "sregym",
-        "conductor",
-        "problem_types",
-    )
-    yaml_dir = os.path.normpath(yaml_dir)
-    if not os.path.isdir(yaml_dir):
+    import yaml
+
+    yaml_dir = Path(__file__).resolve().parents[3] / "third_party" / "sregym" / "sregym" / "conductor"
+    if not yaml_dir.is_dir():
         return {}
-    mapping = {}
-    for yml_path in glob.glob(os.path.join(yaml_dir, "tasklist.*.yml")):
-        basename = os.path.basename(yml_path)
+    mapping: dict[str, str] = {}
+    for yml_path in yaml_dir.glob("tasklist.*.yml"):
+        basename = yml_path.name
         # Extract type name: tasklist.<type_name>.yml
         type_name = basename.replace("tasklist.", "").replace(".yml", "")
         try:
-            with open(yml_path, encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            if data and "all" in data and "problems" in data["all"]:
-                for problem_id in data["all"]["problems"]:
+            with yml_path.open(encoding="utf-8") as f:
+                decoded_yaml: Any = yaml.safe_load(f)
+            data = _string_mapping(decoded_yaml)
+            all_section = _string_mapping(data.get("all")) if data is not None else None
+            problems = _string_mapping(all_section.get("problems")) if all_section is not None else None
+            if problems is not None:
+                for problem_id in problems:
                     mapping[problem_id] = type_name
-        except Exception:
+        except (OSError, yaml.YAMLError):
             pass
     return mapping
 
 
-def _compute_group_stats(runs):
+def _compute_group_stats(runs: Sequence[RunRow]) -> tuple[int, str, str, str, str]:
     count = len(runs)
     diag_ok = sum(1 for r in runs if r.get("Diagnosis.success") == "True")
     with_mitig = [r for r in runs if r.get("has_mitigation")]
@@ -242,8 +402,8 @@ def _compute_group_stats(runs):
     diag_pct = f"{100 * diag_ok / count:.0f}%" if count else "-"
     mitig_pct = f"{100 * mitig_ok / len(with_mitig):.0f}%" if with_mitig else "-"
 
-    ttls = []
-    ttms = []
+    ttls: list[float] = []
+    ttms: list[float] = []
     for r in runs:
         try:
             if r.get("TTL"):
@@ -258,10 +418,12 @@ def _compute_group_stats(runs):
     return count, diag_pct, mitig_pct, avg_ttl, avg_ttm
 
 
-def print_type_breakdown(completed_runs, type_mapping, table_width=130):
+def print_type_breakdown(
+    completed_runs: Sequence[RunRow], type_mapping: Mapping[str, str], table_width: int = 130
+) -> None:
     """Print success rates grouped by problem type."""
     # Group runs by type
-    groups = {}
+    groups: dict[str, list[RunRow]] = {}
     for r in completed_runs:
         pid = r.get("problem_id", "")
         type_name = type_mapping.get(pid, "other")
@@ -291,7 +453,7 @@ def print_type_breakdown(completed_runs, type_mapping, table_width=130):
     print("-" * table_width + "\n")
 
 
-def summarize_results(target_path=None):
+def summarize_results(target_path: str | None = None) -> None:
     _, all_runs = load_results(target_path)
 
     if not all_runs:
@@ -307,8 +469,8 @@ def summarize_results(target_path=None):
     runs_with_mitigation = [r for r in completed_runs if r.get("has_mitigation")]
     mitig_success_count = sum(1 for r in runs_with_mitigation if r.get("Mitigation.success") == "True")
 
-    ttls = []
-    ttms = []
+    ttls: list[float] = []
+    ttms: list[float] = []
     for r in completed_runs:
         try:
             if r.get("TTL"):
@@ -345,7 +507,7 @@ def summarize_results(target_path=None):
     print(f"Average Time to Mitigate: {avg_ttm:.2f}s")
     print("-" * table_width)
 
-    def pad_emoji(s, width):
+    def pad_emoji(s: str, width: int) -> str:
         """Pad so visual width aligns; emojis render as 2 cols in many terminals."""
         has_emoji = "✅" in s or "❌" in s or "⚠️" in s
         visual_len = len(s) + (1 if has_emoji else 0)
@@ -417,9 +579,12 @@ def summarize_results(target_path=None):
         print("No valid TTL or TTM data for plotting.")
         return
 
-    if not HAS_PLOTTING:
+    if not has_plotting:
         print("Matplotlib/Numpy not found. Skipping plots.")
         return
+
+    plt = _plotting()
+    import numpy as np
 
     plt.figure(figsize=(10, 6))
 
@@ -462,7 +627,7 @@ def summarize_results(target_path=None):
     print(f"CDF plot saved to {output_plot}")
 
 
-def diff_results(dirs, names=None):
+def diff_results(dirs: Sequence[str], names: Sequence[str] | None = None) -> None:
     if len(dirs) < 2:
         print("Error: --diff requires at least 2 directories.")
         sys.exit(1)
@@ -470,7 +635,7 @@ def diff_results(dirs, names=None):
     n_dirs = len(dirs)
 
     # Load results from each directory
-    runs_maps = []
+    runs_maps: list[RunMap] = []
     for d in dirs:
         print(f"\n--- Loading results from {d} ---")
         run_map, _ = load_results(d)
@@ -486,7 +651,7 @@ def diff_results(dirs, names=None):
     print(f"\nDiff results will be stored in: {output_dir}")
 
     # --- Statistics Summary ---
-    def get_stats(run_map):
+    def get_stats(run_map: RunMap) -> tuple[int, int, int, int, int, float, float, float]:
         runs = list(run_map.values())
         total = len(runs)
         completed = [r for r in runs if r["status"] == "Completed"]
@@ -495,7 +660,9 @@ def diff_results(dirs, names=None):
         runs_with_mitig = [r for r in completed if r.get("has_mitigation")]
         m_succ = sum(1 for r in runs_with_mitig if r.get("Mitigation.success") == "True")
         n_mitig = len(runs_with_mitig)
-        ttls, ttms, tres = [], [], []
+        ttls: list[float] = []
+        ttms: list[float] = []
+        tres: list[float] = []
         for r in completed:
             try:
                 if r.get("TTL"):
@@ -518,7 +685,7 @@ def diff_results(dirs, names=None):
 
     w_col = max(max(len(n) for n in names), 18)
 
-    def fmt_row(label, values, diff_str=None):
+    def fmt_row(label: str, values: Sequence[object], diff_str: str | None = None) -> str:
         """Format a stats table row with N value columns and optional diff."""
         parts = [f"{label:<25}"] + [f"{v:<{w_col}}" for v in values]
         if n_dirs == 2 and diff_str is not None:
@@ -567,7 +734,7 @@ def diff_results(dirs, names=None):
     print("=" * sep_width + "\n")
 
     # --- Per-Problem Comparison Table ---
-    all_pids = sorted(set().union(*(rm.keys() for rm in runs_maps)))
+    all_pids = sorted(set[str]().union(*(rm.keys() for rm in runs_maps)))
 
     # Dynamic PID width based on data
     max_pid_len = max([len(p) for p in all_pids] + [len("Problem ID")])
@@ -591,37 +758,43 @@ def diff_results(dirs, names=None):
         header_parts.append(f"{'Diff(TTM)':<{diff_width}}")
     header = " | ".join(header_parts)
     sep = "-" * len(header)
-    summary_lines = []
+    summary_lines: list[str] = []
     summary_lines.append(header)
     summary_lines.append(sep)
 
     # Per-dir CDF data
-    ttd_per_dir = [[] for _ in range(n_dirs)]
-    ttm_per_dir = [[] for _ in range(n_dirs)]
-    ttd_success_per_dir = [[] for _ in range(n_dirs)]
-    ttm_success_per_dir = [[] for _ in range(n_dirs)]
-    res_per_dir = [[] for _ in range(n_dirs)]
-    res_success_per_dir = [[] for _ in range(n_dirs)]
+    ttd_per_dir: list[list[float]] = [[] for _ in range(n_dirs)]
+    ttm_per_dir: list[list[float]] = [[] for _ in range(n_dirs)]
+    ttd_success_per_dir: list[list[float]] = [[] for _ in range(n_dirs)]
+    ttm_success_per_dir: list[list[float]] = [[] for _ in range(n_dirs)]
+    res_per_dir: list[list[float]] = [[] for _ in range(n_dirs)]
+    res_success_per_dir: list[list[float]] = [[] for _ in range(n_dirs)]
 
     # 2-dir only: per-problem comparison data for scatter plots
-    if n_dirs == 2:
-        comp_diag_data, comp_mitig_data = [], []
-        comp_diag_success_data, comp_mitig_success_data = [], []
-        comp_diag_fail_data, comp_mitig_fail_data = [], []
-        comp_res_data, comp_res_success_data, comp_res_fail_data = [], [], []
+    comp_diag_data: list[ComparisonPoint] = []
+    comp_mitig_data: list[ComparisonPoint] = []
+    comp_diag_success_data: list[ComparisonPoint] = []
+    comp_mitig_success_data: list[ComparisonPoint] = []
+    comp_diag_fail_data: list[ComparisonPoint] = []
+    comp_mitig_fail_data: list[ComparisonPoint] = []
+    comp_res_data: list[ComparisonPoint] = []
+    comp_res_success_data: list[ComparisonPoint] = []
+    comp_res_fail_data: list[ComparisonPoint] = []
 
-    def pad_emoji(s, width):
+    def pad_emoji(s: str, width: int) -> str:
         # In many terminals, emoji is 2 chars wide. Python len() counts it as 1.
         has_emoji = "✅" in s or "❌" in s
         visual_len = len(s) + (1 if has_emoji else 0)
         padding = max(0, width - visual_len)
         return s + " " * padding
 
-    def get_data(r):
+    def get_data(r: RunRow | None) -> tuple[str, str, float | None, float | None]:
         if not r:
             return "MISSING", "MISSING", None, None
 
-        def parse_float(val):
+        def parse_float(val: str | None) -> float | None:
+            if val is None:
+                return None
             try:
                 return float(val)
             except (ValueError, TypeError):
@@ -668,10 +841,10 @@ def diff_results(dirs, names=None):
             r1, r2 = runs[0], runs[1]
             td1, tm1 = data[0][2], data[0][3]
             td2, tm2 = data[1][2], data[1][3]
-            diag_s1 = r1 and r1.get("Diagnosis.success") == "True"
-            diag_s2 = r2 and r2.get("Diagnosis.success") == "True"
-            mitig_s1 = r1 and r1.get("Mitigation.success") == "True"
-            mitig_s2 = r2 and r2.get("Mitigation.success") == "True"
+            diag_s1 = r1.get("Diagnosis.success") == "True" if r1 else None
+            diag_s2 = r2.get("Diagnosis.success") == "True" if r2 else None
+            mitig_s1 = r1.get("Mitigation.success") == "True" if r1 else None
+            mitig_s2 = r2.get("Mitigation.success") == "True" if r2 else None
 
             if (td1 is not None and td1 > 0) or (td2 is not None and td2 > 0):
                 comp_diag_data.append((pid, td1, td2, diag_s1, diag_s2))
@@ -716,7 +889,7 @@ def diff_results(dirs, names=None):
                 comp_res_fail_data.append((pid, tres1_fail, tres2_fail, False, False))
 
         # Build table line
-        line_parts = [f"{pid:<{pid_width}}"]
+        line_parts: list[str] = [f"{pid:<{pid_width}}"]
         line_parts.extend(pad_emoji(data[i][0], w_d[i]) for i in range(n_dirs))
         if n_dirs == 2:
             td1_v, td2_v = data[0][2], data[1][2]
@@ -1052,18 +1225,18 @@ def diff_results(dirs, names=None):
         name1, name2 = names[0], names[1]
         tokens1_map, tokens2_map = tokens_maps[0], tokens_maps[1]
 
-        comp_token_data = []
+        comp_token_data: list[ComparisonPoint] = []
         for pid in all_pids:
             t1 = tokens1_map.get(pid)
             t2 = tokens2_map.get(pid)
             if (t1 is not None and t1 > 0) or (t2 is not None and t2 > 0):
                 r1 = runs_maps[0].get(pid)
                 r2 = runs_maps[1].get(pid)
-                ds1 = r1 and r1.get("Diagnosis.success") == "True"
-                ms1 = r1 and r1.get("Mitigation.success") == "True"
-                ds2 = r2 and r2.get("Diagnosis.success") == "True"
-                ms2 = r2 and r2.get("Mitigation.success") == "True"
-                comp_token_data.append((pid, t1 or 0, t2 or 0, ds1 and ms1, ds2 and ms2))
+                ds1 = r1.get("Diagnosis.success") == "True" if r1 else None
+                ms1 = r1.get("Mitigation.success") == "True" if r1 else None
+                ds2 = r2.get("Diagnosis.success") == "True" if r2 else None
+                ms2 = r2.get("Mitigation.success") == "True" if r2 else None
+                comp_token_data.append((pid, t1 or 0, t2 or 0, bool(ds1 and ms1), bool(ds2 and ms2)))
         plot_token_comparison_by_problem(
             comp_token_data,
             name1,
@@ -1082,15 +1255,17 @@ def diff_results(dirs, names=None):
             sort_by_name=True,
         )
 
-        tokens_time_data1 = []
-        tokens_time_data2 = []
+        tokens_time_data1: list[TokenTimePoint] = []
+        tokens_time_data2: list[TokenTimePoint] = []
         for pid in all_pids:
             tok1 = tokens1_map.get(pid)
             tok2 = tokens2_map.get(pid)
             r1 = runs_maps[0].get(pid)
             r2 = runs_maps[1].get(pid)
 
-            def parse_float(val):
+            def parse_float(val: str | None) -> float | None:
+                if val is None:
+                    return None
                 try:
                     return float(val)
                 except (ValueError, TypeError):
@@ -1117,11 +1292,20 @@ def diff_results(dirs, names=None):
         )
 
 
-def plot_tokens_vs_time(data1, data2, label1, label2, output_path, colors=None):
+def plot_tokens_vs_time(
+    data1: Sequence[TokenTimePoint],
+    data2: Sequence[TokenTimePoint],
+    label1: str,
+    label2: str,
+    output_path: str,
+    colors: Sequence[str] | None = None,
+) -> None:
     """Scatter plot: X=tokens (diag+mitigation), Y=aggregate time (TTL+TTM)."""
-    if not HAS_PLOTTING:
+    if not has_plotting:
         print(f"Matplotlib/Numpy not found. Skipping plot: {output_path}")
         return
+
+    plt = _plotting()
 
     if not data1 and not data2:
         print("No tokens+time data for scatter plot.")
@@ -1157,11 +1341,20 @@ def plot_tokens_vs_time(data1, data2, label1, label2, output_path, colors=None):
         print(f"Tokens vs time scatter plot saved to {output_path}")
 
 
-def plot_cdf_tokens(data_list, labels, output_path, colors=None, phase_label=None):
+def plot_cdf_tokens(
+    data_list: Sequence[Sequence[float]],
+    labels: Sequence[str],
+    output_path: str,
+    colors: Sequence[str] | None = None,
+    phase_label: str | None = None,
+) -> None:
     """Plot CDF of token usage for N agents."""
-    if not HAS_PLOTTING:
+    if not has_plotting:
         print(f"Matplotlib/Numpy not found. Skipping plot: {output_path}")
         return
+
+    plt = _plotting()
+    import numpy as np
 
     if not any(data_list):
         print("No token data for CDF plot.")
@@ -1206,18 +1399,21 @@ def plot_cdf_tokens(data_list, labels, output_path, colors=None, phase_label=Non
 
 
 def plot_token_comparison_by_problem(
-    data,
-    name1,
-    name2,
-    output_path,
-    colors=None,
-    use_status_colors=False,
-    sort_by_name=False,
-):
+    data: Sequence[ComparisonPoint],
+    name1: str,
+    name2: str,
+    output_path: str,
+    colors: Sequence[str] | None = None,
+    use_status_colors: bool = False,
+    sort_by_name: bool = False,
+) -> None:
     """Plot scatter: Y=problem labels, X=token usage for both agents (dots like time-based)."""
-    if not HAS_PLOTTING:
+    if not has_plotting:
         print(f"Matplotlib/Numpy not found. Skipping plot: {output_path}")
         return
+
+    plt = _plotting()
+    import numpy as np
 
     if not data:
         print("No token data for comparison plot.")
@@ -1237,8 +1433,14 @@ def plot_token_comparison_by_problem(
 
     y_vals = np.arange(len(pids))
 
-    x1_succ, x1_fail, y1_succ, y1_fail = [], [], [], []
-    x2_succ, x2_fail, y2_succ, y2_fail = [], [], [], []
+    x1_succ: list[float] = []
+    x1_fail: list[float] = []
+    y1_succ: list[int] = []
+    y1_fail: list[int] = []
+    x2_succ: list[float] = []
+    x2_fail: list[float] = []
+    y2_succ: list[int] = []
+    y2_fail: list[int] = []
 
     for i, (_pid, t1, t2, s1, s2) in enumerate(data):
         if t1 and t1 > 0:
@@ -1290,11 +1492,20 @@ def plot_token_comparison_by_problem(
     print(f"Token comparison plot saved to {output_path}")
 
 
-def plot_cdfs(data_list, labels, title_metric, output_path, colors=None):
+def plot_cdfs(
+    data_list: Sequence[Sequence[float]],
+    labels: Sequence[str],
+    title_metric: str,
+    output_path: str,
+    colors: Sequence[str] | None = None,
+) -> None:
     """Plot CDF for N data series."""
-    if not HAS_PLOTTING:
+    if not has_plotting:
         print(f"Matplotlib/Numpy not found. Skipping plot: {output_path}")
         return
+
+    plt = _plotting()
+    import numpy as np
 
     _markers = [".", "x", "^", "s", "D", "v", "<", ">"]
     _linestyles = ["-", "--", "-.", ":"]
@@ -1335,19 +1546,22 @@ def plot_cdfs(data_list, labels, title_metric, output_path, colors=None):
 
 
 def plot_comparison_by_problem(
-    data,
-    name1,
-    name2,
-    title_metric,
-    output_path,
-    colors=None,
-    compact=False,
-    use_status_colors=False,
-    sort_by_name=False,
-):
-    if not HAS_PLOTTING:
+    data: list[ComparisonPoint],
+    name1: str,
+    name2: str,
+    title_metric: str,
+    output_path: str,
+    colors: Sequence[str] | None = None,
+    compact: bool = False,
+    use_status_colors: bool = False,
+    sort_by_name: bool = False,
+) -> None:
+    if not has_plotting:
         print(f"Matplotlib/Numpy not found. Skipping plot: {output_path}")
         return
+
+    plt = _plotting()
+    import numpy as np
 
     if not data:
         print(f"No valid data to plot for {title_metric}")
@@ -1377,12 +1591,16 @@ def plot_comparison_by_problem(
     y_vals = np.arange(len(pids))
 
     # Extract valid points for series 1
-    x1_succ, y1_succ = [], []
-    x1_fail, y1_fail = [], []
+    x1_succ: list[float] = []
+    y1_succ: list[int] = []
+    x1_fail: list[float] = []
+    y1_fail: list[int] = []
 
     # Extract valid points for series 2
-    x2_succ, y2_succ = [], []
-    x2_fail, y2_fail = [], []
+    x2_succ: list[float] = []
+    y2_succ: list[int] = []
+    x2_fail: list[float] = []
+    y2_fail: list[int] = []
 
     for i, item in enumerate(data):
         # Unpack with default for backward compatibility if needed, though we updated all calls
@@ -1458,13 +1676,27 @@ def plot_comparison_by_problem(
     print(f"Comparison plot saved to {output_path}")
 
 
-def plot_success_rates(d1, m1, n1, name1, d2, m2, n2, name2, output_path, colors=None):
+def plot_success_rates(
+    d1: int,
+    m1: int,
+    n1: int,
+    name1: str,
+    d2: int,
+    m2: int,
+    n2: int,
+    name2: str,
+    output_path: str,
+    colors: Sequence[str] | None = None,
+) -> None:
     """
     Bar chart comparing diagnosis and mitigation success rates.
     """
-    if not HAS_PLOTTING:
+    if not has_plotting:
         print(f"Matplotlib/Numpy not found. Skipping plot: {output_path}")
         return
+
+    plt = _plotting()
+    import numpy as np
 
     if colors is None:
         colors = ["tab:blue", "tab:orange"]
@@ -1505,7 +1737,7 @@ def plot_success_rates(d1, m1, n1, name1, d2, m2, n2, name2, output_path, colors
     plt.legend()
     plt.grid(True, axis="y", linestyle="--", alpha=0.7)
 
-    def autolabel(rects):
+    def autolabel(rects: Sequence[PlotRectangle]) -> None:
         """Attach a text label above each bar in *rects*, displaying its height."""
         for rect in rects:
             height = rect.get_height()
@@ -1527,11 +1759,11 @@ def plot_success_rates(d1, m1, n1, name1, d2, m2, n2, name2, output_path, colors
     print(f"Success rate plot saved to {output_path}")
 
 
-def _load_sequence_rows(log_dir):
+def _load_sequence_rows(log_dir: str) -> list[SequenceRow]:
     """Shared helper: load all rows with sequence_index from a log directory."""
     pattern = os.path.join(log_dir, "**", "*_results.csv")
     files = glob.glob(pattern, recursive=True)
-    rows = []
+    rows: list[SequenceRow] = []
     for fpath in sorted(files):
         if "ALL_results" in fpath or "_output.csv" in fpath:
             continue
@@ -1542,18 +1774,22 @@ def _load_sequence_rows(log_dir):
                     continue
                 has_mitigation = "Mitigation.success" in reader.fieldnames or "Mitigation.judgment" in reader.fieldnames
                 for row in reader:
+                    csv_row = cast("CsvRow", row)
                     try:
-                        seq_idx = int(row["sequence_index"])
+                        sequence_index = csv_row.get("sequence_index")
+                        if sequence_index is None:
+                            continue
+                        seq_idx = int(sequence_index)
                     except (ValueError, TypeError):
                         continue
-                    rows.append({"seq_idx": seq_idx, "row": row, "has_mitigation": has_mitigation})
+                    rows.append({"seq_idx": seq_idx, "row": csv_row, "has_mitigation": has_mitigation})
         except Exception as e:
             print(f"Warning: could not read {fpath}: {e}")
     rows.sort(key=lambda r: r["seq_idx"])
     return rows
 
 
-def _rolling_avg(xs, ys, w):
+def _rolling_avg(xs: Sequence[T], ys: Sequence[float | int | None], w: int) -> tuple[list[T], list[float]]:
     """Return (x_out, smoothed_y) using a trailing lookback window.
 
     The first output is at index w-1, averaging ys[0:w]. Each subsequent
@@ -1569,7 +1805,7 @@ def _rolling_avg(xs, ys, w):
     return xs_out, smoothed
 
 
-def plot_sequence_success_rate(log_dir, output_path=None, window=5):
+def plot_sequence_success_rate(log_dir: str, output_path: str | None = None, window: int = 5) -> None:
     """Plot diagnosis and mitigation success rate vs sequence index.
 
     Each data point is 1 (success) or 0 (failure); the rolling average gives
@@ -1580,9 +1816,11 @@ def plot_sequence_success_rate(log_dir, output_path=None, window=5):
         output_path: Where to save the PNG (default: <log_dir>/sequence_success_rate.png).
         window: Rolling-average window size for the trend line.
     """
-    if not HAS_PLOTTING:
+    if not has_plotting:
         print("Matplotlib/Numpy not found. Skipping sequence success rate plot.")
         return
+
+    plt = _plotting()
 
     raw = _load_sequence_rows(log_dir)
     if not raw:
@@ -1633,7 +1871,7 @@ def plot_sequence_success_rate(log_dir, output_path=None, window=5):
     print(f"Sequence success rate plot saved to {output_path}")
 
 
-def plot_sequence_time(log_dir, output_path=None, window=5):
+def plot_sequence_time(log_dir: str, output_path: str | None = None, window: int = 5) -> None:
     """Plot solving time (TTL, TTM, and total) vs sequence index.
 
     Loads all *_results.csv files that contain a 'sequence_index' column,
@@ -1644,9 +1882,11 @@ def plot_sequence_time(log_dir, output_path=None, window=5):
         output_path: Where to save the PNG (default: <log_dir>/sequence_time.png).
         window: Rolling-average window size for the trend line.
     """
-    if not HAS_PLOTTING:
+    if not has_plotting:
         print("Matplotlib/Numpy not found. Skipping sequence time plot.")
         return
+
+    plt = _plotting()
 
     raw = _load_sequence_rows(log_dir)
     if not raw:
@@ -1654,15 +1894,19 @@ def plot_sequence_time(log_dir, output_path=None, window=5):
         return
 
     seq_idxs = [r["seq_idx"] for r in raw]
-    ttls, ttms, tots = [], [], []
+    ttls: list[float | None] = []
+    ttms: list[float | None] = []
+    tots: list[float | None] = []
     for r in raw:
         row = r["row"]
         try:
-            ttl = float(row["TTL"]) if row.get("TTL") else None
+            ttl_value = row.get("TTL")
+            ttl = float(ttl_value) if ttl_value else None
         except (ValueError, TypeError):
             ttl = None
         try:
-            ttm = float(row["TTM"]) if row.get("TTM") else None
+            ttm_value = row.get("TTM")
+            ttm = float(ttm_value) if ttm_value else None
         except (ValueError, TypeError):
             ttm = None
         ttls.append(ttl)
@@ -1711,7 +1955,7 @@ def plot_sequence_time(log_dir, output_path=None, window=5):
     print(f"Sequence time plot saved to {output_path}")
 
 
-def _parse_mmdd_hhmm(ts):
+def _parse_mmdd_hhmm(ts: str) -> int:
     """Parse a MMDD_HHMM string into total minutes since Jan 1."""
     mm = int(ts[0:2])
     dd = int(ts[2:4])
@@ -1721,7 +1965,7 @@ def _parse_mmdd_hhmm(ts):
     return ((mm - 1) * 31 + (dd - 1)) * 24 * 60 + hh * 60 + mi
 
 
-def _load_timeline_rows(log_dir, end_time=False):
+def _load_timeline_rows(log_dir: str, end_time: bool = False) -> list[IndexedTimelineRow]:
     """Load results from a directory and sort chronologically by filename timestamp.
 
     Args:
@@ -1736,7 +1980,7 @@ def _load_timeline_rows(log_dir, end_time=False):
         return []
 
     # Build list with timestamp extracted from source_file
-    entries = []
+    entries: list[TimelineRow] = []
     for pid, r in run_map.items():
         if r["status"] != "Completed":
             continue
@@ -1779,12 +2023,18 @@ def _load_timeline_rows(log_dir, end_time=False):
 
     # Sort by derived start time
     entries.sort(key=lambda e: e["start_minutes"])
-    for i, e in enumerate(entries):
-        e["incident_idx"] = i
-    return entries
+    return [IndexedTimelineRow(**entry, incident_idx=index) for index, entry in enumerate(entries)]
 
 
-def plot_timeline(data_per_dir, names, metric, ylabel, output_path, colors, window):
+def plot_timeline(
+    data_per_dir: Sequence[TimelineSeries],
+    names: Sequence[str],
+    metric: str,
+    ylabel: str,
+    output_path: str,
+    colors: Sequence[str],
+    window: int,
+) -> None:
     """Plot a timeline chart with scatter points and rolling average trend lines.
 
     Args:
@@ -1796,9 +2046,11 @@ def plot_timeline(data_per_dir, names, metric, ylabel, output_path, colors, wind
         colors: list of color strings.
         window: rolling average window size.
     """
-    if not HAS_PLOTTING:
+    if not has_plotting:
         print(f"Matplotlib/Numpy not found. Skipping plot: {output_path}")
         return
+
+    plt = _plotting()
 
     _markers = [".", "x", "^", "s", "D", "v", "<", ">"]
     _linestyles = ["-", "--", "-.", ":"]
@@ -1827,7 +2079,7 @@ def plot_timeline(data_per_dir, names, metric, ylabel, output_path, colors, wind
         )
 
     # Single rolling average across all directories combined
-    combined = []
+    combined: list[tuple[int, float]] = []
     for xs, ys in data_per_dir:
         combined.extend((x, y) for x, y in zip(xs, ys, strict=True) if y is not None)
     combined.sort(key=lambda p: p[0])
@@ -1860,10 +2112,12 @@ def plot_timeline(data_per_dir, names, metric, ylabel, output_path, colors, wind
     print(f"Timeline plot saved to {output_path}")
 
 
-def timeline_results(dirs, names=None, window=5, end_time=False):
+def timeline_results(
+    dirs: Sequence[str], names: Sequence[str] | None = None, window: int = 5, end_time: bool = False
+) -> None:
     """Plot timeline of solving times across chronologically ordered incidents."""
     # Load data from each directory, sequencing indices across dirs
-    all_entries = []
+    all_entries: list[list[IndexedTimelineRow]] = []
     offset = 0
     for d in dirs:
         print(f"\n--- Loading timeline data from {d} ---")
@@ -1890,7 +2144,7 @@ def timeline_results(dirs, names=None, window=5, end_time=False):
     colors = [f"C{i}" for i in range(len(dirs))]
 
     # Build per-dir data for each metric
-    metrics = [
+    metrics: list[tuple[str, str, str, Callable[[IndexedTimelineRow], float | None]]] = [
         ("timeline_diagnosis.png", "Diagnosis Time (TTL)", "TTL (seconds)", lambda e: e["ttl"]),
         ("timeline_mitigation.png", "Mitigation Time (TTM)", "TTM (seconds)", lambda e: e["ttm"]),
         (
@@ -1902,7 +2156,7 @@ def timeline_results(dirs, names=None, window=5, end_time=False):
     ]
 
     for filename, title, ylabel, extract in metrics:
-        data_per_dir = []
+        data_per_dir: list[TimelineSeries] = []
         for entries in all_entries:
             xs = [e["incident_idx"] for e in entries]
             ys = [extract(e) for e in entries]

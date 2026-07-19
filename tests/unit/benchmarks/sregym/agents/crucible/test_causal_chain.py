@@ -1,13 +1,16 @@
+# pyright: reportPrivateUsage=false
 """Unit tests for causal chain support in the crucible agent."""
 
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from benchmarks.sregym.agents.crucible._prompts import PromptRenderer
 
 import pytest
 
@@ -279,7 +282,7 @@ class TestExtractBenchmarkReasoning:
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_driver(return_output=None, completed=True):
+def _make_mock_driver(return_output: Any = None, completed: bool = True):
     """Create a mock AgentDriver for testing RecoveryAgent."""
     driver = AsyncMock()
     driver.run = AsyncMock(
@@ -294,7 +297,7 @@ def _make_mock_driver(return_output=None, completed=True):
 
 @pytest.mark.asyncio
 class TestRunRecoveryDiagnosis:
-    async def test_skips_when_no_reasoning(self, tmp_path: Path, renderer):
+    async def test_skips_when_no_reasoning(self, tmp_path: Path, renderer: PromptRenderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
         driver = _make_mock_driver()
@@ -308,7 +311,7 @@ class TestRunRecoveryDiagnosis:
         )
         assert result is None
 
-    async def test_appends_recovery_to_shared_file(self, tmp_path: Path, renderer):
+    async def test_appends_recovery_to_shared_file(self, tmp_path: Path, renderer: PromptRenderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -342,7 +345,7 @@ class TestRunRecoveryDiagnosis:
         assert "### Recovery Diagnosis" in content
         assert "**Causal Chain**: field → mechanism → symptom" in content
 
-    async def test_appends_reflection_to_shared_file(self, tmp_path: Path, renderer):
+    async def test_appends_reflection_to_shared_file(self, tmp_path: Path, renderer: PromptRenderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -377,7 +380,7 @@ class TestRunRecoveryDiagnosis:
         content = shared.read_text()
         assert "**Agent Reflection**: Agent focused on nginx logs instead of tracing downstream." in content
 
-    async def test_omits_reflection_when_empty(self, tmp_path: Path, renderer):
+    async def test_omits_reflection_when_empty(self, tmp_path: Path, renderer: PromptRenderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -408,7 +411,7 @@ class TestRunRecoveryDiagnosis:
         content = shared.read_text()
         assert "**Agent Reflection**" not in content
 
-    async def test_returns_none_when_agent_does_not_submit(self, tmp_path: Path, renderer):
+    async def test_returns_none_when_agent_does_not_submit(self, tmp_path: Path, renderer: PromptRenderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -434,7 +437,7 @@ class TestRunRecoveryDiagnosis:
 
 @pytest.mark.asyncio
 class TestRunRecoveryReflectionPhase:
-    async def test_uses_phase1_message_history_and_stage_outputs(self, tmp_path: Path, renderer):
+    async def test_uses_phase1_message_history_and_stage_outputs(self, tmp_path: Path, renderer: PromptRenderer):
         stage_outputs_file = tmp_path / "stage_outputs.md"
         stage_outputs_file.write_text("## Diagnosis Outcome\nObserved a failing upstream dependency")
         message_history = [{"role": "user", "content": "phase-1 history"}]
@@ -515,7 +518,7 @@ class TestExtractBenchmarkMitigationReasoning:
 
 @pytest.mark.asyncio
 class TestRunRecoveryMitigation:
-    async def test_skips_when_no_reasoning(self, tmp_path: Path, renderer):
+    async def test_skips_when_no_reasoning(self, tmp_path: Path, renderer: PromptRenderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
         driver = _make_mock_driver()
@@ -529,7 +532,7 @@ class TestRunRecoveryMitigation:
         )
         assert result is None
 
-    async def test_appends_recovery_to_shared_file(self, tmp_path: Path, renderer):
+    async def test_appends_recovery_to_shared_file(self, tmp_path: Path, renderer: PromptRenderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -565,7 +568,7 @@ class TestRunRecoveryMitigation:
         assert "**Mitigation**: patch ConfigMap X" in content
         assert "**Agent Reflection**: Agent fixed the wrong field." in content
 
-    async def test_omits_reflection_when_empty(self, tmp_path: Path, renderer):
+    async def test_omits_reflection_when_empty(self, tmp_path: Path, renderer: PromptRenderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 
@@ -595,7 +598,7 @@ class TestRunRecoveryMitigation:
         content = shared.read_text()
         assert "**Agent Reflection**" not in content
 
-    async def test_returns_none_when_agent_does_not_submit(self, tmp_path: Path, renderer):
+    async def test_returns_none_when_agent_does_not_submit(self, tmp_path: Path, renderer: PromptRenderer):
         shared = tmp_path / "shared.md"
         shared.write_text("# Header\n")
 

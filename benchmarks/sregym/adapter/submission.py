@@ -12,8 +12,10 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from collections.abc import Callable
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Literal, Protocol, cast
+
+if TYPE_CHECKING:
+    from types import TracebackType
 
 
 class SubmissionBridgeError(RuntimeError):
@@ -23,7 +25,31 @@ class SubmissionBridgeError(RuntimeError):
 SUBMISSION_TIMEOUT_SECONDS = 300
 
 
-Opener = Callable[..., Any]
+class ResponseContext(Protocol):
+    def __enter__(self) -> ResponseContext: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None: ...
+
+    def read(self) -> bytes: ...
+
+
+class Opener(Protocol):
+    def __call__(self, request: urllib.request.Request, timeout: int) -> ResponseContext: ...
+
+
+def _response_object(response: ResponseContext) -> dict[str, object]:
+    decoded: object = json.loads(response.read())
+    if not isinstance(decoded, dict):
+        raise SubmissionBridgeError("SREGym submission response is not a JSON object")
+    mapping = cast("dict[object, object]", decoded)
+    if not all(isinstance(key, str) for key in mapping):
+        raise SubmissionBridgeError("SREGym submission response is not a JSON object")
+    return cast("dict[str, object]", mapping)
 
 
 def submit_solution(
@@ -31,8 +57,9 @@ def submit_solution(
     *,
     phase: Literal["diagnosis", "mitigation"],
     api_base: str,
-    opener: Opener = urllib.request.urlopen,
-) -> dict[str, Any]:
+    opener: Opener | None = None,
+) -> dict[str, object]:
+    open_request = opener if opener is not None else cast("Opener", urllib.request.urlopen)
     base = api_base.rstrip("/")
     payload = json.dumps({"solution": solution}).encode()
     phase_request = urllib.request.Request(
@@ -41,9 +68,10 @@ def submit_solution(
         headers={"Content-Type": "application/json"},
         method="POST",
     )
+    result: dict[str, object]
     try:
-        with opener(phase_request, timeout=SUBMISSION_TIMEOUT_SECONDS) as response:
-            result = json.loads(response.read())
+        with open_request(phase_request, timeout=SUBMISSION_TIMEOUT_SECONDS) as response:
+            result = _response_object(response)
     except urllib.error.HTTPError as exc:
         if phase != "mitigation" or exc.code != 409:
             raise
@@ -51,8 +79,6 @@ def submit_solution(
         # guard.  submit_done itself is idempotent, so continue to it and recover
         # the cached completion payload instead of duplicating mitigation.
         result = {"status": "already_done"}
-    if not isinstance(result, dict):
-        raise SubmissionBridgeError("SREGym submission response is not a JSON object")
     if phase == "diagnosis":
         if result.get("status") != "acknowledged":
             raise SubmissionBridgeError("SREGym diagnosis was not acknowledged")
@@ -61,9 +87,9 @@ def submit_solution(
         raise SubmissionBridgeError("SREGym mitigation was not acknowledged")
 
     done_request = urllib.request.Request(f"{base}/submit_done", method="POST")
-    with opener(done_request, timeout=SUBMISSION_TIMEOUT_SECONDS) as response:
-        done = json.loads(response.read())
-    if not isinstance(done, dict) or done.get("status") != "done":
+    with open_request(done_request, timeout=SUBMISSION_TIMEOUT_SECONDS) as response:
+        done = _response_object(response)
+    if done.get("status") != "done":
         raise SubmissionBridgeError("SREGym autonomous run did not report done")
     return {"mitigation": result, "done": done}
 

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 import json
 from pathlib import Path
 
@@ -9,7 +10,11 @@ from libs.agent_cli.gemini import GeminiGenerationSession
 def test_gemini_metadata_uses_sdo_filename(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     chats_dir = tmp_path / ".gemini" / "tmp" / "application" / "chats"
     chats_dir.mkdir(parents=True)
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    def mock_home(_path_type: type[Path]) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(Path, "home", classmethod(mock_home))
 
     session = object.__new__(GeminiGenerationSession)
     session.call_id = 7

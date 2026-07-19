@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Tests for benchmarks.sregym.runner.pipeline."""
 
 from __future__ import annotations
@@ -5,7 +6,7 @@ from __future__ import annotations
 import json
 import textwrap
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 import pytest
@@ -576,7 +577,7 @@ class TestResetStagesForRerun:
         )
 
         # Create fake experiment dirs for all stages
-        dirs = []
+        dirs: list[Path] = []
         for i, s in enumerate(config.stages):
             d = tmp_path / f"stage_{i}_{s.name}"
             d.mkdir()
@@ -657,7 +658,7 @@ class TestPipelineRunner:
     """Tests for ``benchmarks.sregym.runner.runner.run_pipeline``."""
 
     @pytest.fixture
-    def sregym_dir(self, tmp_path: Path):
+    def sregym_dir(self, tmp_path: Path) -> Path:
         """Create a fake sregym dir with main.py."""
         d = tmp_path / "third_party" / "sregym"
         d.mkdir(parents=True)
@@ -685,11 +686,11 @@ class TestPipelineRunner:
             encoding="utf-8",
         )
 
-    def test_runs_stages_sequentially(self, sregym_dir, tmp_path: Path) -> None:
+    def test_runs_stages_sequentially(self, sregym_dir: Path, tmp_path: Path) -> None:
         config = self._make_config()
-        calls = []
+        calls: list[list[str]] = []
 
-        def mock_run(argv, cwd=None, env=None):
+        def mock_run(argv: Any, cwd: Any = None, env: Any = None) -> Any:
             calls.append(argv)
             self._write_success_result(argv)
             return type("Result", (), {"returncode": 0})()
@@ -717,11 +718,11 @@ class TestPipelineRunner:
         assert rc == 0
         assert len(calls) == 2
 
-    def test_abort_on_failure(self, sregym_dir, tmp_path: Path) -> None:
+    def test_abort_on_failure(self, sregym_dir: Path, tmp_path: Path) -> None:
         config = self._make_config()
         call_count = 0
 
-        def mock_run(argv, cwd=None, env=None):
+        def mock_run(argv: Any, cwd: Any = None, env: Any = None) -> Any:
             nonlocal call_count
             call_count += 1
             return type("Result", (), {"returncode": 1})()
@@ -753,11 +754,11 @@ class TestPipelineRunner:
         assert loaded_state.stages[0].status == "failed"
         assert loaded_state.stages[1].status == "pending"
 
-    def test_resume_skips_completed(self, sregym_dir, tmp_path: Path) -> None:
+    def test_resume_skips_completed(self, sregym_dir: Path, tmp_path: Path) -> None:
         config = self._make_config()
-        calls = []
+        calls: list[list[str]] = []
 
-        def mock_run(argv, cwd=None, env=None):
+        def mock_run(argv: Any, cwd: Any = None, env: Any = None) -> Any:
             calls.append(argv)
             self._write_success_result(argv)
             return type("Result", (), {"returncode": 0})()
@@ -789,11 +790,18 @@ class TestPipelineRunner:
         assert rc == 0
         assert len(calls) == 1  # only stage 1 ran
 
-    def test_kb_chaining_sets_seed_on_config(self, sregym_dir, tmp_path: Path) -> None:
+    def test_kb_chaining_sets_seed_on_config(self, sregym_dir: Path, tmp_path: Path) -> None:
         config = self._make_config()
-        captured_configs = []
+        captured_configs: list[ExperimentConfig] = []
 
-        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root, extra_env=None):
+        def mock_run_stage(
+            exp_config: Any,
+            stage_exp_dir: Any,
+            tasklist_path: Any,
+            sregym_dir: Any,
+            project_root: Any,
+            extra_env: Any = None,
+        ) -> Any:
             captured_configs.append(exp_config)
             return 0
 
@@ -824,26 +832,33 @@ class TestPipelineRunner:
         seed_dir = captured_configs[1].agent_config["crucible"]["seed_kb_dir"]
         assert seed_dir.endswith("/stage_0_build/kb")
 
-    def test_hooks_invoked_for_kb_barrier(self, sregym_dir, tmp_path: Path) -> None:
+    def test_hooks_invoked_for_kb_barrier(self, sregym_dir: Path, tmp_path: Path) -> None:
         """before_stage + snapshot_before_drain + wait_for_drain fire around
         a stage whose successor chains its KB."""
         config = self._make_config()
-        before_calls = []
-        snapshot_calls = []
-        wait_calls = []
+        before_calls: list[Path] = []
+        snapshot_calls: list[Path] = []
+        wait_calls: list[tuple[Path, object | None]] = []
         sentinel = object()
 
-        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root, extra_env=None):
+        def mock_run_stage(
+            exp_config: Any,
+            stage_exp_dir: Any,
+            tasklist_path: Any,
+            sregym_dir: Any,
+            project_root: Any,
+            extra_env: Any = None,
+        ) -> Any:
             return 0
 
-        def before_stage(exp_dir, cfg):
+        def before_stage(exp_dir: Path, cfg: ExperimentConfig):
             before_calls.append(exp_dir)
 
-        def snap(exp_dir, cfg):
+        def snap(exp_dir: Path, cfg: ExperimentConfig):
             snapshot_calls.append(exp_dir)
             return sentinel
 
-        def wait(exp_dir, baseline):
+        def wait(exp_dir: Path, baseline: object | None):
             wait_calls.append((exp_dir, baseline))
 
         class _Lifecycle:
@@ -889,10 +904,10 @@ class TestPipelineRunner:
         assert snapshot_calls == [pipeline_dir / "stage_0_build"]
         assert wait_calls == [(pipeline_dir / "stage_0_build", sentinel)]
 
-    def test_abort_on_kb_queue_drain_failure(self, sregym_dir, tmp_path: Path) -> None:
+    def test_abort_on_kb_queue_drain_failure(self, sregym_dir: Path, tmp_path: Path) -> None:
         config = self._make_config()
 
-        def wait_fails(exp_dir, baseline):
+        def wait_fails(exp_dir: Path, baseline: object | None):
             raise TimeoutError("queue stuck")
 
         class _Lifecycle:
@@ -935,7 +950,7 @@ class TestPipelineRunner:
         assert loaded_state.stages[0].error == "kb queue drain failed: queue stuck"
         assert loaded_state.stages[1].status == "pending"
 
-    def test_chain_application_workspace_sets_seed_env(self, sregym_dir, tmp_path: Path) -> None:
+    def test_chain_application_workspace_sets_seed_env(self, sregym_dir: Path, tmp_path: Path) -> None:
         config = PipelineConfig(
             name="test",
             defaults={
@@ -951,9 +966,16 @@ class TestPipelineRunner:
                 StageConfig(name="eval", chain_kb=False, chain_application_workspace=True),
             ],
         )
-        captured_envs = []
+        captured_envs: list[dict[str, str]] = []
 
-        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root, extra_env=None):
+        def mock_run_stage(
+            exp_config: Any,
+            stage_exp_dir: Any,
+            tasklist_path: Any,
+            sregym_dir: Any,
+            project_root: Any,
+            extra_env: Any = None,
+        ) -> Any:
             captured_envs.append(extra_env or {})
             if stage_exp_dir.name == "stage_0_build":
                 workspace = stage_exp_dir / "application_workspace"
@@ -985,7 +1007,9 @@ class TestPipelineRunner:
         assert captured_envs[0] == {}
         assert captured_envs[1]["SREGYM_APP_WORKSPACE_SEED_DIR"].endswith("/stage_0_build/application_workspace")
 
-    def test_runtime_retry_prefers_validated_lifecycle_seed_for_current_stage(self, sregym_dir, tmp_path: Path) -> None:
+    def test_runtime_retry_prefers_validated_lifecycle_seed_for_current_stage(
+        self, sregym_dir: Path, tmp_path: Path
+    ) -> None:
         config = PipelineConfig(
             name="test",
             defaults={
@@ -1011,9 +1035,16 @@ class TestPipelineRunner:
         (seed / ".git").mkdir(parents=True)
         (seed / ".sdo").mkdir()
         (seed / ".sdo" / "lifecycle-provenance.yaml").write_text("validated\n", encoding="utf-8")
-        captured_envs = []
+        captured_envs: list[dict[str, str]] = []
 
-        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root, extra_env=None):
+        def mock_run_stage(
+            exp_config: Any,
+            stage_exp_dir: Any,
+            tasklist_path: Any,
+            sregym_dir: Any,
+            project_root: Any,
+            extra_env: Any = None,
+        ) -> Any:
             captured_envs.append(extra_env or {})
             return 0
 
@@ -1037,7 +1068,7 @@ class TestPipelineRunner:
         assert rc == 0
         assert captured_envs[0]["SREGYM_APP_WORKSPACE_SEED_DIR"] == str(seed)
 
-    def test_chain_application_workspace_missing_source_fails(self, sregym_dir, tmp_path: Path) -> None:
+    def test_chain_application_workspace_missing_source_fails(self, sregym_dir: Path, tmp_path: Path) -> None:
         config = PipelineConfig(
             name="test",
             defaults={
@@ -1079,7 +1110,7 @@ class TestPipelineRunner:
         assert loaded_state.stages[1].status == "failed"
         assert "application workspace is missing" in loaded_state.stages[1].error
 
-    def test_chain_application_workspace_requires_workspace_mode(self, sregym_dir, tmp_path: Path) -> None:
+    def test_chain_application_workspace_requires_workspace_mode(self, sregym_dir: Path, tmp_path: Path) -> None:
         config = PipelineConfig(
             name="test",
             defaults={
@@ -1126,7 +1157,7 @@ class TestPipelineRunner:
         assert loaded_state.stages[1].status == "failed"
         assert "requires application_workspace = 'persistent'" in loaded_state.stages[1].error
 
-    def test_chain_application_workspace_requires_persistent_workspace(self, sregym_dir, tmp_path: Path) -> None:
+    def test_chain_application_workspace_requires_persistent_workspace(self, sregym_dir: Path, tmp_path: Path) -> None:
         config = PipelineConfig(
             name="test",
             defaults={
@@ -1173,7 +1204,7 @@ class TestPipelineRunner:
         assert loaded_state.stages[1].status == "failed"
         assert "requires application_workspace = 'persistent'" in loaded_state.stages[1].error
 
-    def test_chain_application_workspace_requires_matching_app_filter(self, sregym_dir, tmp_path: Path) -> None:
+    def test_chain_application_workspace_requires_matching_app_filter(self, sregym_dir: Path, tmp_path: Path) -> None:
         config = PipelineConfig(
             name="test",
             defaults={
@@ -1198,7 +1229,14 @@ class TestPipelineRunner:
         pipeline_dir = tmp_path / "pipeline"
         pipeline_dir.mkdir()
 
-        def mock_run_stage(exp_config, stage_exp_dir, tasklist_path, sregym_dir, project_root, extra_env=None):
+        def mock_run_stage(
+            exp_config: Any,
+            stage_exp_dir: Any,
+            tasklist_path: Any,
+            sregym_dir: Any,
+            project_root: Any,
+            extra_env: Any = None,
+        ) -> Any:
             workspace = stage_exp_dir / "application_workspace"
             workspace.mkdir(parents=True, exist_ok=True)
             return 0
@@ -1225,7 +1263,7 @@ class TestPipelineRunner:
         assert loaded_state.stages[1].status == "failed"
         assert "matching app_filter values" in loaded_state.stages[1].error
 
-    def test_resume_extends_state_for_new_stage(self, sregym_dir, tmp_path: Path) -> None:
+    def test_resume_extends_state_for_new_stage(self, sregym_dir: Path, tmp_path: Path) -> None:
         config = PipelineConfig(
             name="test",
             defaults={"agent": "crucible", "model": "gemini-flash"},

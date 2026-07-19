@@ -80,7 +80,7 @@ class TestConfineReadsHook:
         payload = build_claude_sandbox_settings(SandboxConfig())
         assert "hooks" not in payload
 
-    def test_hook_emitted_when_roots_set(self, tmp_path):
+    def test_hook_emitted_when_roots_set(self, tmp_path: Path):
         cfg = SandboxConfig(confine_native_reads_to=[str(tmp_path)])
         payload = build_claude_sandbox_settings(cfg)
         assert "hooks" in payload
@@ -91,7 +91,7 @@ class TestConfineReadsHook:
         assert "confine_reads.py" in command
         assert str(tmp_path) in command
 
-    def _run_hook(self, payload: dict, roots: list[str]) -> tuple[int, str]:
+    def _run_hook(self, payload: dict[str, object], roots: list[str]) -> tuple[int, str]:
         hook_path = Path(__file__).resolve().parents[2] / "libs" / "agent_cli" / "hooks" / "confine_reads.py"
         proc = subprocess.run(
             [sys.executable, str(hook_path), *roots],
@@ -102,7 +102,7 @@ class TestConfineReadsHook:
         )
         return proc.returncode, proc.stdout
 
-    def test_hook_allows_path_inside_root(self, tmp_path):
+    def test_hook_allows_path_inside_root(self, tmp_path: Path):
         (tmp_path / "foo.txt").write_text("hi")
         rc, out = self._run_hook(
             {"tool_name": "Read", "tool_input": {"file_path": str(tmp_path / "foo.txt")}},
@@ -111,7 +111,7 @@ class TestConfineReadsHook:
         assert rc == 0
         assert out == ""
 
-    def test_hook_denies_path_outside_root(self, tmp_path):
+    def test_hook_denies_path_outside_root(self, tmp_path: Path):
         rc, out = self._run_hook(
             {"tool_name": "Read", "tool_input": {"file_path": "/etc/passwd"}},
             [str(tmp_path)],
@@ -122,7 +122,7 @@ class TestConfineReadsHook:
         assert hso["permissionDecision"] == "deny"
         assert "/etc/passwd" in hso["permissionDecisionReason"]
 
-    def test_hook_handles_glob_path_kwarg(self, tmp_path):
+    def test_hook_handles_glob_path_kwarg(self, tmp_path: Path):
         rc, out = self._run_hook(
             {"tool_name": "Glob", "tool_input": {"pattern": "**/*.py", "path": "/var/log"}},
             [str(tmp_path)],
@@ -131,7 +131,7 @@ class TestConfineReadsHook:
         decision = json.loads(out)
         assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
 
-    def test_hook_allows_tool_without_path(self, tmp_path):
+    def test_hook_allows_tool_without_path(self, tmp_path: Path):
         rc, out = self._run_hook(
             {"tool_name": "Glob", "tool_input": {"pattern": "**/*.py"}},
             [str(tmp_path)],

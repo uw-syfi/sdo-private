@@ -14,7 +14,7 @@ from benchmarks.sregym.agents.crucible.config import (
 
 
 def test_experiment_agent_defaults_and_cli_prompt_version() -> None:
-    agent: dict = {}
+    agent: dict[str, object] = {}
     cli = argparse.Namespace(prompt_version="v3", no_judge=False)
     cfg = crucible_config_from_experiment_agent(agent, cli_args=cli)
     assert cfg.prompt_version == "v3"

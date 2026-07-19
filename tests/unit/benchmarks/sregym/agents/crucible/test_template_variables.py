@@ -18,7 +18,7 @@ PROMPTS_DIR = _PROMPTS_ROOT / _DEFAULT_VERSION
 
 def _get_all_templates() -> list[tuple[str, Path]]:
     """Return (template_name, template_path) for all .j2 files."""
-    results = []
+    results: list[tuple[str, Path]] = []
     for p in sorted(PROMPTS_DIR.rglob("*.j2")):
         name = str(p.relative_to(PROMPTS_DIR)).removesuffix(".j2")
         results.append((name, p))

@@ -279,48 +279,48 @@ class TestFieldValidation:
 class TestValidateEnv:
     """validate_env() checks required environment variables."""
 
-    def test_openai_with_key(self, monkeypatch):
+    def test_openai_with_key(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         mc = ModelConfig(provider="openai", model="gpt-4o")
         mc.validate_env()  # should not raise
 
-    def test_openai_missing_key(self, monkeypatch):
+    def test_openai_missing_key(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         mc = ModelConfig(provider="openai", model="gpt-4o")
         with pytest.raises(EnvironmentError, match="OPENAI_API_KEY"):
             mc.validate_env()
 
-    def test_anthropic_with_key(self, monkeypatch):
+    def test_anthropic_with_key(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         mc = ModelConfig(provider="anthropic", model="claude-3-sonnet")
         mc.validate_env()
 
-    def test_anthropic_missing_key(self, monkeypatch):
+    def test_anthropic_missing_key(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         mc = ModelConfig(provider="anthropic", model="claude-3-sonnet")
         with pytest.raises(EnvironmentError, match="ANTHROPIC_API_KEY"):
             mc.validate_env()
 
-    def test_gemini_with_gemini_key(self, monkeypatch):
+    def test_gemini_with_gemini_key(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("GEMINI_API_KEY", "key")
         monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
         mc = ModelConfig(provider="gemini", model="gemini-2.0-flash")
         mc.validate_env()
 
-    def test_gemini_with_google_key(self, monkeypatch):
+    def test_gemini_with_google_key(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         monkeypatch.setenv("GOOGLE_API_KEY", "key")
         mc = ModelConfig(provider="gemini", model="gemini-2.0-flash")
         mc.validate_env()
 
-    def test_gemini_missing_both_keys(self, monkeypatch):
+    def test_gemini_missing_both_keys(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
         mc = ModelConfig(provider="gemini", model="gemini-2.0-flash")
         with pytest.raises(EnvironmentError, match="GEMINI_API_KEY or GOOGLE_API_KEY"):
             mc.validate_env()
 
-    def test_vertex_all_present_with_field_location(self, monkeypatch):
+    def test_vertex_all_present_with_field_location(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/path/creds.json")
         monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
         monkeypatch.delenv("GOOGLE_CLOUD_LOCATION", raising=False)
@@ -328,7 +328,7 @@ class TestValidateEnv:
         mc = ModelConfig(provider="vertex", model="gemini-2.5-pro", location="us-central1")
         mc.validate_env()
 
-    def test_vertex_location_from_google_cloud_location_env(self, monkeypatch):
+    def test_vertex_location_from_google_cloud_location_env(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/path/creds.json")
         monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
         monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-east1")
@@ -336,7 +336,7 @@ class TestValidateEnv:
         mc = ModelConfig(provider="vertex", model="gemini-2.5-pro")  # no field location
         mc.validate_env()
 
-    def test_vertex_location_from_vertex_location_env(self, monkeypatch):
+    def test_vertex_location_from_vertex_location_env(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/path/creds.json")
         monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
         monkeypatch.delenv("GOOGLE_CLOUD_LOCATION", raising=False)
@@ -344,7 +344,7 @@ class TestValidateEnv:
         mc = ModelConfig(provider="vertex", model="gemini-2.5-pro")
         mc.validate_env()
 
-    def test_vertex_missing_credentials(self, monkeypatch):
+    def test_vertex_missing_credentials(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
         monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
         monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
@@ -352,7 +352,7 @@ class TestValidateEnv:
         with pytest.raises(EnvironmentError, match="GOOGLE_APPLICATION_CREDENTIALS"):
             mc.validate_env()
 
-    def test_vertex_missing_project(self, monkeypatch):
+    def test_vertex_missing_project(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/path/creds.json")
         monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
         monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
@@ -360,7 +360,7 @@ class TestValidateEnv:
         with pytest.raises(EnvironmentError, match="GOOGLE_CLOUD_PROJECT"):
             mc.validate_env()
 
-    def test_vertex_missing_location_all_sources(self, monkeypatch):
+    def test_vertex_missing_location_all_sources(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/path/creds.json")
         monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
         monkeypatch.delenv("GOOGLE_CLOUD_LOCATION", raising=False)

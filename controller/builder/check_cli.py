@@ -9,7 +9,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from controller.builder.errors import ControllerBuilderError
 from controller.builder.go_runner import GoRunner
@@ -497,22 +497,21 @@ def _pending_controller_rollout(
     if completed.returncode != 0:
         details = completed.stderr.strip() or completed.stdout.strip()
         raise ValueError(f"cannot resolve durable controller rollout: {details}")
-    payload = json.loads(completed.stdout)
-    if payload is None:
+    decoded = cast("object", json.loads(completed.stdout))
+    if decoded is None:
         return None
+    if not isinstance(decoded, dict):
+        raise ValueError("durable controller rollout command returned an invalid expectation")
+    payload = cast("dict[object, object]", decoded)
     required = {
         "incident_id",
         "reflection_commit",
         "before_detector_fingerprint",
         "after_detector_fingerprint",
     }
-    if (
-        not isinstance(payload, dict)
-        or set(payload) != required
-        or not all(isinstance(payload[field], str) and payload[field] for field in required)
-    ):
+    if set(payload) != required or not all(isinstance(payload[field], str) and payload[field] for field in required):
         raise ValueError("durable controller rollout command returned an invalid expectation")
-    return payload
+    return {field: value for field in required if isinstance(value := payload[field], str)}
 
 
 def _persist_controller_rollout(app_root: Path, worktree_root: Path, record: dict[str, object]) -> None:
@@ -561,21 +560,6 @@ def _git_head(app_root: Path) -> str:
         text=True,
     )
     return completed.stdout.strip() if completed.returncode == 0 else "unknown"
-
-
-def _collect_finding_payloads(stdout: str) -> list[dict[str, object]]:
-    payloads: list[dict[str, object]] = []
-    for raw_line in stdout.splitlines():
-        line = raw_line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict) and payload.get("rule_id"):
-            payloads.append(payload)
-    return payloads
 
 
 def _app_root(args: argparse.Namespace) -> Path:

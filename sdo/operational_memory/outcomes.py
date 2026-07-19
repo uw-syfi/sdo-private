@@ -22,13 +22,13 @@ class OutcomeFacts(BaseModel):
     request: IncidentRequest
     result: IncidentResult | None = None
     dispatch_error: str | None = None
-    final_health_detector_state: list[DetectorEvaluation] = Field(default_factory=list)
+    final_health_detector_state: list[DetectorEvaluation] = Field(default_factory=list[DetectorEvaluation])
     health_verified: bool
     fault_confirmed: bool
     missed_fault_detected: bool = False
-    inspected_playbooks: list[str] = Field(default_factory=list)
-    confirmed_playbooks: list[str] = Field(default_factory=list)
-    rejected_playbooks: list[str] = Field(default_factory=list)
+    inspected_playbooks: list[str] = Field(default_factory=list[str])
+    confirmed_playbooks: list[str] = Field(default_factory=list[str])
+    rejected_playbooks: list[str] = Field(default_factory=list[str])
     repair_commit: str | None = None
     memory_commit: str | None = None
     responder_backend: str = Field(min_length=1)

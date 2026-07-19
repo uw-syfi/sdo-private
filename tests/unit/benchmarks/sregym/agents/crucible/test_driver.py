@@ -1,7 +1,9 @@
+# pyright: reportPrivateUsage=false
 """Unit tests for benchmarks.sregym.agents.crucible.driver._wait_for_stage."""
 
 from __future__ import annotations
 
+import math
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -48,10 +50,10 @@ class TestWaitForStage:
 
         assert stage == "mitigation"
         assert mock_sleep.call_count == 2
-        delays = [c.args[0] for c in mock_sleep.call_args_list]
+        delays = [float(c.args[0]) for c in mock_sleep.call_args_list]
         # First delay is 1.0, second is 1.5
-        assert delays[0] == pytest.approx(1.0)
-        assert delays[1] == pytest.approx(1.5)
+        assert math.isclose(delays[0], 1.0)
+        assert math.isclose(delays[1], 1.5)
 
     def test_raises_timeout_when_stage_never_ready(self):
         """Raises TimeoutError if conductor never reaches a ready stage."""

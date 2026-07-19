@@ -20,10 +20,34 @@ from sdo.agent_runtime.lifecycle.agents import (
     HealthJudgeArtifact,
     LifecycleAgentBackend,
     LifecycleAgentError,
+    TopologyResourceDTO,
 )
 from sdo.operational_memory import ContainerSandboxRunner, SandboxResult, SandboxRunner
 
 logger = logging.getLogger(__name__)
+
+
+def _mapping(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    result: dict[str, object] = {}
+    for key, item in cast("dict[object, object]", value).items():
+        if not isinstance(key, str):
+            return None
+        result[key] = item
+    return result
+
+
+def _object_mapping(value: object) -> dict[object, object] | None:
+    if not isinstance(value, dict):
+        return None
+    return cast("dict[object, object]", value)
+
+
+def _object_list(value: object) -> list[object] | None:
+    if not isinstance(value, list):
+        return None
+    return cast("list[object]", value)
 
 
 class LifecycleError(RuntimeError):
@@ -63,13 +87,13 @@ def reuse_initial_lifecycle_if_valid(
     if not provenance_path.is_file() or any(not (root / relative).is_file() for relative in required_paths):
         return False
     try:
-        provenance = yaml.safe_load(provenance_path.read_text(encoding="utf-8"))
-        if not isinstance(provenance, dict):
+        provenance = _mapping(cast("object", yaml.safe_load(provenance_path.read_text(encoding="utf-8"))))
+        if provenance is None:
             return False
         deployer = DeployerAssessment.model_validate(provenance.get("deployer"))
         final_artifact = HealthJudgeArtifact.model_validate(provenance.get("health_judge"))
-        raw_attempts = provenance.get("health_judge_rounds")
-        if not isinstance(raw_attempts, list):
+        raw_attempts = _object_list(provenance.get("health_judge_rounds"))
+        if raw_attempts is None:
             return False
         attempts = [HealthJudgeArtifact.model_validate(raw) for raw in raw_attempts]
         expected = _deployer_assessment({"repository": str(root), "application": application})
@@ -236,7 +260,7 @@ def run_initial_lifecycle(
     if final_artifact is None:
         raise LifecycleError("health judge produced no validated final artifact")
 
-    provenance = {
+    provenance: dict[str, object] = {
         "deployer": deployer.model_dump(mode="json"),
         "health_judge": final_artifact.model_dump(mode="json"),
         "health_judge_rounds": [artifact.model_dump(mode="json") for artifact in judge_attempts],
@@ -274,10 +298,13 @@ def _deployer_assessment(payload: dict[str, object]) -> dict[str, object]:
 
 def _judge_assessment(payload: dict[str, object]) -> dict[str, object]:
     objective = str(payload["health_objective"]).strip()
-    deployer = payload.get("deployer_assessment")
-    if not isinstance(deployer, dict) or not isinstance(deployer.get("resources"), list):
+    deployer = _mapping(payload.get("deployer_assessment"))
+    if deployer is None:
         raise LifecycleError("health judge requires a published deployer assessment")
-    resources = [resource for resource in deployer["resources"] if isinstance(resource, dict)]
+    raw_resources = _object_list(deployer.get("resources"))
+    if raw_resources is None:
+        raise LifecycleError("health judge requires a published deployer assessment")
+    resources = [resource for raw in raw_resources if (resource := _mapping(raw)) is not None]
     objective_lower = objective.lower()
     selects_all_source_backed = "all source-backed" in objective_lower
 
@@ -297,10 +324,10 @@ def _judge_assessment(payload: dict[str, object]) -> dict[str, object]:
     for resource in resources:
         if resource.get("kind") != "Deployment" or resource.get("name") not in deployment_names:
             continue
-        dependencies = resource.get("dependencies")
-        if not isinstance(dependencies, list):
+        dependencies = _object_list(resource.get("dependencies"))
+        if dependencies is None:
             continue
-        labels = {}
+        labels: dict[str, str] = {}
         for dependency in dependencies:
             if not isinstance(dependency, str) or not dependency.startswith("pod-label:"):
                 continue
@@ -329,21 +356,24 @@ def _validate_deployer_assessment(root: Path, assessment: DeployerAssessment) ->
         errors.append("deployer topology_fingerprint does not match tracked source")
 
     def canonical(resources: object) -> list[tuple[str, str, str, str, tuple[str, ...]]]:
-        if not isinstance(resources, list):
+        resource_items = _object_list(resources)
+        if resource_items is None:
             return []
-        result = []
-        for resource in resources:
-            if hasattr(resource, "model_dump"):
-                resource = resource.model_dump(mode="json")
-            if not isinstance(resource, dict):
+        result: list[tuple[str, str, str, str, tuple[str, ...]]] = []
+        for raw_resource in resource_items:
+            if isinstance(raw_resource, TopologyResourceDTO):
+                raw_resource = cast("object", raw_resource.model_dump(mode="json"))
+            resource = _mapping(raw_resource)
+            if resource is None:
                 continue
+            dependencies = _object_list(resource.get("dependencies")) or []
             result.append(
                 (
                     str(resource.get("kind", "")),
                     str(resource.get("name", "")),
                     str(resource.get("namespace", "")),
                     str(resource.get("source", "")),
-                    tuple(sorted(str(item) for item in resource.get("dependencies", []))),
+                    tuple(sorted(str(item) for item in dependencies)),
                 )
             )
         return sorted(result)
@@ -849,23 +879,24 @@ def _matching_go_brace(source: str, opening_brace: int) -> int:
 
 def _render_health_detector(plan: dict[str, object]) -> str:
     def map_entries(field: str) -> str:
-        values = plan.get(field, [])
-        if not isinstance(values, list):
+        values = _object_list(plan.get(field, []))
+        if values is None:
             raise LifecycleError(f"health judge plan field {field!r} must be a list")
         return "\n".join(f"\t{json.dumps(str(value))}: {{}}," for value in values)
 
     digest = str(plan.get("objective_digest", ""))
     if len(digest) != 64:
         raise LifecycleError("health judge plan requires a SHA-256 objective digest")
-    raw_label_sets = plan.get("workload_label_sets", [])
-    if not isinstance(raw_label_sets, list):
+    raw_label_sets = _object_list(plan.get("workload_label_sets", []))
+    if raw_label_sets is None:
         raise LifecycleError("health judge plan field 'workload_label_sets' must be a list")
-    label_sets = []
+    label_sets: list[str] = []
     for raw_labels in raw_label_sets:
-        if not isinstance(raw_labels, dict):
+        labels = _object_mapping(raw_labels)
+        if labels is None:
             raise LifecycleError("health judge workload labels must be mappings")
         entries = ", ".join(
-            f"{json.dumps(str(key))}: {json.dumps(str(value))}" for key, value in sorted(raw_labels.items())
+            f"{json.dumps(str(key))}: {json.dumps(str(value))}" for key, value in sorted(labels.items())
         )
         label_sets.append(f"\t{{{entries}}},")
     return (
@@ -924,14 +955,18 @@ def _topology_resources(root: Path, tracked: list[str]) -> list[TopologyResource
         if Path(relative).suffix.lower() not in {".yaml", ".yml"}:
             continue
         try:
-            documents = list(yaml.safe_load_all((root / relative).read_text(encoding="utf-8")))
+            documents = cast(
+                "list[object]",
+                list(yaml.safe_load_all((root / relative).read_text(encoding="utf-8"))),
+            )
         except (OSError, UnicodeDecodeError, yaml.YAMLError):
             continue
-        for document in documents:
-            if not isinstance(document, dict):
+        for raw_document in documents:
+            document = _mapping(raw_document)
+            if document is None:
                 continue
-            metadata = document.get("metadata")
-            if not isinstance(metadata, dict):
+            metadata = _mapping(document.get("metadata"))
+            if metadata is None:
                 continue
             kind = document.get("kind")
             name = metadata.get("name")
@@ -950,47 +985,50 @@ def _topology_resources(root: Path, tracked: list[str]) -> list[TopologyResource
     return sorted(resources, key=lambda item: (item.namespace, item.kind, item.name, item.source))
 
 
-def _resource_dependencies(document: dict[object, object]) -> tuple[str, ...]:
+def _resource_dependencies(document: dict[str, object]) -> tuple[str, ...]:
     dependencies: set[str] = set()
-    spec = document.get("spec")
-    if not isinstance(spec, dict):
+    spec = _mapping(document.get("spec"))
+    if spec is None:
         return ()
-    selector = spec.get("selector")
-    if isinstance(selector, dict):
+    selector = _object_mapping(spec.get("selector"))
+    if selector is not None:
         for key, value in selector.items():
             if isinstance(key, str) and isinstance(value, str):
                 dependencies.add(f"selector:{key}={value}")
-    template = spec.get("template")
-    template_metadata = template.get("metadata") if isinstance(template, dict) else None
-    template_labels = template_metadata.get("labels") if isinstance(template_metadata, dict) else None
-    if isinstance(template_labels, dict):
+    template = _mapping(spec.get("template"))
+    template_metadata = _mapping(template.get("metadata")) if template is not None else None
+    template_labels = _object_mapping(template_metadata.get("labels")) if template_metadata is not None else None
+    if template_labels is not None:
         for key, value in template_labels.items():
             if isinstance(key, str) and isinstance(value, str):
                 dependencies.add(f"pod-label:{key}={value}")
-    pod_spec = template.get("spec") if isinstance(template, dict) else None
-    if not isinstance(pod_spec, dict):
+    pod_spec = _mapping(template.get("spec")) if template is not None else None
+    if pod_spec is None:
         return tuple(sorted(dependencies))
     service_account = pod_spec.get("serviceAccountName")
     if isinstance(service_account, str) and service_account:
         dependencies.add(f"ServiceAccount/{service_account}")
-    for volume in pod_spec.get("volumes", []):
-        if not isinstance(volume, dict):
+    for raw_volume in _object_list(pod_spec.get("volumes", [])) or []:
+        volume = _mapping(raw_volume)
+        if volume is None:
             continue
-        config_map = volume.get("configMap")
-        if isinstance(config_map, dict) and isinstance(config_map.get("name"), str):
+        config_map = _mapping(volume.get("configMap"))
+        if config_map is not None and isinstance(config_map.get("name"), str):
             dependencies.add(f"ConfigMap/{config_map['name']}")
     for container_group in ("initContainers", "containers"):
-        for container in pod_spec.get(container_group, []):
-            if not isinstance(container, dict):
+        for raw_container in _object_list(pod_spec.get(container_group, [])) or []:
+            container = _mapping(raw_container)
+            if container is None:
                 continue
             image = container.get("image")
             if isinstance(image, str) and image:
                 dependencies.add(f"image:{image}")
-            for source in container.get("envFrom", []):
-                if not isinstance(source, dict):
+            for raw_source in _object_list(container.get("envFrom", [])) or []:
+                source = _mapping(raw_source)
+                if source is None:
                     continue
-                config_map = source.get("configMapRef")
-                if isinstance(config_map, dict) and isinstance(config_map.get("name"), str):
+                config_map = _mapping(source.get("configMapRef"))
+                if config_map is not None and isinstance(config_map.get("name"), str):
                     dependencies.add(f"ConfigMap/{config_map['name']}")
     return tuple(sorted(dependencies))
 

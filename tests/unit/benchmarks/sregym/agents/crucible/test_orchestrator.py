@@ -1,14 +1,16 @@
+# pyright: reportPrivateUsage=false
 """Unit tests for benchmarks.sregym.agents.crucible.orchestrator helpers."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 from benchmarks.sregym.agents.crucible._prompts import PromptRenderer
@@ -79,7 +81,7 @@ class TestBuildUsageMetrics:
 
 
 class TestSharedFileInit:
-    def _init(self, shared_file, app_info: dict) -> None:
+    def _init(self, shared_file: Path, app_info: dict[str, str]) -> None:
         SharedFile(shared_file).init(
             "# SRE Judged Session State\n"
             "## Session\n"
@@ -120,7 +122,7 @@ def _mock_httpx_response(stage: str) -> MagicMock:
     return resp
 
 
-def _make_mock_client(**kwargs) -> AsyncMock:
+def _make_mock_client(**kwargs: Any) -> AsyncMock:
     """Build a mock httpx.AsyncClient with async context-manager support."""
     client = AsyncMock(spec=httpx.AsyncClient)
     for k, v in kwargs.items():
@@ -130,11 +132,11 @@ def _make_mock_client(**kwargs) -> AsyncMock:
     return client
 
 
-def _counter_clock(step: float = 1.0):
+def _counter_clock(step: float = 1.0) -> Callable[[], float]:
     """Return a callable that increments by *step* on each call (starts at 0)."""
     n = {"v": -step}
 
-    def tick():
+    def tick() -> float:
         n["v"] += step
         return n["v"]
 
@@ -161,7 +163,7 @@ class TestWaitForMitigationStage:
     async def test_polls_until_stage_matches(self):
         call_count = 0
 
-        async def staged_get(*args, **kwargs):
+        async def staged_get(*args: Any, **kwargs: Any) -> MagicMock:
             nonlocal call_count
             call_count += 1
             if call_count < 3:
@@ -205,7 +207,7 @@ class TestWaitForMitigationStage:
     async def test_handles_connection_error_gracefully(self):
         call_count = 0
 
-        async def fake_get(*args, **kwargs):
+        async def fake_get(*args: Any, **kwargs: Any):
             nonlocal call_count
             call_count += 1
             if call_count < 3:
@@ -281,7 +283,7 @@ class TestHypothesisTextPassedToJudge:
         mock_sre._config = MagicMock()
         mock_sre._config.stage_outputs_file = None
 
-        async def fake_sre_run(**kwargs):
+        async def fake_sre_run(**kwargs: Any) -> AgentResult[Any]:
             state = SharedState()
             state.answer = "disk full"
             state.answer_justification = "100% usage"
@@ -295,9 +297,9 @@ class TestHypothesisTextPassedToJudge:
         mock_sre.run = AsyncMock(side_effect=fake_sre_run)
 
         # Mock judge agent — capture the hypothesis_text kwarg
-        captured_judge_kwargs = []
+        captured_judge_kwargs: list[dict[str, Any]] = []
 
-        async def fake_judge_run(**kwargs):
+        async def fake_judge_run(**kwargs: Any):
             captured_judge_kwargs.append(kwargs)
             state = SharedState()
             state.verdict = "APPROVED"
@@ -395,13 +397,13 @@ class TestStageLoopModelHTTPError:
         mock_sre._config = MagicMock()
         mock_sre._config.stage_outputs_file = None
 
-        async def fake_sre_run(**kwargs):
+        async def fake_sre_run(**kwargs: Any):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
                 # Simulate a transient failure
                 state = SharedState()
-                result = AgentResult(output=None, completed=False)
+                result = AgentResult[Any](output=None, completed=False)
                 result.state = state  # type: ignore[attr-defined]
                 return result
             state = SharedState()
@@ -418,7 +420,7 @@ class TestStageLoopModelHTTPError:
         mock_sre.run = AsyncMock(side_effect=fake_sre_run)
 
         # Mock judge
-        async def fake_judge_run(**kwargs):
+        async def fake_judge_run(**kwargs: Any):
             state = SharedState()
             state.verdict = "APPROVED"
             state.submitted = True
