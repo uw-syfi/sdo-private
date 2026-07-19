@@ -6,6 +6,6 @@
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "Clearing Python bytecode cache..."
-count=$(find "$REPO_ROOT/app_operator" "$REPO_ROOT/sregym_agents" "$REPO_ROOT/libs" -name "*.pyc" -delete -print | wc -l | tr -d ' ')
-find "$REPO_ROOT/app_operator" "$REPO_ROOT/sregym_agents" "$REPO_ROOT/libs" -name "__pycache__" -type d -empty -delete
+count=$(find "$REPO_ROOT/sdo" "$REPO_ROOT/benchmarks" "$REPO_ROOT/libs" -name "*.pyc" -delete -print | wc -l | tr -d ' ')
+find "$REPO_ROOT/sdo" "$REPO_ROOT/benchmarks" "$REPO_ROOT/libs" -name "__pycache__" -type d -empty -delete
 echo "Deleted $count .pyc files."

@@ -1,0 +1,58 @@
+# Ablation: heuristic injection on vs off.
+#
+# Both stages run the same variant problems with identical KB.
+# Stage 0 builds the KB and injects everything including heuristics.
+# Stage 1 reuses stage 0's KB but disables heuristic injection.
+#
+# Usage:
+#   bash scripts/run_sregym.sh benchmarks/sregym/experiments/heuristics_ablation.toml
+
+[pipeline]
+name = "heuristics-ablation"
+
+[defaults]
+agent = "crucible"
+model = "google-vertex:gemini-2.5-flash"
+parallel = 4
+enable_summary = true
+no_inject_summary = false
+
+[defaults.variants]
+enabled = true
+count = 16
+offset = 0
+seed = 42
+
+[defaults.env]
+judge_model_id = "vertex-ai-gemini-2.5-pro"
+crucible_seed_kb_dir = ""
+worker_cpu_limit = "16"
+
+[defaults.agent_config.crucible]
+prompt_version = "v3"
+enable_judge = false
+enable_ltm_retrieval = true
+max_hypotheses = 3
+max_submissions = 3
+kb_type = "structured"
+include_benchmark_results = true
+enable_heuristic_refinement = true
+max_diagnosis_iterations = 3
+max_mitigation_iterations = 3
+wait_stage_timeout = 300
+
+# Stage 0: with heuristics
+[[stages]]
+name = "with_heuristics"
+chain_kb = false
+
+[stages.agent_config.crucible]
+inject_heuristics = true
+
+# Stage 1: without heuristics (same KB, no heuristic injection)
+[[stages]]
+name = "without_heuristics"
+chain_kb = true
+
+[stages.agent_config.crucible]
+inject_heuristics = false

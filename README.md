@@ -2,7 +2,7 @@
 
 SDO is the research prototype described in `sdo_paper/`: an agentic system that deploys an application from source, derives independently checked detectors from a human health objective, and then operates the application through a continuously running Kubernetes controller.
 
-The production design has one entry point and one durable memory model. SRE Gym integrations remain in this repository as benchmark adapters; they are not part of the production runtime.
+The production design has one entry point and one durable memory model. SREGym integrations remain in this repository as benchmark adapters; they are not part of the production runtime.
 
 ## System at a glance
 
@@ -19,17 +19,18 @@ sdo operate
 
 The main packages are:
 
-- `app_operator/lifecycle/`: source deployment, architecture capture, and health-detector bootstrap.
-- `app_operator/memory/`: the transactional commit broker, validation, worktrees, and outcome records.
-- `app_operator/protocol/` and `app_operator/responder/`: structured controller/responder requests and fresh or resumed coding-agent sessions.
-- `app_operator/runtime/`: installation of the production controller on Kubernetes.
+- `sdo/agent_runtime/lifecycle/`: source deployment, architecture capture, and health-detector bootstrap.
+- `sdo/operational_memory/`: the transactional commit broker, validation, worktrees, and outcome records.
+- `sdo/contracts/` and `sdo/agent_runtime/responder/`: structured controller/responder requests and fresh or resumed coding-agent sessions.
+- `sdo/controller_install/`: installation of the production controller on Kubernetes.
 - `controller/sdk/`: the public Go detector API.
 - `controller/core/`: detector execution and snapshot validation.
 - `controller/runtime/`: scheduling, finding persistence, batching, responder dispatch, and durable controller state.
 - `controller/builder/`: validation and generation of an application-specific controller from `.sdo/diagnostics`.
-- `sregym_agents/`, `bench/sregym/`, and `app_operator/sdo_sregym/`: benchmark agents, harnesses, and the adapter to the production runtime.
+- `benchmarks/sregym/`: first-party benchmark adapters, protocol clients, runners, experiments, analysis, and legacy agents.
+- `third_party/sregym/`: the external SREGym harness Git submodule.
 
-Production packages must not depend on benchmark packages.
+Production packages must not depend on benchmark packages. The reusable SDO lifecycle, responder, contracts, and operational-memory implementation lives under `sdo/`; Crucible is retained only as a legacy benchmark agent under `benchmarks/sregym/agents/`.
 
 ## Operational memory
 
@@ -93,7 +94,7 @@ The repository intentionally retains:
 
 - the production SDO implementation;
 - target applications used for source-deployment evaluation;
-- SRE Gym benchmark code, adapters, experiment configuration, and analysis tools;
+- SREGym benchmark code, adapters, experiment configuration, and analysis tools;
 - tests, build definitions, and documentation required by those components.
 
 Old bounded deploy-and-monitor operators, generated shell health checks, standalone fault-injection tooling, and historical trajectory formats are outside the paper design and are not part of the supported system.

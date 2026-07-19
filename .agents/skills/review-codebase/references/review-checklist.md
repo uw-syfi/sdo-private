@@ -7,7 +7,7 @@ Apply the relevant checks rather than mechanically reporting every item.
 - [ ] `sdo operate` is the only production lifecycle entry point.
 - [ ] Production behavior follows source deployment, independent health judging, `.sdo` bootstrap, and controller handoff.
 - [ ] Bounded shell monitoring, generated shell health checks, duplicate deployment lifecycles, historical trajectory stacks, and standalone fault injection are absent.
-- [ ] Production packages do not import SRE Gym packages, verdicts, task APIs, or submission transports.
+- [ ] Production packages do not import SREGym packages, verdicts, task APIs, or submission transports.
 - [ ] Benchmark adapters reuse production APIs instead of reimplementing controller semantics.
 - [ ] Names, environment variables, module paths, docs, images, and API versions consistently use SDO terminology.
 

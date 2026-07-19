@@ -93,7 +93,7 @@ func helperDispatcher(mode string, timeout time.Duration) SubprocessDispatcher {
 
 func goldenRequest(t *testing.T) IncidentRequest {
 	t.Helper()
-	content, err := os.ReadFile("../../tests/fixtures/sdo/protocol/incident_request.json")
+	content, err := os.ReadFile("../../tests/fixtures/sdo/contracts/incident_request.json")
 	if err != nil {
 		t.Fatalf("read request fixture: %v", err)
 	}

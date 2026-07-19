@@ -2,7 +2,7 @@
 
 These applications exercise the paper-described SDO lifecycle: source-grounded architecture capture, Kubernetes deployment, objective-specific health detectors, and controller-driven incident response. They are evaluation inputs rather than production SDO modules.
 
-Some applications also participate in SRE Gym or deployment experiments. Application-specific Compose files may remain as upstream source material, but the production SDO runtime targets Kubernetes and does not generate shell health checks.
+Some applications also participate in SREGym or deployment experiments. Application-specific Compose files may remain as upstream source material, but the production SDO runtime targets Kubernetes and does not generate shell health checks.
 
 ## Applications
 

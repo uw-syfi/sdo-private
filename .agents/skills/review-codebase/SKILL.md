@@ -1,6 +1,6 @@
 ---
 name: review-codebase
-description: Review the SDO codebase for correctness, security, paper-architecture alignment, production-versus-SRE-Gym boundaries, code quality, and convention adherence. Use for repository or subsystem audits and /review-codebase; use review-mr for a specific branch or merge-request diff.
+description: Review the SDO codebase for correctness, security, paper-architecture alignment, production-versus-SREGym boundaries, code quality, and convention adherence. Use for repository or subsystem audits and /review-codebase; use review-mr for a specific branch or merge-request diff.
 ---
 
 # Review the SDO codebase
@@ -11,10 +11,11 @@ Produce evidence-backed, numbered issue proposals. Do not file issues or change 
 
 Unless narrowed by the user, review:
 
-- `app_operator/lifecycle`, `memory`, `protocol`, `responder`, and `runtime` as production orchestration;
+- `sdo/agent_runtime/lifecycle`, `sdo/agent_runtime/responder`, `sdo/operational_memory`, `sdo/contracts`, and
+  `sdo/controller_install` as production orchestration;
 - `controller/sdk`, `core`, `runtime`, and `builder` as the production controller;
 - retained shared libraries under `libs/`;
-- `app_operator/sdo_sregym`, `sregym_agents`, `libs/sregym_lib`, and `bench/sregym` as benchmark-only code;
+- `benchmarks/sregym/{adapter,protocol,runner,experiments,analysis,agents}` and `third_party/sregym` as benchmark-only code, with Crucible explicitly treated as a legacy agent rather than SDO core;
 - relevant tests, scripts, configuration, and documentation.
 
 Treat `apps/` as evaluation input unless the user requests an application review. Check that production modules do not import benchmark code and that removed bounded-operator concepts have not reappeared.

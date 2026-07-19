@@ -56,7 +56,7 @@ spec:
             - /workspace/worktrees
             - --responder-env=CODEX_HOME=/workspace/.sdo-runtime/codex
             - --broker-arg=-m
-            - --broker-arg=app_operator.responder.broker_cli
+            - --broker-arg=sdo.agent_runtime.responder.broker_cli
             - --broker-arg=--proposal-command
             - --broker-arg=git diff --check HEAD --
             - --broker-arg=--validator-mode

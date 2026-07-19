@@ -52,7 +52,7 @@ Correlate classification, health verification, responder session ID, outcome com
 
 **Signature:** lifecycle, detector, controller, or responder evidence contains fault labels, verdicts, submission APIs, or hidden benchmark metadata.
 
-This invalidates the production path. Benchmark transport belongs only in the SRE Gym adapter.
+This invalidates the production path. Benchmark transport belongs only in the SREGym adapter.
 
 ## Healthy evidence chain
 

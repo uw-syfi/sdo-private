@@ -1,6 +1,6 @@
 ---
 name: analyze-experiment
-description: Analyze SDO and SRE Gym experiment runs using lifecycle provenance, operational-memory outcomes, broker/controller evidence, strict production receipts, benchmark result CSVs, and agent-specific trajectories when present. Use when asked to review or compare experiment runs, explain deployment or incident behavior, find detours, assess controller/responder evidence, or invoke /analyze-experiment.
+description: Analyze SDO and SREGym experiment runs using lifecycle provenance, operational-memory outcomes, broker/controller evidence, strict production receipts, benchmark result CSVs, and agent-specific trajectories when present. Use when asked to review or compare experiment runs, explain deployment or incident behavior, find detours, assess controller/responder evidence, or invoke /analyze-experiment.
 ---
 
 # Analyze experiment
@@ -9,7 +9,7 @@ Analyze a run from durable evidence outward. Do not assume that a process exit c
 
 ## Locate evidence
 
-SRE Gym runs normally live under `bench/sregym/logs/`:
+SREGym runs normally live under `third_party/sregym/logs/`:
 
 - single run: `<timestamp>_<agent>/`
 - pipeline: `<timestamp>_pipeline_<name>/stage_<index>_<name>/`

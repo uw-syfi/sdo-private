@@ -1,6 +1,6 @@
 # SDO experiment evidence reference
 
-Use this reference to correlate durable production evidence with SRE Gym artifacts. Field sets may grow; inspect the run's schema/version and repository models before assuming optional fields.
+Use this reference to correlate durable production evidence with SREGym artifacts. Field sets may grow; inspect the run's schema/version and repository models before assuming optional fields.
 
 ## Evidence hierarchy
 
@@ -62,7 +62,7 @@ Ledger fields can include proposal, outcome, reflection, and validator-evidence 
 
 ## Strict production receipt
 
-Path in an SRE Gym problem run: `agent/sdo_production_receipt_strict.json`
+Path in an SREGym problem run: `agent/sdo_production_receipt_strict.json`
 
 The current receipt schema is `sdo.production-receipt/v1`. It summarizes durable evidence including:
 
@@ -75,14 +75,14 @@ The current receipt schema is `sdo.production-receipt/v1`. It summarizes durable
 - accepted detector paths and any correlated controller-update rollout;
 - lifecycle provenance and topology freshness.
 
-Use `libs/sregym_lib/production_receipt.py` as the schema source of truth. A malformed or incomplete receipt is a failed production-evidence chain even if the benchmark process exits zero.
+Use `benchmarks/sregym/protocol/receipt.py` as the schema source of truth. A malformed or incomplete receipt is a failed production-evidence chain even if the benchmark process exits zero.
 
-## SRE Gym result tree
+## SREGym result tree
 
 Typical paths:
 
 ```text
-bench/sregym/logs/<run-or-pipeline>/
+third_party/sregym/logs/<run-or-pipeline>/
 ├── experiment_config.toml or pipeline_config.toml
 ├── pipeline_state.json                     # pipelines
 ├── lifecycle_seed_stage<N>/                # SDO pipeline reuse evidence

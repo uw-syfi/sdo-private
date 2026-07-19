@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import configparser
 import re
 import subprocess
 from pathlib import Path
@@ -24,7 +25,7 @@ def _repository_files() -> list[Path]:
     return [
         REPOSITORY_ROOT / raw.decode()
         for raw in completed.stdout.split(b"\0")
-        if raw and not raw.startswith((b"bench/sregym/", b"sdo_paper/"))
+        if raw and not raw.startswith((b"third_party/sregym/", b"sdo_paper/"))
     ]
 
 
@@ -53,3 +54,80 @@ def test_ci_references_only_existing_repository_scripts() -> None:
     referenced = sorted(set(re.findall(r"\./(scripts/[A-Za-z0-9_./-]+\.sh)", ci)))
     missing = [relative for relative in referenced if not (REPOSITORY_ROOT / relative).is_file()]
     assert not missing, f"CI references missing scripts: {missing}"
+
+
+def test_python_implementation_uses_the_canonical_sdo_namespace() -> None:
+    legacy_package = "app" + "_operator"
+    required_packages = (
+        "sdo/agent_runtime/lifecycle",
+        "sdo/agent_runtime/responder",
+        "sdo/contracts",
+        "sdo/controller_install",
+        "sdo/operational_memory",
+    )
+
+    legacy_paths = [
+        path.relative_to(REPOSITORY_ROOT).as_posix()
+        for path in _repository_files()
+        if path.exists() and legacy_package in path.relative_to(REPOSITORY_ROOT).parts
+    ]
+
+    assert not legacy_paths, f"legacy Python package paths remain: {legacy_paths}"
+    assert all((REPOSITORY_ROOT / package).is_dir() for package in required_packages)
+
+    violations: list[str] = []
+    for path in _repository_files():
+        if not path.is_file() or path == Path(__file__).resolve():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if legacy_package in text:
+            violations.append(path.relative_to(REPOSITORY_ROOT).as_posix())
+    assert not violations, f"legacy Python package references remain: {violations}"
+
+
+def test_sregym_wrapper_uses_the_shared_benchmark_launcher() -> None:
+    wrapper = (REPOSITORY_ROOT / "scripts/run_sregym.sh").read_text(encoding="utf-8")
+
+    assert "python -m benchmarks.sregym.run" in wrapper
+    assert not (REPOSITORY_ROOT / "scripts/run_sregym.py").exists()
+
+
+def test_sregym_owned_code_has_one_explicit_benchmark_boundary() -> None:
+    required = (
+        "benchmarks/sregym/adapter",
+        "benchmarks/sregym/analysis",
+        "benchmarks/sregym/experiments",
+        "benchmarks/sregym/agents/crucible",
+        "benchmarks/sregym/protocol",
+        "benchmarks/sregym/runner",
+    )
+
+    assert all((REPOSITORY_ROOT / path).is_dir() for path in required)
+    assert not (REPOSITORY_ROOT / "sregym_agents").exists()
+    assert not (REPOSITORY_ROOT / "libs/sregym_lib").exists()
+    assert not (REPOSITORY_ROOT / "bench/sregym_analysis").exists()
+
+
+def test_external_sregym_harness_is_a_third_party_submodule() -> None:
+    modules = configparser.ConfigParser()
+    modules.read(REPOSITORY_ROOT / ".gitmodules")
+
+    section = 'submodule "third_party/sregym"'
+    assert section in modules
+    assert modules[section]["path"] == "third_party/sregym"
+    assert 'submodule "bench/sregym"' not in modules
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "--stage", "--", "third_party/sregym", "bench/sregym"],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert len(tracked) == 1
+    metadata, path = tracked[0].split("\t", maxsplit=1)
+    assert metadata.split(maxsplit=1)[0] == "160000"
+    assert path == "third_party/sregym"

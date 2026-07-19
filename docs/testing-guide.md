@@ -4,7 +4,8 @@ SDO spans Python orchestration, Go controller modules, generated detector worksp
 
 ## Test organization
 
-- `tests/unit/app_operator/` — lifecycle, memory, protocol, responder, runtime, and benchmark-adapter contracts.
+- `tests/unit/sdo/` — agent-runtime, operational-memory, contract, and controller-installation behavior.
+- `tests/unit/benchmarks/sregym/adapter/` — benchmark-adapter transport and receipt behavior.
 - `tests/unit/controller/` — Python controller-builder validation and workspace generation.
 - `tests/unit/libs/` — shared-library contracts.
 - `tests/integration/` — cross-package and external-process behavior.
@@ -22,7 +23,7 @@ bash scripts/check_errors.sh
 # Python
 uv run pytest tests/unit/
 uv run pytest tests/integration/
-uv run pytest tests/ --cov=app_operator --cov=controller
+uv run pytest tests/ --cov=sdo --cov=controller
 
 # Go controller modules
 (cd controller/sdk && go test ./...)
@@ -59,7 +60,7 @@ Prefer deterministic fake clocks, snapshot sources, dispatchers, and state store
 
 ### Benchmark boundary
 
-Tests for `app_operator/sdo_sregym/` should prove that benchmark resources are added through the runtime extension interface and that strict receipts derive from durable controller/broker evidence. Add architecture tests that reject imports from SRE Gym packages in production modules.
+Tests for `benchmarks/sregym/adapter/` should prove that benchmark resources are added through the runtime extension interface and that strict receipts derive from durable controller/broker evidence. Add architecture tests that reject imports from SREGym packages in production modules.
 
 ## Test style
 
