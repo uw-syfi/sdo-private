@@ -1,6 +1,6 @@
 """Client for the SREGym conductor HTTP API.
 
-All benchmark participants share the same conductor contract; this
+All benchmark agents share the same conductor contract; this
 module owns it.
 
 Covered surface:

@@ -8,7 +8,7 @@
   "reportMissingTypeStubs": false,
   "strict": [
     "libs",
-    "benchmarks/sregym/participants",
+    "benchmarks/sregym/agents",
     "benchmarks/sregym/protocol",
     "benchmarks/sregym/runner"
   ]

@@ -40,7 +40,7 @@ operational-memory boundary, message contracts, and installation of the separate
 | `sdo/contracts/` | Typed findings, detector evaluations, and controller-to-responder incident contracts |
 | `sdo/agent_runtime/responder/` | Incident response sessions, broker integration, credentials, and outcome-driven reflection |
 | `sdo/controller_install/` | Kubernetes resources, repository synchronization, controller installation, and optional transport extensions |
-| `benchmarks/sregym/` | First-party benchmark boundary: adapter, protocol, runner, experiments, analysis, and legacy participants |
+| `benchmarks/sregym/` | First-party benchmark boundary: adapter, protocol, runner, experiments, analysis, and legacy agents |
 | `third_party/sregym/` | External SREGym harness, retained as a Git submodule outside first-party package namespaces |
 
 Production packages may not import `benchmarks.sregym` or code from the external harness. The dependency direction is from benchmark adapters to production APIs. Reusable lifecycle, incident-response, contracts, and operational-memory behavior belongs under `sdo/`, not under the benchmark namespace.
@@ -54,9 +54,9 @@ The first-party SREGym tree is divided by responsibility:
 | `benchmarks/sregym/runner/` | Experiment and pipeline configuration, lifecycle chaining, and harness process orchestration |
 | `benchmarks/sregym/experiments/` | Checked-in benchmark and end-to-end experiment definitions |
 | `benchmarks/sregym/analysis/` | Benchmark-result summarization utilities |
-| `benchmarks/sregym/participants/` | Benchmark competitors that are not production SDO components |
+| `benchmarks/sregym/agents/` | Benchmark competitors that are not production SDO components |
 
-`benchmarks/sregym/participants/crucible/` is the legacy Crucible competitor. Its judge loop, benchmark-oracle recovery, and private knowledge-base formats are useful only for historical benchmark comparisons; they do not define the SDO responder or `.sdo/` operational memory. The external harness itself remains pinned separately under `third_party/sregym/`.
+`benchmarks/sregym/agents/crucible/` is the legacy Crucible competitor. Its judge loop, benchmark-oracle recovery, and private knowledge-base formats are useful only for historical benchmark comparisons; they do not define the SDO responder or `.sdo/` operational memory. The external harness itself remains pinned separately under `third_party/sregym/`.
 
 ## Controller
 
@@ -102,7 +102,7 @@ The installation code provides manifests and orchestration logic; the always-run
 ## Shared libraries
 
 - `libs/agent_cli/` provides the production coding-agent adapter; SDO's deployer, health judge, responder, and reflection backends use its structured Codex execution while retaining subsystem-owned protocols and Pydantic validation.
-- `libs/model_config/`, `libs/agent_mw/`, and `libs/pydantic_agent/` support legacy benchmark participants where configured.
+- `libs/model_config/`, `libs/agent_mw/`, and `libs/pydantic_agent/` support legacy benchmark agents where configured.
 - `libs/sdo_core/` contains neutral command, filesystem, and tool helpers.
 - SREGym-specific protocols and runner utilities live under `benchmarks/sregym/`, not `libs/`.
 

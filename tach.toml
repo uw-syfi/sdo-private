@@ -109,10 +109,10 @@ depends_on = [
     "sdo.operation",
 ]
 
-# --- Benchmark participants (independent of production sdo) ---
+# --- Benchmark agents (independent of production sdo) ---
 
 [[modules]]
-path = "benchmarks.sregym.participants"
+path = "benchmarks.sregym.agents"
 depends_on = [
     "libs.pydantic_agent",
     "libs.agent_mw",

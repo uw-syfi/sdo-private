@@ -6,13 +6,13 @@ SDO autonomously deploys and operates applications using source-grounded agents,
 
 - [`sdo/`](sdo/AGENTS.md) — Python agent runtime, operational memory, contracts, and controller installation
 - `controller/` — detector SDK, execution core, long-running runtime, and controller builder
-- [`benchmarks/sregym/`](benchmarks/sregym/AGENTS.md) — first-party SREGym adapters, protocol clients, runners, experiments, analysis, and legacy benchmark participants
+- [`benchmarks/sregym/`](benchmarks/sregym/AGENTS.md) — first-party SREGym adapters, protocol clients, runners, experiments, analysis, and legacy benchmark agents
 - `third_party/sregym/` — external SREGym harness Git submodule
 - `libs/` — shared agent and model libraries; `sdo_core` contains neutral runtime helpers
 - `apps/` — source-deployment evaluation applications
 - `tests/` — unit and integration tests
 
-Production code must not import from SREGym packages. Benchmark adapters may import the production API. The production SDO agent core belongs under `sdo/`; `benchmarks/sregym/participants/crucible/` is a legacy benchmark participant, not an alternate production runtime.
+Production code must not import from SREGym packages. Benchmark adapters may import the production API. The production SDO agent core belongs under `sdo/`; `benchmarks/sregym/agents/crucible/` is a legacy benchmark agent, not an alternate production runtime.
 
 ## Development conventions
 

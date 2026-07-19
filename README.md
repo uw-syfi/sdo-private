@@ -27,10 +27,10 @@ The main packages are:
 - `controller/core/`: detector execution and snapshot validation.
 - `controller/runtime/`: scheduling, finding persistence, batching, responder dispatch, and durable controller state.
 - `controller/builder/`: validation and generation of an application-specific controller from `.sdo/diagnostics`.
-- `benchmarks/sregym/`: first-party benchmark adapters, protocol clients, runners, experiments, analysis, and legacy participants.
+- `benchmarks/sregym/`: first-party benchmark adapters, protocol clients, runners, experiments, analysis, and legacy agents.
 - `third_party/sregym/`: the external SREGym harness Git submodule.
 
-Production packages must not depend on benchmark packages. The reusable SDO lifecycle, responder, contracts, and operational-memory implementation lives under `sdo/`; Crucible is retained only as a legacy benchmark participant under `benchmarks/sregym/participants/`.
+Production packages must not depend on benchmark packages. The reusable SDO lifecycle, responder, contracts, and operational-memory implementation lives under `sdo/`; Crucible is retained only as a legacy benchmark agent under `benchmarks/sregym/agents/`.
 
 ## Operational memory
 

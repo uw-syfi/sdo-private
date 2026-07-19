@@ -6,7 +6,7 @@ translating :class:`ExperimentConfig` into CLI args + env vars for
 
 Participant-specific concerns (for example Crucible's knowledge-base seeding
 and between-stage drain barrier) are injected via :class:`ExpStageLifecycle`.
-This runner stays participant-agnostic.
+This runner stays agent-agnostic.
 """
 
 from __future__ import annotations

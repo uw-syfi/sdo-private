@@ -27,7 +27,7 @@ Status meanings:
 | Transactional commit broker | `sdo/operational_memory/commit_broker.py`, `broker_service.py`, `validation.py`, `worktrees.py` | Implemented | Role/path ownership, proposal validation, merge sequencing, outcomes, and idempotency are covered by focused tests |
 | Outcome-driven reflection | `sdo/agent_runtime/responder/reflection.py`, `sdo/operational_memory/broker_service.py` | Implemented | Selected outcome classifications resume the responder session and validate memory proposals; learning effectiveness is an experimental question |
 | Controller refresh after detector change | `controller/builder/check_cli.py`, runtime rollout records | Integrated | Fingerprint and correlated rollout contracts have tests; production rollout requires a cluster and images |
-| SREGym evaluation boundary | `benchmarks/sregym/`, `third_party/sregym/` | Benchmark-only | First-party adapter, protocol, runner, experiment, analysis, and participant code is separated from the external harness and intentionally outside production modules |
+| SREGym evaluation boundary | `benchmarks/sregym/`, `third_party/sregym/` | Benchmark-only | First-party adapter, protocol, runner, experiment, analysis, and agent code is separated from the external harness and intentionally outside production modules |
 
 ## Artifact ownership matrix
 
@@ -51,7 +51,7 @@ Status meanings:
 | `libs/model_config`, `libs/agent_mw`, `libs/pydantic_agent` | Retained agent support used by SREGym |
 | `apps/` | Deployment/evaluation inputs |
 | `benchmarks/sregym/adapter`, `protocol`, `runner`, `experiments`, `analysis` | Retained first-party benchmark integration |
-| `benchmarks/sregym/participants/crucible` | Retained legacy benchmark participant; not production SDO agent logic or operational memory |
+| `benchmarks/sregym/agents/crucible` | Retained legacy benchmark agent; not production SDO agent logic or operational memory |
 | `third_party/sregym` | Retained external SREGym harness Git submodule |
 | Historical bounded operator, shell health checks, trajectory recorder, UI, prompt stack, standalone fault injection | Remove; outside the paper design |
 | Legacy Python and controller package names | Removed after moving retained implementation to the canonical SDO paths |

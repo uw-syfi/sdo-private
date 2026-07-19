@@ -1,6 +1,6 @@
 agents:
   - name: crucible
-    kickoff_command: uv run python -m benchmarks.sregym.participants.crucible.driver
+    kickoff_command: uv run python -m benchmarks.sregym.agents.crucible.driver
     kickoff_workdir: ../..
     kickoff_env:
       PYTHONUNBUFFERED: "1"

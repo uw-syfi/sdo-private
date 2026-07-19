@@ -18,8 +18,8 @@ Usage:
     uv run python -m benchmarks.sregym.run third_party/sregym/logs/<pipeline_dir>/ --stage 1
 
 This script is a thin integration layer: launcher orchestration lives in
-:mod:`benchmarks.sregym.runner`; optional participant-specific lifecycle
-behavior is loaded from :mod:`benchmarks.sregym.participants`.
+:mod:`benchmarks.sregym.runner`; optional agent-specific lifecycle
+behavior is loaded from :mod:`benchmarks.sregym.agents`.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ _SREGYM_DIR = Path(os.environ.get("SDO_SREGYM_DIR", _PROJECT_ROOT / "third_party
 
 
 def _load_exp_stage_lifecycle(agent_name: str) -> ExpStageLifecycle:
-    module_name = f"benchmarks.sregym.participants.{agent_name}"
+    module_name = f"benchmarks.sregym.agents.{agent_name}"
     try:
         module = importlib.import_module(module_name)
     except ModuleNotFoundError as exc:

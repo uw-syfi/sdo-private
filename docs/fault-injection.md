@@ -12,6 +12,6 @@ When evaluating the production adapter, preserve this boundary:
 - benchmark conductor, fault-selection, and submission protocols remain under `benchmarks/sregym/protocol/` and `runner/`;
 - no hidden fault identity or judge verdict may enter lifecycle provenance, detectors, controller requests, or responder prompts.
 
-The legacy Crucible participant under `benchmarks/sregym/participants/` may consume benchmark verdicts for its own historical recovery experiments. That behavior is benchmark-only and must not be treated as SDO agent logic or imported into production code.
+The legacy Crucible agent under `benchmarks/sregym/agents/` may consume benchmark verdicts for its own historical recovery experiments. That behavior is benchmark-only and must not be treated as SDO agent logic or imported into production code.
 
 Use the benchmark's own CLI and documentation for available faults and task selection. The removed standalone Compose fault injector is not a supported repository feature.

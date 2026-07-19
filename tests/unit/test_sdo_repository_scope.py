@@ -100,7 +100,7 @@ def test_sregym_owned_code_has_one_explicit_benchmark_boundary() -> None:
         "benchmarks/sregym/adapter",
         "benchmarks/sregym/analysis",
         "benchmarks/sregym/experiments",
-        "benchmarks/sregym/participants/crucible",
+        "benchmarks/sregym/agents/crucible",
         "benchmarks/sregym/protocol",
         "benchmarks/sregym/runner",
     )

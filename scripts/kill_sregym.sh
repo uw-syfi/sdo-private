@@ -2,7 +2,7 @@
 # Kill orphaned SREGym processes left behind after the orchestrator exits.
 #
 # What it kills:
-#   1. benchmarks.sregym.participants.crucible.driver processes (agent job workers)
+#   1. benchmarks.sregym.agents.crucible.driver processes (agent job workers)
 #   2. third_party/sregym/main.py processes (the orchestrator itself, if any)
 #
 # Each driver is launched with start_new_session=True, so we kill the
@@ -23,7 +23,7 @@ fi
 # Note: forked worker processes appear as ".venv/bin/python3 main.py --agent ..."
 # (not "third_party/sregym/main.py") because the cwd is changed before exec.
 PATTERNS=(
-    "benchmarks\.sregym\.participants\.crucible\.driver"
+    "benchmarks\.sregym\.agents\.crucible\.driver"
     "third_party/sregym/main\.py"
     "main\.py --agent .+ --experiment-dir .+third_party/sregym"
 )
