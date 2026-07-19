@@ -22,7 +22,6 @@ members = [
     "sdo-model-config",
     "sdo-operator",
     "sdo-pydantic-agent",
-    "sdo-sregym-lib",
 ]
 
 [[package]]
@@ -3474,10 +3473,14 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
+    { name = "filelock" },
+    { name = "httpx" },
     { name = "jinja2" },
     { name = "loguru" },
+    { name = "pydantic" },
     { name = "pydantic-ai" },
     { name = "pyyaml" },
+    { name = "requests" },
     { name = "sdo-agent-cli" },
     { name = "tach" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
@@ -3504,15 +3507,19 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastmcp", specifier = ">=2.9.2" },
+    { name = "filelock", specifier = ">=3.0.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
     { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6.0.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "loguru", specifier = ">=0.7.2" },
+    { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-ai", specifier = ">=1.0.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23.0" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=4.1.0" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3.5.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "requests", specifier = ">=2.0.0" },
     { name = "ruff", marker = "extra == 'test'", specifier = ">=0.1.0" },
     { name = "sdo-agent-cli", editable = "libs/agent_cli" },
     { name = "tach", specifier = ">=0.33" },
@@ -3541,27 +3548,6 @@ dependencies = [
 requires-dist = [
     { name = "pydantic-ai", specifier = ">=1.0.0" },
     { name = "sdo-model-config", editable = "libs/model_config" },
-]
-
-[[package]]
-name = "sdo-sregym-lib"
-version = "0.1.0"
-source = { editable = "libs/sregym_lib" }
-dependencies = [
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-    { name = "requests" },
-    { name = "tomli", marker = "python_full_version < '3.11'" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pyyaml", specifier = ">=6.0.0" },
-    { name = "requests", specifier = ">=2.0.0" },
-    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
 ]
 
 [[package]]

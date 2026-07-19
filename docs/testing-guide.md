@@ -60,7 +60,7 @@ Prefer deterministic fake clocks, snapshot sources, dispatchers, and state store
 
 ### Benchmark boundary
 
-Tests for `benchmarks/sregym/adapter/` should prove that benchmark resources are added through the runtime extension interface and that strict receipts derive from durable controller/broker evidence. Add architecture tests that reject imports from SRE Gym packages in production modules.
+Tests for `benchmarks/sregym/adapter/` should prove that benchmark resources are added through the runtime extension interface and that strict receipts derive from durable controller/broker evidence. Add architecture tests that reject imports from SREGym packages in production modules.
 
 ## Test style
 

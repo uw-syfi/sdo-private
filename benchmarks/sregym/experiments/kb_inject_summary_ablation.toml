@@ -1,0 +1,61 @@
+# Pipeline: KB build (no inject summary) → KB reuse (with inject summary)
+#
+# Both stages run the same 64 variant problems (same seed/count/offset).
+# Stage 0 builds the knowledge base without injecting summaries.
+# Stage 1 reuses stage 0's KB and enables summary injection.
+#
+# Usage:
+#   bash scripts/run_sregym.sh benchmarks/sregym/experiments/kb_inject_summary_ablation.toml
+
+[pipeline]
+name = "kb-inject-summary-ablation"
+
+[defaults]
+agent = "crucible"
+model = "google-vertex:gemini-2.5-flash"
+parallel = 8
+enable_summary = true
+
+[defaults.variants]
+enabled = true
+count = 50
+offset = 0
+seed = 42
+
+[defaults.env]
+judge_model_id = "vertex-ai-gemini-2.5-pro"
+crucible_seed_kb_dir = ""
+worker_cpu_limit = "16"
+
+[defaults.agent_config.crucible]
+prompt_version = "v3"
+enable_judge = false
+enable_ltm_retrieval = true
+max_hypotheses = 3
+max_submissions = 3
+kb_type = "structured"
+include_benchmark_results = true
+enable_heuristic_refinement = false
+include_incident_files = false
+max_diagnosis_iterations = 3
+max_mitigation_iterations = 3
+wait_stage_timeout = 300
+
+# Stage 0: build KB, no summary injection
+[[stages]]
+name = "build_kb_no_inject"
+chain_kb = false
+
+[stages.runner]
+no_inject_summary = true
+
+# Stage 1: reuse stage 0's KB, with summary injection
+[[stages]]
+name = "eval_with_inject"
+chain_kb = true
+
+[stages.runner]
+no_inject_summary = false
+
+[stages.agent_config.crucible]
+inject_heuristics = false

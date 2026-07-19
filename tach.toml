@@ -36,7 +36,7 @@ depends_on = [
 ]
 
 [[modules]]
-path = "libs.sregym_lib"
+path = "benchmarks.sregym.protocol"
 depends_on = []
 
 [[modules]]
@@ -78,10 +78,22 @@ depends_on = [
 [[modules]]
 path = "benchmarks.sregym.adapter"
 depends_on = [
+    "benchmarks.sregym.protocol",
     "sdo.agent_runtime.lifecycle",
     "sdo.operational_memory",
     "sdo.controller_install",
-    "libs.sregym_lib",
+]
+
+[[modules]]
+path = "benchmarks.sregym.runner"
+depends_on = [
+    "benchmarks.sregym.protocol",
+]
+
+[[modules]]
+path = "benchmarks.sregym.run"
+depends_on = [
+    "benchmarks.sregym.runner",
 ]
 
 [[modules]]
@@ -97,13 +109,12 @@ depends_on = [
     "sdo.operation",
 ]
 
-# --- sregym_agents (independent of production sdo) ---
+# --- Benchmark participants (independent of production sdo) ---
 
 [[modules]]
-path = "sregym_agents"
+path = "benchmarks.sregym.participants"
 depends_on = [
     "libs.pydantic_agent",
     "libs.agent_mw",
     "libs.agent_cli",
-    "libs.sregym_lib",
 ]

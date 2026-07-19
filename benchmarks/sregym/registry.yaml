@@ -1,0 +1,13 @@
+agents:
+  - name: crucible
+    kickoff_command: uv run python -m benchmarks.sregym.participants.crucible.driver
+    kickoff_workdir: ../..
+    kickoff_env:
+      PYTHONUNBUFFERED: "1"
+  - name: sdo_codex
+    kickoff_command: uv run python -m benchmarks.sregym.adapter.driver
+    kickoff_workdir: ../..
+    kickoff_env:
+      PYTHONUNBUFFERED: "1"
+    defer_cleanup: true
+    wait_for_natural_exit: true

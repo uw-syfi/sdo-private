@@ -91,10 +91,24 @@ def test_python_implementation_uses_the_canonical_sdo_namespace() -> None:
 def test_sregym_wrapper_uses_the_shared_benchmark_launcher() -> None:
     wrapper = (REPOSITORY_ROOT / "scripts/run_sregym.sh").read_text(encoding="utf-8")
 
-    assert "python -m sregym_agents.run_sregym" in wrapper
+    assert "python -m benchmarks.sregym.run" in wrapper
     assert not (REPOSITORY_ROOT / "scripts/run_sregym.py").exists()
-    assert not (REPOSITORY_ROOT / "sregym_agents/experiment_config.py").exists()
-    assert not (REPOSITORY_ROOT / "sregym_agents/pipeline_config.py").exists()
+
+
+def test_sregym_owned_code_has_one_explicit_benchmark_boundary() -> None:
+    required = (
+        "benchmarks/sregym/adapter",
+        "benchmarks/sregym/analysis",
+        "benchmarks/sregym/experiments",
+        "benchmarks/sregym/participants/crucible",
+        "benchmarks/sregym/protocol",
+        "benchmarks/sregym/runner",
+    )
+
+    assert all((REPOSITORY_ROOT / path).is_dir() for path in required)
+    assert not (REPOSITORY_ROOT / "sregym_agents").exists()
+    assert not (REPOSITORY_ROOT / "libs/sregym_lib").exists()
+    assert not (REPOSITORY_ROOT / "bench/sregym_analysis").exists()
 
 
 def test_external_sregym_harness_is_a_third_party_submodule() -> None:

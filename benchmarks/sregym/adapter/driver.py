@@ -16,8 +16,8 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from benchmarks.sregym.adapter.runtime import RuntimeConfig, run_production_runtime
-from libs.sregym_lib.conductor import get_api_base, get_app_info, poll_stage_sync, signal_cleanup
-from libs.sregym_lib.schema import READY_STAGES
+from benchmarks.sregym.protocol.conductor import get_api_base, get_app_info, poll_stage_sync, signal_cleanup
+from benchmarks.sregym.protocol.schema import READY_STAGES
 from sdo.agent_runtime.lifecycle import reuse_initial_lifecycle_if_valid, run_initial_lifecycle
 
 logger = logging.getLogger(__name__)

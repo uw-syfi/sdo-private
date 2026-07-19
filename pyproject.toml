@@ -6,12 +6,16 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "sdo-agent-cli",
+    "filelock>=3.0.0",
+    "httpx>=0.27.0",
     "loguru>=0.7.2",
     "tomli>=2.0.1; python_version < '3.11'",
     "jinja2>=3.1.0",
     "pyyaml>=6.0.3",
     "tach>=0.33",
     "pydantic-ai>=1.0.0",
+    "pydantic>=2.0.0",
+    "requests>=2.0.0",
     "fastmcp>=2.9.2",
 ]
 
@@ -47,7 +51,6 @@ members = [
     "libs/pydantic_agent",
     "libs/agent_mw",
     "libs/model_config",
-    "libs/sregym_lib",
 ]
 
 [tool.hatch.build.targets.wheel]

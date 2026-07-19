@@ -14,7 +14,6 @@ _PROJECT_PACKAGES: dict[str, Path] = {
     "sdo": _REPO_ROOT / "sdo",
     "benchmarks": _REPO_ROOT / "benchmarks",
     "libs": _REPO_ROOT / "libs",
-    "sregym_agents": _REPO_ROOT / "sregym_agents",
 }
 
 # Each entry is an independently owned package with a public __init__.py
@@ -29,6 +28,8 @@ _OWNERS: tuple[str, ...] = (
     "sdo.operational_memory",
     "benchmarks.sregym.adapter",
 )
+
+_PUBLIC_MODULES: tuple[str, ...] = ()
 
 
 def _iter_py_files(*roots: Path) -> list[Path]:
@@ -88,7 +89,7 @@ def test_cross_package_imports_go_through_facades() -> None:
         home = _owner(_module_for_file(filepath) or "")
         for module, lineno in _imports(filepath):
             target = _owner(module)
-            if target is None or target == home or module == target:
+            if target is None or target == home or module == target or module in _PUBLIC_MODULES:
                 continue
             violations.append(_fmt(filepath, lineno, module, f"bypasses the '{target}' facade; import from '{target}'"))
     assert not violations, f"{len(violations)} facade violation(s) found:\n" + "\n".join(violations)
@@ -171,7 +172,7 @@ def test_all_does_not_export_private_names() -> None:
 
 
 def test_production_sdo_does_not_import_benchmark_code() -> None:
-    forbidden = ("benchmarks", "sregym_agents", "libs.sregym_lib")
+    forbidden = ("benchmarks",)
     violations: list[str] = []
     sdo_root = _PROJECT_PACKAGES["sdo"]
     for filepath in _iter_py_files(sdo_root):

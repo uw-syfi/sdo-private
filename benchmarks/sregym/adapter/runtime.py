@@ -12,8 +12,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from libs.sregym_lib.production_receipt import ProductionReceiptValidationError
-from libs.sregym_lib.production_receipt import (
+from benchmarks.sregym.protocol import ProductionReceiptValidationError
+from benchmarks.sregym.protocol import (
     validate_production_receipt as validate_receipt_contract,
 )
 from sdo.controller_install import (
@@ -48,7 +48,7 @@ def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle
 
 
 @dataclass(frozen=True)
-class _SregymRuntimeExtension:
+class _SREGymRuntimeExtension:
     config: RuntimeConfig
 
     def controller_args(self, config: ControllerInstallConfig) -> list[str]:
@@ -84,7 +84,7 @@ class _SregymRuntimeExtension:
 
 
 def runtime_resources(config: RuntimeConfig) -> list[dict[str, Any]]:
-    extension = _SregymRuntimeExtension(config)
+    extension = _SREGymRuntimeExtension(config)
     pod_security, container_security = controller_security_contexts()
     return production_controller_resources(
         config,
@@ -94,7 +94,7 @@ def runtime_resources(config: RuntimeConfig) -> list[dict[str, Any]]:
 
 
 def run_production_runtime(config: RuntimeConfig) -> dict[str, Any]:
-    result = install_controller(config, _SregymRuntimeExtension(config))
+    result = install_controller(config, _SREGymRuntimeExtension(config))
     if not isinstance(result, dict):
         raise ControllerInstallError("benchmark runtime did not produce a production receipt")
     return result

@@ -14,7 +14,6 @@ LIBS_ROOT = Path(__file__).parents[3] / "libs"
         ("model_config", "sdo-model-config"),
         ("pydantic_agent", "sdo-pydantic-agent"),
         ("sdo_core", "sdo-core"),
-        ("sregym_lib", "sdo-sregym-lib"),
     ],
 )
 def test_internal_distribution_uses_sdo_name(library: str, distribution: str) -> None:

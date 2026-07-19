@@ -28,8 +28,8 @@ from benchmarks.sregym.adapter.runtime import (
     runtime_resources,
     validate_production_receipt,
 )
-from libs.sregym_lib.experiment import ExperimentConfig, config_to_env
-from libs.sregym_lib.pipeline import load_pipeline_config, merge_stage_config
+from benchmarks.sregym.runner.experiment import ExperimentConfig, config_to_env
+from benchmarks.sregym.runner.pipeline import load_pipeline_config, merge_stage_config
 from sdo.controller_install.kubernetes import (
     ControllerInstallError,
     _controller_job_logs,
@@ -758,7 +758,7 @@ def test_registered_driver_has_no_direct_codex_or_verdict_orchestration() -> Non
 
 def test_sdo_codex_is_an_external_deferred_cleanup_agent(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[5]
-    registry_path = root / "sregym_agents" / "agents.yaml"
+    registry_path = root / "benchmarks" / "sregym" / "registry.yaml"
     registry = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
     entry = next(agent for agent in registry["agents"] if agent["name"] == "sdo_codex")
 
@@ -766,12 +766,12 @@ def test_sdo_codex_is_an_external_deferred_cleanup_agent(tmp_path: Path) -> None
     assert entry["wait_for_natural_exit"] is True
     assert entry["kickoff_command"] == "uv run python -m benchmarks.sregym.adapter.driver"
     env = config_to_env(ExperimentConfig(agent="sdo_codex"), project_root=tmp_path)
-    assert env["SREGYM_AGENT_REGISTRY"] == str(tmp_path / "sregym_agents" / "agents.yaml")
+    assert env["SREGYM_AGENT_REGISTRY"] == str(tmp_path / "benchmarks" / "sregym" / "registry.yaml")
 
 
 def test_four_problem_pipeline_is_source_backed_and_chains_one_hotel_workspace() -> None:
     root = Path(__file__).resolve().parents[5]
-    config = load_pipeline_config(root / "sregym_agents" / "experiments" / "sdo_codex_four_e2e.toml")
+    config = load_pipeline_config(root / "benchmarks" / "sregym" / "experiments" / "sdo_codex_four_e2e.toml")
     expected = [
         "readiness_probe_misconfiguration_hotel_reservation",
         "missing_configmap_hotel_reservation",
@@ -785,11 +785,12 @@ def test_four_problem_pipeline_is_source_backed_and_chains_one_hotel_workspace()
     assert all(stage.app_filter == "hotel_reservation" for stage in resolved)
     assert all(stage.deploy_from_source for stage in resolved)
     assert all(stage.application_workspace == "persistent" for stage in resolved)
+    assert all(stage.require_strict_receipt for stage in resolved)
     assert [stage.chain_application_workspace for stage in config.stages] == [False, True, True, True]
 
 
 def test_runner_honors_temporary_sregym_checkout(monkeypatch, tmp_path: Path) -> None:
-    import sregym_agents.run_sregym as runner
+    import benchmarks.sregym.run as runner
 
     monkeypatch.setenv("SDO_SREGYM_DIR", str(tmp_path))
     try:

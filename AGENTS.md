@@ -6,13 +6,13 @@ SDO autonomously deploys and operates applications using source-grounded agents,
 
 - [`sdo/`](sdo/AGENTS.md) — Python agent runtime, operational memory, contracts, and controller installation
 - `controller/` — detector SDK, execution core, long-running runtime, and controller builder
-- [`sregym_agents/`](sregym_agents/AGENTS.md) — SRE Gym benchmark agents
-- `benchmarks/sregym/adapter/`, `third_party/sregym/`, `libs/sregym_lib/` — benchmark-only adapters and harnesses
+- [`benchmarks/sregym/`](benchmarks/sregym/AGENTS.md) — first-party SREGym adapters, protocol clients, runners, experiments, analysis, and legacy benchmark participants
+- `third_party/sregym/` — external SREGym harness Git submodule
 - `libs/` — shared agent and model libraries; `sdo_core` contains neutral runtime helpers
 - `apps/` — source-deployment evaluation applications
 - `tests/` — unit and integration tests
 
-Production code must not import from SRE Gym packages. Benchmark adapters may import the production API.
+Production code must not import from SREGym packages. Benchmark adapters may import the production API. The production SDO agent core belongs under `sdo/`; `benchmarks/sregym/participants/crucible/` is a legacy benchmark participant, not an alternate production runtime.
 
 ## Development conventions
 
@@ -31,7 +31,7 @@ Production code must not import from SRE Gym packages. Benchmark adapters may im
 - Artifact ownership is enforced by the commit broker. Agents propose changes in isolated worktrees; only validated commits reach the operational branch.
 - The health judge owns health detectors. Responders may add or refine incident detectors and playbooks after independently verified outcomes.
 - Detector runtime code is deterministic Go using `controller/sdk`; it must not call an LLM or inspect benchmark verdicts.
-- `controller/runtime` remains transport-neutral. SRE Gym submission relays and receipts stay behind the benchmark adapter.
+- `controller/runtime` remains transport-neutral. SREGym submission relays and receipts stay behind the benchmark adapter.
 
 When changing operational-memory formats or experiment result structures, update `.agents/skills/analyze-experiment/references/`. When moving production or benchmark boundaries, update `docs/architecture.md` and the paper-scope matrix.
 
