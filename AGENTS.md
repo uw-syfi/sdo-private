@@ -1,67 +1,49 @@
-# SDS (Self-Defining Systems)
+# SDO (Self-Defining Operator)
 
-SDS autonomously explores, validates, and evolves infrastructure using agentic LLMs.
+SDO autonomously deploys and operates applications using source-grounded agents, independently validated Go detectors, a long-running Kubernetes controller, and repository-backed operational memory.
 
 ## Projects
 
-- [`app_operator/`](app_operator/AGENTS.md) — Deploy + monitor target apps with LLM agents
-- [`sregym_agents/`](sregym_agents/AGENTS.md) — SRE Gym competition agents
-- `libs/` — Shared libraries: `agent_cli`, `agent_mw`, `model_config`, `pydantic_agent`, `sds_core`
-- `apps/` — Target applications (hotelReservation, socialNetwork, ...)
-- `tests/` — `unit/`, `integration/`
+- [`app_operator/`](app_operator/AGENTS.md) — lifecycle, operational memory, responder protocol, and Kubernetes runtime
+- `controller/` — detector SDK, execution core, long-running runtime, and controller builder
+- [`sregym_agents/`](sregym_agents/AGENTS.md) — SRE Gym benchmark agents
+- `app_operator/sdo_sregym/`, `bench/sregym/`, `libs/sregym_lib/` — benchmark-only adapters and harnesses
+- `libs/` — shared agent and model libraries; `sdo_core` contains neutral runtime helpers
+- `apps/` — source-deployment evaluation applications
+- `tests/` — unit and integration tests
 
-## Development Conventions
+Production code must not import from SRE Gym packages. Benchmark adapters may import the production API.
 
-- **Test-driven**: begin designing your work by thinking about how to test it. Test suite is part of your plan.
-- **Red/Green TDD**: write failing tests first, then implement.
-- **Python**: type hints, `autopep8` formatting, `ruff` linting, `pytest` tests
-- **Structured data**: use dataclasses instead of raw `dict` for shapes constructed/consumed in multiple places
-- **Config**: dataclasses with `__post_init__` validation (`TypeError`/`ValueError`)
-- **Exceptions**: custom hierarchy in `app_operator/exceptions.py`
-- **Adding a new feature**: Think about tests first. Test public behavior, not internal details.
-- **Fixing bugs**: Write a reproducing test first, then fix. Test must be part of the fix.
+## Development conventions
 
-## Usage Guide for LLM Agents
+- Begin with a failing test for bugs and new public behavior.
+- Test contracts and ownership boundaries, not private implementation details.
+- Use Python type hints, `autopep8`, `ruff`, and `pytest`.
+- Prefer dataclasses or Pydantic models over repeated raw mapping shapes.
+- Validate configuration in `__post_init__` with `TypeError` or `ValueError`.
+- Keep exceptions in the `app_operator/exceptions.py` hierarchy where applicable.
+- Delete removed code instead of commenting it out.
+- Keep code already running in an async loop on that loop: use `async`/`await`, never `run_sync()`, `asyncio.run()`, or `run_until_complete()`.
 
-- **Debugging deployment**: Check `.sds/deploy.sh` and `.sds/logs/`
-- **Adding fault types**: Add to `COMPOSE_FAULTS`, implement `_inject_*`, register in dispatch table, add tests
+## SDO invariants
 
-## Remote repo access
+- `.sdo/` contains the five durable artifact classes: goal, architecture, playbooks, diagnostics, and outcomes.
+- Artifact ownership is enforced by the commit broker. Agents propose changes in isolated worktrees; only validated commits reach the operational branch.
+- The health judge owns health detectors. Responders may add or refine incident detectors and playbooks after independently verified outcomes.
+- Detector runtime code is deterministic Go using `controller/sdk`; it must not call an LLM or inspect benchmark verdicts.
+- `controller/runtime` remains transport-neutral. SRE Gym submission relays and receipts stay behind the benchmark adapter.
 
-Use `glab` command (if available) to access the remote repo on GitLab, including issues and merge requests.
+When changing operational-memory formats or experiment result structures, update `.agents/skills/analyze-experiment/references/`. When moving production or benchmark boundaries, update `docs/architecture.md` and the paper-scope matrix.
 
-## Notes from Developers
-
-- Use `uv` and `uv run ...` for Python.
-- Keep this file concise — detailed docs live in `docs/`.
-- When code changes impact CLI, update README.md.
-- When removing code, delete it — do not comment it out.
-- **Avoid nested event loops:** Code that already runs inside an async event loop (e.g. a pydantic-ai tool handler) must never call `run_sync()`, `asyncio.run()`, or `loop.run_until_complete()` — these create a second event loop, and any objects bound to the outer loop (httpx connection pools, anyio locks, etc.) will raise `RuntimeError: is bound to a different event loop`. Instead, make the function `async` and `await` the coroutine directly so it stays on the same loop.
-- When changing trajectory format (`trajectory.py`) or experiment log/result structures (`commands/run_exp.py`), update the `analyze-experiment` skill references in `.agents/skills/analyze-experiment/references/`.
-- When adding or moving feature flags in `app_operator/config.py`, update `docs/feature-flags.md` to match.
-- When introducing a new top-level project or library (e.g. `libs/`, `sregym_agents/`), add it to `tach.toml` with the correct `depends_on` entries.
-
-## Code Validation (after every code edit)
+## Validation after code edits
 
 ```bash
-bash scripts/format_code.sh   # autopep8 formatting
-bash scripts/check_errors.sh  # ruff linting (add --fix to auto-fix)
+bash scripts/format_code.sh
+bash scripts/check_errors.sh
 ```
 
-## Testing
+Use `uv` and `uv run ...` for Python. See [docs/testing-guide.md](docs/testing-guide.md) for focused Python and Go commands.
 
-See [`docs/testing-guide.md`](docs/testing-guide.md) for full guidance.
+## Remote repository access
 
-```bash
-scripts/run_tests.sh                      # all tests
-uv run pytest tests/                      # python only
-uv run pytest tests/ --cov=app_operator  # with coverage
-```
-
-## Notes
-
-- Use `uv` and `uv run ...` for Python.
-- Keep this file concise — detailed docs live in `docs/`.
-- When code changes impact CLI, update README.md.
-- When removing code, delete it — do not comment it out.
-- Use `glab` command (if available) to access the remote repo on GitLab.
+Use `glab` when available for GitLab issues and merge requests.

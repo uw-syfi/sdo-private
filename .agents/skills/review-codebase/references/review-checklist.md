@@ -1,61 +1,67 @@
-# Review Checklist
+# SDO review checklist
 
-Use this checklist when reviewing the SDS codebase. Not every item applies to every review — focus on what is relevant to the scope.
+Apply the relevant checks rather than mechanically reporting every item.
+
+## Paper and repository scope
+
+- [ ] `sdo operate` is the only production lifecycle entry point.
+- [ ] Production behavior follows source deployment, independent health judging, `.sdo` bootstrap, and controller handoff.
+- [ ] Bounded shell monitoring, generated shell health checks, duplicate deployment lifecycles, historical trajectory stacks, and standalone fault injection are absent.
+- [ ] Production packages do not import SRE Gym packages, verdicts, task APIs, or submission transports.
+- [ ] Benchmark adapters reuse production APIs instead of reimplementing controller semantics.
+- [ ] Names, environment variables, module paths, docs, images, and API versions consistently use SDO terminology.
+
+## Lifecycle and agents
+
+- [ ] The health objective is human-supplied and persisted exactly.
+- [ ] Source deployment requires a real, attributable Git commit and independent verification.
+- [ ] Deployer and health judge use separate fresh sessions and structured, validated handoffs.
+- [ ] Architecture inventory and topology fingerprint are grounded in tracked source.
+- [ ] Health-judge corrections are bounded and detector source/tests pass deterministic validation.
+- [ ] Agent backends honor one interface without nested event loops or hidden shared conversation state.
+
+## Operational memory and Git
+
+- [ ] Goal, architecture, playbooks, diagnostics, and outcomes enforce distinct ownership.
+- [ ] Agents work in contained isolated worktrees and cannot escape through paths or symlinks.
+- [ ] Commit attribution, parent/head checks, and merge ordering prevent stale or unrelated changes.
+- [ ] Outcomes are controller-owned and append-only.
+- [ ] Broker operations are idempotent across retries and restarts.
+- [ ] Reflection is classification-aware, same-session where required, and based on committed outcomes/history.
+
+## Controller and detectors
+
+- [ ] Detector runtime is deterministic Go and consumes only declared snapshot APIs.
+- [ ] Manifest class and owner agree; watches, persistence, batching, playbooks, and provenance are validated.
+- [ ] Generated packages compile and include matching plus near-miss tests.
+- [ ] Scheduler, cache, finding persistence, batching, dispatch, and acknowledgement survive restart semantics.
+- [ ] Incident IDs and idempotency keys correlate requests, results, ledgers, outcomes, and receipts.
+- [ ] Leader election prevents duplicate active effects.
+- [ ] Accepted detector changes trigger a validated, correlated controller rollout.
 
 ## Security
 
-- [ ] Check for arbitrary code execution without user confirmation (e.g., `subprocess.run` on generated code)
-- [ ] Check for command injection via unsanitized inputs in shell commands
-- [ ] Check for secrets or credentials committed to the repo
-- [ ] Check for overly permissive file permissions
+- [ ] Generated code and repair proposals run in isolated validators with explicit resource/network policy.
+- [ ] Shell commands avoid injection and unresolved destructive targets.
+- [ ] Secrets are mounted or passed narrowly and never committed, logged, or copied into memory.
+- [ ] Kubernetes RBAC, pod security contexts, service-account tokens, volumes, and network access use least privilege.
+- [ ] Repository synchronization and worktree cleanup cannot overwrite paths outside the intended application/PVC.
+- [ ] Benchmark labels and external verdicts cannot leak into production prompts or detectors.
 
-## Architecture
+## Python and configuration
 
-- [ ] Check module boundaries: `lego_agent` should not import directly from `app_operator` internals (known issue: `engine.py` imports from `app_operator.adk.tools`, `app_operator.langgraph.llm`, `app_operator.config`)
-- [ ] Check for duplicate logic across modules (e.g., `_generate_deploy_script` / `_generate_health_check_script` in `deployer.py`)
-- [ ] Check that abstractions are used consistently — avoid `isinstance` checks on concrete types when an interface exists (e.g., `isinstance(self.filesystem, RealFilesystem)`)
-- [ ] Check that singletons (e.g., `PromptLoader`) are properly reset in tests
+- [ ] Reused structured shapes are dataclasses or Pydantic models, not ad hoc mappings.
+- [ ] Configuration validates types, values, positive timeouts, and mutually exclusive options.
+- [ ] Async handlers await coroutines on the existing event loop.
+- [ ] Exceptions preserve actionable context without exposing secrets.
+- [ ] Subprocess timeouts, return codes, partial output, and cleanup paths are handled.
+- [ ] Removed compatibility code has been deleted rather than left unreachable.
 
-## Code Quality
+## Tests and evidence
 
-- [ ] Run `bash scripts/check_errors.sh` — all ruff errors must be resolved
-- [ ] Check for magic numbers — constants should be named
-- [ ] Check for overly complex methods (>50 lines or deep nesting)
-- [ ] Check for dead code or commented-out code (should be deleted per project conventions)
-- [ ] Check function return patterns — `(bool, str)` tuples vs exceptions should be consistent within a module
-
-## Configuration
-
-- [ ] New config fields must have `__post_init__` validation with `TypeError`/`ValueError`
-- [ ] Config defaults in code must match documentation in `CLAUDE.md` / `sds.toml` examples
-- [ ] Module-level constants (e.g., `AGENT_FIX_TIMEOUT_SECS`) should not duplicate `OperatorConfig` fields — prefer config values at all call sites
-- [ ] Check `Config.from_dict()` recognizes new fields (no silent drops)
-
-## Testing
-
-- [ ] New code should have tests — check coverage for the changed files
-- [ ] Tests should test contracts (return values, exceptions, side effects), not internal state
-- [ ] Tests using `InMemoryFilesystem` should pass absolute paths to avoid `resolve()` touching real disk
-- [ ] Check for test file duplication between `tests/unit/` root and `tests/unit/<subsystem>/` subdirectories
-- [ ] Check that tests using `ScriptGeneratingAgent` use `tmp_path` for isolation
-- [ ] Verify `reset_loader()` is called in tests that configure DSPy prompt loading
-
-## Error Handling
-
-- [ ] Custom exceptions should inherit from the hierarchy in `app_operator/exceptions.py`
-- [ ] Broad `except Exception` catches should be justified — check if specific exceptions should be caught instead
-- [ ] Agent functions returning `(bool, str)` should document failure conditions
-
-## Dependency Injection
-
-- [ ] Classes that touch the filesystem should accept `FileSystemInterface`
-- [ ] Optional dependencies should default to null implementations (`NullTrajectoryRecorder`, `NullOperatorUI`)
-- [ ] Check that `CodingAgent.recorder` is set per-instance, not leaked across instances via class-level attributes
-
-## Project Conventions
-
-- [ ] Python code uses type hints
-- [ ] Formatting: `autopep8` with `--max-line-length 120`
-- [ ] Linting: `ruff` with no errors
-- [ ] No commented-out code — delete removed code entirely
-- [ ] No unnecessary abstractions — prefer simple, direct code
+- [ ] Bugs have reproducing tests and features have public contract tests.
+- [ ] Ownership, stale commits, malformed handoffs, timeouts, retries, and cleanup failure paths are covered.
+- [ ] Controller modules have Go tests for state transitions and restart behavior.
+- [ ] Architecture tests reject production-to-benchmark imports and excluded modules.
+- [ ] Live-cluster claims cite exact smoke-test evidence; unit tests are not presented as deployment proof.
+- [ ] Docs and the code-to-paper matrix match actual entry points and modules.

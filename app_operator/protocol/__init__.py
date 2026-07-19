@@ -1,3 +1,19 @@
-from app_operator.protocol.models import IncidentRequest, IncidentResult
+from app_operator.protocol.models import (
+    ConfirmedRootCause,
+    DetectorEvaluation,
+    Finding,
+    IncidentRequest,
+    IncidentResult,
+    IncidentStatus,
+    UsageMetrics,
+)
 
-__all__ = ["IncidentRequest", "IncidentResult"]
+__all__ = [
+    "ConfirmedRootCause",
+    "DetectorEvaluation",
+    "Finding",
+    "IncidentRequest",
+    "IncidentResult",
+    "IncidentStatus",
+    "UsageMetrics",
+]

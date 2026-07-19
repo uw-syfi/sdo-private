@@ -1,4 +1,4 @@
-"""Narrow process boundary for observer controller rollout evidence."""
+"""Narrow process boundary for SDO controller rollout evidence."""
 
 from __future__ import annotations
 

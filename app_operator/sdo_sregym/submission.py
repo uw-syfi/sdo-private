@@ -12,7 +12,8 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from typing import Any, Literal, Protocol
+from collections.abc import Callable
+from typing import Any, Literal
 
 
 class SubmissionBridgeError(RuntimeError):
@@ -22,8 +23,7 @@ class SubmissionBridgeError(RuntimeError):
 SUBMISSION_TIMEOUT_SECONDS = 300
 
 
-class Opener(Protocol):
-    def __call__(self, request: urllib.request.Request, timeout: int): ...
+Opener = Callable[..., Any]
 
 
 def submit_solution(

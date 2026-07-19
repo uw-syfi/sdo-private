@@ -11,9 +11,10 @@ import argparse
 import json
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Protocol
+from typing import Any
 
 SUBMISSION_TIMEOUT_SECONDS = 300
 HEALTH_TIMEOUT_SECONDS = 5
@@ -25,8 +26,7 @@ class RelayRequestError(ValueError):
     """Raised when a request falls outside the relay's narrow contract."""
 
 
-class Opener(Protocol):
-    def __call__(self, request: urllib.request.Request, timeout: int): ...
+Opener = Callable[..., Any]
 
 
 @dataclass(frozen=True)
@@ -58,8 +58,11 @@ def forward_request(
     except urllib.error.HTTPError as exc:
         response = exc
     with response:
+        status = response.status
+        if status is None:
+            raise RelayRequestError("relay target response has no HTTP status")
         return RelayResponse(
-            status=int(response.status),
+            status=int(status),
             body=response.read(),
             content_type=str(response.headers.get("Content-Type", "application/json")),
         )

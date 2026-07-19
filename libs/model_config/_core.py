@@ -1,7 +1,7 @@
 """Single source of truth for model provider parsing and representation.
 
 ModelConfig is the canonical way to represent a provider+model pair across
-all SDS runtimes (pydantic-ai, litellm, LangChain).
+all SDO runtimes (pydantic-ai, litellm, LangChain).
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ class ModelConfig:
         if self.provider not in _CANONICAL_PROVIDERS:
             raise ValueError(
                 f"provider must be one of {sorted(_CANONICAL_PROVIDERS)}, got {self.provider!r}. "
-                "Use from_provider_and_model() or from_string() to map SDS aliases."
+                "Use from_provider_and_model() or from_string() to map SDO aliases."
             )
         if not self.model or not self.model.strip():
             raise ValueError("model must be a non-empty string")
@@ -89,7 +89,7 @@ class ModelConfig:
             raise ValueError(f"thinking_budget must be a positive int, got {self.thinking_budget!r}")
 
     # ------------------------------------------------------------------
-    # Factory: from SDS provider alias + bare model name
+    # Factory: from SDO provider alias + bare model name
     # ------------------------------------------------------------------
 
     @classmethod
@@ -101,7 +101,7 @@ class ModelConfig:
         location: str | None = None,
         thinking_budget: int | None = None,
     ) -> ModelConfig:
-        """Build a ModelConfig from an SDS provider alias and bare model name.
+        """Build a ModelConfig from an SDO provider alias and bare model name.
 
         Raises:
             ValueError: If the alias has no canonical mapping (e.g. "subagent").
@@ -262,7 +262,7 @@ class ModelConfig:
 
 
 def normalize_provider(alias: str) -> str:
-    """Map an SDS provider alias to its canonical family name.
+    """Map an SDO provider alias to its canonical family name.
 
     Returns one of: "openai", "anthropic", "gemini", "vertex".
     Raises ValueError for unresolvable aliases ("subagent").

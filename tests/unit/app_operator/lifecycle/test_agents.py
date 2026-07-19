@@ -281,7 +281,7 @@ def test_lifecycle_rejects_benchmark_or_environment_oracles_before_compilation(t
         def run_health_judge(self, **kwargs: object) -> HealthJudgeArtifact:
             artifact = super().run_health_judge(**kwargs)  # type: ignore[arg-type]
             return artifact.model_copy(
-                update={"detector_source": artifact.detector_source + "\n// read SDS_SREGYM_VERDICT_PATH\n"}
+                update={"detector_source": artifact.detector_source + "\n// read SREGYM_VERDICT_PATH\n"}
             )
 
     with pytest.raises(LifecycleError, match="benchmark|oracle"):
@@ -372,7 +372,7 @@ import (
     \"time\"
     appsv1 \"k8s.io/api/apps/v1\"
     corev1 \"k8s.io/api/core/v1\"
-    \"sds.dev/observer/sdk\"
+    \"sdo.dev/controller/sdk\"
 )
 
 func New() sdk.Detector { return Detector{} }

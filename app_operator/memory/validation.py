@@ -44,8 +44,6 @@ class MemoryValidator:
 
         try:
             repository = MemoryRepository(resolved_root)
-            if repository.is_legacy:
-                raise MemoryValidationError("legacy .sds memory is read-only")
             repository.schema_version()
             goal = repository.goal()
             architecture = repository.architecture()
@@ -63,7 +61,7 @@ class MemoryValidator:
             raise MemoryValidationError("arch.md body must not be empty")
         if not playbooks:
             raise MemoryValidationError("at least one playbook is required")
-        self._validate_playbooks(repository, playbooks)
+        self._validate_playbooks(repository)
         self._validate_detector_classes(repository)
         self._validate_detector_ownership(
             repository,
@@ -120,7 +118,7 @@ class MemoryValidator:
                 raise MemoryValidationError(f"symlink is forbidden in operational memory: {path}")
 
     @staticmethod
-    def _validate_playbooks(repository: MemoryRepository, playbooks: list[object]) -> None:
+    def _validate_playbooks(repository: MemoryRepository) -> None:
         playbook_root = repository.memory_root / "playbooks"
         index_path = playbook_root / "README.md"
         if not index_path.is_file():

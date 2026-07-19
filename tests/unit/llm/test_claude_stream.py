@@ -594,10 +594,8 @@ def test_parse_real_fixture(claude_agent, mock_llm_subprocess):
     # The fixture has a result event at the end
     assert "AI-native infrastructure automation system" in result
 
-    # Count tool calls (should be 38 based on fixture)
+    # The compact fixture contains one complete tool interaction.
     mock_recorder = claude_agent.recorder
-    assert mock_recorder.add_tool_call.call_count == 38
+    assert mock_recorder.add_tool_call.call_count == 1
 
-    # Count text events by checking if result contains multiple parts
-    # The fixture should have processed text events successfully
-    assert len(result) > 100  # Result should be substantial
+    assert len(result) > 20

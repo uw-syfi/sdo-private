@@ -89,7 +89,7 @@ def _private_owner_dir(module: str) -> Path | None:
 
     The owner is the immediate parent directory of the _-prefixed segment:
       "libs.agent_mw._turn_logger"  →  <root>/libs/agent_mw/
-      "app_operator.commands._foo"  →  <root>/app_operator/commands/
+      "app_operator.memory._foo"  →  <root>/app_operator/memory/
       "sregym_agents.crucible._bar" →  <root>/sregym_agents/crucible/
     """
     parts = module.split(".")

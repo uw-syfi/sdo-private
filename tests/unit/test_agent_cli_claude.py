@@ -3,10 +3,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app_operator.trajectory import NullTrajectoryRecorder
 from libs.agent_cli.claude import ClaudeCodeCodingAgent, ClaudeGenerationSession
 from libs.agent_cli.cli_agent import CLICodingAgent
 from libs.agent_cli.mcp_config import HttpMcpServer, StdioMcpServer
+from libs.agent_cli.trajectory import NullTrajectoryRecorder
 
 
 @pytest.fixture

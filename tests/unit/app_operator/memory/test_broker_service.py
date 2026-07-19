@@ -218,7 +218,7 @@ def test_in_cluster_broker_uses_isolated_kubernetes_validator_job() -> None:
     validator = _memory_validator(
         "kubernetes",
         namespace="demo",
-        image="sdo-observer-validator:test",
+        image="sdo-detector-validator:test",
         repository_pvc="application-repository",
         repository_mount_path=Path("/workspace"),
     )
@@ -226,7 +226,7 @@ def test_in_cluster_broker_uses_isolated_kubernetes_validator_job() -> None:
     sandbox = validator.sandbox_runner
     assert sandbox.__class__.__name__ == "KubernetesJobSandboxRunner"
     assert sandbox.namespace == "demo"
-    assert sandbox.image == "sdo-observer-validator:test"
+    assert sandbox.image == "sdo-detector-validator:test"
     assert sandbox.repository_pvc == "application-repository"
 
 

@@ -35,15 +35,10 @@ class MemoryRepository:
     def __init__(self, app_root: Path) -> None:
         self.app_root = app_root.resolve()
         canonical = self.app_root / ".sdo"
-        legacy = self.app_root / ".sds"
         if canonical.exists() or canonical.is_symlink():
             selected = canonical
-            self.is_legacy = False
-        elif legacy.exists():
-            selected = legacy
-            self.is_legacy = True
         else:
-            raise MemoryRepositoryError(f"application has no .sdo or legacy .sds memory: {self.app_root}")
+            raise MemoryRepositoryError(f"application has no .sdo operational memory: {self.app_root}")
         self.memory_root = self._contained(selected, label="memory root")
 
     def schema_version(self) -> int:
@@ -112,8 +107,6 @@ class MemoryRepository:
     def append_outcome(self, outcome: OutcomeRecord, *, actor: ArtifactOwner) -> None:
         if actor != ArtifactOwner.CONTROLLER:
             raise MemoryRepositoryError("only the controller may append outcomes")
-        if self.is_legacy:
-            raise MemoryRepositoryError("legacy .sds memory is read-only; migrate to .sdo before writing")
         path = self.memory_root / "outcomes.jsonl"
         with path.open("a", encoding="utf-8") as stream:
             stream.write(outcome.model_dump_json(exclude_none=True) + "\n")

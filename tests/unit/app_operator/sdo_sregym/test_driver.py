@@ -10,6 +10,15 @@ import pytest
 import yaml
 
 from app_operator.memory.broker_service import ControllerRolloutExpectation, ControllerRolloutRecord
+from app_operator.runtime.kubernetes import (
+    RuntimeInstallError,
+    _controller_job_logs,
+    _delete_repository_sync,
+    _job_state,
+    _pod_is_ready,
+    _tar_environment,
+    _wait_for_controller_job,
+)
 from app_operator.sdo_sregym.driver import (
     _cleanup_defer_timeout_seconds,
     _in_cluster_api_base,
@@ -19,17 +28,11 @@ from app_operator.sdo_sregym.driver import (
 )
 from app_operator.sdo_sregym.runtime import (
     RuntimeConfig,
-    RuntimeInstallError,
-    _controller_job_logs,
     _controller_update_rollout_succeeded,
-    _delete_repository_sync,
-    _job_state,
     _load_incident_ledger,
-    _pod_is_ready,
     _resolve_responder_dispatch,
-    _tar_environment,
     _validated_controller_rollout_record,
-    _wait_for_controller_job,
+    run_production_runtime,
     runtime_resources,
     validate_production_receipt,
 )
@@ -85,7 +88,7 @@ def test_sregym_adapter_routes_only_through_production_job_controller(tmp_path: 
     assert "--broker-arg=--validator-mode" in command
     assert "--broker-arg=kubernetes" in command
     assert "--broker-arg=--validator-image" in command
-    assert "--broker-arg=sdo-observer-validator:v0.1.0" in command
+    assert "--broker-arg=sdo-detector-validator:v0.1.0" in command
     assert "--broker-arg=--validator-namespace" in command
     assert "--broker-arg=hotel-reservation" in command
     assert "--broker-arg=--validator-repository-pvc" in command
@@ -145,6 +148,37 @@ def test_sregym_adapter_routes_only_through_production_job_controller(tmp_path: 
     )
     assert service["spec"]["ports"] == [{"name": "http", "port": 8000, "targetPort": 18000}]
     assert controller["spec"]["template"]["spec"].get("hostNetwork") is not True
+
+
+def test_sregym_adapter_delegates_execution_to_production_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import app_operator.sdo_sregym.runtime as runtime
+
+    config = RuntimeConfig(
+        repository=tmp_path,
+        namespace="demo",
+        application="demo",
+        controller_image="controller:test",
+        responder_image="responder:test",
+        repository_pvc="repository",
+        credentials_secret="credentials",
+        model="gpt-test",
+        timeout_seconds=60,
+        submission_api_base="http://sdo-sregym-bridge:8000",
+    )
+    calls: list[tuple[object, object]] = []
+
+    def fake_run(production_config: object, extension: object) -> dict[str, bool]:
+        calls.append((production_config, extension))
+        return {"completed": True}
+
+    monkeypatch.setattr(runtime, "run_kubernetes_runtime", fake_run)
+
+    assert run_production_runtime(config) == {"completed": True}
+    assert calls[0][0] is config
+    assert calls[0][1].controller_args(config)[-1] == "--responder-env=SDO_SREGYM_SUBMISSION_BRIDGE=1"
 
 
 def test_remote_conductor_address_is_not_rewritten() -> None:
@@ -229,7 +263,7 @@ def test_runtime_job_state_fails_fast() -> None:
 
 
 def test_controller_job_poll_retries_transient_kubernetes_api_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    import app_operator.sdo_sregym.runtime as runtime
+    import app_operator.runtime.kubernetes as runtime
 
     responses = iter(
         [
@@ -243,7 +277,7 @@ def test_controller_job_poll_retries_transient_kubernetes_api_failure(monkeypatc
         checks.append(bool(kwargs.get("check", True)))
         return next(responses)
 
-    monkeypatch.setattr(runtime, "_kubectl", fake_kubectl)
+    monkeypatch.setattr(runtime, "kubectl", fake_kubectl)
     monkeypatch.setattr(runtime.time, "sleep", lambda _: None)
 
     _wait_for_controller_job(
@@ -266,7 +300,7 @@ def test_controller_job_poll_retries_transient_kubernetes_api_failure(monkeypatc
 def test_controller_logs_select_successful_retry_pod(monkeypatch: pytest.MonkeyPatch) -> None:
     import json
 
-    import app_operator.sdo_sregym.runtime as runtime
+    import app_operator.runtime.kubernetes as runtime
 
     calls: list[list[str]] = []
 
@@ -287,7 +321,7 @@ def test_controller_logs_select_successful_retry_pod(monkeypatch: pytest.MonkeyP
             "",
         )
 
-    monkeypatch.setattr(runtime, "_kubectl", fake_kubectl)
+    monkeypatch.setattr(runtime, "kubectl", fake_kubectl)
 
     logs = _controller_job_logs("demo")
 
@@ -347,14 +381,14 @@ def test_receipt_rejects_incomplete_durable_responder_pair(missing_suffix: str) 
 
 
 def test_repository_sync_cleanup_does_not_wait_on_filtered_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
-    import app_operator.sdo_sregym.runtime as runtime
+    import app_operator.runtime.kubernetes as runtime
 
     calls: list[tuple[list[str], str, bool]] = []
 
     def fake_kubectl(args: list[str], *, namespace: str, check: bool = True, **_kwargs: object) -> None:
         calls.append((args, namespace, check))
 
-    monkeypatch.setattr(runtime, "_kubectl", fake_kubectl)
+    monkeypatch.setattr(runtime, "kubectl", fake_kubectl)
 
     _delete_repository_sync("demo")
 
@@ -589,7 +623,7 @@ def test_receipt_accepts_failed_controller_pod_before_one_success_and_never_need
 def test_controller_supervisor_persists_rollout_with_pod_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     import argparse
 
-    import observer.updater.check_cli as checker
+    import controller.builder.check_cli as checker
 
     expectation = ControllerRolloutExpectation(
         incident_id="incident-1",
@@ -661,10 +695,8 @@ def test_registered_driver_has_no_direct_codex_or_verdict_orchestration() -> Non
 
     assert "run_production_runtime" in source
     assert "CodingAgent" not in source
-    assert "ObserverHealthController" not in source
     assert "HealthJudgeVerdict" not in source
     assert "evaluate-once" not in source
-    assert "SDS_SREGYM_VERDICT_PATH" not in source
     assert "run_initial_lifecycle" in source
 
 
@@ -703,10 +735,10 @@ def test_four_problem_pipeline_is_source_backed_and_chains_one_hotel_workspace()
 def test_runner_honors_temporary_sregym_checkout(monkeypatch, tmp_path: Path) -> None:
     import sregym_agents.run_sregym as runner
 
-    monkeypatch.setenv("SDS_SREGYM_DIR", str(tmp_path))
+    monkeypatch.setenv("SDO_SREGYM_DIR", str(tmp_path))
     try:
         reloaded = importlib.reload(runner)
         assert tmp_path.resolve() == reloaded._SREGYM_DIR
     finally:
-        monkeypatch.delenv("SDS_SREGYM_DIR", raising=False)
+        monkeypatch.delenv("SDO_SREGYM_DIR", raising=False)
         importlib.reload(runner)

@@ -1,103 +1,99 @@
-# SDS (Self-Defining Systems)
+# SDO (Self-Defining Operator)
 
-SDS is a research project exploring how AI agents can autonomously take over systems work — design, implementation, operation, and improvement. This repository starts with one slice of that vision: **autonomous system operation**.
+SDO is the research prototype described in `sdo_paper/`: an agentic system that deploys an application from source, derives independently checked detectors from a human health objective, and then operates the application through a continuously running Kubernetes controller.
 
-SDS targets online applications. Microservices are the first class studied; benchmark apps live in `apps/`.
+The production design has one entry point and one durable memory model. SRE Gym integrations remain in this repository as benchmark adapters; they are not part of the production runtime.
 
-Core components in this repo:
+## System at a glance
 
-- **`sds_operator`** — deploys applications, self-heals on errors, and monitors health.
-- **`sregym_agents`** — SRE Gym agents and experiment harnesses for incident diagnosis, mitigation, and operational-memory experiments.
-
----
-
-## How the Operator Works
-
-```
-sds_operator run <app>
-  ├── CodeAnalyzerAgent  → reads codebase → .sds/code_analysis.md
-  ├── DeploymentAgent    → generates deploy.sh, self-heals on errors, retries
-  ├── AppMonitor         → periodic health checks after deploy succeeds
-  └── Trajectory recorder → .sds/trajectories/*.json
+```text
+sdo operate
+  -> source deployer
+  -> independent health judge
+  -> .sdo operational memory
+  -> generated Go detectors
+  -> Kubernetes controller
+  -> isolated incident responder
+  -> validated commits and outcome-driven reflection
 ```
 
-All agents share a single LLM provider (gemini, claude, codex…) configured in `sds.toml` and accessed via `libs/agent_cli/`. Provider choice and runtime choice are independent — switching from Claude to Gemini or from `cli_agent` to `pydantic_ai` requires only editing `sds.toml`.
+The main packages are:
 
-**Trajectories** are structured JSON recordings of every agent call.
+- `app_operator/lifecycle/`: source deployment, architecture capture, and health-detector bootstrap.
+- `app_operator/memory/`: the transactional commit broker, validation, worktrees, and outcome records.
+- `app_operator/protocol/` and `app_operator/responder/`: structured controller/responder requests and fresh or resumed coding-agent sessions.
+- `app_operator/runtime/`: installation of the production controller on Kubernetes.
+- `controller/sdk/`: the public Go detector API.
+- `controller/core/`: detector execution and snapshot validation.
+- `controller/runtime/`: scheduling, finding persistence, batching, responder dispatch, and durable controller state.
+- `controller/builder/`: validation and generation of an application-specific controller from `.sdo/diagnostics`.
+- `sregym_agents/`, `bench/sregym/`, and `app_operator/sdo_sregym/`: benchmark agents, harnesses, and the adapter to the production runtime.
 
----
+Production packages must not depend on benchmark packages.
 
-## Quick Start
+## Operational memory
+
+Each operated application carries five durable artifact classes under `.sdo/`:
+
+```text
+.sdo/
+├── goal.md                 # human-owned health objective
+├── arch.md                 # deployer-owned source/topology summary
+├── playbooks/              # responder-owned procedures
+├── diagnostics/            # Go health and incident detectors + manifest
+└── outcomes.jsonl          # controller-owned append-only outcomes
+```
+
+`schema-version` and lifecycle provenance support validation of those five artifact classes. Ownership rules are enforced by the commit broker: responders cannot rewrite the goal, health detectors, architecture, or prior outcomes.
+
+## Quick start
 
 ```bash
-git clone --recursive git@gitlab.cs.washington.edu:syslab/sds.git
-cd sds
+git clone --recursive <repository-url>
+cd <repository-directory>
 uv sync
-cp sds.example.toml sds.toml
+uv run sdo operate --help
 ```
 
-Set your API key in `.env` (e.g., `GOOGLE_API_KEY=...` for Gemini or `ANTHROPIC_API_KEY=...` for Claude), then run:
+Operate an application with an inline objective or a checked-in objective file:
 
 ```bash
-./sds_operator run apps/deathstarbench/hotelReservation
+uv run sdo operate /path/to/application \
+  --namespace application \
+  --goal-file /path/to/health-objective.md
 ```
 
-The operator will analyze the codebase, generate `deploy.sh` and `health_check.sh`, attempt deployment, self-correct any errors, and then monitor the running application. All output lands in `.sds/` inside the app directory.
+The complete interface is:
 
----
-
-## Configuration
-
-Minimal `sds.toml` for the first week:
-
-```toml
-[agent]
-provider = "gemini"   # gemini | claude | codex | openai
-model = "gemini-1.5-pro"
-
-[runtime]
-impl = "cli_agent"    # cli_agent (default) | pydantic_ai
+```text
+sdo operate REPOSITORY --namespace NAMESPACE (--goal TEXT | --goal-file PATH)
+  [--application NAME] [--model MODEL]
+  [--controller-image IMAGE] [--responder-image IMAGE] [--validator-image IMAGE]
+  [--repository-pvc PVC] [--credentials-secret SECRET]
+  [--attempts N] [--timeout-seconds N]
 ```
 
-Full schema in `app_operator/config.py`. Provider credentials, runtime tradeoffs, and all other fields are in `docs/architecture.md`.
+The application name defaults to the repository directory name. The model defaults to `SDO_MODEL`, or `gpt-5.4` when unset; deployment attempts default to 3 and the timeout to 1800 seconds. Default images are `sdo-controller:v0.1.0`, `sdo-responder:v0.1.0`, and `sdo-detector-validator:v0.1.0`. The default PVC is `sdo-application-repository` and the default credentials Secret is `sdo-codex-credentials`.
 
----
+The production path requires a Git worktree, Kubernetes access, those images, and model credentials. The health objective is human-supplied rather than inferred from benchmark verdicts.
 
-## Key Commands
+For local validation without a live cluster:
 
-| Command | What it does |
-|---|---|
-| `./sds_operator run <app>` | Deploy and monitor an application |
-| `./sds_operator init-exp <app> <name>` | Create an isolated experiment copy |
-| `./sds_operator run-exp <name>` | Run multiple experiments in parallel |
-
-Full option reference for each command is in `docs/architecture.md`.
-
----
-
-## Understanding the Output
-
-After `sds_operator run`, the app directory contains a `.sds/` folder:
-
-```
-.sds/
-├── deploy.sh            # AI-generated deployment script
-├── health_check.sh      # AI-generated health check script
-├── code_analysis.md     # CodeAnalyzerAgent output (feeds DeploymentAgent)
-├── logs/                # Per-attempt logs for deployment and monitoring
-└── trajectories/        # JSON recordings of every agent call
-    └── *.json           # One file per run
+```bash
+bash scripts/format_code.sh
+bash scripts/check_errors.sh
+uv run pytest tests/unit/
 ```
 
-Trajectory files contain phase, prompt, response, token counts, and success/failure for each agent call.
+See [docs/architecture.md](docs/architecture.md) for boundaries and lifecycle details, [docs/testing-guide.md](docs/testing-guide.md) for validation commands, and [docs/sdo-paper-parity-implementation-plan.md](docs/sdo-paper-parity-implementation-plan.md) for the concise code-to-paper scope matrix.
 
----
+## Repository scope
 
-## Going Deeper
+The repository intentionally retains:
 
-| Question | Document |
-|---|---|
-| How do runtimes, providers, and agents relate? | `docs/architecture.md` |
-| How do I inject faults? | `docs/fault-injection.md` |
-| How do I write tests? | `docs/testing-guide.md` |
-| What feature flags are available? | `docs/feature-flags.md` |
+- the production SDO implementation;
+- target applications used for source-deployment evaluation;
+- SRE Gym benchmark code, adapters, experiment configuration, and analysis tools;
+- tests, build definitions, and documentation required by those components.
+
+Old bounded deploy-and-monitor operators, generated shell health checks, standalone fault-injection tooling, and historical trajectory formats are outside the paper design and are not part of the supported system.

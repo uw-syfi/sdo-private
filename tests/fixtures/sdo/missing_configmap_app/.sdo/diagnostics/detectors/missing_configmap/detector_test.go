@@ -8,7 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"sds.dev/observer/sdk/sdktest"
+	"sdo.dev/controller/sdk/sdktest"
 )
 
 func TestDetectorGeneralizesAcrossNamesAndIgnoresOptionalReferences(t *testing.T) {

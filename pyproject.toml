@@ -1,31 +1,20 @@
 [project]
-name = "sds-operator"
+name = "sdo-operator"
 version = "0.1.0"
-description = "Application deployment and monitoring operator"
+description = "Self-Defining Operator for autonomous Kubernetes operation"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "python-dotenv>=1.0.0",
     "loguru>=0.7.2",
     "tomli>=2.0.1; python_version < '3.11'",
     "jinja2>=3.1.0",
-    "pandas>=2.0.0",
-    "tabulate>=0.9.0",
     "pyyaml>=6.0.3",
-    "rich>=13.0.0",
     "tach>=0.33",
     "pydantic-ai>=1.0.0",
     "fastmcp>=2.9.2",
-    "deepagents>=0.5.0a1; python_version >= '3.11'",
-    "numpy>=2.2.6",
-    "matplotlib>=3.10.8",
 ]
 
 [project.optional-dependencies]
-plot = [
-    "matplotlib>=3.7.0",
-    "numpy>=1.24.0",
-]
 test = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -37,8 +26,8 @@ test = [
 ]
 
 [project.scripts]
-operator = "app_operator.__main__:main"
-sds-observer-check = "observer.updater.check_cli:main"
+sdo = "app_operator.__main__:main"
+sdo-detector-check = "controller.builder.check_cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -50,7 +39,7 @@ prerelease = "if-necessary-or-explicit"
 [tool.uv.workspace]
 members = [
     "libs/agent_cli",
-    "libs/sds_core",
+    "libs/sdo_core",
     "libs/pydantic_agent",
     "libs/agent_mw",
     "libs/model_config",
@@ -58,7 +47,7 @@ members = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["app_operator", "libs", "observer"]
+packages = ["app_operator", "libs", "controller"]
 
 [tool.ruff]
 line-length = 120
@@ -91,6 +80,9 @@ exclude_lines = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 norecursedirs = ["apps", ".venv", "venv", "build", "dist", ".hypothesis"]
+markers = [
+    "live_codex: opt-in test that invokes a live Codex CLI session",
+]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

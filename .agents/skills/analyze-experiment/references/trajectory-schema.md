@@ -1,172 +1,105 @@
-# Trajectory JSON Schema
+# SDO experiment evidence reference
 
-## Top-Level Structure
+Use this reference to correlate durable production evidence with SRE Gym artifacts. Field sets may grow; inspect the run's schema/version and repository models before assuming optional fields.
 
-```json
-{
-  "metadata": {
-    "repo_path": "string — path to the deployed repository",
-    "start_time": "string — ISO datetime",
-    "end_time": "string — ISO datetime",
-    "agent_name": "string — e.g. 'GeminiGenerationSession', 'LangGraph', 'Agentflow'",
-    "status": "string — 'running' | 'completed' | 'failed' | 'interrupted'",
-    "run_id": "string — YYYYMMDD-HHMMSS",
-    "token_usage": "object (optional) — {input_tokens, output_tokens, total_tokens}",
-    "fault_injection": "object (optional) — fault injection metadata"
-  },
-  "calls": [
-    {
-      "call_id": "int — sequential (1, 2, 3...)",
-      "phase": "string — 'exploration' | 'script_generation' | 'deployment' | 'monitoring'",
-      "start_time": "string — ISO datetime",
-      "end_time": "string | null",
-      "context": "object — phase-specific (e.g. {attempt: 1}, {cycle: 5})",
-      "prompt_version": "string (optional) — 'jinja2' or 'dspy_vN'",
-      "fallback_occurred": "bool (optional)"
-    }
-  ],
-  "exploration": ["array of ConversationEntry — code analysis phase"],
-  "script_generation": ["array of ConversationEntry — deploy/health script creation"],
-  "deployment": ["array of ConversationEntry — deployment attempts with self-healing"],
-  "monitoring": ["array of ConversationEntry — health check monitoring"],
-  "gemini_sessions": ["array of strings — paths to Gemini CLI session files (if used)"]
-}
-```
+## Evidence hierarchy
 
-## ConversationEntry
+For production-lifecycle claims, use this order:
 
-Each phase array contains conversation entries, one per agent invocation in that phase:
+1. strict production receipt;
+2. controller-owned outcomes and durable runtime state;
+3. broker incident ledger and attributable Git commits;
+4. lifecycle provenance and validated operational memory;
+5. controller, responder, validator, and harness logs;
+6. agent-specific trajectories.
 
-```json
-{
-  "call_id": "int — links to calls[] entry",
-  "messages": ["array of TrajectoryMessage"],
-  "prompt_version": "string (optional)",
-  "fallback_occurred": "bool (optional)",
-  "prompt_kwargs": "object (optional) — rendered prompt parameters",
-  "rendered_prompt": "string (optional) — final prompt sent to agent"
-}
-```
+A benchmark result can establish the harness verdict. It cannot by itself establish memory ownership, independent verification, reflection, rollout, or cleanup.
 
-## TrajectoryMessage
+## Lifecycle provenance
 
-```json
-{
-  "role": "string — 'system' | 'user' | 'assistant' | 'tool_call'",
-  "content": "string (optional) — message text",
-  "timestamp": "string — ISO datetime",
-  "tool": "string (optional, tool_call only) — tool name (e.g. 'bash', 'Read', 'Grep')",
-  "args": "object (optional, tool_call only) — tool arguments",
-  "stdout": "string (optional, tool_call only) — stdout output (truncated to ~10000 chars)",
-  "stderr": "string (optional, tool_call only) — stderr output",
-  "exit_code": "int (optional, tool_call only)",
-  "duration_seconds": "float (optional)"
-}
-```
+Path: `.sdo/lifecycle-provenance.yaml`
 
-## Phases Explained
+Expected sections:
 
-| Phase | Description | Context Fields |
-|-------|-------------|----------------|
-| `exploration` | CodeAnalyzerAgent reads the codebase, produces `code_analysis.md` and `deployment_issues.md` | — |
-| `script_generation` | DeploymentAgent generates `deploy.sh` and `health_check.sh` | — |
-| `deployment` | Self-healing loop: run deploy → health check → fix errors → retry. Each attempt is a separate ConversationEntry | `{attempt: N}` |
-| `monitoring` | AppMonitor runs periodic health checks after successful deployment | `{cycle: N}` |
+- `deployer`: session ID, source commit, topology fingerprint, resource inventory, and architecture summary.
+- `health_judge`: the accepted final detector artifact.
+- `health_judge_rounds`: ordered structured attempts with distinct session IDs, round numbers, objective digest, covered resources, source, and tests.
 
-## Reading Trajectories Efficiently
+Correlate the deployer source commit with Git and `arch.md`. Correlate the objective digest with the exact text in `goal.md`. A reused lifecycle is credible only when current source/topology and detector validation still match.
 
-Trajectories can be large. Focus on:
+## Outcome records
 
-1. **`metadata.status`** — did it complete or fail?
-2. **`calls[]`** — count phases, check for repeated deployment attempts
-3. **`deployment[]`** — the core analysis target; each entry is one attempt
-4. **Tool calls with non-zero exit_code** — these are the errors the agent had to fix
-5. **Assistant messages after errors** — shows agent's reasoning and fix strategy
-6. **`context.attempt`** in calls — tracks attempt number progression
+Path: `.sdo/outcomes.jsonl`
 
-### Useful jq queries
+Each line is one controller-owned record. Important fields include:
+
+- `incident_id`, `source_commit`, `deployed_commit`;
+- detector history, findings, and final health-detector state;
+- surfaced, inspected, confirmed, rejected, and applied playbooks;
+- confirmed root causes;
+- `classification`;
+- repair and memory commits;
+- responder backend/model and usage;
+- detected, dispatched, mitigated, verified, and completed timestamps.
+
+Useful queries:
 
 ```bash
-# Count deployment attempts
-jq '.deployment | length' trajectory.json
-
-# List all tool calls with failures
-jq '[.deployment[].messages[] | select(.role=="tool_call" and .exit_code != 0 and .exit_code != null)] | length' trajectory.json
-
-# Get metadata summary
-jq '.metadata | {status, agent_name, start_time, end_time}' trajectory.json
-
-# Extract fix summaries (assistant messages in deployment phase)
-jq '.deployment[].messages[] | select(.role=="assistant") | .content[:200]' trajectory.json
+jq -s 'length' .sdo/outcomes.jsonl
+jq -s 'map({incident_id, classification, repair_commit, memory_commit, timestamps})' .sdo/outcomes.jsonl
+jq -s 'group_by(.classification) | map({classification: .[0].classification, count: length})' .sdo/outcomes.jsonl
 ```
 
----
+## Broker incident ledger
 
-## Pydantic AI: Session Directory Format
-
-The `pydantic_ai` operator writes one **JSONL file per agent run** inside a timestamped session directory:
-
-```
-.sds/trajectories/20250317-120000/
-    metadata.json              ← index; symlinked from .sds/trajectory.json
-    001_code_analysis_analyze_agent.jsonl
-    002_script_generation_script_agent.jsonl
-    003_deployment_health_agent.jsonl
-    004_deployment_repair_agent.jsonl
-    005_deployment_health_agent.jsonl
-    006_monitoring_health_agent.jsonl
-```
-
-### `metadata.json`
-
-```json
-{
-  "metadata": {
-    "repo_path": "string — absolute path to the repository",
-    "start_time": "string — YYYY-MM-DD HH:MM:SS",
-    "end_time": "string — YYYY-MM-DD HH:MM:SS (set at finalize)",
-    "status": "string — 'running' | 'completed' | 'failed' | 'interrupted'",
-    "token_usage": {
-      "input_tokens": "int",
-      "output_tokens": "int",
-      "requests": "int"
-    }
-  },
-  "phases": {
-    "code_analysis": ["001_code_analysis_analyze_agent.jsonl"],
-    "script_generation": ["002_script_generation_script_agent.jsonl"],
-    "deployment": [
-      "003_deployment_health_agent.jsonl",
-      "004_deployment_repair_agent.jsonl",
-      "005_deployment_health_agent.jsonl"
-    ],
-    "monitoring": ["006_monitoring_health_agent.jsonl"]
-  }
-}
-```
-
-`phases` maps each phase name to an ordered list of trajectory filenames (agent hand-offs visible via list length).
-
-### Per-run JSONL file
-
-Each `.jsonl` file contains **one JSON line** per agent run written by `TrajectoryMiddleware`:
-
-```json
-{"agent_name": "...", "timestamp": "...", "run_ctx": {"phase": "...", "agent_name": "...", "context": {...}}, "messages": [...], "usage": {"input_tokens": 0, "output_tokens": 0}}
-```
-
-### Useful jq queries (new format)
+Broker state is stored under the repository's Git common directory, normally in an `sdo-broker/` subtree. Resolve the common directory with:
 
 ```bash
-# Count deployment attempts
-jq '.phases.deployment | length' .sds/trajectory.json
-
-# Get status
-jq '.metadata | {status, start_time, end_time, token_usage}' .sds/trajectory.json
-
-# List all phases and run counts
-jq '.phases | to_entries[] | {phase: .key, runs: (.value | length)}' .sds/trajectory.json
-
-# Read messages from a specific run
-jq '.' .sds/trajectories/*/003_deployment_health_agent.jsonl
+git -C <application-worktree> rev-parse --git-common-dir
 ```
+
+Ledger fields can include proposal, outcome, reflection, and validator-evidence commits; responder session ID; accepted detector paths; closure and acknowledgement state; network-policy canaries; topology fingerprints; and controller-update rollout records. Require incident IDs and commit hashes to agree with the receipt and outcome.
+
+## Strict production receipt
+
+Path in an SRE Gym problem run: `agent/sdo_production_receipt_strict.json`
+
+The current receipt schema is `sdo.production-receipt/v1`. It summarizes durable evidence including:
+
+- incident, namespace, controller/responder/validator images;
+- production job dispatch and responder-job correlation;
+- proposal, outcome, reflection, and validator-evidence commits;
+- same-session reflection and independent verification;
+- final detector clearing and network-policy canaries;
+- acknowledgement, cleanup, and remaining worktrees;
+- accepted detector paths and any correlated controller-update rollout;
+- lifecycle provenance and topology freshness.
+
+Use `libs/sregym_lib/production_receipt.py` as the schema source of truth. A malformed or incomplete receipt is a failed production-evidence chain even if the benchmark process exits zero.
+
+## SRE Gym result tree
+
+Typical paths:
+
+```text
+bench/sregym/logs/<run-or-pipeline>/
+├── experiment_config.toml or pipeline_config.toml
+├── pipeline_state.json                     # pipelines
+├── lifecycle_seed_stage<N>/                # SDO pipeline reuse evidence
+└── stage_<N>_<name>/ or run root
+    ├── experiment_config.toml
+    ├── application_workspace/
+    └── problem_runs/<problem-id>/
+        ├── results_*.csv
+        ├── agent/
+        │   └── sdo_production_receipt_strict.json
+        └── <harness and agent logs>
+```
+
+Result CSVs may flatten stage results into fields such as `Diagnosis.success` and `Mitigation.success`. Require explicit true values and inspect `agent_error`; missing or malformed values are not success.
+
+## Agent trajectories
+
+Crucible and generic CLI benchmark agents may emit JSON or JSONL trajectories under run-specific `agent/` or `trajectories/` directories. Their schema is agent-specific. Start by inspecting keys and timestamps rather than applying a historical fixed schema.
+
+Use trajectories to explain hypotheses, commands, tool failures, and detours. Do not use them as substitutes for controller outcomes, broker commits, independent verification, or strict receipts.

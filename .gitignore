@@ -62,7 +62,7 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-sds.toml
+sdo.toml
 
 .codex
 opencode.json
@@ -70,7 +70,7 @@ opencode.json
 .hypothesis
 agent_graph.png
 agentflow_runs/
-.sds
+.sdo-runtime/
 
 # DSPy optimization artifacts
 app_operator/prompts/optimized/

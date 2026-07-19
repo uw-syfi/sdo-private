@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app_operator.protocol.models import (
+from app_operator.protocol import (
     ConfirmedRootCause,
     DetectorEvaluation,
     Finding,
@@ -121,10 +121,10 @@ class DiagnosticsManifest(MemoryModel):
 
     @model_validator(mode="after")
     def validate_header_and_ids(self) -> DiagnosticsManifest:
-        if self.api_version != "sds.dev/v1alpha1":
-            raise ValueError("apiVersion must be sds.dev/v1alpha1")
-        if self.kind != "ObserverDiagnostics":
-            raise ValueError("kind must be ObserverDiagnostics")
+        if self.api_version != "sdo.dev/v1alpha1":
+            raise ValueError("apiVersion must be sdo.dev/v1alpha1")
+        if self.kind != "DetectorManifest":
+            raise ValueError("kind must be DetectorManifest")
         ids = [detector.id for detector in self.detectors]
         if len(ids) != len(set(ids)):
             raise ValueError("detector IDs must be unique")

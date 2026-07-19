@@ -481,7 +481,7 @@ def config_to_env(config: ExperimentConfig, project_root: Path, exp_dir: Path | 
         env["SREGYM_EXPERIMENT_AGENT_CONFIG"] = json.dumps(agent_cfg)
     if config.agent == "sdo_codex":
         sdo_cfg = config.agent_config.get("sdo_codex") or {}
-        validator_image = str(sdo_cfg.get("validator_image", "sdo-observer-validator:v0.1.0"))
+        validator_image = str(sdo_cfg.get("validator_image", "sdo-detector-validator:v0.1.0"))
         env["SREGYM_KIND_REQUIRED_IMAGES"] = json.dumps(
             [
                 str(sdo_cfg.get("controller_image", "sdo-controller:v0.1.0")),

@@ -21,7 +21,7 @@ from app_operator.memory.outcomes import OutcomeFacts, derive_outcome
 from app_operator.memory.repository import MemoryRepository
 from app_operator.memory.validation import MemoryValidationError
 from app_operator.memory.worktrees import IncidentWorktree, WorktreeManager
-from app_operator.protocol.models import (  # noqa: TC001 - Pydantic resolves these annotations at runtime.
+from app_operator.protocol import (  # noqa: TC001 - Pydantic resolves these annotations at runtime.
     DetectorEvaluation,
     IncidentRequest,
     IncidentResult,
@@ -30,7 +30,7 @@ from app_operator.protocol.models import (  # noqa: TC001 - Pydantic resolves th
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from app_operator.responder.session import SessionReflector
+    from app_operator.responder import SessionReflector
 
 
 class BrokerServiceError(RuntimeError):
@@ -515,13 +515,12 @@ class BrokerService:
         return ledger
 
     def _diagnostics_tree_fingerprint(self, commit: str) -> str:
-        for relative in (".sdo/diagnostics", ".sds/diagnostics"):
-            try:
-                value = self.broker._git(self.target_repository, "rev-parse", f"{commit}:{relative}").strip()
-            except CommitBrokerError:
-                continue
-            if value:
-                return value
+        try:
+            value = self.broker._git(self.target_repository, "rev-parse", f"{commit}:.sdo/diagnostics").strip()
+        except CommitBrokerError as exc:
+            raise BrokerServiceError(f"commit {commit} has no diagnostics tree") from exc
+        if value:
+            return value
         raise BrokerServiceError(f"commit {commit} has no diagnostics tree")
 
     @staticmethod

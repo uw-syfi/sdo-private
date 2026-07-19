@@ -5,7 +5,7 @@ from datetime import datetime  # noqa: TC003 - Pydantic resolves this annotation
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app_operator.memory.models import OutcomeClassification, OutcomeRecord, OutcomeTimestamps
-from app_operator.protocol.models import (
+from app_operator.protocol import (
     DetectorEvaluation,
     IncidentRequest,
     IncidentResult,

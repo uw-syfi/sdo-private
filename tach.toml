@@ -14,7 +14,7 @@ path = "libs.model_config"
 depends_on = []
 
 [[modules]]
-path = "libs.sds_core"
+path = "libs.sdo_core"
 depends_on = []
 
 [[modules]]
@@ -32,7 +32,7 @@ depends_on = [
 [[modules]]
 path = "libs.agent_cli"
 depends_on = [
-    "libs.sds_core",
+    "libs.sdo_core",
 ]
 
 [[modules]]
@@ -40,21 +40,8 @@ path = "libs.sregym_lib"
 depends_on = []
 
 [[modules]]
-path = "observer.updater"
+path = "controller.builder"
 depends_on = []
-
-# --- Layer 1: shared infrastructure ---
-
-[[modules]]
-path = "app_operator.prompts"
-depends_on = []
-
-[[modules]]
-path = "app_operator.trajectory"
-depends_on = [
-    "app_operator.prompts",
-    "libs.agent_cli",
-]
 
 [[modules]]
 path = "app_operator.protocol"
@@ -73,6 +60,13 @@ depends_on = [
 ]
 
 [[modules]]
+path = "app_operator.runtime"
+depends_on = [
+    "app_operator.memory",
+    "app_operator.protocol",
+]
+
+[[modules]]
 path = "app_operator.responder"
 depends_on = [
     "app_operator.memory",
@@ -84,44 +78,21 @@ path = "app_operator.sdo_sregym"
 depends_on = [
     "app_operator.lifecycle",
     "app_operator.memory",
+    "app_operator.runtime",
     "libs.sregym_lib",
 ]
 
-# --- Layer 2: integration modules ---
-
 [[modules]]
-path = "app_operator.fault_injection"
-depends_on = []
-
-# --- Layer 3: runtimes (independent of each other) ---
-
-[[modules]]
-path = "app_operator.cli_agent"
+path = "app_operator.operation"
 depends_on = [
-    "app_operator.prompts",
-    "app_operator.trajectory",
-    "libs.agent_cli",
+    "app_operator.lifecycle",
+    "app_operator.runtime",
 ]
-
-# --- Layer 3.5: UI ---
-
-[[modules]]
-path = "app_operator.ui"
-depends_on = []
-
-# --- Layer 4: commands ---
-
-[[modules]]
-path = "app_operator.commands"
-depends_on = [
-]
-
-# --- Layer 5: entry point ---
 
 [[modules]]
 path = "app_operator.__main__"
 depends_on = [
-    "app_operator.commands",
+    "app_operator.operation",
 ]
 
 # --- sregym_agents (independent of app_operator) ---

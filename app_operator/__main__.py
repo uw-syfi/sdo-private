@@ -1,129 +1,85 @@
+"""Command-line entry point for the Self-Defining Operator."""
+
+from __future__ import annotations
+
 import argparse
-import shutil
-import subprocess
+import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
 
-from dotenv import load_dotenv
+from app_operator.operation import OperationConfig, OperationError, operate
 
-from app_operator.commands import (
-    classify_runs,
-    init_exp,
-    plot_exp,
-    run,
-    run_exp,
-)
-from app_operator.logger import logger
-
-# Load environment variables from .env file
-# Find the SDS repo root (where .env should be) by looking for this file's parent directory
-# or searching upward for .git or pyproject.toml
-_sds_root = Path(__file__).parent.parent.parent.resolve()
-if (_sds_root / ".env").exists():
-    load_dotenv(_sds_root / ".env")
-else:
-    # Fallback: search from current directory
-    load_dotenv()
-
-REQUIRED_DEPENDENCIES = ["docker", "kubectl"]
-
-INSTALL_HINTS = {
-    "docker": "Install Docker: https://docs.docker.com/engine/install/",
-    "kubectl": "Install kubectl: https://kubernetes.io/docs/tasks/tools/",
-}
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
-def check_dependencies():
-    """Check if required system dependencies are installed."""
-    missing = [tool for tool in REQUIRED_DEPENDENCIES if not shutil.which(tool)]
+class OperationRunner(Protocol):
+    def __call__(self, config: OperationConfig) -> object: ...
 
-    if missing:
-        for tool in missing:
-            hint = INSTALL_HINTS.get(tool, f"Please install '{tool}' to continue.")
-            logger.error(f"Missing required system dependencies: {tool}: {hint}")
-        sys.exit(1)
 
-    # Check if docker daemon is running
+def main(argv: Sequence[str] | None = None, *, operation_runner: OperationRunner = operate) -> int:
+    """Run the sole public SDO command."""
+
+    parser = _build_parser()
+    args = parser.parse_args(argv)
     try:
-        subprocess.check_call(
-            ["docker", "container", "ls"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except subprocess.CalledProcessError:
-        logger.error("Docker daemon is not running or not accessible.")
-        logger.info("Start Docker and try again: https://docs.docker.com/engine/install/")
-        sys.exit(1)
+        config = _operation_config(args)
+        operation_runner(config)
+    except (OperationError, OSError, TypeError, ValueError) as exc:
+        print(f"sdo operate failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
 
 
-def main() -> int:
-    """Main entry point for the operator CLI.
-
-    Returns:
-        int: Exit code (0 for success, non-zero for failure).
-    """
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="operator",
-        description="Codex-assisted deployment mode with automatic error fixing.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Run Codex-assisted deployment on a repository
-  ./sds_operator /path/to/repository
-
-  # Use a custom health check interval
-  ./sds_operator /path/to/repository --interval 60
-        """,
+        prog="sdo",
+        description="Deploy and continuously operate an application from source.",
     )
-
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    subparsers.required = True
-
-    # 'run' command
-    run_parser = subparsers.add_parser("run", help="Run Codex-assisted deployment on a repository")
-    run.add_arguments(run_parser)
-
-    # 'init-exp' command
-    init_exp_parser = subparsers.add_parser("init-exp", help="Initialize a new experiment from an existing application")
-    init_exp.add_arguments(init_exp_parser)
-
-    # 'run-exp' command
-    run_exp_parser = subparsers.add_parser("run-exp", help="Run experiments defined in a TOML config file")
-    run_exp.add_arguments(run_exp_parser)
-
-    # 'plot-exp' command
-    plot_exp_parser = subparsers.add_parser("plot-exp", help="Plot and compare experiment results")
-    plot_exp.add_arguments(plot_exp_parser)
-
-    # 'classify-runs' command
-    classify_runs_parser = subparsers.add_parser(
-        "classify-runs", help="Classify experiment runs into quality categories"
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    operate_parser = subparsers.add_parser(
+        "operate",
+        help="deploy, independently verify, and continuously operate an application",
     )
-    classify_runs.add_arguments(classify_runs_parser)
+    operate_parser.add_argument("repository", type=Path, help="application Git repository")
+    operate_parser.add_argument("--namespace", required=True, help="Kubernetes namespace")
+    goal = operate_parser.add_mutually_exclusive_group(required=True)
+    goal.add_argument("--goal", help="human-owned health objective")
+    goal.add_argument("--goal-file", type=Path, help="file containing the human-owned health objective")
+    operate_parser.add_argument("--application", help="application name; defaults to the repository directory name")
+    operate_parser.add_argument("--model", default=os.getenv("SDO_MODEL", "gpt-5.4"))
+    operate_parser.add_argument("--controller-image", default="sdo-controller:v0.1.0")
+    operate_parser.add_argument("--responder-image", default="sdo-responder:v0.1.0")
+    operate_parser.add_argument("--validator-image", default="sdo-detector-validator:v0.1.0")
+    operate_parser.add_argument("--repository-pvc", default="sdo-application-repository")
+    operate_parser.add_argument("--credentials-secret", default="sdo-codex-credentials")
+    operate_parser.add_argument("--attempts", type=int, default=3)
+    operate_parser.add_argument("--timeout-seconds", type=int, default=1800)
+    return parser
 
-    if len(sys.argv) > 1 and sys.argv[1] not in subparsers.choices:
-        sys.argv.insert(1, "run")
 
-    args = parser.parse_args()
-
-    # Check Docker dependencies for commands that need them
-    if args.command in ["run", "init-exp"]:
-        check_dependencies()
-
-    if args.command == "run":
-        return run.run_command(args)
-    if args.command == "init-exp":
-        return init_exp.run_command(args)
-    if args.command == "run-exp":
-        return run_exp.run_command(args)
-    if args.command == "plot-exp":
-        return plot_exp.run_command(args)
-    if args.command == "classify-runs":
-        return classify_runs.run_command(args)
-    parser.print_help()
-    return 1
+def _operation_config(args: argparse.Namespace) -> OperationConfig:
+    repository = args.repository.resolve()
+    if args.goal is not None:
+        health_objective = args.goal
+    else:
+        health_objective = args.goal_file.read_text(encoding="utf-8")
+    return OperationConfig(
+        repository=repository,
+        namespace=args.namespace,
+        application=args.application or repository.name,
+        health_objective=health_objective,
+        model=args.model,
+        controller_image=args.controller_image,
+        responder_image=args.responder_image,
+        validator_image=args.validator_image,
+        repository_pvc=args.repository_pvc,
+        credentials_secret=args.credentials_secret,
+        max_attempts=args.attempts,
+        timeout_seconds=args.timeout_seconds,
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

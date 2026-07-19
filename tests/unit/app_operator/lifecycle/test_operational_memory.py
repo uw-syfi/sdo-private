@@ -11,7 +11,7 @@ from app_operator.lifecycle.operational_memory import (
     ensure_operational_memory,
 )
 from app_operator.memory.sandbox import LocalSandboxRunner
-from observer.updater.manifest import load_manifest
+from controller.builder.manifest import load_manifest
 
 if TYPE_CHECKING:
     from pathlib import Path
