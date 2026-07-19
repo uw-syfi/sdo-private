@@ -45,7 +45,7 @@ class GeminiGenerationSession(CLIGenerationSession):
                 project_name = Path(self.cwd).name
                 project_dir = gemini_tmp_dir / project_name / "chats"
                 if project_dir.exists():
-                    metadata_file = project_dir / f"sds_call_{self.call_id:03d}.json"
+                    metadata_file = project_dir / f"sdo_call_{self.call_id:03d}.json"
                     metadata = {
                         "call_id": self.call_id,
                         "run_id": self.run_id,

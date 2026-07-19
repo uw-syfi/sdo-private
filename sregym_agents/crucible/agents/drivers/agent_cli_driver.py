@@ -173,9 +173,10 @@ class AgentCLIDriver(AgentDriver):
         cwd: str | None = None,
         sandbox: bool | Any = False,
     ) -> None:
-        import libs.agent_cli  # noqa: F401  # ensure provider modules are registered
+        import libs.agent_cli
         from libs.agent_cli.base import AGENT_REGISTRY
 
+        _ = libs.agent_cli  # importing the package registers provider modules
         provider_key = provider.lower()
         if provider_key not in AGENT_REGISTRY:
             raise ValueError(

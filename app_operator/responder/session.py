@@ -8,7 +8,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app_operator.memory.models import OutcomeClassification, OutcomeRecord
+from app_operator.memory import OutcomeClassification, OutcomeRecord
 
 
 def _classification_directive(classification: OutcomeClassification) -> str:

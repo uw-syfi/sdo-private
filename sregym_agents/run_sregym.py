@@ -48,7 +48,7 @@ from libs.sregym_lib import (
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-_SREGYM_DIR = Path(os.environ.get("SDS_SREGYM_DIR", _PROJECT_ROOT / "bench" / "sregym")).resolve()
+_SREGYM_DIR = Path(os.environ.get("SDO_SREGYM_DIR", _PROJECT_ROOT / "bench" / "sregym")).resolve()
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 [project]
-name = "sds-agent-cli"
+name = "sdo-agent-cli"
 version = "0.1.0"
-description = "AI provider CLI integrations for SDS agents"
+description = "AI provider CLI integrations for SDO agents"
 requires-python = ">=3.10"
 dependencies = [
     "litellm>=1.0.0",

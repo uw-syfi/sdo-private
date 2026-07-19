@@ -8,10 +8,11 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from app_operator.memory.models import ValidatorNetworkPolicyCanary
 
@@ -29,8 +30,7 @@ class SandboxRunner(Protocol):
     def run(self, app_root: Path) -> SandboxResult: ...
 
 
-class CommandRunner(Protocol):
-    def __call__(self, *args: object, **kwargs: object) -> subprocess.CompletedProcess[str]: ...
+CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
 class ContainerSandboxRunner:
@@ -39,7 +39,7 @@ class ContainerSandboxRunner:
     def __init__(
         self,
         *,
-        image: str = "sdo-observer-validator:v0.1.0",
+        image: str = "sdo-detector-validator:v0.1.0",
         runtime: str | None = None,
         timeout_seconds: int = 600,
         cpu_limit: str = "1",
@@ -90,7 +90,7 @@ class ContainerSandboxRunner:
             "PYTHONDONTWRITEBYTECODE=1",
             "python",
             "-m",
-            "observer.updater.check_cli",
+            "controller.builder.check_cli",
             "test",
             "--app",
             "/workspace",
@@ -235,7 +235,7 @@ class KubernetesJobSandboxRunner:
 
     @staticmethod
     def _canary_evidence(
-        mode: str,
+        mode: Literal["allow", "deny"],
         run_name: str,
         passed: bool,
         result: SandboxResult,
@@ -432,7 +432,7 @@ class KubernetesJobSandboxRunner:
                                 "name": "validator",
                                 "image": self.image,
                                 "imagePullPolicy": "IfNotPresent",
-                                "command": ["python", "-m", "observer.updater.check_cli"],
+                                "command": ["python", "-m", "controller.builder.check_cli"],
                                 "args": ["test", "--app", "/workspace"],
                                 "workingDir": "/workspace",
                                 "terminationMessagePolicy": "FallbackToLogsOnError",
@@ -601,7 +601,7 @@ class LocalSandboxRunner:
                     environment[name] = value
             try:
                 completed = self.command_runner(
-                    [sys.executable, "-m", "observer.updater.check_cli", "test", "--app", str(app_root.resolve())],
+                    [sys.executable, "-m", "controller.builder.check_cli", "test", "--app", str(app_root.resolve())],
                     check=False,
                     capture_output=True,
                     text=True,

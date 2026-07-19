@@ -363,11 +363,12 @@ def _csv_semantic_success(row: dict[str, str | None], stage: str) -> bool:
         if not isinstance(nested_raw, str) or not nested_raw.strip():
             return False
         try:
-            nested = json.loads(nested_raw)
+            parsed: object = json.loads(nested_raw)
         except json.JSONDecodeError:
             return False
-        if not isinstance(nested, dict) or "success" not in nested:
+        if not isinstance(parsed, dict) or "success" not in parsed:
             return False
+        nested = cast("dict[str, object]", parsed)
         raw = nested["success"]
     else:
         return False
@@ -385,11 +386,12 @@ def _strict_receipt_error(receipt_path: Path) -> str | None:
     """Parse and validate one SDO receipt at the production schema boundary."""
 
     try:
-        document = json.loads(receipt_path.read_text(encoding="utf-8"))
+        parsed_document: object = json.loads(receipt_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return f"strict receipt is unreadable or malformed: {exc}"
-    if not isinstance(document, dict):
+    if not isinstance(parsed_document, dict):
         return "strict receipt must contain one JSON object"
+    document = cast("dict[str, Any]", parsed_document)
 
     try:
         validate_production_receipt(document)

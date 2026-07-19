@@ -1,12 +1,12 @@
 [project]
-name = "sds-agent-mw"
+name = "sdo-agent-mw"
 version = "0.1.0"
 description = "Reusable AgentMiddleware implementations for pydantic-ai agents"
 requires-python = ">=3.10"
-dependencies = ["sds-pydantic-agent", "pydantic-ai>=1.0.0"]
+dependencies = ["sdo-pydantic-agent", "pydantic-ai>=1.0.0"]
 
 [tool.uv.sources]
-sds-pydantic-agent = { workspace = true }
+sdo-pydantic-agent = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

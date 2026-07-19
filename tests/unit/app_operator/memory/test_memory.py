@@ -15,7 +15,7 @@ from app_operator.memory.models import (
     OutcomeRecord,
     OutcomeTimestamps,
 )
-from app_operator.memory.repository import MemoryRepository, MemoryRepositoryError
+from app_operator.memory.repository import MemoryRepository
 from app_operator.memory.sandbox import KubernetesJobSandboxRunner, LocalSandboxRunner
 from app_operator.memory.validation import MemoryValidationError, MemoryValidator
 
@@ -76,8 +76,8 @@ Check `<TARGET_RESOURCE>` and restore `<MISSING_CONFIG_MAP>` from source.
         encoding="utf-8",
     )
     (root / "diagnostics" / "manifest.yaml").write_text(
-        """apiVersion: sds.dev/v1alpha1
-kind: ObserverDiagnostics
+        """apiVersion: sdo.dev/v1alpha1
+kind: DetectorManifest
 sdkVersion: v0.1
 detectors:
   - id: missing-configmap
@@ -100,7 +100,7 @@ detectors:
         encoding="utf-8",
     )
     (root / "diagnostics" / "go.mod").write_text(
-        "module app-diagnostics\n\ngo 1.24\n\nrequire sds.dev/observer/sdk v0.0.0\n",
+        "module app-diagnostics\n\ngo 1.24\n\nrequire sdo.dev/controller/sdk v0.0.0\n",
         encoding="utf-8",
     )
     (detector / "detector.go").write_text(
@@ -110,7 +110,7 @@ import (
     "context"
     "time"
 
-    "sds.dev/observer/sdk"
+    "sdo.dev/controller/sdk"
 )
 
 func New() sdk.Detector { return Detector{} }
@@ -170,8 +170,7 @@ def _init_repository(root: Path) -> None:
     _git(root, "commit", "-m", "initial memory")
 
 
-def test_repository_prefers_canonical_memory_and_typed_front_matter(tmp_path: Path) -> None:
-    _write_memory(tmp_path, memory_dir=".sds", application="legacy")
+def test_repository_reads_canonical_memory_and_typed_front_matter(tmp_path: Path) -> None:
     _write_memory(tmp_path, application="canonical")
 
     repository = MemoryRepository(tmp_path)
@@ -182,14 +181,6 @@ def test_repository_prefers_canonical_memory_and_typed_front_matter(tmp_path: Pa
     assert repository.architecture().metadata.generated_at_commit == "abc123"
     assert repository.playbooks()[0].metadata.fault_class == "missing-configmap"
     assert repository.playbooks()[0].metadata.originating_commit == "seed-commit"
-
-
-def test_legacy_memory_is_read_only(tmp_path: Path) -> None:
-    _write_memory(tmp_path, memory_dir=".sds")
-    repository = MemoryRepository(tmp_path)
-
-    with pytest.raises(MemoryRepositoryError, match="read-only"):
-        repository.append_outcome(_outcome(), actor=ArtifactOwner.CONTROLLER)
 
 
 def test_validator_enforces_ownership_append_only_outcomes_and_links(tmp_path: Path) -> None:
@@ -398,7 +389,7 @@ def test_kubernetes_validator_job_isolated_from_cluster_credentials_network_and_
 
     result = KubernetesJobSandboxRunner(
         namespace="demo",
-        image="sdo-observer-validator:test",
+        image="sdo-detector-validator:test",
         repository_pvc="application-repository",
         repository_mount_path=repository_mount,
         command_runner=command_runner,

@@ -1,9 +1,8 @@
-"""Install and run the production SDO controller in the benchmark namespace."""
+"""SREGym transport and receipt adapter for the production Kubernetes runtime."""
 
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import time
 from dataclasses import dataclass
@@ -11,32 +10,37 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import yaml
 from pydantic import ValidationError
 
-from app_operator.memory.broker_service import ControllerRolloutRecord
-from libs.sregym_lib.production_receipt import (
-    ProductionReceiptValidationError,
+from app_operator.memory import ControllerRolloutRecord
+from app_operator.runtime import (
+    KubernetesRuntimeConfig,
+    KubernetesRuntimeResult,
+    RuntimeInstallError,
+    kubectl,
+    run_kubernetes_runtime,
+    runtime_security_contexts,
 )
+from app_operator.runtime import (
+    runtime_resources as kubernetes_runtime_resources,
+)
+from libs.sregym_lib.production_receipt import ProductionReceiptValidationError
 from libs.sregym_lib.production_receipt import (
     validate_production_receipt as validate_receipt_contract,
 )
 
 
-class RuntimeInstallError(RuntimeError):
-    """Raised when the in-cluster SDO runtime cannot be installed or completed."""
+@dataclass(frozen=True)
+class RuntimeConfig(KubernetesRuntimeConfig):
+    """Kubernetes runtime configuration extended with benchmark transport."""
 
-
-CODEX_HOME_PATH = "/workspace/.sdo-runtime/codex"
-RUNTIME_BUILD_ROOT = "/workspace/.sdo-runtime/build"
-RUNTIME_TMPDIR = f"{RUNTIME_BUILD_ROOT}/tmp"
-RUNTIME_GO_TMPDIR = f"{RUNTIME_BUILD_ROOT}/go-tmp"
-RUNTIME_GO_CACHE = f"{RUNTIME_BUILD_ROOT}/go-cache"
+    submission_api_base: str | None = None
+    submission_relay_target_base: str | None = None
+    allow_test_lifecycle: bool = False
+    wait_for_completion: bool = True
 
 
 def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle: bool = False) -> None:
-    """Preserve the runtime API while sharing one cross-layer contract."""
-
     try:
         validate_receipt_contract(receipt, allow_test_lifecycle=allow_test_lifecycle)
     except ProductionReceiptValidationError as exc:
@@ -44,248 +48,56 @@ def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle
 
 
 @dataclass(frozen=True)
-class RuntimeConfig:
-    repository: Path
-    namespace: str
-    application: str
-    controller_image: str
-    responder_image: str
-    repository_pvc: str
-    credentials_secret: str
-    model: str
-    timeout_seconds: int
-    validator_image: str = "sdo-observer-validator:v0.1.0"
-    submission_api_base: str | None = None
-    submission_relay_target_base: str | None = None
-    allow_test_lifecycle: bool = False
+class _SregymRuntimeExtension:
+    config: RuntimeConfig
+
+    def controller_args(self, config: KubernetesRuntimeConfig) -> list[str]:
+        args = ["--duration", f"{config.timeout_seconds}s", "--exit-after-closure"]
+        if self.config.submission_api_base:
+            args.extend(
+                [
+                    f"--responder-env=SDO_SREGYM_API_BASE={self.config.submission_api_base}",
+                    "--responder-env=SDO_SREGYM_SUBMISSION_BRIDGE=1",
+                ]
+            )
+        return args
+
+    def resources(
+        self,
+        config: KubernetesRuntimeConfig,
+        pod_security: dict[str, Any],
+        container_security: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        return _submission_bridge_resources(self.config, pod_security, container_security)
+
+    def wait_until_ready(self, config: KubernetesRuntimeConfig) -> None:
+        _wait_for_submission_bridge(self.config)
+
+    def complete(self, config: KubernetesRuntimeConfig, result: KubernetesRuntimeResult) -> dict[str, Any]:
+        receipt = _production_receipt(self.config, result.controller_logs)
+        validate_production_receipt(receipt, allow_test_lifecycle=self.config.allow_test_lifecycle)
+        print("SDO_PRODUCTION_RECEIPT=" + json.dumps(receipt, sort_keys=True))
+        return receipt
+
+    def cleanup(self, config: KubernetesRuntimeConfig) -> None:
+        _delete_submission_bridge(self.config)
 
 
 def runtime_resources(config: RuntimeConfig) -> list[dict[str, Any]]:
-    controller_args = [
-        "controller",
-        "--app",
-        "/workspace/application",
-        "--namespace",
-        config.namespace,
-        "--application",
-        config.application,
-        "--responder-image",
-        config.responder_image,
-        "--repository-pvc",
-        config.repository_pvc,
-        "--repository-mount-path",
-        "/workspace",
-        "--credentials-secret",
-        config.credentials_secret,
-        "--worktree-root",
-        "/workspace/worktrees",
-        "--duration",
-        f"{config.timeout_seconds}s",
-        "--exit-after-closure",
-        f"--responder-env=CODEX_HOME={CODEX_HOME_PATH}",
-        "--broker-arg=-m",
-        "--broker-arg=app_operator.responder.broker_cli",
-        "--broker-arg=--proposal-command",
-        "--broker-arg=git diff --check HEAD --",
-        "--broker-arg=--validator-mode",
-        "--broker-arg=kubernetes",
-        "--broker-arg=--validator-namespace",
-        f"--broker-arg={config.namespace}",
-        "--broker-arg=--validator-image",
-        f"--broker-arg={config.validator_image}",
-        "--broker-arg=--validator-repository-pvc",
-        f"--broker-arg={config.repository_pvc}",
-        "--broker-arg=--validator-repository-mount-path",
-        "--broker-arg=/workspace",
-        "--broker-arg=--responder-model",
-        f"--broker-arg={config.model}",
-        "--broker-arg=--reflection-model",
-        f"--broker-arg={config.model}",
-    ]
-    if config.submission_api_base:
-        controller_args.extend(
-            [
-                f"--responder-env=SDO_SREGYM_API_BASE={config.submission_api_base}",
-                "--responder-env=SDO_SREGYM_SUBMISSION_BRIDGE=1",
-            ]
-        )
-    pod_security = {
-        "runAsNonRoot": True,
-        "runAsUser": 65532,
-        "fsGroup": 65532,
-        "seccompProfile": {"type": "RuntimeDefault"},
-    }
-    container_security = {
-        "allowPrivilegeEscalation": False,
-        "readOnlyRootFilesystem": True,
-        "capabilities": {"drop": ["ALL"]},
-    }
-    return [
-        {
-            "apiVersion": "v1",
-            "kind": "PersistentVolumeClaim",
-            "metadata": {"name": config.repository_pvc, "namespace": config.namespace},
-            "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "10Gi"}}},
-        },
-        *_rbac_resources(config.namespace),
-        *_submission_bridge_resources(config, pod_security, container_security),
-        {
-            "apiVersion": "v1",
-            "kind": "Pod",
-            "metadata": {"name": "sdo-repository-sync", "namespace": config.namespace},
-            "spec": {
-                "restartPolicy": "Never",
-                "automountServiceAccountToken": False,
-                "securityContext": pod_security,
-                "containers": [
-                    {
-                        "name": "sync",
-                        "image": config.controller_image,
-                        "imagePullPolicy": "IfNotPresent",
-                        "command": ["sleep", "3600"],
-                        "securityContext": container_security,
-                        "resources": {
-                            "requests": {"cpu": "50m", "memory": "64Mi"},
-                            "limits": {"cpu": "250m", "memory": "256Mi"},
-                        },
-                        "volumeMounts": [
-                            {"name": "repository", "mountPath": "/workspace"},
-                            {"name": "scratch", "mountPath": "/tmp"},
-                        ],
-                    }
-                ],
-                "volumes": [
-                    {"name": "repository", "persistentVolumeClaim": {"claimName": config.repository_pvc}},
-                    {"name": "scratch", "emptyDir": {}},
-                ],
-            },
-        },
-        {
-            "apiVersion": "batch/v1",
-            "kind": "Job",
-            "metadata": {"name": "sdo-controller-run", "namespace": config.namespace},
-            "spec": {
-                "backoffLimit": 6,
-                "podFailurePolicy": {
-                    "rules": [
-                        {
-                            "action": "Ignore",
-                            "onPodConditions": [{"type": "DisruptionTarget", "status": "True"}],
-                        }
-                    ]
-                },
-                "ttlSecondsAfterFinished": 600,
-                "template": {
-                    "metadata": {"labels": {"app.kubernetes.io/name": "sdo-controller"}},
-                    "spec": {
-                        "restartPolicy": "Never",
-                        "serviceAccountName": "sdo-controller",
-                        "securityContext": pod_security,
-                        "initContainers": [
-                            {
-                                "name": "prepare-build-cache",
-                                "image": config.controller_image,
-                                "imagePullPolicy": "IfNotPresent",
-                                "command": [
-                                    "mkdir",
-                                    "-p",
-                                    RUNTIME_TMPDIR,
-                                    RUNTIME_GO_TMPDIR,
-                                    RUNTIME_GO_CACHE,
-                                ],
-                                "securityContext": container_security,
-                                "resources": {
-                                    "requests": {"cpu": "10m", "memory": "16Mi"},
-                                    "limits": {"cpu": "100m", "memory": "64Mi"},
-                                },
-                                "volumeMounts": [{"name": "repository", "mountPath": "/workspace"}],
-                            }
-                        ],
-                        "containers": [
-                            {
-                                "name": "controller",
-                                "image": config.controller_image,
-                                "imagePullPolicy": "IfNotPresent",
-                                "command": ["python3", "-m", "observer.updater.check_cli"],
-                                "args": controller_args,
-                                "envFrom": [{"secretRef": {"name": config.credentials_secret}}],
-                                "env": [
-                                    {"name": "CODEX_HOME", "value": CODEX_HOME_PATH},
-                                    {"name": "TMPDIR", "value": RUNTIME_TMPDIR},
-                                    {"name": "GOTMPDIR", "value": RUNTIME_GO_TMPDIR},
-                                    {"name": "GOCACHE", "value": RUNTIME_GO_CACHE},
-                                    {"name": "SDO_CONTROLLER_JOB", "value": "sdo-controller-run"},
-                                    {
-                                        "name": "SDO_CONTROLLER_POD_UID",
-                                        "valueFrom": {"fieldRef": {"fieldPath": "metadata.uid"}},
-                                    },
-                                    {"name": "GIT_AUTHOR_NAME", "value": "sdo-controller"},
-                                    {"name": "GIT_AUTHOR_EMAIL", "value": "sdo-controller@invalid"},
-                                    {"name": "GIT_COMMITTER_NAME", "value": "sdo-controller"},
-                                    {"name": "GIT_COMMITTER_EMAIL", "value": "sdo-controller@invalid"},
-                                ],
-                                "securityContext": container_security,
-                                "resources": {
-                                    "requests": {"cpu": "250m", "memory": "512Mi"},
-                                    "limits": {"cpu": "2", "memory": "4Gi"},
-                                },
-                                "volumeMounts": [
-                                    {"name": "repository", "mountPath": "/workspace"},
-                                    {"name": "scratch", "mountPath": "/tmp"},
-                                    {"name": "credentials", "mountPath": "/sdo/credentials", "readOnly": True},
-                                ],
-                            }
-                        ],
-                        "volumes": [
-                            {"name": "repository", "persistentVolumeClaim": {"claimName": config.repository_pvc}},
-                            {"name": "scratch", "emptyDir": {"sizeLimit": "4Gi"}},
-                            {"name": "credentials", "secret": {"secretName": config.credentials_secret}},
-                        ],
-                    },
-                },
-            },
-        },
-    ]
+    extension = _SregymRuntimeExtension(config)
+    pod_security, container_security = runtime_security_contexts()
+    return kubernetes_runtime_resources(
+        config,
+        extra_controller_args=extension.controller_args(config),
+        additional_resources=extension.resources(config, pod_security, container_security),
+    )
 
 
 def run_production_runtime(config: RuntimeConfig) -> dict[str, Any]:
-    resources = runtime_resources(config)
-    base = resources[:-1]
-    controller_job = resources[-1]
-    _kubectl(["apply", "-f", "-"], namespace=config.namespace, input_text=yaml.safe_dump_all(base))
-    _ensure_credentials_secret(config)
-    try:
-        _wait_for_submission_bridge(config)
-        _wait_for_repository_sync(config.namespace)
-        _kubectl(
-            [
-                "exec",
-                "sdo-repository-sync",
-                "--",
-                "sh",
-                "-c",
-                "rm -rf /workspace/application /workspace/worktrees "
-                "&& mkdir -p /workspace/application /workspace/worktrees",
-            ],
-            namespace=config.namespace,
-        )
-        _copy_repository_to_pod(config)
-        _kubectl(["delete", "job/sdo-controller-run", "--ignore-not-found=true"], namespace=config.namespace)
-        _kubectl(["apply", "-f", "-"], namespace=config.namespace, input_text=yaml.safe_dump(controller_job))
-        try:
-            _wait_for_controller_job(config)
-        except RuntimeInstallError:
-            _kubectl(["logs", "job/sdo-controller-run"], namespace=config.namespace, check=False)
-            raise
-        controller_logs = _controller_job_logs(config.namespace)
-        _copy_repository_from_pod(config)
-        receipt = _production_receipt(config, controller_logs)
-        validate_production_receipt(receipt, allow_test_lifecycle=config.allow_test_lifecycle)
-        print("SDO_PRODUCTION_RECEIPT=" + json.dumps(receipt, sort_keys=True))
-        return receipt
-    finally:
-        _delete_repository_sync(config.namespace)
-        _delete_submission_bridge(config)
+    result = run_kubernetes_runtime(config, _SregymRuntimeExtension(config))
+    if not isinstance(result, dict):
+        raise RuntimeInstallError("benchmark runtime did not produce a production receipt")
+    return result
 
 
 def _submission_bridge_resources(
@@ -359,7 +171,7 @@ def _wait_for_submission_bridge(config: RuntimeConfig) -> None:
     deadline = time.monotonic() + 120
     last_details = "deployment not observed"
     while time.monotonic() < deadline:
-        completed = _kubectl(
+        completed = kubectl(
             ["get", "deployment/sdo-sregym-bridge", "-o", "json"],
             namespace=config.namespace,
             check=False,
@@ -378,7 +190,7 @@ def _wait_for_submission_bridge(config: RuntimeConfig) -> None:
 def _delete_submission_bridge(config: RuntimeConfig) -> None:
     if config.submission_relay_target_base is None:
         return
-    _kubectl(
+    kubectl(
         [
             "delete",
             "deployment/sdo-sregym-bridge",
@@ -389,36 +201,6 @@ def _delete_submission_bridge(config: RuntimeConfig) -> None:
         namespace=config.namespace,
         check=False,
     )
-
-
-def _delete_repository_sync(namespace: str) -> None:
-    """Request cleanup without waiting on watch behavior unsupported by the filtered proxy."""
-
-    _kubectl(
-        ["delete", "pod/sdo-repository-sync", "--ignore-not-found=true", "--wait=false"],
-        namespace=namespace,
-        check=False,
-    )
-
-
-def _controller_job_logs(namespace: str) -> str:
-    """Read the successful retry pod so transient failed-pod logs cannot hide rollout evidence."""
-
-    pods_result = _kubectl(
-        ["get", "pods", "--selector", "job-name=sdo-controller-run", "-o", "json"],
-        namespace=namespace,
-        check=False,
-    )
-    if pods_result.returncode == 0:
-        items = json.loads(pods_result.stdout).get("items", [])
-        succeeded = sorted(
-            str(item.get("metadata", {}).get("name", ""))
-            for item in items
-            if isinstance(item, dict) and item.get("status", {}).get("phase") == "Succeeded"
-        )
-        if succeeded:
-            return _kubectl(["logs", f"pod/{succeeded[-1]}"], namespace=namespace, check=False).stdout
-    return _kubectl(["logs", "job/sdo-controller-run"], namespace=namespace, check=False).stdout
 
 
 def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str, Any]:
@@ -436,19 +218,19 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
     common_dir = Path(common_dir_result.stdout.strip())
     if not common_dir.is_absolute():
         common_dir = config.repository / common_dir
-    jobs_payload = _kubectl(
+    jobs_payload = kubectl(
         ["get", "jobs", "--selector", "app.kubernetes.io/name=sdo-responder", "-o", "json"],
         namespace=config.namespace,
     )
     jobs = json.loads(jobs_payload.stdout).get("items", [])
     state_document = json.loads(
-        _kubectl(["get", "configmap/sdo-controller-state", "-o", "json"], namespace=config.namespace).stdout
+        kubectl(["get", "configmap/sdo-controller-state", "-o", "json"], namespace=config.namespace).stdout
     )
     state = json.loads(state_document.get("data", {}).get("runtime-state.json", "{}"))
     incident_id = state.get("last_acknowledged_incident_id")
     if not isinstance(incident_id, str) or not incident_id.strip():
         raise RuntimeInstallError("controller has no durable acknowledged incident for receipt correlation")
-    configmaps_payload = _kubectl(["get", "configmaps", "-o", "json"], namespace=config.namespace)
+    configmaps_payload = kubectl(["get", "configmaps", "-o", "json"], namespace=config.namespace)
     configmaps = json.loads(configmaps_payload.stdout).get("items", [])
     responder_jobs, result, responder_job_evidence = _resolve_responder_dispatch(
         incident_id=incident_id,
@@ -456,7 +238,7 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         configmaps=configmaps,
     )
     ledger = _load_incident_ledger(common_dir.resolve() / "sdo-broker", incident_id)
-    remaining = _kubectl(
+    remaining = kubectl(
         [
             "exec",
             "sdo-repository-sync",
@@ -649,197 +431,3 @@ def _controller_update_rollout_succeeded(controller_logs: str) -> bool:
         if isinstance(fingerprint, str) and fingerprint and type(returncode) is int and returncode == 0:
             return True
     return False
-
-
-def _rbac_resources(namespace: str) -> list[dict[str, Any]]:
-    root = Path(__file__).resolve().parents[2]
-    path = root / "observer" / "controller" / "deploy" / "rbac.yaml"
-    resources = [document for document in yaml.safe_load_all(path.read_text(encoding="utf-8")) if document]
-    for resource in resources:
-        resource.setdefault("metadata", {})["namespace"] = namespace
-    return resources
-
-
-def _wait_for_controller_job(config: RuntimeConfig) -> None:
-    deadline = time.monotonic() + config.timeout_seconds + 300
-    while time.monotonic() < deadline:
-        completed = _kubectl(
-            ["get", "job/sdo-controller-run", "-o", "json"],
-            namespace=config.namespace,
-            check=False,
-        )
-        if completed.returncode != 0:
-            time.sleep(2)
-            continue
-        state = _job_state(json.loads(completed.stdout))
-        if state == "complete":
-            return
-        if state == "failed":
-            raise RuntimeInstallError("controller Job failed")
-        time.sleep(2)
-    raise RuntimeInstallError("controller Job did not complete before its runtime deadline")
-
-
-def _wait_for_repository_sync(namespace: str, timeout_seconds: int = 180) -> None:
-    """Poll readiness because SREGym's filtered API proxy does not support kubectl watch reliably."""
-
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        completed = _kubectl(
-            ["get", "pod/sdo-repository-sync", "-o", "json"],
-            namespace=namespace,
-            check=False,
-        )
-        if completed.returncode == 0 and _pod_is_ready(json.loads(completed.stdout)):
-            return
-        time.sleep(2)
-    raise RuntimeInstallError("repository sync Pod did not become ready")
-
-
-def _pod_is_ready(pod: dict[str, Any]) -> bool:
-    status = pod.get("status")
-    if not isinstance(status, dict):
-        return False
-    conditions = status.get("conditions", [])
-    return isinstance(conditions, list) and any(
-        isinstance(condition, dict) and condition.get("type") == "Ready" and condition.get("status") == "True"
-        for condition in conditions
-    )
-
-
-def _job_state(job: dict[str, Any]) -> str:
-    status = job.get("status")
-    if not isinstance(status, dict):
-        return "running"
-    if status.get("succeeded", 0):
-        return "complete"
-    conditions = status.get("conditions", [])
-    if isinstance(conditions, list) and any(
-        isinstance(condition, dict) and condition.get("type") == "Failed" and condition.get("status") == "True"
-        for condition in conditions
-    ):
-        return "failed"
-    return "running"
-
-
-def _ensure_credentials_secret(config: RuntimeConfig) -> None:
-    completed = _kubectl(
-        ["get", f"secret/{config.credentials_secret}"],
-        namespace=config.namespace,
-        check=False,
-    )
-    if completed.returncode == 0:
-        return
-    secret_data: dict[str, str] = {}
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if api_key:
-        secret_data["OPENAI_API_KEY"] = api_key
-    codex_home = Path(os.getenv("CODEX_HOME", str(Path.home() / ".codex")))
-    auth_file = codex_home / "auth.json"
-    if auth_file.is_file():
-        secret_data["auth.json"] = auth_file.read_text(encoding="utf-8")
-    if not secret_data:
-        raise RuntimeInstallError(
-            f"Secret {config.credentials_secret!r} does not exist and no Codex credentials are available"
-        )
-    secret = {
-        "apiVersion": "v1",
-        "kind": "Secret",
-        "metadata": {"name": config.credentials_secret, "namespace": config.namespace},
-        "type": "Opaque",
-        "stringData": secret_data,
-    }
-    _kubectl(["apply", "-f", "-"], namespace=config.namespace, input_text=yaml.safe_dump(secret))
-
-
-def _copy_repository_to_pod(config: RuntimeConfig) -> None:
-    producer = subprocess.Popen(
-        ["tar", "-C", str(config.repository), "-cf", "-", "."],
-        stdout=subprocess.PIPE,
-        env=_tar_environment(),
-    )
-    if producer.stdout is None:
-        raise RuntimeInstallError("failed to open repository tar stream")
-    consumer = subprocess.run(
-        [
-            "kubectl",
-            "--namespace",
-            config.namespace,
-            "exec",
-            "-i",
-            "sdo-repository-sync",
-            "--",
-            "tar",
-            "-C",
-            "/workspace/application",
-            "-xf",
-            "-",
-        ],
-        stdin=producer.stdout,
-        check=False,
-        capture_output=True,
-        text=False,
-        env=_tar_environment(),
-    )
-    producer.stdout.close()
-    producer_returncode = producer.wait()
-    if producer_returncode != 0 or consumer.returncode != 0:
-        raise RuntimeInstallError("failed to seed application repository into the shared PVC")
-
-
-def _copy_repository_from_pod(config: RuntimeConfig) -> None:
-    producer = subprocess.Popen(
-        [
-            "kubectl",
-            "--namespace",
-            config.namespace,
-            "exec",
-            "sdo-repository-sync",
-            "--",
-            "tar",
-            "-C",
-            "/workspace/application",
-            "-cf",
-            "-",
-            ".",
-        ],
-        stdout=subprocess.PIPE,
-    )
-    if producer.stdout is None:
-        raise RuntimeInstallError("failed to open runtime repository tar stream")
-    consumer = subprocess.run(
-        ["tar", "-C", str(config.repository), "-xf", "-"],
-        stdin=producer.stdout,
-        check=False,
-        capture_output=True,
-        text=False,
-        env=_tar_environment(),
-    )
-    producer.stdout.close()
-    producer_returncode = producer.wait()
-    if producer_returncode != 0 or consumer.returncode != 0:
-        raise RuntimeInstallError("failed to synchronize accepted runtime commits back to the benchmark workspace")
-
-
-def _tar_environment() -> dict[str, str]:
-    return {**os.environ, "COPYFILE_DISABLE": "1"}
-
-
-def _kubectl(
-    args: list[str],
-    *,
-    namespace: str,
-    input_text: str | None = None,
-    check: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    completed = subprocess.run(
-        ["kubectl", "--namespace", namespace, *args],
-        input=input_text,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if check and completed.returncode != 0:
-        details = completed.stderr.strip() or completed.stdout.strip()
-        raise RuntimeInstallError(f"kubectl {' '.join(args)} failed: {details}")
-    return completed

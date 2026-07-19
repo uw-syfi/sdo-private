@@ -10,6 +10,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
 import yaml
 
@@ -116,9 +117,8 @@ def run_initial_lifecycle(
 
     deployer: DeployerAssessment | None = None
     trusted_source_facts = _deployer_assessment({"repository": str(root), "application": application})
-    required_resource_names = ", ".join(
-        sorted(repr(str(resource["name"])) for resource in trusted_source_facts["resources"])
-    )
+    trusted_resources = cast("list[dict[str, object]]", trusted_source_facts["resources"])
+    required_resource_names = ", ".join(sorted(repr(str(resource["name"])) for resource in trusted_resources))
     trusted_source_feedback = (
         "Trusted controller-derived source facts. Copy source_commit, topology_fingerprint, and resources exactly. "
         "The architecture_summary_markdown must mention every resource name verbatim, including low-level data "
@@ -598,8 +598,8 @@ Inspect `<AFFECTED_RESOURCE>`, repair the source of truth, redeploy, and verify 
         encoding="utf-8",
     )
     (memory / "diagnostics" / "manifest.yaml").write_text(
-        """apiVersion: sds.dev/v1alpha1
-kind: ObserverDiagnostics
+        """apiVersion: sdo.dev/v1alpha1
+kind: DetectorManifest
 sdkVersion: v0.1
 detectors:
   - id: health-objective
@@ -636,7 +636,7 @@ detectors:
         encoding="utf-8",
     )
     (memory / "diagnostics" / "go.mod").write_text(
-        "module app-diagnostics\n\ngo 1.24\n\nrequire sds.dev/observer/sdk v0.0.0\n",
+        "module app-diagnostics\n\ngo 1.24\n\nrequire sdo.dev/controller/sdk v0.0.0\n",
         encoding="utf-8",
     )
     if health_judge_artifact is None:
@@ -1048,7 +1048,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
-	"sds.dev/observer/sdk"
+	"sdo.dev/controller/sdk"
 )
 
 const deterministicHealthDetectorVersion = "v3"
@@ -1200,7 +1200,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sds.dev/observer/sdk/sdktest"
+	"sdo.dev/controller/sdk/sdktest"
 )
 
 func TestDetectUsesOnlyObjectiveSpecificDeploymentTargets(t *testing.T) {

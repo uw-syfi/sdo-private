@@ -58,7 +58,7 @@ kubectl --namespace kube-system rollout status deployment/calico-kube-controller
 kind load docker-image \
   sdo-controller:v0.1.0 \
   sdo-responder:v0.1.0 \
-  sdo-observer-validator:v0.1.0 \
+  sdo-detector-validator:v0.1.0 \
   --name "${cluster_name}"
 kubectl create namespace "${namespace}"
 

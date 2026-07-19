@@ -81,7 +81,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--responder-image", default=config.get("responder_image", "sdo-responder:v0.1.0"))
     parser.add_argument(
         "--validator-image",
-        default=config.get("validator_image", "sdo-observer-validator:v0.1.0"),
+        default=config.get("validator_image", "sdo-detector-validator:v0.1.0"),
     )
     parser.add_argument("--repository-pvc", default=config.get("repository_pvc", "sdo-application-repository"))
     parser.add_argument("--credentials-secret", default=config.get("credentials_secret", "sdo-codex-credentials"))

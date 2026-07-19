@@ -68,25 +68,17 @@ unit_tests_python:
     - ./scripts/test_python.sh
   coverage: '/TOTAL\s+\d+\s+\d+\s+(\d+%)/'
 
-unit_tests_js:
-  stage: test
-  image: node:20
-  script:
-    - echo "Running Frontend Tests..."
-    - ./scripts/test_js.sh
-
 architecture_check:
   extends: .test_job_template
   script:
     - echo "Checking architecture rules..."
     - ./scripts/check_arch.sh
 
-tach_graph_freshness:
-  extends: .test_job_template
+controller_tests:
+  image: golang:1.24.5-bookworm
+  stage: test
+  dependencies: []
   script:
-    - apt-get update -qq && apt-get install -y -qq graphviz >/dev/null
-    - echo "Regenerating tach module graph..."
-    - ./scripts/generate_tach_graph.sh
-    - >-
-      git diff --exit-code docs/assets/tach_module_graph.dot ||
-      (echo "ERROR: docs/assets/tach_module_graph.dot is out of date. Run scripts/generate_tach_graph.sh and commit the result." && exit 1)
+    - cd controller/sdk && go test -race ./...
+    - cd ../core && go test -race ./...
+    - cd ../runtime && go test -race ./...

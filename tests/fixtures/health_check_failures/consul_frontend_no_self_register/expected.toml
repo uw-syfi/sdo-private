@@ -1,4 +1,0 @@
-verdict = "invalid_service_discovery_expectation"
-
-# frontend has local source but does not self-register — the Consul check is wrong
-invalid_consul_services = ["frontend"]

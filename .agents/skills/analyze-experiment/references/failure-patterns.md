@@ -1,95 +1,66 @@
-# Common Deployment Failure Patterns
+# Common SDO experiment failure patterns
 
-## Pattern 1: Repeated Identical Failures (Agent Stuck)
+## Incomplete evidence chain
 
-**Signature:** Same error in consecutive attempt logs. Agent applies fixes but the error persists.
+**Signature:** benchmark output reports success but the strict receipt is missing, invalid, or cannot be correlated to an outcome and broker ledger.
 
-**Root causes:** Agent fixes symptom not cause, doesn't read error logs carefully, or misidentifies the failing component.
+Check incident IDs, commit hashes, final detector state, independent verification, acknowledgement, cleanup, and remaining worktrees. Report benchmark success and production completion separately.
 
-**What to look for in trajectory:**
-- Same stderr/stdout error text across deployment entries
-- Agent's assistant messages show it's not referencing the actual error output
-- Fix attempts are superficial (e.g., changing a port number when the issue is a missing service)
+## Lifecycle provenance mismatch
 
-## Pattern 2: Cascading Failures
+**Signature:** deployer commit or topology fingerprint differs from the current application workspace, judge sessions are reused unexpectedly, or the objective digest differs from `goal.md`.
 
-**Signature:** Each fix reveals a new error in a different service.
+This indicates stale or fabricated bootstrap memory. Check whether a pipeline lifecycle seed was copied and whether reuse validation ran against the correct source revision.
 
-**Root causes:** Incomplete code analysis, missing dependency graph understanding, no holistic view of the system.
+## Repeated deployment rejection
 
-**What to look for:**
-- Different services fail on each attempt
-- Agent fixes are reactive (fix what broke) rather than proactive (fix the architecture)
-- `code_analysis.md` or `deployment_issues.md` is incomplete or missing key services
+**Signature:** bounded source-deployment attempts receive the same verifier feedback or fail to create an attributable commit.
 
-## Pattern 3: Platform Mismatch
+Look for unchanged Git HEAD, missing role trailer, Kubernetes rollout errors, agent claims unsupported by cluster state, and verifier feedback that the next attempt ignored.
 
-**Signature:** `deploy.sh` mixes `docker compose` and `kubectl` commands.
+## Detector quality or build failure
 
-**What to look for:**
-- Tool calls showing edits to deploy.sh that add kubectl to a docker-compose deployment or vice versa
-- "command not found" errors for the wrong platform
+**Signature:** generated Go fails manifest validation, compilation, tests, or near-miss behavior.
 
-## Pattern 4: Startup Order Race Conditions
+Check ownership/class, objective digest, watches, namespace handling, source-backed resource coverage, nondeterministic dependencies, and whether tests merely restate implementation details.
 
-**Signature:** "connection refused" errors that appear intermittently. Service A can't reach Service B.
+## Finding-state instability
 
-**What to look for:**
-- Non-deterministic failures (same command works on retry)
-- Missing `depends_on` with health conditions in docker-compose
-- Agent doesn't add wait/retry logic
+**Signature:** incidents fire or clear unexpectedly, duplicate dispatches occur, or restarts change behavior.
 
-## Pattern 5: Missing Environment Variables
+Inspect firing/clearing thresholds, debounce state, snapshot versions, durable controller state, leader transitions, and incident idempotency keys.
 
-**Signature:** `KeyError`, `undefined variable`, or service crash on startup.
+## Responder detour or thrashing
 
-**What to look for:**
-- Agent doesn't read application config files (application.properties, .env, config.json)
-- docker-compose.yml missing `environment:` section
-- Agent adds env vars one at a time across multiple attempts instead of comprehensively
+**Signature:** the responder performs broad exploration, repeats hypotheses, changes unrelated source, or alternates between fixes without improving detector/health evidence.
 
-## Pattern 6: Health Check Targeting Wrong Endpoints
+Compare trajectory actions with findings, surfaced playbooks, architecture, and validator feedback. Count proposals and rejected commits rather than only model turns.
 
-**Signature:** Deployment succeeds but health check fails with 404 or connection refused.
+## Ownership or broker rejection
 
-**What to look for:**
-- health_check.sh uses wrong port, wrong hostname, or wrong endpoint path
-- Agent fixes health_check.sh multiple times (a detour if the app was already healthy)
+**Signature:** a repair appears plausible but the broker rejects it.
 
-## Pattern 7: Build Failures
+Check edits to human goals, architecture, health detectors, prior outcomes, or paths outside the allowed worktree; missing provenance; dirty or uncommitted state; detector validation; and stale branch heads.
 
-**Signature:** `docker compose up` fails during image build. COPY errors, dependency install failures.
+## Reflection without learning
 
-**What to look for:**
-- Dockerfile references files not in build context
-- Agent doesn't verify file paths before fixing Dockerfile
-- Missing `--build` flag (uses cached broken image)
+**Signature:** an outcome commit exists but reflection is absent when required, uses a different session, produces no validated memory commit, or generalizes beyond evidence.
 
-## Pattern 8: Agent Detours
+Correlate classification, health verification, responder session ID, outcome commit, reflection commit, accepted detector paths, and controller-update rollout.
 
-**Signature:** Agent spends time on activities unrelated to the current error.
+## Benchmark leakage
 
-**Examples of detours:**
-- Reading many files without acting on them
-- Modifying application source code when the issue is in deployment config
-- Repeatedly checking status without acting on results
-- Undoing a previous fix and trying a different approach (thrashing)
-- Exploring the codebase extensively when the error message already points to the fix
+**Signature:** lifecycle, detector, controller, or responder evidence contains fault labels, verdicts, submission APIs, or hidden benchmark metadata.
 
-**What to look for:**
-- Long sequences of Read/Grep tool calls with no subsequent Edit/Write
-- Tool calls to files unrelated to the error
-- Agent modifying source code (Go/Java/Python files) rather than deployment config
-- Back-and-forth edits to the same file
+This invalidates the production path. Benchmark transport belongs only in the SRE Gym adapter.
 
-## Healthy vs Unhealthy Summary
+## Healthy evidence chain
 
-| Indicator | Healthy | Unhealthy |
-|-----------|---------|-----------|
-| Attempt count | 1-3 | 4+ or max reached |
-| Error progression | Different error each attempt | Same error repeats |
-| Fix strategy | Read error → identify cause → targeted fix | Guess → try → repeat |
-| Platform commands | Consistent (all docker or all kubectl) | Mixed platforms |
-| Code analysis quality | Comprehensive, all services listed | Incomplete, missing services |
-| Agent tool usage | Read error logs → fix config | Skip logs → modify source code |
-| Time per attempt | Decreasing (converging) | Increasing (diverging) |
+| Layer | Expected evidence |
+|---|---|
+| Lifecycle | Distinct fresh sessions, current source commit/topology, validated objective detector |
+| Controller | Persistent finding history, one correlated incident, durable state |
+| Responder | Isolated worktree, structured result, attributable proposal |
+| Broker | Ownership checks, independent verification, committed outcome |
+| Reflection | Same-session proposal when applicable, validated memory commit, correlated rollout |
+| Benchmark | Explicit diagnosis and mitigation success plus one valid strict receipt for SDO adapter runs |

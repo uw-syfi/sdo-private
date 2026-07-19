@@ -1,5 +1,5 @@
 [project]
-name = "sds-model-config"
+name = "sdo-model-config"
 version = "0.1.0"
 description = "Single source of truth for model provider parsing and representation"
 requires-python = ">=3.10"

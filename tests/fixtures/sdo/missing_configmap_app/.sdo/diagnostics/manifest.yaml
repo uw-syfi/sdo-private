@@ -1,5 +1,5 @@
-apiVersion: sds.dev/v1alpha1
-kind: ObserverDiagnostics
+apiVersion: sdo.dev/v1alpha1
+kind: DetectorManifest
 sdkVersion: v0.1
 detectors:
   - id: missing-configmap

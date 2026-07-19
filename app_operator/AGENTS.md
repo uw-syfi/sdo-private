@@ -1,51 +1,43 @@
-# Application Operator
+# SDO application operator
 
-Core operator that deploys and monitors target applications using agentic LLMs.
+This package implements the paper-facing lifecycle around the Go controller.
 
-## Key Commands
+## Public workflow
 
-```bash
-uv run -m app_operator run /path/to/app        # deploy + monitor
+`sdo operate` is the production entry point:
+
+```text
+sdo operate REPOSITORY --namespace NAMESPACE (--goal TEXT | --goal-file PATH)
 ```
 
-## sds.toml Configuration
+Optional flags select the application name, model, controller/responder/validator images, repository PVC, credentials Secret, bounded deployment attempts, and runtime timeout. Its orchestration:
 
-Full schema in `config.py`. Invalid values raise `ValueError`/`TypeError` at initialization.
+1. accept a human health objective;
+2. deploy the application source to Kubernetes with a fresh coding-agent session;
+3. require an attributable source commit and independent deployment verification;
+4. create or validate the five `.sdo/` operational-memory artifact classes;
+5. build and install the application-specific controller; and
+6. leave operation to the controller rather than a bounded shell-monitor loop.
 
-```toml
-[agent]
-backend = "gemini"  # gemini | codex | claude | claude-code | opencode | openai | anthropic
-model = "gemini-1.5-pro"
+## Package map
 
-[runtime]
-impl = "cli_agent"  # cli_agent | pydantic_ai
+- `lifecycle/` — source deployment, topology capture, independent health judging, and initial memory.
+- `memory/` — typed memory models, worktrees, validation, commit broker, and outcomes.
+- `protocol/` — structured finding, incident, closure, and responder contracts.
+- `responder/` — incident sessions, broker-facing CLI, credentials, and reflection.
+- `runtime/` — production Kubernetes controller installation.
+- `sdo_sregym/` — benchmark adapter only; production modules must not import it.
 
-[operator.phase]  # optional — disable phases
-code_analysis = false          # default: true
-fix_summary_consolidation = false  # default: true
+The durable memory root is `.sdo/`. Treat `goal.md`, `arch.md`, `playbooks/`, `diagnostics/`, and `outcomes.jsonl` as separately owned contracts. Provenance and schema files support validation but do not add another agent-owned memory class.
 
-[features]
-git_integration = false        # default: false — see docs/feature-flags.md
-```
+## Development rules
 
-See [`../docs/feature-flags.md`](../docs/feature-flags.md) for all feature flags.
+- Write reproducing tests first for bugs and contract tests first for features.
+- Preserve fresh-session separation between the deployer and health judge.
+- Do not let responders modify human-owned goals, deployer-owned architecture, judge-owned health detectors, or prior controller outcomes.
+- Run generated detector code only through isolated validation and the deterministic Go controller path.
+- Keep benchmark APIs, verdicts, submission relays, and receipts inside `sdo_sregym/`.
+- Keep existing async event loops intact; make handlers async and await work directly.
+- Update `../docs/architecture.md` and the paper-scope matrix when lifecycle or ownership contracts change.
 
-## Architecture
-
-- **DeploymentAgent** (`cli_agent/agents/deployer.py`): Generates deploy.sh/health_check.sh, self-healing loop.
-- **CodeAnalyzerAgent** (`cli_agent/agents/code_analyzer.py`): Proactive codebase analysis, generates `.sds/code_analysis.md`.
-- **AppMonitor** (`cli_agent/agents/app_monitor.py`): Periodic health checks.
-- **Trajectory** (`trajectory.py`): Records all agent calls with sequential IDs, saves to `.sds/trajectories/*.json`.
-- **PromptLoader** (`prompts/__init__.py`): Renders operator prompts.
-
-See [`../docs/fault-injection.md`](../docs/fault-injection.md) for details.
-
-## Usage Guide
-
-- **Debugging deployment**: Check `.sds/deploy.sh` and `.sds/logs/`
-- **Adding fault types**: Add to `COMPOSE_FAULTS`, implement `_inject_*`, register in dispatch table, add tests
-
-## Notes
-
-- When changing trajectory format (`trajectory.py`) or experiment log/result structures (`commands/run_exp.py`), update the `analyze-experiment` skill references in `../.agents/skills/analyze-experiment/references/`.
-- When adding or moving feature flags in `config.py`, update `../docs/feature-flags.md` to match.
+Validate Python edits with the root formatting/lint scripts and focused tests under `tests/unit/app_operator/`.

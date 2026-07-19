@@ -5,14 +5,12 @@ import os
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
 
 from app_operator.protocol.models import IncidentRequest, IncidentResult
 
-
-class CommandRunner(Protocol):
-    def __call__(self, *args: object, **kwargs: object) -> subprocess.CompletedProcess[str]: ...
+CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
 class ResponderExecutionError(RuntimeError):

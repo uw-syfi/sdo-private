@@ -8,13 +8,27 @@ the exact same artifact contract without introducing a dependency cycle.
 from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003 -- Pydantic resolves this annotation at runtime.
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, model_validator
 
 
 class ProductionReceiptValidationError(ValueError):
     """Raised when an SDO receipt cannot prove production completion."""
+
+
+def _string_keyed_objects(value: object) -> list[dict[str, object]] | None:
+    if not isinstance(value, list):
+        return None
+    result: list[dict[str, object]] = []
+    for item in cast("list[object]", value):
+        if not isinstance(item, dict):
+            return None
+        candidate = cast("dict[object, object]", item)
+        if not all(isinstance(key, str) for key in candidate):
+            return None
+        result.append(cast("dict[str, object]", candidate))
+    return result
 
 
 class _ControllerRolloutRecord(BaseModel):
@@ -86,27 +100,18 @@ def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle
         raise ProductionReceiptValidationError(
             "production receipt requires validator_evidence_commit=reflection_commit"
         )
-    detector_clear = receipt.get("detector_clear")
-    if (
-        not isinstance(detector_clear, list)
-        or not detector_clear
-        or any(
-            not isinstance(state, dict) or state.get("status") != "clear" or state.get("fingerprints") != []
-            for state in detector_clear
-        )
+    detector_clear = _string_keyed_objects(receipt.get("detector_clear"))
+    if not detector_clear or any(
+        state.get("status") != "clear" or state.get("fingerprints") != [] for state in detector_clear
     ):
         raise ProductionReceiptValidationError("production receipt requires detector_clear with empty fingerprints")
-    verification = receipt.get("independent_verification")
-    if (
-        not isinstance(verification, list)
-        or not verification
-        or any(not isinstance(evidence, dict) or evidence.get("passed") is not True for evidence in verification)
-    ):
+    verification = _string_keyed_objects(receipt.get("independent_verification"))
+    if not verification or any(evidence.get("passed") is not True for evidence in verification):
         raise ProductionReceiptValidationError("production receipt requires passing independent_verification")
-    canaries = receipt.get("validator_network_policy_canaries")
-    if not isinstance(canaries, list) or len(canaries) != 2:
+    canaries = _string_keyed_objects(receipt.get("validator_network_policy_canaries"))
+    if canaries is None or len(canaries) != 2:
         raise ProductionReceiptValidationError("production receipt requires validator_network_policy_canaries")
-    if any(not isinstance(canary, dict) or canary.get("passed") is not True for canary in canaries):
+    if any(canary.get("passed") is not True for canary in canaries):
         raise ProductionReceiptValidationError("production receipt requires network-policy canaries passed=true")
     if {canary.get("mode") for canary in canaries} != {"allow", "deny"}:
         raise ProductionReceiptValidationError(
@@ -114,10 +119,11 @@ def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle
         )
     for canary in canaries:
         for field in ("job_name", "observed_at", "details"):
-            if not isinstance(canary.get(field), str) or not canary[field].strip():
+            value = canary.get(field)
+            if not isinstance(value, str) or not value.strip():
                 raise ProductionReceiptValidationError(f"production receipt network-policy canary requires {field}")
     if receipt.get("remaining_worktrees") != []:
         raise ProductionReceiptValidationError("production receipt requires remaining_worktrees=[]")
     responder_jobs = receipt.get("responder_jobs")
-    if not isinstance(responder_jobs, list) or len(responder_jobs) != 1:
+    if not isinstance(responder_jobs, list) or len(cast("list[object]", responder_jobs)) != 1:
         raise ProductionReceiptValidationError("production receipt requires exactly one responder Job")

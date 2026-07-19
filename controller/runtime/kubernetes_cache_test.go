@@ -1,0 +1,166 @@
+package runtime
+
+import (
+	"context"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
+
+	"sdo.dev/controller/sdk"
+)
+
+func TestKubernetesCacheUsesDeclaredInformerUnionWithoutRelisting(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "demo"}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "settings", Namespace: "demo"}, Data: map[string]string{"state": "original"}},
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "undeclared", Namespace: "demo"}},
+	)
+	var deploymentLists atomic.Int32
+	var configMapLists atomic.Int32
+	client.PrependReactor("list", "deployments", countList(&deploymentLists))
+	client.PrependReactor("list", "configmaps", countList(&configMapLists))
+
+	cache, err := NewKubernetesCache(KubernetesCacheConfig{
+		Namespace: "demo", Client: client, StateConfigMapName: "sdo-controller-state",
+	}, []sdk.Detector{
+		scheduledDetector{spec: sdk.DetectorSpec{ID: "a", Interval: time.Second, Watches: []sdk.WatchKind{
+			{APIVersion: "apps/v1", Kind: "Deployment"}, {APIVersion: "v1", Kind: "ConfigMap"},
+		}}},
+		scheduledDetector{spec: sdk.DetectorSpec{ID: "b", Interval: time.Second, Watches: []sdk.WatchKind{
+			{APIVersion: "v1", Kind: "ConfigMap"},
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("new cache: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cache.Start(ctx)
+	if err := cache.WaitForSync(ctx); err != nil {
+		t.Fatalf("wait for sync: %v", err)
+	}
+	drainWatchEvents(cache.Events())
+
+	snapshot, err := cache.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if len(snapshot.Deployments()) != 1 || len(snapshot.ConfigMaps()) != 1 || len(snapshot.Services()) != 0 {
+		t.Fatalf("snapshot does not reflect declared informer union: %#v", snapshot)
+	}
+	configMaps := snapshot.ConfigMaps()
+	configMaps[0].Data["state"] = "mutated"
+	second, err := cache.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("second snapshot: %v", err)
+	}
+	if got := second.ConfigMaps()[0].Data["state"]; got != "original" {
+		t.Fatalf("snapshot leaked informer object mutation: %q", got)
+	}
+	if deploymentLists.Load() != 1 || configMapLists.Load() != 1 {
+		t.Fatalf("unexpected API relists: deployments=%d configmaps=%d", deploymentLists.Load(), configMapLists.Load())
+	}
+}
+
+func TestKubernetesCacheRoutesEventsAndIgnoresUndeclaredAndInternalState(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	cache, err := NewKubernetesCache(KubernetesCacheConfig{
+		Namespace: "demo", Client: client, StateConfigMapName: "sdo-controller-state",
+	}, []sdk.Detector{scheduledDetector{spec: sdk.DetectorSpec{
+		ID: "configmaps", Interval: time.Second, Watches: []sdk.WatchKind{{APIVersion: "v1", Kind: "ConfigMap"}},
+	}}})
+	if err != nil {
+		t.Fatalf("new cache: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cache.Start(ctx)
+	if err := cache.WaitForSync(ctx); err != nil {
+		t.Fatalf("wait for sync: %v", err)
+	}
+
+	configMap, err := client.CoreV1().ConfigMaps("demo").Create(ctx, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "settings"},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create ConfigMap: %v", err)
+	}
+	awaitWatchEvent(t, cache.Events(), sdk.WatchKind{APIVersion: "v1", Kind: "ConfigMap", Namespace: "demo"})
+	configMap.Data = map[string]string{"updated": "true"}
+	if _, err := client.CoreV1().ConfigMaps("demo").Update(ctx, configMap, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("update ConfigMap: %v", err)
+	}
+	awaitWatchEvent(t, cache.Events(), sdk.WatchKind{APIVersion: "v1", Kind: "ConfigMap", Namespace: "demo"})
+	if err := client.CoreV1().ConfigMaps("demo").Delete(ctx, "settings", metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("delete ConfigMap: %v", err)
+	}
+	awaitWatchEvent(t, cache.Events(), sdk.WatchKind{APIVersion: "v1", Kind: "ConfigMap", Namespace: "demo"})
+
+	if _, err := client.CoreV1().Services("demo").Create(ctx, &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "undeclared"},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create undeclared Service: %v", err)
+	}
+	if _, err := client.CoreV1().ConfigMaps("demo").Create(ctx, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "sdo-controller-state"},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create internal state ConfigMap: %v", err)
+	}
+	select {
+	case event := <-cache.Events():
+		t.Fatalf("unexpected event for undeclared/internal resource: %#v", event)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestKubernetesCacheWaitForSyncHonorsCancellation(t *testing.T) {
+	cache, err := NewKubernetesCache(KubernetesCacheConfig{
+		Namespace: "demo", Client: fake.NewSimpleClientset(),
+	}, []sdk.Detector{scheduledDetector{spec: sdk.DetectorSpec{
+		ID: "pods", Interval: time.Second, Watches: []sdk.WatchKind{{APIVersion: "v1", Kind: "Pod"}},
+	}}})
+	if err != nil {
+		t.Fatalf("new cache: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := cache.WaitForSync(ctx); err == nil {
+		t.Fatal("expected cancelled sync")
+	}
+}
+
+func countList(counter *atomic.Int32) func(ktesting.Action) (bool, runtime.Object, error) {
+	return func(ktesting.Action) (bool, runtime.Object, error) {
+		counter.Add(1)
+		return false, nil, nil
+	}
+}
+
+func awaitWatchEvent(t *testing.T, events <-chan sdk.WatchKind, want sdk.WatchKind) {
+	t.Helper()
+	select {
+	case got := <-events:
+		if got != want {
+			t.Fatalf("unexpected watch event: got %#v, want %#v", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for watch event")
+	}
+}
+
+func drainWatchEvents(events <-chan sdk.WatchKind) {
+	for {
+		select {
+		case <-events:
+		default:
+			return
+		}
+	}
+}

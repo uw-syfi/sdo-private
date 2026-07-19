@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
@@ -76,8 +77,7 @@ class LifecycleAgentBackend(Protocol):
     ) -> HealthJudgeArtifact: ...
 
 
-class CommandRunner(Protocol):
-    def __call__(self, *args: object, **kwargs: object) -> subprocess.CompletedProcess[str]: ...
+CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
 class CodexLifecycleBackend:
@@ -154,8 +154,8 @@ Prior judge artifact (null on round one):
 Validation feedback:
 {feedback}
 
-Author deterministic Go detector code and deterministic Go tests using only sds.dev/observer/sdk's
-DetectionContext snapshot methods and Kubernetes API types already available to observer diagnostics. Inspect the
+Author deterministic Go detector code and deterministic Go tests using only sdo.dev/controller/sdk's
+DetectionContext snapshot methods and Kubernetes API types already available to SDO diagnostics. Inspect the
 SDK in this repository before writing. The detector must compile as package objective, export New() sdk.Detector,
 encode the SHA-256 digest of the exact human objective in a healthObjectiveDigest constant, and detect only
 objective-specific observable failure conditions. Its tests must include matching and near-miss cases. On later

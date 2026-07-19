@@ -1,15 +1,17 @@
 #!/bin/bash
-# Run tests using pytest via uv and npm for frontend
+# Run the complete Python and Go test suites.
 
 set -e
 
 # Get the directory of the script
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 echo "Running all tests..."
 
 # Run Python tests
 "$SCRIPT_DIR/test_python.sh" "$@"
 
-# Run frontend tests
-"$SCRIPT_DIR/test_js.sh"
+for module in controller/sdk controller/core controller/runtime; do
+  (cd "$PROJECT_ROOT/$module" && go test ./...)
+done

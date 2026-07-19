@@ -3,11 +3,16 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cluster_name="${SDO_SMOKE_CLUSTER:-sdo-smoke}"
-fixture="${repo_root}/tests/fixtures/sdo/missing_configmap_app"
+workspace="$(mktemp -d)"
+fixture="${workspace}/application"
 kind_config="$(mktemp)"
 job_manifest="$(mktemp)"
 
+cp -R "${repo_root}/tests/fixtures/sdo/missing_configmap_app" "${fixture}"
+chmod -R a+rX "${fixture}"
+
 cleanup() {
+  rm -rf "${workspace}"
   rm -f "${kind_config}" "${job_manifest}"
   kind delete cluster --name "${cluster_name}" >/dev/null 2>&1 || true
 }
@@ -25,25 +30,31 @@ nodes:
 EOF
 
 kind create cluster --name "${cluster_name}" --config "${kind_config}" --wait 120s
-docker image inspect sdo-observer-validator:v0.1.0 >/dev/null
-kind load docker-image sdo-observer-validator:v0.1.0 --name "${cluster_name}"
+docker image inspect sdo-detector-validator:v0.1.0 >/dev/null
+kind load docker-image sdo-detector-validator:v0.1.0 --name "${cluster_name}"
 
 cat >"${job_manifest}" <<'EOF'
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sdo-observer-validator-smoke
+  name: sdo-detector-validator-smoke
 spec:
   backoffLimit: 0
   template:
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: validator
-          image: sdo-observer-validator:v0.1.0
+          image: sdo-detector-validator:v0.1.0
           imagePullPolicy: Never
-          command: ["python", "-m", "observer.updater.check_cli"]
+          command: ["python", "-m", "controller.builder.check_cli"]
           args: ["test", "--app", "/workspace"]
           env:
             - {name: HOME, value: /tmp}
@@ -58,7 +69,7 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: ["ALL"]}
           resources:
-            limits: {cpu: "1", memory: 3Gi}
+            limits: {cpu: "2", memory: 3Gi}
           volumeMounts:
             - {name: application, mountPath: /workspace, readOnly: true}
             - {name: scratch, mountPath: /tmp}
@@ -70,8 +81,8 @@ spec:
 EOF
 
 kubectl apply -f "${job_manifest}"
-if ! kubectl wait --for=condition=complete job/sdo-observer-validator-smoke --timeout=240s; then
-  kubectl logs job/sdo-observer-validator-smoke || true
+if ! kubectl wait --for=condition=complete job/sdo-detector-validator-smoke --timeout=480s; then
+  kubectl logs job/sdo-detector-validator-smoke || true
   exit 1
 fi
-kubectl logs job/sdo-observer-validator-smoke
+kubectl logs job/sdo-detector-validator-smoke
