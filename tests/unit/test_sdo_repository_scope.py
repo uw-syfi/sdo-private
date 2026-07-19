@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import configparser
 import re
 import subprocess
 from pathlib import Path
@@ -24,7 +25,7 @@ def _repository_files() -> list[Path]:
     return [
         REPOSITORY_ROOT / raw.decode()
         for raw in completed.stdout.split(b"\0")
-        if raw and not raw.startswith((b"bench/sregym/", b"sdo_paper/"))
+        if raw and not raw.startswith((b"third_party/sregym/", b"sdo_paper/"))
     ]
 
 
@@ -94,3 +95,25 @@ def test_sregym_wrapper_uses_the_shared_benchmark_launcher() -> None:
     assert not (REPOSITORY_ROOT / "scripts/run_sregym.py").exists()
     assert not (REPOSITORY_ROOT / "sregym_agents/experiment_config.py").exists()
     assert not (REPOSITORY_ROOT / "sregym_agents/pipeline_config.py").exists()
+
+
+def test_external_sregym_harness_is_a_third_party_submodule() -> None:
+    modules = configparser.ConfigParser()
+    modules.read(REPOSITORY_ROOT / ".gitmodules")
+
+    section = 'submodule "third_party/sregym"'
+    assert section in modules
+    assert modules[section]["path"] == "third_party/sregym"
+    assert 'submodule "bench/sregym"' not in modules
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "--stage", "--", "third_party/sregym", "bench/sregym"],
+        cwd=REPOSITORY_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert len(tracked) == 1
+    metadata, path = tracked[0].split("\t", maxsplit=1)
+    assert metadata.split(maxsplit=1)[0] == "160000"
+    assert path == "third_party/sregym"

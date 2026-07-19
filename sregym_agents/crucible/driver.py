@@ -254,7 +254,7 @@ async def _async_main(args: argparse.Namespace) -> None:
     diagnosis_shared_file = Path("diagnosis_session_state.md")
     mitigation_shared_file = Path("mitigation_session_state.md")
     _run_uid = uuid.uuid4().hex[:8]
-    # Write trajectory to logs_dir (bench/sregym/logs/…) when available, matching
+    # Write trajectory to logs_dir (third_party/sregym/logs/…) when available, matching
     # the convention used by other sregym agents (claudecode, gemini_cli, codex).
     # Fall back to cwd (exp_env after chdir) for local/standalone runs.
     logs_dir: Path | None = None

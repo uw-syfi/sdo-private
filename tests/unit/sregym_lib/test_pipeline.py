@@ -659,7 +659,7 @@ class TestPipelineRunner:
     @pytest.fixture
     def sregym_dir(self, tmp_path: Path):
         """Create a fake sregym dir with main.py."""
-        d = tmp_path / "bench" / "sregym"
+        d = tmp_path / "third_party" / "sregym"
         d.mkdir(parents=True)
         (d / "main.py").write_text("# fake")
         return d

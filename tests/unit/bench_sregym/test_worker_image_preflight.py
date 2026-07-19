@@ -13,7 +13,7 @@ import yaml
 
 
 def _worker_infra() -> Any:
-    path = Path(__file__).resolve().parents[3] / "bench" / "sregym" / "sregym" / "worker_infra.py"
+    path = Path(__file__).resolve().parents[3] / "third_party" / "sregym" / "sregym" / "worker_infra.py"
     spec = importlib.util.spec_from_file_location("test_worker_infra_module", path)
     assert spec is not None
     assert spec.loader is not None

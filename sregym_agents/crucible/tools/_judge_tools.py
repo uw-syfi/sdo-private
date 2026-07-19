@@ -22,7 +22,7 @@ _MCP_BACKOFF_FACTOR = 2.0
 _MCP_MAX_DELAY = 60.0
 
 # Maximum number of candidate diagnoses the judge may submit at once. Mirrors
-# the cap in bench/sregym/sregym/conductor/constants.py — kept in sync by
+# the cap in third_party/sregym/sregym/conductor/constants.py — kept in sync by
 # value rather than import so the agent doesn't depend on the benchmark
 # package layout.
 MAX_DIAGNOSIS_CANDIDATES = 5

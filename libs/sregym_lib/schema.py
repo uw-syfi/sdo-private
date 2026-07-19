@@ -2,7 +2,7 @@
 
 Single source of truth for endpoint paths, env var names, and stage-set
 memberships that every SREGym agent agrees on.  The upstream contract
-lives in ``bench/sregym/sregym/conductor/constants.py``; this module
+lives in ``third_party/sregym/sregym/conductor/constants.py``; this module
 mirrors the subset the agents depend on so we don't import the submodule.
 """
 
@@ -34,7 +34,7 @@ READY_STAGES: Final[frozenset[str]] = frozenset({"diagnosis", "mitigation"})
 TERMINAL_STAGES: Final[frozenset[str]] = frozenset({"done", "completed", "finished", "awaiting_cleanup"})
 
 # --- Submission limits ------------------------------------------------------
-# Mirrors the cap in bench/sregym/sregym/conductor/constants.py — kept in
+# Mirrors the cap in third_party/sregym/sregym/conductor/constants.py — kept in
 # sync by value rather than import so the lib doesn't depend on the
 # benchmark submodule layout.
 

@@ -27,7 +27,7 @@ The main packages are:
 - `controller/core/`: detector execution and snapshot validation.
 - `controller/runtime/`: scheduling, finding persistence, batching, responder dispatch, and durable controller state.
 - `controller/builder/`: validation and generation of an application-specific controller from `.sdo/diagnostics`.
-- `sregym_agents/`, `bench/sregym/`, and `benchmarks/sregym/adapter/`: benchmark agents, harnesses, and the adapter to the production runtime.
+- `sregym_agents/`, `third_party/sregym/`, and `benchmarks/sregym/adapter/`: benchmark agents, the external harness, and the adapter to the production runtime.
 
 Production packages must not depend on benchmark packages.
 

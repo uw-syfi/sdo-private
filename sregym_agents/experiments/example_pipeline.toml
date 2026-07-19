@@ -7,10 +7,10 @@
 #   bash scripts/run_sregym.sh sregym_agents/experiments/example_pipeline.toml
 #
 #   # Resume after failure:
-#   bash scripts/run_sregym.sh bench/sregym/logs/<pipeline_dir>/
+#   bash scripts/run_sregym.sh third_party/sregym/logs/<pipeline_dir>/
 #
 #   # Rerun stage 1 only:
-#   bash scripts/run_sregym.sh bench/sregym/logs/<pipeline_dir>/ --stage 1
+#   bash scripts/run_sregym.sh third_party/sregym/logs/<pipeline_dir>/ --stage 1
 
 [pipeline]
 name = "kb-bootstrap-then-eval"

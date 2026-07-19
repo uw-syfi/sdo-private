@@ -15,7 +15,7 @@ Unless narrowed by the user, review:
   `sdo/controller_install` as production orchestration;
 - `controller/sdk`, `core`, `runtime`, and `builder` as the production controller;
 - retained shared libraries under `libs/`;
-- `benchmarks/sregym/adapter`, `sregym_agents`, `libs/sregym_lib`, and `bench/sregym` as benchmark-only code;
+- `benchmarks/sregym/adapter`, `sregym_agents`, `libs/sregym_lib`, and `third_party/sregym` as benchmark-only code;
 - relevant tests, scripts, configuration, and documentation.
 
 Treat `apps/` as evaluation input unless the user requests an application review. Check that production modules do not import benchmark code and that removed bounded-operator concepts have not reappeared.

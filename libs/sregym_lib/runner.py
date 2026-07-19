@@ -2,7 +2,7 @@
 
 Pure orchestration — resolving configs, creating experiment directories,
 translating :class:`ExperimentConfig` into CLI args + env vars for
-``bench/sregym/main.py``, and running pipelines with resume/rerun support.
+``third_party/sregym/main.py``, and running pipelines with resume/rerun support.
 
 Agent-specific concerns (for example crucible's knowledge-base seeding and
 between-stage KB drain barrier) are injected via :class:`ExpStageLifecycle`.

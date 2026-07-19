@@ -41,6 +41,7 @@ operational-memory boundary, message contracts, and installation of the separate
 | `sdo/agent_runtime/responder/` | Incident response sessions, broker integration, credentials, and outcome-driven reflection |
 | `sdo/controller_install/` | Kubernetes resources, repository synchronization, controller installation, and optional transport extensions |
 | `benchmarks/sregym/adapter/` | Benchmark-only adapter, submission transport, and evaluation receipts |
+| `third_party/sregym/` | External SRE Gym harness, retained as a Git submodule outside first-party package namespaces |
 
 Production packages may not import `benchmarks.sregym.adapter`, `sregym_agents`, `libs.sregym_lib`, or benchmark code. The dependency direction is from benchmark adapters to production APIs.
 

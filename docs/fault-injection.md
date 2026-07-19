@@ -2,7 +2,7 @@
 
 Fault injection is retained only as part of SRE Gym benchmark execution. It is not a production SDO lifecycle phase and production packages must not consume fault labels, benchmark verdicts, or injection metadata.
 
-The benchmark implementation and its authoritative documentation live in the `bench/sregym/` submodule and `sregym_agents/`. Experiment definitions are under `sregym_agents/experiments/`.
+The benchmark implementation and its authoritative documentation live in the `third_party/sregym/` submodule and `sregym_agents/`. Experiment definitions are under `sregym_agents/experiments/`.
 
 When evaluating the production adapter, preserve this boundary:
 

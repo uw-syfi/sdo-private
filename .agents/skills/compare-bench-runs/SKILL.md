@@ -16,7 +16,7 @@ behavioral differences, and synthesizing findings.
 
 ## Prerequisites
 
-Each run directory (`bench/sregym/logs/<run_name>/`) contains:
+Each run directory (`third_party/sregym/logs/<run_name>/`) contains:
 - `sregym_*_w*_<problem>.md` — per-problem trajectory files (see `references/trajectory-format.md`)
 - `*_crucible_results.csv` — result CSVs
 - `<problem>.log` — execution logs
@@ -43,7 +43,7 @@ Print a summary table to the user before proceeding.
 
 ### Step 2: Analyze Each Problem with Subagents
 
-Create an output directory (bench/sregym/logs/diff/<diff_dir>_analysis).
+Create an output directory (third_party/sregym/logs/diff/<diff_dir>_analysis).
 
 Launch one Agent subagent per problem (or batch 2-3 similar problems per agent). Use `run_in_background: true` and launch in parallel batches of ~15.
 

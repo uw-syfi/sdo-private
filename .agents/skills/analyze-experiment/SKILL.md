@@ -9,7 +9,7 @@ Analyze a run from durable evidence outward. Do not assume that a process exit c
 
 ## Locate evidence
 
-SRE Gym runs normally live under `bench/sregym/logs/`:
+SRE Gym runs normally live under `third_party/sregym/logs/`:
 
 - single run: `<timestamp>_<agent>/`
 - pipeline: `<timestamp>_pipeline_<name>/stage_<index>_<name>/`

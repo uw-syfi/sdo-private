@@ -27,7 +27,7 @@ Status meanings:
 | Transactional commit broker | `sdo/operational_memory/commit_broker.py`, `broker_service.py`, `validation.py`, `worktrees.py` | Implemented | Role/path ownership, proposal validation, merge sequencing, outcomes, and idempotency are covered by focused tests |
 | Outcome-driven reflection | `sdo/agent_runtime/responder/reflection.py`, `sdo/operational_memory/broker_service.py` | Implemented | Selected outcome classifications resume the responder session and validate memory proposals; learning effectiveness is an experimental question |
 | Controller refresh after detector change | `controller/builder/check_cli.py`, runtime rollout records | Integrated | Fingerprint and correlated rollout contracts have tests; production rollout requires a cluster and images |
-| SRE Gym evaluation adapter | `benchmarks/sregym/adapter/`, `sregym_agents/`, `bench/sregym/` | Benchmark-only | Submission relay, receipts, experiment runner, and benchmark logs are intentionally outside production modules |
+| SRE Gym evaluation adapter | `benchmarks/sregym/adapter/`, `sregym_agents/`, `third_party/sregym/` | Benchmark-only | Submission relay, receipts, experiment runner, and benchmark logs are intentionally outside production modules |
 
 ## Artifact ownership matrix
 
@@ -50,7 +50,7 @@ Status meanings:
 | `libs/agent_cli` | Production coding-agent CLI adapter, also reused by SRE Gym |
 | `libs/model_config`, `libs/agent_mw`, `libs/pydantic_agent` | Retained agent support used by SRE Gym |
 | `apps/` | Deployment/evaluation inputs |
-| `benchmarks/sregym/adapter`, `sregym_agents`, `libs/sregym_lib`, `bench/sregym` | Retained benchmark boundary |
+| `benchmarks/sregym/adapter`, `sregym_agents`, `libs/sregym_lib`, `third_party/sregym` | Retained benchmark boundary |
 | Historical bounded operator, shell health checks, trajectory recorder, UI, prompt stack, standalone fault injection | Remove; outside the paper design |
 | Legacy Python and controller package names | Removed after moving retained implementation to the canonical SDO paths |
 

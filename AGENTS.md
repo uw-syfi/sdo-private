@@ -7,7 +7,7 @@ SDO autonomously deploys and operates applications using source-grounded agents,
 - [`sdo/`](sdo/AGENTS.md) — Python agent runtime, operational memory, contracts, and controller installation
 - `controller/` — detector SDK, execution core, long-running runtime, and controller builder
 - [`sregym_agents/`](sregym_agents/AGENTS.md) — SRE Gym benchmark agents
-- `benchmarks/sregym/adapter/`, `bench/sregym/`, `libs/sregym_lib/` — benchmark-only adapters and harnesses
+- `benchmarks/sregym/adapter/`, `third_party/sregym/`, `libs/sregym_lib/` — benchmark-only adapters and harnesses
 - `libs/` — shared agent and model libraries; `sdo_core` contains neutral runtime helpers
 - `apps/` — source-deployment evaluation applications
 - `tests/` — unit and integration tests

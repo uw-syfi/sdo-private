@@ -4,7 +4,7 @@
 # Usage:
 #   bash scripts/run_sregym.sh                                     # new run (default config)
 #   bash scripts/run_sregym.sh sregym_agents/experiments/default.toml  # new run
-#   bash scripts/run_sregym.sh bench/sregym/logs/<exp-dir>/        # resume
+#   bash scripts/run_sregym.sh third_party/sregym/logs/<exp-dir>/  # resume
 #
 # Environment variable overrides (e.g. MODEL=foo) are still supported.
 

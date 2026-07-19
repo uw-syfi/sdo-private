@@ -124,7 +124,7 @@ def promote_crucible_legacy_config(
 
 @dataclass
 class ExperimentConfig:
-    # Runner settings (become CLI args to bench/sregym/main.py)
+    # Runner settings (become CLI args to third_party/sregym/main.py)
     agent: str = "crucible"
     model: str = "google-vertex:gemini-2.5-flash"
     parallel: int = 4
@@ -387,7 +387,7 @@ def config_to_main_args(
     exp_dir: Path,
     tasklist_path: Path | None,
 ) -> list[str]:
-    """Convert ExperimentConfig to CLI args for bench/sregym/main.py."""
+    """Convert ExperimentConfig to CLI args for third_party/sregym/main.py."""
     args = [
         "--agent",
         config.agent,

@@ -82,7 +82,7 @@ Use `libs/sregym_lib/production_receipt.py` as the schema source of truth. A mal
 Typical paths:
 
 ```text
-bench/sregym/logs/<run-or-pipeline>/
+third_party/sregym/logs/<run-or-pipeline>/
 ├── experiment_config.toml or pipeline_config.toml
 ├── pipeline_state.json                     # pipelines
 ├── lifecycle_seed_stage<N>/                # SDO pipeline reuse evidence

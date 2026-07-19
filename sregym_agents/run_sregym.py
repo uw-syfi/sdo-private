@@ -12,10 +12,10 @@ Usage:
     uv run python -m sregym_agents.run_sregym sregym_agents/experiments/example_pipeline.toml
 
     # Resume experiment or pipeline:
-    uv run python -m sregym_agents.run_sregym bench/sregym/logs/<exp_or_pipeline_dir>/
+    uv run python -m sregym_agents.run_sregym third_party/sregym/logs/<exp_or_pipeline_dir>/
 
     # Rerun a specific pipeline stage:
-    uv run python -m sregym_agents.run_sregym bench/sregym/logs/<pipeline_dir>/ --stage 1
+    uv run python -m sregym_agents.run_sregym third_party/sregym/logs/<pipeline_dir>/ --stage 1
 
 This script is a thin integration layer: the launcher orchestration lives
 in :mod:`libs.sregym_lib`; agent-specific experiment-stage lifecycle
@@ -48,7 +48,7 @@ from libs.sregym_lib import (
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-_SREGYM_DIR = Path(os.environ.get("SDO_SREGYM_DIR", _PROJECT_ROOT / "bench" / "sregym")).resolve()
+_SREGYM_DIR = Path(os.environ.get("SDO_SREGYM_DIR", _PROJECT_ROOT / "third_party" / "sregym")).resolve()
 
 
 # ---------------------------------------------------------------------------
