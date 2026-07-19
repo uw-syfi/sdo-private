@@ -1,0 +1,1516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Sdo System Architecture</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;max-width:736px;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="Sdo System Architecture" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;Sdo System Architecture&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(--background) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: light-dark(rgb(255 255 255), rgb(24 24 24));
+  --foreground: light-dark(rgb(26 28 31), rgb(255 255 255));
+  --card: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --card-foreground: var(--foreground);
+  --popover: light-dark(rgb(255 255 255), rgb(45 45 45));
+  --popover-foreground: var(--foreground);
+  --primary: light-dark(rgb(51 156 255), rgb(131 195 255));
+  --primary-foreground: light-dark(rgb(255 255 255), rgb(13 13 13));
+  --secondary: light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%));
+  --secondary-foreground: var(--foreground);
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: light-dark(
+    rgb(26 28 31 / 49.4%),
+    rgb(255 255 255 / 49.8%)
+  );
+  --accent: light-dark(rgb(229 242 255), rgb(13 39 63));
+  --accent-foreground: var(--primary);
+  --destructive: light-dark(rgb(226 85 7), rgb(255 133 73));
+  --border: light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%));
+  --input: light-dark(
+    rgb(26 28 31 / 11.8%),
+    color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+  );
+  --ring: light-dark(rgb(51 156 255), rgb(131 195 255 / 76%));
+  --font-size-base: 14px;
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: 12.5px;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+  --color-background-primary: var(--background);
+  --color-text-primary: var(--foreground);
+  --color-border-secondary: var(--border);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--viz-font-weight-medium);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: superellipse(1.5);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: superellipse(1.5);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+    [aria-pressed=&quot;true&quot;],
+    [aria-selected=&quot;true&quot;],
+    .is-selected
+  ) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div id=&quot;sdo-architecture-walkthrough&quot; aria-label=&quot;Interactive SDO architecture walkthrough&quot;&gt;
+  &lt;style&gt;
+    #sdo-architecture-walkthrough {
+      color: var(--foreground);
+      width: 100%;
+      padding: 0.25rem 0;
+    }
+
+    #sdo-architecture-walkthrough .sdo-proof-line {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    #sdo-architecture-walkthrough .sdo-step-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-bottom: 0.75rem;
+    }
+
+    #sdo-architecture-walkthrough .sdo-progress-line {
+      display: grid;
+      grid-template-columns: auto minmax(7rem, 1fr);
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    #sdo-architecture-walkthrough progress {
+      width: 100%;
+      accent-color: var(--primary);
+    }
+
+    #sdo-architecture-walkthrough .sdo-map {
+      width: 100%;
+      display: block;
+      overflow: visible;
+    }
+
+    #sdo-architecture-walkthrough .sdo-map text {
+      fill: var(--foreground);
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 400;
+      pointer-events: none;
+    }
+
+    #sdo-architecture-walkthrough .sdo-map .sdo-lane-label {
+      fill: var(--muted-foreground);
+      font-size: 13px;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    #sdo-architecture-walkthrough .sdo-lane-band {
+      fill: color-mix(in srgb, var(--muted) 42%, transparent);
+    }
+
+    #sdo-architecture-walkthrough .sdo-node rect {
+      fill: var(--card);
+      stroke: var(--border);
+      stroke-width: 1.5;
+      transition: fill 180ms ease, stroke 180ms ease, opacity 180ms ease;
+    }
+
+    #sdo-architecture-walkthrough .sdo-node text {
+      fill: var(--card-foreground);
+      transition: opacity 180ms ease;
+    }
+
+    #sdo-architecture-walkthrough .sdo-node .sdo-node-subtitle {
+      fill: var(--muted-foreground);
+      font-size: 12px;
+    }
+
+    #sdo-architecture-walkthrough .sdo-node:not(.is-active) {
+      opacity: 0.42;
+    }
+
+    #sdo-architecture-walkthrough .sdo-node.is-active rect {
+      fill: color-mix(in srgb, var(--viz-series-1) 19%, var(--card));
+      stroke: var(--viz-series-1);
+      stroke-width: 2.5;
+    }
+
+    #sdo-architecture-walkthrough .sdo-edge {
+      fill: none;
+      stroke: var(--border);
+      stroke-width: 2;
+      opacity: 0.38;
+      transition: stroke 180ms ease, opacity 180ms ease, stroke-width 180ms ease;
+    }
+
+    #sdo-architecture-walkthrough .sdo-edge.is-active {
+      stroke: var(--viz-series-1);
+      stroke-width: 3;
+      opacity: 1;
+    }
+
+    #sdo-architecture-walkthrough .sdo-store-rail {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.5rem;
+      margin-top: 0.35rem;
+      margin-bottom: 0.75rem;
+    }
+
+    #sdo-architecture-walkthrough .sdo-store {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      min-width: 0;
+      padding: 0.45rem 0;
+      border-top: 2px solid var(--border);
+      color: var(--muted-foreground);
+      transition: border-color 180ms ease, color 180ms ease;
+    }
+
+    #sdo-architecture-walkthrough .sdo-store.is-active {
+      border-color: var(--viz-series-1);
+      color: var(--foreground);
+    }
+
+    #sdo-architecture-walkthrough .sdo-mobile-flow {
+      display: none;
+      margin: 0.5rem 0 0.75rem;
+    }
+
+    #sdo-architecture-walkthrough .sdo-mobile-step {
+      display: grid;
+      grid-template-columns: 2rem minmax(0, 1fr);
+      gap: 0.5rem;
+      padding: 0.5rem 0.4rem;
+      border-left: 3px solid var(--border);
+      color: var(--muted-foreground);
+    }
+
+    #sdo-architecture-walkthrough .sdo-mobile-step.is-active {
+      border-left-color: var(--viz-series-1);
+      color: var(--foreground);
+      background: color-mix(in srgb, var(--viz-series-1) 10%, transparent);
+    }
+
+    #sdo-architecture-walkthrough .sdo-detail {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+      gap: 1rem;
+      align-items: start;
+    }
+
+    #sdo-architecture-walkthrough .sdo-detail h2 {
+      margin-top: 0;
+      margin-bottom: 0.35rem;
+    }
+
+    #sdo-architecture-walkthrough .sdo-detail p {
+      margin: 0;
+    }
+
+    #sdo-architecture-walkthrough .sdo-boundary-list {
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    #sdo-architecture-walkthrough .sdo-boundary-item {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 0.45rem;
+      align-items: start;
+    }
+
+    @media (max-width: 560px) {
+      #sdo-architecture-walkthrough .sdo-map {
+        display: none;
+      }
+
+      #sdo-architecture-walkthrough .sdo-mobile-flow {
+        display: grid;
+      }
+
+      #sdo-architecture-walkthrough .sdo-store-rail,
+      #sdo-architecture-walkthrough .sdo-detail {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      #sdo-architecture-walkthrough .sdo-detail &gt; :first-child {
+        grid-column: 1 / -1;
+      }
+    }
+
+    @media (max-width: 380px) {
+      #sdo-architecture-walkthrough .sdo-store-rail,
+      #sdo-architecture-walkthrough .sdo-detail {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #sdo-architecture-walkthrough .sdo-node rect,
+      #sdo-architecture-walkthrough .sdo-node text,
+      #sdo-architecture-walkthrough .sdo-edge,
+      #sdo-architecture-walkthrough .sdo-store {
+        transition: none;
+      }
+    }
+  &lt;/style&gt;
+
+  &lt;div class=&quot;sdo-proof-line text-small&quot;&gt;
+    &lt;span class=&quot;viz-badge&quot;&gt;Verified today&lt;/span&gt;
+    &lt;span&gt;Readiness-probe incident completed with one responder, three commits, independent clearance, acknowledgement, and cleanup.&lt;/span&gt;
+  &lt;/div&gt;
+
+  &lt;div class=&quot;sdo-progress-line&quot;&gt;
+    &lt;span class=&quot;text-small text-muted&quot; data-step-count&gt;Step 1 of 8&lt;/span&gt;
+    &lt;progress value=&quot;1&quot; max=&quot;8&quot; aria-label=&quot;Architecture walkthrough progress&quot;&gt;&lt;/progress&gt;
+  &lt;/div&gt;
+
+  &lt;div class=&quot;viz-controls sdo-step-controls&quot; aria-label=&quot;Walkthrough steps&quot;&gt;
+    &lt;button type=&quot;button&quot; class=&quot;btn btn-ghost&quot; data-step-button=&quot;0&quot; aria-pressed=&quot;true&quot;&gt;1 Define&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;btn btn-ghost&quot; data-step-button=&quot;1&quot; aria-pressed=&quot;false&quot;&gt;2 Judge&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;btn btn-ghost&quot; data-step-button=&quot;2&quot; aria-pressed=&quot;false&quot;&gt;3 Commit&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;btn btn-ghost&quot; data-step-button=&quot;3&quot; aria-pressed=&quot;false&quot;&gt;4 Detect&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;btn btn-ghost&quot; data-step-button=&quot;4&quot; aria-pressed=&quot;false&quot;&gt;5 Repair&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;btn btn-ghost&quot; data-step-button=&quot;5&quot; aria-pressed=&quot;false&quot;&gt;6 Verify&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;btn btn-ghost&quot; data-step-button=&quot;6&quot; aria-pressed=&quot;false&quot;&gt;7 Learn&lt;/button&gt;
+    &lt;button type=&quot;button&quot; class=&quot;btn btn-ghost&quot; data-step-button=&quot;7&quot; aria-pressed=&quot;false&quot;&gt;8 Close&lt;/button&gt;
+  &lt;/div&gt;
+
+  &lt;svg class=&quot;sdo-map&quot; viewBox=&quot;0 0 900 520&quot; role=&quot;img&quot; aria-labelledby=&quot;sdo-map-title sdo-map-desc&quot;&gt;
+    &lt;title id=&quot;sdo-map-title&quot;&gt;SDO architecture at the selected walkthrough step&lt;/title&gt;
+    &lt;desc id=&quot;sdo-map-desc&quot;&gt;Source and objective flow through model-backed definition, deterministic runtime detection, agent repair, independent verification, reflection, rollout, and durable receipt.&lt;/desc&gt;
+    &lt;defs&gt;
+      &lt;marker id=&quot;sdo-arrow-neutral&quot; viewBox=&quot;0 0 10 10&quot; refX=&quot;8&quot; refY=&quot;5&quot; markerWidth=&quot;6&quot; markerHeight=&quot;6&quot; orient=&quot;auto-start-reverse&quot;&gt;
+        &lt;path d=&quot;M 0 0 L 10 5 L 0 10 z&quot; fill=&quot;var(--border)&quot;&gt;&lt;/path&gt;
+      &lt;/marker&gt;
+      &lt;marker id=&quot;sdo-arrow-active&quot; viewBox=&quot;0 0 10 10&quot; refX=&quot;8&quot; refY=&quot;5&quot; markerWidth=&quot;6&quot; markerHeight=&quot;6&quot; orient=&quot;auto-start-reverse&quot;&gt;
+        &lt;path d=&quot;M 0 0 L 10 5 L 0 10 z&quot; fill=&quot;var(--viz-series-1)&quot;&gt;&lt;/path&gt;
+      &lt;/marker&gt;
+    &lt;/defs&gt;
+
+    &lt;rect class=&quot;sdo-lane-band&quot; x=&quot;0&quot; y=&quot;24&quot; width=&quot;900&quot; height=&quot;125&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+    &lt;rect class=&quot;sdo-lane-band&quot; x=&quot;0&quot; y=&quot;188&quot; width=&quot;900&quot; height=&quot;148&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+    &lt;rect class=&quot;sdo-lane-band&quot; x=&quot;0&quot; y=&quot;374&quot; width=&quot;900&quot; height=&quot;126&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+    &lt;text class=&quot;sdo-lane-label&quot; x=&quot;18&quot; y=&quot;18&quot;&gt;Definition plane · model-backed, bounded, read-only&lt;/text&gt;
+    &lt;text class=&quot;sdo-lane-label&quot; x=&quot;18&quot; y=&quot;182&quot;&gt;Runtime plane · deterministic Go control loop&lt;/text&gt;
+    &lt;text class=&quot;sdo-lane-label&quot; x=&quot;18&quot; y=&quot;368&quot;&gt;Closure plane · validate, learn, acknowledge&lt;/text&gt;
+
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;source-deployer&quot; d=&quot;M 190 88 L 237 88&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;deployer-judge&quot; d=&quot;M 360 88 L 407 88&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;judge-validator&quot; d=&quot;M 530 88 L 577 88&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;validator-memory&quot; d=&quot;M 700 88 L 747 88&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;memory-controller&quot; d=&quot;M 810 130 C 810 168, 545 167, 545 215&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;cluster-detector&quot; d=&quot;M 190 258 L 237 258&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;detector-controller&quot; d=&quot;M 360 258 L 407 258&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;controller-broker&quot; d=&quot;M 530 258 L 577 258&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;broker-responder&quot; d=&quot;M 700 258 L 747 258&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;responder-cluster&quot; d=&quot;M 810 298 C 810 338, 125 338, 125 298&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;detector-clear&quot; d=&quot;M 300 298 C 300 350, 92 350, 92 402&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;clear-validation&quot; d=&quot;M 155 442 L 172 442&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;validation-proposal&quot; d=&quot;M 300 442 L 317 442&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;proposal-outcome&quot; d=&quot;M 445 442 L 462 442&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;outcome-reflection&quot; d=&quot;M 590 442 L 607 442&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+    &lt;path class=&quot;sdo-edge&quot; data-edge=&quot;reflection-final&quot; d=&quot;M 735 442 L 752 442&quot; marker-end=&quot;url(#sdo-arrow-neutral)&quot;&gt;&lt;/path&gt;
+
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;source&quot; transform=&quot;translate(67 48)&quot;&gt;
+      &lt;rect width=&quot;123&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;34&quot;&gt;Source + objective&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;55&quot;&gt;Human-owned intent&lt;/text&gt;
+    &lt;/g&gt;
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;deployer&quot; transform=&quot;translate(237 48)&quot;&gt;
+      &lt;rect width=&quot;123&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;31&quot;&gt;Fresh deployer&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;52&quot;&gt;Codex · read-only&lt;/text&gt;
+    &lt;/g&gt;
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;judge&quot; transform=&quot;translate(407 48)&quot;&gt;
+      &lt;rect width=&quot;123&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;31&quot;&gt;Health judge ×3&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;52&quot;&gt;Fresh Codex sessions&lt;/text&gt;
+    &lt;/g&gt;
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;validator&quot; transform=&quot;translate(577 48)&quot;&gt;
+      &lt;rect width=&quot;123&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;31&quot;&gt;Isolated validator&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;52&quot;&gt;Compile + tests&lt;/text&gt;
+    &lt;/g&gt;
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;memory&quot; transform=&quot;translate(747 48)&quot;&gt;
+      &lt;rect width=&quot;123&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;31&quot;&gt;SDO memory&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;52&quot;&gt;Git-backed .sdo&lt;/text&gt;
+    &lt;/g&gt;
+
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;cluster&quot; transform=&quot;translate(67 218)&quot;&gt;
+      &lt;rect width=&quot;123&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;31&quot;&gt;Kubernetes state&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;52&quot;&gt;Informer snapshots&lt;/text&gt;
+    &lt;/g&gt;
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;detector&quot; transform=&quot;translate(237 218)&quot;&gt;
+      &lt;rect width=&quot;123&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;31&quot;&gt;Go detector&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;52&quot;&gt;Persistent evidence&lt;/text&gt;
+    &lt;/g&gt;
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;controller&quot; transform=&quot;translate(407 218)&quot;&gt;
+      &lt;rect width=&quot;123&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;31&quot;&gt;Controller&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;52&quot;&gt;Lease + state machine&lt;/text&gt;
+    &lt;/g&gt;
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;broker&quot; transform=&quot;translate(577 218)&quot;&gt;
+      &lt;rect width=&quot;123&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;31&quot;&gt;Commit broker&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;52&quot;&gt;PVC Git worktree&lt;/text&gt;
+    &lt;/g&gt;
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;responder&quot; transform=&quot;translate(747 218)&quot;&gt;
+      &lt;rect width=&quot;123&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;31&quot;&gt;Responder Job&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;61.5&quot; y=&quot;52&quot;&gt;Codex CLI repair&lt;/text&gt;
+    &lt;/g&gt;
+
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;clear&quot; transform=&quot;translate(27 402)&quot;&gt;
+      &lt;rect width=&quot;128&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;31&quot;&gt;Detector clear&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;52&quot;&gt;No fingerprints&lt;/text&gt;
+    &lt;/g&gt;
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;closure-validation&quot; transform=&quot;translate(172 402)&quot;&gt;
+      &lt;rect width=&quot;128&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;28&quot;&gt;Validate repair&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;49&quot;&gt;Canaries + sandbox&lt;/text&gt;
+    &lt;/g&gt;
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;proposal&quot; transform=&quot;translate(317 402)&quot;&gt;
+      &lt;rect width=&quot;128&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;31&quot;&gt;Proposal commit&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;52&quot;&gt;Source repair&lt;/text&gt;
+    &lt;/g&gt;
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;outcome&quot; transform=&quot;translate(462 402)&quot;&gt;
+      &lt;rect width=&quot;128&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;31&quot;&gt;Outcome commit&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;52&quot;&gt;Verified result&lt;/text&gt;
+    &lt;/g&gt;
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;reflection&quot; transform=&quot;translate(607 402)&quot;&gt;
+      &lt;rect width=&quot;128&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;28&quot;&gt;Same-session&lt;/text&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;46&quot;&gt;reflection&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;65&quot;&gt;Learn detector/playbook&lt;/text&gt;
+    &lt;/g&gt;
+    &lt;g class=&quot;sdo-node&quot; data-node=&quot;finalize&quot; transform=&quot;translate(752 402)&quot;&gt;
+      &lt;rect width=&quot;128&quot; height=&quot;80&quot; rx=&quot;8&quot;&gt;&lt;/rect&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;27&quot;&gt;Roll out + ack&lt;/text&gt;
+      &lt;text text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;45&quot;&gt;clean + receipt&lt;/text&gt;
+      &lt;text class=&quot;sdo-node-subtitle&quot; text-anchor=&quot;middle&quot; x=&quot;64&quot; y=&quot;64&quot;&gt;Strict evidence&lt;/text&gt;
+    &lt;/g&gt;
+  &lt;/svg&gt;
+
+  &lt;div class=&quot;sdo-mobile-flow&quot; aria-label=&quot;Architecture flow for small screens&quot;&gt;
+    &lt;div class=&quot;sdo-mobile-step&quot; data-mobile-step=&quot;0&quot;&gt;&lt;strong&gt;1&lt;/strong&gt;&lt;span&gt;Source and objective → fresh read-only deployer&lt;/span&gt;&lt;/div&gt;
+    &lt;div class=&quot;sdo-mobile-step&quot; data-mobile-step=&quot;1&quot;&gt;&lt;strong&gt;2&lt;/strong&gt;&lt;span&gt;Independent health judges author deterministic Go checks&lt;/span&gt;&lt;/div&gt;
+    &lt;div class=&quot;sdo-mobile-step&quot; data-mobile-step=&quot;2&quot;&gt;&lt;strong&gt;3&lt;/strong&gt;&lt;span&gt;Isolated compilation → Git-backed operational memory&lt;/span&gt;&lt;/div&gt;
+    &lt;div class=&quot;sdo-mobile-step&quot; data-mobile-step=&quot;3&quot;&gt;&lt;strong&gt;4&lt;/strong&gt;&lt;span&gt;Kubernetes snapshots → detector → Lease-backed controller&lt;/span&gt;&lt;/div&gt;
+    &lt;div class=&quot;sdo-mobile-step&quot; data-mobile-step=&quot;4&quot;&gt;&lt;strong&gt;5&lt;/strong&gt;&lt;span&gt;Broker worktree → one hardened Codex responder Job&lt;/span&gt;&lt;/div&gt;
+    &lt;div class=&quot;sdo-mobile-step&quot; data-mobile-step=&quot;5&quot;&gt;&lt;strong&gt;6&lt;/strong&gt;&lt;span&gt;Live repair → independent detector clear → sandbox validation&lt;/span&gt;&lt;/div&gt;
+    &lt;div class=&quot;sdo-mobile-step&quot; data-mobile-step=&quot;6&quot;&gt;&lt;strong&gt;7&lt;/strong&gt;&lt;span&gt;Proposal + outcome → same-session reflection → learned memory&lt;/span&gt;&lt;/div&gt;
+    &lt;div class=&quot;sdo-mobile-step&quot; data-mobile-step=&quot;7&quot;&gt;&lt;strong&gt;8&lt;/strong&gt;&lt;span&gt;Controller rollout → acknowledgement → cleanup → strict receipt&lt;/span&gt;&lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;div class=&quot;sdo-store-rail&quot; aria-label=&quot;Durable system stores&quot;&gt;
+    &lt;div class=&quot;sdo-store&quot; data-store=&quot;git&quot;&gt;&lt;i data-lucide=&quot;git-commit-horizontal&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Git history&lt;/span&gt;&lt;/div&gt;
+    &lt;div class=&quot;sdo-store&quot; data-store=&quot;state&quot;&gt;&lt;i data-lucide=&quot;database&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;ConfigMap state&lt;/span&gt;&lt;/div&gt;
+    &lt;div class=&quot;sdo-store&quot; data-store=&quot;lease&quot;&gt;&lt;i data-lucide=&quot;key-round&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Leader Lease&lt;/span&gt;&lt;/div&gt;
+    &lt;div class=&quot;sdo-store&quot; data-store=&quot;pvc&quot;&gt;&lt;i data-lucide=&quot;hard-drive&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;PVC + Jobs&lt;/span&gt;&lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;div class=&quot;card sdo-detail&quot; aria-live=&quot;polite&quot;&gt;
+    &lt;div&gt;
+      &lt;div class=&quot;text-small text-muted&quot; data-phase-label&gt;Definition plane&lt;/div&gt;
+      &lt;h2 data-step-title&gt;Inspect source and define the objective&lt;/h2&gt;
+      &lt;p data-step-copy&gt;A fresh, read-only Codex deployer inventories source-backed resources and explains the application architecture without changing the repository or cluster.&lt;/p&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;sdo-boundary-list text-small&quot;&gt;
+      &lt;div class=&quot;sdo-boundary-item&quot;&gt;&lt;i data-lucide=&quot;shield-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;&lt;strong&gt;Trust boundary:&lt;/strong&gt; &lt;span data-boundary&gt;The model may inspect, but it cannot deploy, repair, or declare health.&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+      &lt;div class=&quot;sdo-boundary-item&quot;&gt;&lt;i data-lucide=&quot;save&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;&lt;strong&gt;Durable effect:&lt;/strong&gt; &lt;span data-durable&gt;A structured topology handoff tied to the source commit and objective.&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+
+  &lt;script&gt;
+    (() =&gt; {
+      const root = document.getElementById(&#x27;sdo-architecture-walkthrough&#x27;);
+      if (!root) return;
+
+      const steps = [
+        {
+          phase: &#x27;Definition plane&#x27;,
+          title: &#x27;Inspect source and define the objective&#x27;,
+          copy: &#x27;A fresh, read-only Codex deployer inventories source-backed resources and explains the application architecture without changing the repository or cluster.&#x27;,
+          boundary: &#x27;The model may inspect, but it cannot deploy, repair, or declare health.&#x27;,
+          durable: &#x27;A structured topology handoff tied to the source commit and objective.&#x27;,
+          nodes: [&#x27;source&#x27;, &#x27;deployer&#x27;],
+          edges: [&#x27;source-deployer&#x27;],
+          stores: []
+        },
+        {
+          phase: &#x27;Definition plane&#x27;,
+          title: &#x27;Author an independent definition of health&#x27;,
+          copy: &#x27;Three fresh Codex health-judge sessions refine objective-specific Go detection logic and tests. Each receives the trusted deployer inventory but does not reuse the deployer session.&#x27;,
+          boundary: &#x27;The deployer describes the system; independent judges define health. No responder or SREGym verdict is allowed to become the health oracle.&#x27;,
+          durable: &#x27;Candidate detector source, tests, architecture summary, and unique session provenance.&#x27;,
+          nodes: [&#x27;deployer&#x27;, &#x27;judge&#x27;],
+          edges: [&#x27;deployer-judge&#x27;],
+          stores: []
+        },
+        {
+          phase: &#x27;Definition plane&#x27;,
+          title: &#x27;Validate and commit operational memory&#x27;,
+          copy: &#x27;Every candidate is compiled and tested in isolation. Only the fully validated final detector, playbooks, architecture, and lifecycle provenance enter the .sdo Git history.&#x27;,
+          boundary: &#x27;Generated code is untrusted until the tokenless, network-isolated validator passes.&#x27;,
+          durable: &#x27;One atomic lifecycle commit containing validated operational memory.&#x27;,
+          nodes: [&#x27;judge&#x27;, &#x27;validator&#x27;, &#x27;memory&#x27;],
+          edges: [&#x27;judge-validator&#x27;, &#x27;validator-memory&#x27;],
+          stores: [&#x27;git&#x27;]
+        },
+        {
+          phase: &#x27;Runtime plane&#x27;,
+          title: &#x27;Detect a persistent fault deterministically&#x27;,
+          copy: &#x27;Kubernetes informers feed snapshots to the generated Go detector. Persistence, clearing, and debounce policies convert observations into one durable incident.&#x27;,
+          boundary: &#x27;No LLM participates in the continuous monitoring loop or decides whether the system is currently healthy.&#x27;,
+          durable: &#x27;A Lease-guarded ConfigMap records detector state, fingerprints, incident identity, dispatch state, and pending closure.&#x27;,
+          nodes: [&#x27;memory&#x27;, &#x27;cluster&#x27;, &#x27;detector&#x27;, &#x27;controller&#x27;],
+          edges: [&#x27;memory-controller&#x27;, &#x27;cluster-detector&#x27;, &#x27;detector-controller&#x27;],
+          stores: [&#x27;state&#x27;, &#x27;lease&#x27;]
+        },
+        {
+          phase: &#x27;Runtime plane&#x27;,
+          title: &#x27;Dispatch exactly one repair agent&#x27;,
+          copy: &#x27;The broker creates an isolated Git worktree on the shared PVC. The controller starts one hardened Kubernetes Job running Codex CLI with the incident evidence and relevant playbooks.&#x27;,
+          boundary: &#x27;The responder may repair source and live state, but .sdo memory stays read-only before independent verification.&#x27;,
+          durable: &#x27;Incident-derived Job identity, PVC worktree, result ConfigMap, and persisted in-flight lifecycle.&#x27;,
+          nodes: [&#x27;controller&#x27;, &#x27;broker&#x27;, &#x27;responder&#x27;],
+          edges: [&#x27;controller-broker&#x27;, &#x27;broker-responder&#x27;],
+          stores: [&#x27;state&#x27;, &#x27;lease&#x27;, &#x27;pvc&#x27;]
+        },
+        {
+          phase: &#x27;Closure plane&#x27;,
+          title: &#x27;Verify the repair independently&#x27;,
+          copy: &#x27;The responder applies its fix, but its success claim is not trusted. The original Go detector must become clear with no fingerprints, then isolated validation checks the proposed source change.&#x27;,
+          boundary: &#x27;The agent proposes the repair; the deterministic health judge decides whether it worked.&#x27;,
+          durable: &#x27;Clear detector history, independent verification evidence, and a validated repair candidate.&#x27;,
+          nodes: [&#x27;responder&#x27;, &#x27;cluster&#x27;, &#x27;detector&#x27;, &#x27;clear&#x27;, &#x27;closure-validation&#x27;],
+          edges: [&#x27;responder-cluster&#x27;, &#x27;detector-clear&#x27;, &#x27;clear-validation&#x27;],
+          stores: [&#x27;state&#x27;, &#x27;lease&#x27;, &#x27;pvc&#x27;]
+        },
+        {
+          phase: &#x27;Closure plane&#x27;,
+          title: &#x27;Commit the result and teach the system&#x27;,
+          copy: &#x27;The broker commits the repair proposal and verified outcome, then resumes the exact responder Codex session to author fault-specific playbooks, detectors, tests, and architecture updates.&#x27;,
+          boundary: &#x27;Reflection starts only after the repair is verified and the outcome is durable. Reflected code must pass the same isolated canary and compile gates.&#x27;,
+          durable: &#x27;Distinct proposal, outcome, and validated same-session reflection commits with incident provenance.&#x27;,
+          nodes: [&#x27;closure-validation&#x27;, &#x27;proposal&#x27;, &#x27;outcome&#x27;, &#x27;reflection&#x27;, &#x27;validator&#x27;, &#x27;memory&#x27;],
+          edges: [&#x27;validation-proposal&#x27;, &#x27;proposal-outcome&#x27;, &#x27;outcome-reflection&#x27;, &#x27;judge-validator&#x27;, &#x27;validator-memory&#x27;],
+          stores: [&#x27;git&#x27;, &#x27;state&#x27;, &#x27;pvc&#x27;]
+        },
+        {
+          phase: &#x27;Closure plane&#x27;,
+          title: &#x27;Roll out, acknowledge, clean, and prove&#x27;,
+          copy: &#x27;If detector code changed, the accepted controller is rebuilt and exercised. A durable acknowledgement then removes the incident worktree and emits a strict machine-verifiable receipt.&#x27;,
+          boundary: &#x27;Cleanup cannot happen before commits, validation, rollout evidence, and acknowledgement are durable.&#x27;,
+          durable: &#x27;Structured rollout return code, acknowledgement marker, zero remaining worktrees, and strict production receipt.&#x27;,
+          nodes: [&#x27;memory&#x27;, &#x27;controller&#x27;, &#x27;reflection&#x27;, &#x27;finalize&#x27;],
+          edges: [&#x27;memory-controller&#x27;, &#x27;reflection-final&#x27;],
+          stores: [&#x27;git&#x27;, &#x27;state&#x27;, &#x27;lease&#x27;, &#x27;pvc&#x27;]
+        }
+      ];
+
+      const buttons = Array.from(root.querySelectorAll(&#x27;[data-step-button]&#x27;));
+      const nodes = Array.from(root.querySelectorAll(&#x27;[data-node]&#x27;));
+      const edges = Array.from(root.querySelectorAll(&#x27;[data-edge]&#x27;));
+      const stores = Array.from(root.querySelectorAll(&#x27;[data-store]&#x27;));
+      const mobileSteps = Array.from(root.querySelectorAll(&#x27;[data-mobile-step]&#x27;));
+      const progress = root.querySelector(&#x27;progress&#x27;);
+      const mapDesc = root.querySelector(&#x27;#sdo-map-desc&#x27;);
+
+      function selectStep(index) {
+        const step = steps[index];
+        if (!step) return;
+        const activeNodes = new Set(step.nodes);
+        const activeEdges = new Set(step.edges);
+        const activeStores = new Set(step.stores);
+
+        buttons.forEach((button, buttonIndex) =&gt; {
+          button.setAttribute(&#x27;aria-pressed&#x27;, buttonIndex === index ? &#x27;true&#x27; : &#x27;false&#x27;);
+        });
+        nodes.forEach((node) =&gt; node.classList.toggle(&#x27;is-active&#x27;, activeNodes.has(node.dataset.node)));
+        edges.forEach((edge) =&gt; {
+          const active = activeEdges.has(edge.dataset.edge);
+          edge.classList.toggle(&#x27;is-active&#x27;, active);
+          edge.setAttribute(&#x27;marker-end&#x27;, active ? &#x27;url(#sdo-arrow-active)&#x27; : &#x27;url(#sdo-arrow-neutral)&#x27;);
+        });
+        stores.forEach((store) =&gt; store.classList.toggle(&#x27;is-active&#x27;, activeStores.has(store.dataset.store)));
+        mobileSteps.forEach((item, itemIndex) =&gt; {
+          const active = itemIndex === index;
+          item.classList.toggle(&#x27;is-active&#x27;, active);
+          if (active) item.setAttribute(&#x27;aria-current&#x27;, &#x27;step&#x27;);
+          else item.removeAttribute(&#x27;aria-current&#x27;);
+        });
+
+        root.querySelector(&#x27;[data-step-count]&#x27;).textContent = `Step ${index + 1} of ${steps.length}`;
+        root.querySelector(&#x27;[data-phase-label]&#x27;).textContent = step.phase;
+        root.querySelector(&#x27;[data-step-title]&#x27;).textContent = step.title;
+        root.querySelector(&#x27;[data-step-copy]&#x27;).textContent = step.copy;
+        root.querySelector(&#x27;[data-boundary]&#x27;).textContent = step.boundary;
+        root.querySelector(&#x27;[data-durable]&#x27;).textContent = step.durable;
+        progress.value = index + 1;
+        mapDesc.textContent = `${step.title}. ${step.copy}`;
+      }
+
+      buttons.forEach((button) =&gt; {
+        button.addEventListener(&#x27;click&#x27;, () =&gt; selectStep(Number(button.dataset.stepButton)));
+      });
+
+      selectStep(0);
+    })();
+  &lt;/script&gt;
+&lt;/div&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+
+  const getTrigger = (target) =&gt;
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest(&quot;[data-tooltip]&quot;)
+      : null;
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handleLeave = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
+    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
+    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
+    document.removeEventListener(&quot;focusout&quot;, handleLeave);
+    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
+    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
+  document.addEventListener(&quot;pointerout&quot;, handleLeave);
+  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
+  document.addEventListener(&quot;focusout&quot;, handleLeave);
+  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
+  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+</body>
+</html>

@@ -1,0 +1,1292 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import os
+import re
+import subprocess
+import tempfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+import yaml
+
+from app_operator.lifecycle.agents import (
+    CodexLifecycleBackend,
+    DeployerAssessment,
+    HealthJudgeArtifact,
+    LifecycleAgentBackend,
+    LifecycleAgentError,
+)
+from app_operator.memory import ContainerSandboxRunner, SandboxResult, SandboxRunner
+
+logger = logging.getLogger(__name__)
+
+
+class LifecycleError(RuntimeError):
+    """Raised when deployment-to-controller operational memory cannot be initialized."""
+
+
+@dataclass(frozen=True)
+class TopologyResource:
+    kind: str
+    name: str
+    namespace: str
+    source: str
+    dependencies: tuple[str, ...]
+
+
+def reuse_initial_lifecycle_if_valid(
+    app_root: Path,
+    *,
+    application: str,
+    health_objective: str,
+    validator: SandboxRunner | None = None,
+) -> bool:
+    """Reuse a real lifecycle handoff only while its source and contracts remain valid."""
+
+    root = app_root.resolve()
+    provenance_path = root / ".sdo" / "lifecycle-provenance.yaml"
+    required_paths = (
+        ".sdo/schema-version",
+        ".sdo/goal.md",
+        ".sdo/arch.md",
+        ".sdo/playbooks/README.md",
+        ".sdo/diagnostics/manifest.yaml",
+        ".sdo/diagnostics/detectors/health/objective/detector.go",
+        ".sdo/diagnostics/detectors/health/objective/detector_test.go",
+        ".sdo/outcomes.jsonl",
+    )
+    if not provenance_path.is_file() or any(not (root / relative).is_file() for relative in required_paths):
+        return False
+    try:
+        provenance = yaml.safe_load(provenance_path.read_text(encoding="utf-8"))
+        if not isinstance(provenance, dict):
+            return False
+        deployer = DeployerAssessment.model_validate(provenance.get("deployer"))
+        final_artifact = HealthJudgeArtifact.model_validate(provenance.get("health_judge"))
+        raw_attempts = provenance.get("health_judge_rounds")
+        if not isinstance(raw_attempts, list):
+            return False
+        attempts = [HealthJudgeArtifact.model_validate(raw) for raw in raw_attempts]
+        expected = _deployer_assessment({"repository": str(root), "application": application})
+        current_deployer = deployer.model_copy(update={"source_commit": str(expected["source_commit"])})
+        if _validate_deployer_assessment(root, current_deployer):
+            return False
+        session_ids = [deployer.session_id, *(attempt.session_id for attempt in attempts)]
+        if len(session_ids) != len(set(session_ids)):
+            return False
+        if not {1, 2, 3}.issubset({attempt.round for attempt in attempts}):
+            return False
+        if not attempts or final_artifact.session_id != attempts[-1].session_id or final_artifact.round != 3:
+            return False
+        if _validate_health_judge_artifact(
+            final_artifact,
+            deployer=deployer,
+            health_objective=health_objective,
+            expected_round=3,
+        ):
+            return False
+        selected_validator = validator or ContainerSandboxRunner()
+        return selected_validator.run(root).returncode == 0
+    except (LifecycleError, OSError, TypeError, ValueError, yaml.YAMLError):
+        return False
+
+
+def run_initial_lifecycle(
+    app_root: Path,
+    *,
+    application: str,
+    health_objective: str,
+    backend: LifecycleAgentBackend | None = None,
+    validator: SandboxRunner | None = None,
+    judge_rounds: int = 3,
+    judge_corrections_per_round: int = 3,
+    deployer_attempts: int = 3,
+) -> str:
+    """Bootstrap memory with fresh model-backed deployer and health-judge sessions."""
+
+    if judge_rounds < 1 or judge_corrections_per_round < 1 or deployer_attempts < 1:
+        raise ValueError("lifecycle rounds, corrections, and deployer attempts must be positive")
+    root = app_root.resolve()
+    selected_backend = backend or CodexLifecycleBackend(model=os.getenv("SDO_LIFECYCLE_MODEL") or None)
+    selected_validator = validator or ContainerSandboxRunner()
+
+    deployer: DeployerAssessment | None = None
+    trusted_source_facts = _deployer_assessment({"repository": str(root), "application": application})
+    required_resource_names = ", ".join(
+        sorted(repr(str(resource["name"])) for resource in trusted_source_facts["resources"])
+    )
+    trusted_source_feedback = (
+        "Trusted controller-derived source facts. Copy source_commit, topology_fingerprint, and resources exactly. "
+        "The architecture_summary_markdown must mention every resource name verbatim, including low-level data "
+        f"stores and observability resources. Required names: {required_resource_names}. Use repository inspection "
+        "to describe their relationships:\n" + json.dumps(trusted_source_facts, indent=2, sort_keys=True)
+    )
+    deployer_feedback: str | None = trusted_source_feedback
+    deployer_errors: list[str] = []
+    for attempt_index in range(1, deployer_attempts + 1):
+        try:
+            candidate = selected_backend.run_deployer(
+                repository=root,
+                application=application,
+                correction_feedback=deployer_feedback,
+            )
+            validation_errors = _validate_deployer_assessment(root, candidate)
+        except (LifecycleAgentError, ValueError) as exc:
+            validation_errors = [str(exc)]
+        else:
+            if not validation_errors:
+                deployer = candidate
+                break
+        deployer_errors = validation_errors
+        logger.warning(
+            "deployer attempt %d failed validation: %s",
+            attempt_index,
+            "; ".join(validation_errors),
+        )
+        deployer_feedback = (
+            trusted_source_feedback
+            + "\n\nPrior validation errors:\n"
+            + "\n".join(f"- {error}" for error in validation_errors)
+        )
+    if deployer is None:
+        raise LifecycleError("deployer exhausted its bounded correction attempts: " + "; ".join(deployer_errors))
+
+    judge_attempts: list[HealthJudgeArtifact] = []
+    judge_feedback: str | None = None
+    previous: HealthJudgeArtifact | None = None
+    used_sessions = {deployer.session_id}
+    final_artifact: HealthJudgeArtifact | None = None
+    last_errors: list[str] = []
+    for round_index in range(1, judge_rounds + 1):
+        round_passed = False
+        for attempt_index in range(1, judge_corrections_per_round + 1):
+            try:
+                artifact = selected_backend.run_health_judge(
+                    repository=root,
+                    application=application,
+                    health_objective=health_objective,
+                    deployer=deployer,
+                    round_index=round_index,
+                    previous=previous,
+                    correction_feedback=judge_feedback,
+                )
+            except (LifecycleAgentError, ValueError) as exc:
+                last_errors = [str(exc)]
+                logger.warning(
+                    "health judge round %d attempt %d failed before validation: %s",
+                    round_index,
+                    attempt_index,
+                    "; ".join(last_errors),
+                )
+                judge_feedback = "The prior fresh session failed before validation:\n" + "\n".join(
+                    f"- {error}" for error in last_errors
+                )
+                continue
+            judge_attempts.append(artifact)
+            errors = _validate_health_judge_artifact(
+                artifact,
+                deployer=deployer,
+                health_objective=health_objective,
+                expected_round=round_index,
+            )
+            if artifact.session_id in used_sessions:
+                errors.append(f"lifecycle session id {artifact.session_id!r} was reused instead of starting fresh")
+            used_sessions.add(artifact.session_id)
+            if not errors:
+                validation = _validate_authored_candidate(
+                    root,
+                    application=application,
+                    health_objective=health_objective,
+                    deployer=deployer,
+                    artifact=artifact,
+                    validator=selected_validator,
+                )
+                if validation.returncode != 0:
+                    details = validation.stderr.strip() or validation.stdout.strip() or "detector validation failed"
+                    errors.append(details)
+            previous = artifact
+            last_errors = errors
+            if errors:
+                logger.warning(
+                    "health judge round %d attempt %d failed validation: %s",
+                    round_index,
+                    attempt_index,
+                    "; ".join(errors),
+                )
+                judge_feedback = "The prior artifact failed independent validation:\n" + "\n".join(
+                    f"- {error}" for error in errors
+                )
+                continue
+            final_artifact = artifact
+            round_passed = True
+            judge_feedback = (
+                "The prior artifact passed compilation and tests. Adversarially identify another objective-specific "
+                "failure pattern it could miss, strengthen the detector without adding broad false positives, and "
+                "retain matching plus near-miss tests."
+            )
+            break
+        if not round_passed:
+            raise LifecycleError(
+                f"health judge round {round_index} exhausted bounded correction attempts: " + "; ".join(last_errors)
+            )
+    if final_artifact is None:
+        raise LifecycleError("health judge produced no validated final artifact")
+
+    provenance = {
+        "deployer": deployer.model_dump(mode="json"),
+        "health_judge": final_artifact.model_dump(mode="json"),
+        "health_judge_rounds": [artifact.model_dump(mode="json") for artifact in judge_attempts],
+    }
+    return ensure_operational_memory(
+        root,
+        application=application,
+        health_objective=health_objective,
+        health_judge_artifact=final_artifact,
+        architecture_summary_markdown=deployer.architecture_summary_markdown,
+        lifecycle_provenance=provenance,
+    )
+
+
+def _deployer_assessment(payload: dict[str, object]) -> dict[str, object]:
+    root = Path(str(payload["repository"])).resolve()
+    tracked = [path for path in _git(root, "ls-files").splitlines() if path and not path.startswith(".sdo/")]
+    resources = _topology_resources(root, tracked)
+    return {
+        "application": str(payload["application"]),
+        "source_commit": _git(root, "rev-parse", "HEAD"),
+        "topology_fingerprint": _topology_fingerprint(root),
+        "resources": [
+            {
+                "kind": resource.kind,
+                "name": resource.name,
+                "namespace": resource.namespace,
+                "source": resource.source,
+                "dependencies": list(resource.dependencies),
+            }
+            for resource in resources
+        ],
+    }
+
+
+def _judge_assessment(payload: dict[str, object]) -> dict[str, object]:
+    objective = str(payload["health_objective"]).strip()
+    deployer = payload.get("deployer_assessment")
+    if not isinstance(deployer, dict) or not isinstance(deployer.get("resources"), list):
+        raise LifecycleError("health judge requires a published deployer assessment")
+    resources = [resource for resource in deployer["resources"] if isinstance(resource, dict)]
+    objective_lower = objective.lower()
+    selects_all_source_backed = "all source-backed" in objective_lower
+
+    def targets(kind: str) -> list[str]:
+        names = sorted(
+            {
+                str(resource["name"])
+                for resource in resources
+                if resource.get("kind") == kind and isinstance(resource.get("name"), str)
+            }
+        )
+        mentioned = [] if selects_all_source_backed else [name for name in names if name.lower() in objective_lower]
+        return mentioned or names
+
+    deployment_names = targets("Deployment")
+    workload_label_sets: list[dict[str, str]] = []
+    for resource in resources:
+        if resource.get("kind") != "Deployment" or resource.get("name") not in deployment_names:
+            continue
+        dependencies = resource.get("dependencies")
+        if not isinstance(dependencies, list):
+            continue
+        labels = {}
+        for dependency in dependencies:
+            if not isinstance(dependency, str) or not dependency.startswith("pod-label:"):
+                continue
+            key, separator, value = dependency.removeprefix("pod-label:").partition("=")
+            if separator and key and value:
+                labels[key] = value
+        if labels and labels not in workload_label_sets:
+            workload_label_sets.append(labels)
+    return {
+        "input_context": "published-deployer-assessment",
+        "objective_digest": hashlib.sha256(objective.encode()).hexdigest(),
+        "deployment_names": deployment_names,
+        "service_names": targets("Service"),
+        "network_policy_names": targets("NetworkPolicy"),
+        "workload_label_sets": workload_label_sets,
+        "source_commit": deployer.get("source_commit"),
+    }
+
+
+def _validate_deployer_assessment(root: Path, assessment: DeployerAssessment) -> list[str]:
+    expected = _deployer_assessment({"repository": str(root), "application": root.name})
+    errors: list[str] = []
+    if assessment.source_commit != expected["source_commit"]:
+        errors.append("deployer source_commit does not match repository HEAD")
+    if assessment.topology_fingerprint != expected["topology_fingerprint"]:
+        errors.append("deployer topology_fingerprint does not match tracked source")
+
+    def canonical(resources: object) -> list[tuple[str, str, str, str, tuple[str, ...]]]:
+        if not isinstance(resources, list):
+            return []
+        result = []
+        for resource in resources:
+            if hasattr(resource, "model_dump"):
+                resource = resource.model_dump(mode="json")
+            if not isinstance(resource, dict):
+                continue
+            result.append(
+                (
+                    str(resource.get("kind", "")),
+                    str(resource.get("name", "")),
+                    str(resource.get("namespace", "")),
+                    str(resource.get("source", "")),
+                    tuple(sorted(str(item) for item in resource.get("dependencies", []))),
+                )
+            )
+        return sorted(result)
+
+    if canonical(assessment.resources) != canonical(expected["resources"]):
+        errors.append("deployer resource inventory is incomplete or differs from tracked manifests")
+    summary = assessment.architecture_summary_markdown.lower()
+    missing_names = sorted({resource.name for resource in assessment.resources if resource.name.lower() not in summary})
+    if missing_names:
+        errors.append("architecture summary omits source-backed resources: " + ", ".join(missing_names))
+    return errors
+
+
+def _validate_health_judge_artifact(
+    artifact: HealthJudgeArtifact,
+    *,
+    deployer: DeployerAssessment,
+    health_objective: str,
+    expected_round: int,
+) -> list[str]:
+    errors: list[str] = []
+    expected_digest = hashlib.sha256(health_objective.strip().encode()).hexdigest()
+    if artifact.round != expected_round:
+        errors.append(f"health judge returned round {artifact.round}, expected {expected_round}")
+    if artifact.objective_digest != expected_digest:
+        errors.append("health judge objective digest does not match the human-owned objective")
+    if artifact.source_commit != deployer.source_commit:
+        errors.append("health judge source commit does not match the published deployer assessment")
+    known_resources = {
+        (resource.kind, resource.name, resource.namespace, resource.source, tuple(sorted(resource.dependencies)))
+        for resource in deployer.resources
+    }
+    covered_resources = {
+        (resource.kind, resource.name, resource.namespace, resource.source, tuple(sorted(resource.dependencies)))
+        for resource in artifact.covered_resources
+    }
+    if known_resources and not covered_resources:
+        errors.append("health detector does not cover any published source-backed resource")
+    unexpected_resources = sorted(covered_resources - known_resources)
+    if unexpected_resources:
+        rendered = "; ".join(
+            f"kind={kind!r}, name={name!r}, namespace={namespace!r}, source={source!r}, dependencies={dependencies!r}"
+            for kind, name, namespace, source, dependencies in unexpected_resources
+        )
+        errors.append(
+            "health detector claims resources absent from the deployer handoff: "
+            + rendered
+            + ". covered_resources must copy complete objects exactly from the published deployer handoff, "
+            "including the source-manifest namespace and dependencies"
+        )
+    objective_lower = health_objective.lower()
+    global_objective = "all source-backed deployments" in objective_lower or "all selected services" in objective_lower
+    required_kinds: set[str] = set()
+    if global_objective:
+        required_kinds.update({"Deployment", "Service", "ConfigMap", "NetworkPolicy"})
+    required_resources = {
+        (resource.kind, resource.name, resource.namespace, resource.source, tuple(sorted(resource.dependencies)))
+        for resource in deployer.resources
+        if resource.kind in required_kinds
+    }
+    missing_required = sorted(required_resources - covered_resources)
+    if missing_required:
+        rendered = ", ".join(f"{kind}/{name}" for kind, name, *_rest in missing_required)
+        errors.append("health detector omits required source-backed resources: " + rendered)
+    extra_covered = sorted(covered_resources - required_resources) if global_objective else []
+    if extra_covered:
+        rendered = ", ".join(f"{kind}/{name}" for kind, name, *_rest in extra_covered)
+        errors.append(
+            "global health detector covered_resources must cover exactly the required Deployment, Service, "
+            "ConfigMap, and NetworkPolicy inventory; remove: " + rendered
+        )
+    if not artifact.failure_patterns or any(not pattern.strip() for pattern in artifact.failure_patterns):
+        errors.append("health judge must enumerate concrete failure patterns covered by the detector")
+
+    source = artifact.detector_source
+    tests = artifact.detector_test_source
+    referenced_config_maps = sorted(
+        {
+            dependency.removeprefix("ConfigMap/")
+            for resource in deployer.resources
+            if resource.kind == "Deployment"
+            for dependency in resource.dependencies
+            if dependency.startswith("ConfigMap/") and dependency.removeprefix("ConfigMap/")
+        }
+    )
+    if global_objective and referenced_config_maps:
+        derives_config_maps = (
+            "ConfigMaps()" in source
+            and re.search(r"\.Spec\s*\.\s*Template\s*\.\s*Spec", source) is not None
+            and re.search(r"\.\s*Volumes\b", source) is not None
+            and re.search(r"\.\s*ConfigMap\b", source) is not None
+        )
+        if not derives_config_maps:
+            rendered = ", ".join(f"ConfigMap/{name}" for name in referenced_config_maps)
+            errors.append(
+                "health detector must derive missing ConfigMap dependencies from Deployment pod specs/volume "
+                f"references and compare them with DetectionContext.ConfigMaps(): {rendered}"
+            )
+    required_source = {
+        "package objective": "detector must use package objective",
+        "func New() sdk.Detector": "detector must export New() sdk.Detector",
+        "Spec() sdk.DetectorSpec": "detector must expose a registration method for lifecycle enforcement",
+        "Detect(": "detector must implement deterministic Detect",
+        "healthObjectiveDigest": "detector must bind itself to the objective digest",
+        expected_digest: "detector source does not embed the exact objective digest",
+    }
+    for marker, message in required_source.items():
+        if marker not in source:
+            errors.append(message)
+    if "package objective" not in tests or "func Test" not in tests:
+        errors.append("health judge must author deterministic Go matching and near-miss tests")
+    forbidden_oracles = (
+        "sregym",
+        "sdo_sregym",
+        "verdict_path",
+        "os.getenv",
+        "os.getenv",
+        "os.environ",
+        "benchmark result",
+        "hidden fault",
+    )
+    combined = f"{source}\n{tests}".lower()
+    if any(token in combined for token in forbidden_oracles):
+        errors.append("health detector contains a benchmark or environment oracle")
+    if any(resource.namespace == "default" for resource in deployer.resources) and '"default"' in source:
+        errors.append(
+            "health detector hard-codes source namespace default; use DetectionContext.Namespace() at runtime"
+        )
+    try:
+        _canonicalize_health_registration(source)
+    except LifecycleError as exc:
+        errors.append(str(exc))
+    return errors
+
+
+def _validate_authored_candidate(
+    root: Path,
+    *,
+    application: str,
+    health_objective: str,
+    deployer: DeployerAssessment,
+    artifact: HealthJudgeArtifact,
+    validator: SandboxRunner,
+) -> SandboxResult:
+    with tempfile.TemporaryDirectory(prefix="sdo-lifecycle-candidate-") as temp_dir:
+        candidate = Path(temp_dir) / "application"
+        cloned = subprocess.run(
+            ["git", "clone", "--quiet", "--no-hardlinks", str(root), str(candidate)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if cloned.returncode != 0:
+            details = cloned.stderr.strip() or cloned.stdout.strip()
+            raise LifecycleError(f"create lifecycle validation candidate failed: {details}")
+        ensure_operational_memory(
+            candidate,
+            application=application,
+            health_objective=health_objective,
+            health_judge_artifact=artifact,
+            architecture_summary_markdown=deployer.architecture_summary_markdown,
+        )
+        return validator.run(candidate)
+
+
+def ensure_operational_memory(
+    app_root: Path,
+    *,
+    application: str,
+    health_objective: str,
+    health_judge_plan: dict[str, object] | None = None,
+    health_judge_artifact: HealthJudgeArtifact | None = None,
+    architecture_summary_markdown: str | None = None,
+    lifecycle_provenance: dict[str, object] | None = None,
+) -> str:
+    root = app_root.resolve()
+    if not (root / ".git").exists():
+        raise LifecycleError(f"application workspace is not a Git repository: {root}")
+    memory = root / ".sdo"
+    fingerprint = _topology_fingerprint(root)
+    source_commit = _git(root, "rev-parse", "HEAD")
+    plan = health_judge_plan or _judge_assessment(
+        {
+            "health_objective": health_objective,
+            "deployer_assessment": _deployer_assessment({"repository": str(root), "application": application}),
+        }
+    )
+    if memory.exists():
+        if health_judge_artifact is not None or lifecycle_provenance is not None:
+            _refresh_model_backed_operational_memory(
+                root,
+                application=application,
+                fingerprint=fingerprint,
+                source_commit=source_commit,
+                health_judge_artifact=health_judge_artifact,
+                architecture_summary_markdown=architecture_summary_markdown,
+                lifecycle_provenance=lifecycle_provenance,
+            )
+            return _git(root, "rev-parse", "HEAD")
+        _refresh_architecture_if_needed(root, application, fingerprint, source_commit)
+        _upgrade_health_detector_if_needed(root, plan)
+        return _git(root, "rev-parse", "HEAD")
+
+    detector = memory / "diagnostics" / "detectors" / "health" / "objective"
+    playbook = memory / "playbooks" / "health-objective"
+    detector.mkdir(parents=True)
+    playbook.mkdir(parents=True)
+    (memory / "schema-version").write_text("1\n", encoding="utf-8")
+    (memory / "goal.md").write_text(
+        f"""---
+schema_version: 1
+owner: human
+application: {application}
+---
+# Health objective
+
+{health_objective.strip()}
+""",
+        encoding="utf-8",
+    )
+    (memory / "arch.md").write_text(
+        _architecture_document(
+            root,
+            application,
+            fingerprint,
+            source_commit,
+            authored_summary=architecture_summary_markdown,
+        ),
+        encoding="utf-8",
+    )
+    (memory / "outcomes.jsonl").write_text("", encoding="utf-8")
+    if lifecycle_provenance is not None:
+        (memory / "lifecycle-provenance.yaml").write_text(
+            yaml.safe_dump(lifecycle_provenance, sort_keys=True),
+            encoding="utf-8",
+        )
+    (memory / "playbooks" / "README.md").write_text(
+        "# Playbooks\n\n- [Health objective](health-objective/README.md)\n",
+        encoding="utf-8",
+    )
+    (playbook / "README.md").write_text(
+        """---
+schema_version: 1
+owner: responder
+fault_class: health-objective-failure
+originating_incident: lifecycle-bootstrap
+---
+# Health objective failure
+
+Inspect `<AFFECTED_RESOURCE>`, repair the source of truth, redeploy, and verify the human-owned objective.
+""",
+        encoding="utf-8",
+    )
+    (memory / "diagnostics" / "manifest.yaml").write_text(
+        """apiVersion: sds.dev/v1alpha1
+kind: ObserverDiagnostics
+sdkVersion: v0.1
+detectors:
+  - id: health-objective
+    package: ./detectors/health/objective
+    constructor: New
+    class: health
+    owner: health_judge
+    watches:
+      - apiVersion: v1
+        kind: Pod
+      - apiVersion: v1
+        kind: ConfigMap
+      - apiVersion: v1
+        kind: Service
+      - apiVersion: apps/v1
+        kind: Deployment
+      - apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+      - apiVersion: v1
+        kind: Endpoints
+      - apiVersion: discovery.k8s.io/v1
+        kind: EndpointSlice
+    interval: 30s
+    persistence:
+      firing: 2
+      clearing: 2
+    batching:
+      severity: critical
+      debounce: 500ms
+    possiblePlaybooks:
+      - .sdo/playbooks/health-objective/README.md
+    originatingCommit: lifecycle-bootstrap
+""",
+        encoding="utf-8",
+    )
+    (memory / "diagnostics" / "go.mod").write_text(
+        "module app-diagnostics\n\ngo 1.24\n\nrequire sds.dev/observer/sdk v0.0.0\n",
+        encoding="utf-8",
+    )
+    if health_judge_artifact is None:
+        _write_health_detector(detector, plan)
+    else:
+        _write_authored_health_detector(detector, health_judge_artifact)
+    _commit(root, "sdo: capture goal, architecture, and independent health judge")
+    return _git(root, "rev-parse", "HEAD")
+
+
+def _refresh_model_backed_operational_memory(
+    root: Path,
+    *,
+    application: str,
+    fingerprint: str,
+    source_commit: str,
+    health_judge_artifact: HealthJudgeArtifact | None,
+    architecture_summary_markdown: str | None,
+    lifecycle_provenance: dict[str, object] | None,
+) -> None:
+    memory = root / ".sdo"
+    architecture = memory / "arch.md"
+    architecture.write_text(
+        _architecture_document(
+            root,
+            application,
+            fingerprint,
+            source_commit,
+            authored_summary=architecture_summary_markdown,
+        ),
+        encoding="utf-8",
+    )
+    if health_judge_artifact is not None:
+        detector = memory / "diagnostics" / "detectors" / "health" / "objective"
+        _write_authored_health_detector(detector, health_judge_artifact)
+    _ensure_health_configmap_watch(root)
+    if lifecycle_provenance is not None:
+        (memory / "lifecycle-provenance.yaml").write_text(
+            yaml.safe_dump(lifecycle_provenance, sort_keys=True),
+            encoding="utf-8",
+        )
+    _commit(root, "sdo: refresh model-backed operational memory")
+
+
+def _refresh_architecture_if_needed(root: Path, application: str, fingerprint: str, source_commit: str) -> None:
+    architecture = root / ".sdo" / "arch.md"
+    if not architecture.is_file():
+        raise LifecycleError("existing .sdo memory has no arch.md")
+    if f"topology_fingerprint: {fingerprint}" in architecture.read_text(encoding="utf-8"):
+        return
+    architecture.write_text(
+        _architecture_document(root, application, fingerprint, source_commit),
+        encoding="utf-8",
+    )
+    _commit(root, "sdo: refresh commit-aware architecture summary")
+
+
+def _ensure_health_configmap_watch(root: Path) -> None:
+    manifest = root / ".sdo" / "diagnostics" / "manifest.yaml"
+    manifest_text = manifest.read_text(encoding="utf-8")
+    if "kind: ConfigMap" in manifest_text:
+        return
+    updated = manifest_text.replace(
+        "      - apiVersion: v1\n        kind: Pod\n",
+        "      - apiVersion: v1\n        kind: Pod\n      - apiVersion: v1\n        kind: ConfigMap\n",
+    )
+    if updated == manifest_text:
+        raise LifecycleError("health detector manifest has no Pod watch anchor for ConfigMap watch")
+    manifest.write_text(updated, encoding="utf-8")
+
+
+def _upgrade_health_detector_if_needed(root: Path, plan: dict[str, object]) -> None:
+    detector = root / ".sdo" / "diagnostics" / "detectors" / "health" / "objective"
+    source = detector / "detector.go"
+    if not source.is_file():
+        return
+    source_text = source.read_text(encoding="utf-8")
+    desired_source = _render_health_detector(plan)
+    if source_text == desired_source:
+        return
+    _write_health_detector(detector, plan)
+    _ensure_health_configmap_watch(root)
+    manifest = root / ".sdo" / "diagnostics" / "manifest.yaml"
+    manifest_text = manifest.read_text(encoding="utf-8")
+    if "kind: NetworkPolicy" not in manifest_text:
+        manifest_text = manifest_text.replace(
+            "      - apiVersion: apps/v1\n        kind: Deployment\n",
+            "      - apiVersion: apps/v1\n        kind: Deployment\n"
+            "      - apiVersion: networking.k8s.io/v1\n        kind: NetworkPolicy\n",
+        )
+    if manifest_text != manifest.read_text(encoding="utf-8"):
+        manifest.write_text(manifest_text, encoding="utf-8")
+    _commit(root, "sdo: upgrade independent health judge")
+
+
+def _write_health_detector(detector: Path, plan: dict[str, object]) -> None:
+    detector.mkdir(parents=True, exist_ok=True)
+    (detector / "detector.go").write_text(_render_health_detector(plan), encoding="utf-8")
+    (detector / "detector_test.go").write_text(_HEALTH_DETECTOR_TEST_SOURCE, encoding="utf-8")
+
+
+def _write_authored_health_detector(detector: Path, artifact: HealthJudgeArtifact) -> None:
+    detector.mkdir(parents=True, exist_ok=True)
+    source = _canonicalize_health_registration(artifact.detector_source)
+    (detector / "detector.go").write_text(source.rstrip() + "\n", encoding="utf-8")
+    (detector / "detector_test.go").write_text(artifact.detector_test_source.rstrip() + "\n", encoding="utf-8")
+
+
+_SPEC_SIGNATURE = re.compile(
+    r"func\s*\((?P<receiver>[^)]*)\)\s*Spec\s*\(\s*\)\s*sdk\.DetectorSpec\s*\{",
+)
+
+
+def _canonicalize_health_registration(source: str) -> str:
+    """Enforce controller-owned registration around judge-authored checks."""
+
+    match = _SPEC_SIGNATURE.search(source)
+    if match is None:
+        raise LifecycleError("health detector has no replaceable Spec() sdk.DetectorSpec method")
+    opening_brace = match.end() - 1
+    closing_brace = _matching_go_brace(source, opening_brace)
+    receiver = match.group("receiver").strip()
+    canonical = f"""func ({receiver}) Spec() sdk.DetectorSpec {{
+	return sdk.DetectorSpec{{
+		ID: "health-objective", Class: sdk.DetectorClassHealth, Owner: sdk.DetectorOwnerHealthJudge,
+		Interval: 30 * time.Second,
+		Watches: []sdk.WatchKind{{
+			{{APIVersion: "v1", Kind: "Pod"}},
+			{{APIVersion: "v1", Kind: "ConfigMap"}},
+			{{APIVersion: "v1", Kind: "Service"}},
+			{{APIVersion: "apps/v1", Kind: "Deployment"}},
+			{{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"}},
+			{{APIVersion: "v1", Kind: "Endpoints"}},
+			{{APIVersion: "discovery.k8s.io/v1", Kind: "EndpointSlice"}},
+		}},
+		Persistence: sdk.PersistencePolicy{{Firing: 2, Clearing: 2}},
+		Batching: sdk.BatchingPolicy{{Severity: sdk.SeverityCritical, Debounce: 500 * time.Millisecond}},
+		Playbooks: []string{{".sdo/playbooks/health-objective/README.md"}},
+		OriginatingCommit: "lifecycle-bootstrap",
+	}}
+}}"""
+    replaced = source[: match.start()] + canonical + source[closing_brace + 1 :]
+    return _prune_unused_aliased_go_imports(replaced)
+
+
+_ALIASED_GO_IMPORT = re.compile(
+    r'^(?P<indent>[ \t]*)(?P<alias>[A-Za-z_][A-Za-z0-9_]*)[ \t]+"(?P<path>[^"]+)"[ \t]*$',
+    re.MULTILINE,
+)
+
+
+def _prune_unused_aliased_go_imports(source: str) -> str:
+    """Remove imports made unused when the controller replaces the authored Spec."""
+
+    import_ranges = [(match.start(), match.end()) for match in _ALIASED_GO_IMPORT.finditer(source)]
+    body = source
+    for start, end in reversed(import_ranges):
+        body = body[:start] + (" " * (end - start)) + body[end:]
+
+    unused_ranges = [
+        (match.start(), match.end())
+        for match in _ALIASED_GO_IMPORT.finditer(source)
+        if match.group("alias") not in {"_", "."}
+        and re.search(rf"\b{re.escape(match.group('alias'))}\s*\.", body) is None
+    ]
+    for start, end in reversed(unused_ranges):
+        source = source[:start] + source[end:]
+    return source
+
+
+def _matching_go_brace(source: str, opening_brace: int) -> int:
+    depth = 0
+    quote = ""
+    escaped = False
+    line_comment = False
+    block_comment = False
+    index = opening_brace
+    while index < len(source):
+        current = source[index]
+        following = source[index + 1] if index + 1 < len(source) else ""
+        if line_comment:
+            if current == "\n":
+                line_comment = False
+        elif block_comment:
+            if current == "*" and following == "/":
+                block_comment = False
+                index += 1
+        elif quote:
+            if escaped:
+                escaped = False
+            elif current == "\\" and quote != "`":
+                escaped = True
+            elif current == quote:
+                quote = ""
+        elif current == "/" and following == "/":
+            line_comment = True
+            index += 1
+        elif current == "/" and following == "*":
+            block_comment = True
+            index += 1
+        elif current in {'"', "'", "`"}:
+            quote = current
+        elif current == "{":
+            depth += 1
+        elif current == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    raise LifecycleError("health detector Spec() method has unbalanced braces")
+
+
+def _render_health_detector(plan: dict[str, object]) -> str:
+    def map_entries(field: str) -> str:
+        values = plan.get(field, [])
+        if not isinstance(values, list):
+            raise LifecycleError(f"health judge plan field {field!r} must be a list")
+        return "\n".join(f"\t{json.dumps(str(value))}: {{}}," for value in values)
+
+    digest = str(plan.get("objective_digest", ""))
+    if len(digest) != 64:
+        raise LifecycleError("health judge plan requires a SHA-256 objective digest")
+    raw_label_sets = plan.get("workload_label_sets", [])
+    if not isinstance(raw_label_sets, list):
+        raise LifecycleError("health judge plan field 'workload_label_sets' must be a list")
+    label_sets = []
+    for raw_labels in raw_label_sets:
+        if not isinstance(raw_labels, dict):
+            raise LifecycleError("health judge workload labels must be mappings")
+        entries = ", ".join(
+            f"{json.dumps(str(key))}: {json.dumps(str(value))}" for key, value in sorted(raw_labels.items())
+        )
+        label_sets.append(f"\t{{{entries}}},")
+    return (
+        _HEALTH_DETECTOR_SOURCE.replace("__OBJECTIVE_DIGEST__", digest)
+        .replace("__REQUIRED_DEPLOYMENTS__", map_entries("deployment_names"))
+        .replace("__REQUIRED_SERVICES__", map_entries("service_names"))
+        .replace("__REQUIRED_WORKLOAD_LABELS__", "\n".join(label_sets))
+    )
+
+
+def _architecture_document(
+    root: Path,
+    application: str,
+    fingerprint: str,
+    source_commit: str,
+    *,
+    authored_summary: str | None = None,
+) -> str:
+    tracked = [path for path in _git(root, "ls-files").splitlines() if path and not path.startswith(".sdo/")]
+    resources = _topology_resources(root, tracked)
+    if resources:
+        resource_rows = "\n".join(
+            f"| {resource.kind}/{resource.name} | {resource.namespace} | {resource.source} | "
+            f"{', '.join(resource.dependencies) or 'none declared'} |"
+            for resource in resources
+        )
+        topology = (
+            "## Source-backed Kubernetes topology\n\n"
+            "| Resource | Namespace | Source | Declared dependencies/selectors |\n"
+            "| --- | --- | --- | --- |\n"
+            f"{resource_rows}\n"
+        )
+    else:
+        topology = "## Source-backed Kubernetes topology\n\nNo Kubernetes resources were found in tracked YAML files.\n"
+    generated_summary = f"""# Architecture
+
+The application source currently contains {len(tracked)} tracked deployment and implementation files.
+The table below is derived from source manifests; confirm it against the live namespace before acting.
+
+{topology}"""
+    body = authored_summary.strip() if authored_summary else generated_summary.strip()
+    return f"""---
+schema_version: 1
+generated_at_commit: {source_commit}
+generated_at: {datetime.now(timezone.utc).isoformat()}
+application: {application}
+topology_fingerprint: {fingerprint}
+---
+{body}
+"""
+
+
+def _topology_resources(root: Path, tracked: list[str]) -> list[TopologyResource]:
+    resources: list[TopologyResource] = []
+    for relative in tracked:
+        if Path(relative).suffix.lower() not in {".yaml", ".yml"}:
+            continue
+        try:
+            documents = list(yaml.safe_load_all((root / relative).read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
+            continue
+        for document in documents:
+            if not isinstance(document, dict):
+                continue
+            metadata = document.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            kind = document.get("kind")
+            name = metadata.get("name")
+            if not isinstance(kind, str) or not isinstance(name, str) or not kind or not name:
+                continue
+            namespace = metadata.get("namespace", "default")
+            resources.append(
+                TopologyResource(
+                    kind=kind,
+                    name=name,
+                    namespace=namespace if isinstance(namespace, str) and namespace else "default",
+                    source=relative,
+                    dependencies=_resource_dependencies(document),
+                )
+            )
+    return sorted(resources, key=lambda item: (item.namespace, item.kind, item.name, item.source))
+
+
+def _resource_dependencies(document: dict[object, object]) -> tuple[str, ...]:
+    dependencies: set[str] = set()
+    spec = document.get("spec")
+    if not isinstance(spec, dict):
+        return ()
+    selector = spec.get("selector")
+    if isinstance(selector, dict):
+        for key, value in selector.items():
+            if isinstance(key, str) and isinstance(value, str):
+                dependencies.add(f"selector:{key}={value}")
+    template = spec.get("template")
+    template_metadata = template.get("metadata") if isinstance(template, dict) else None
+    template_labels = template_metadata.get("labels") if isinstance(template_metadata, dict) else None
+    if isinstance(template_labels, dict):
+        for key, value in template_labels.items():
+            if isinstance(key, str) and isinstance(value, str):
+                dependencies.add(f"pod-label:{key}={value}")
+    pod_spec = template.get("spec") if isinstance(template, dict) else None
+    if not isinstance(pod_spec, dict):
+        return tuple(sorted(dependencies))
+    service_account = pod_spec.get("serviceAccountName")
+    if isinstance(service_account, str) and service_account:
+        dependencies.add(f"ServiceAccount/{service_account}")
+    for volume in pod_spec.get("volumes", []):
+        if not isinstance(volume, dict):
+            continue
+        config_map = volume.get("configMap")
+        if isinstance(config_map, dict) and isinstance(config_map.get("name"), str):
+            dependencies.add(f"ConfigMap/{config_map['name']}")
+    for container_group in ("initContainers", "containers"):
+        for container in pod_spec.get(container_group, []):
+            if not isinstance(container, dict):
+                continue
+            image = container.get("image")
+            if isinstance(image, str) and image:
+                dependencies.add(f"image:{image}")
+            for source in container.get("envFrom", []):
+                if not isinstance(source, dict):
+                    continue
+                config_map = source.get("configMapRef")
+                if isinstance(config_map, dict) and isinstance(config_map.get("name"), str):
+                    dependencies.add(f"ConfigMap/{config_map['name']}")
+    return tuple(sorted(dependencies))
+
+
+def _topology_fingerprint(root: Path) -> str:
+    digest = hashlib.sha256()
+    for relative in sorted(_git(root, "ls-files").splitlines()):
+        if not relative or relative.startswith(".sdo/"):
+            continue
+        path = root / relative
+        if not path.is_file():
+            continue
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _commit(root: Path, message: str) -> None:
+    _git(root, "add", "--all", "--", ".sdo")
+    _git(
+        root,
+        "-c",
+        "user.name=SDO Lifecycle",
+        "-c",
+        "user.email=sdo-lifecycle@localhost",
+        "commit",
+        "-m",
+        message,
+    )
+
+
+def _git(root: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        details = completed.stderr.strip() or completed.stdout.strip()
+        raise LifecycleError(f"git {' '.join(args)} failed: {details}")
+    return completed.stdout.strip()
+
+
+_HEALTH_DETECTOR_SOURCE = r"""package objective
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	"sds.dev/observer/sdk"
+)
+
+const deterministicHealthDetectorVersion = "v3"
+const healthObjectiveDigest = "__OBJECTIVE_DIGEST__"
+
+var requiredDeployments = map[string]struct{}{
+__REQUIRED_DEPLOYMENTS__
+}
+
+var requiredServices = map[string]struct{}{
+__REQUIRED_SERVICES__
+}
+
+var requiredWorkloadLabels = []map[string]string{
+__REQUIRED_WORKLOAD_LABELS__
+}
+
+func isRequiredDeployment(name string) bool {
+	_, required := requiredDeployments[name]
+	return required
+}
+
+func isRequiredService(name string) bool {
+	_, required := requiredServices[name]
+	return required
+}
+
+func policySelectsRequiredWorkload(selector map[string]string) bool {
+	for _, labels := range requiredWorkloadLabels {
+		matches := true
+		for key, value := range selector {
+			if labels[key] != value {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
+}
+
+type Detector struct{}
+
+func New() sdk.Detector { return Detector{} }
+
+func (Detector) Spec() sdk.DetectorSpec {
+	return sdk.DetectorSpec{
+		ID: "health-objective", Class: sdk.DetectorClassHealth, Owner: sdk.DetectorOwnerHealthJudge,
+		Interval: 30 * time.Second,
+		Watches: []sdk.WatchKind{
+			{APIVersion: "v1", Kind: "Pod"}, {APIVersion: "v1", Kind: "ConfigMap"},
+			{APIVersion: "v1", Kind: "Service"},
+			{APIVersion: "apps/v1", Kind: "Deployment"},
+			{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"},
+			{APIVersion: "v1", Kind: "Endpoints"},
+			{APIVersion: "discovery.k8s.io/v1", Kind: "EndpointSlice"},
+		},
+		Persistence: sdk.PersistencePolicy{Firing: 2, Clearing: 2},
+		Batching: sdk.BatchingPolicy{Severity: sdk.SeverityCritical, Debounce: 500 * time.Millisecond},
+		Playbooks: []string{".sdo/playbooks/health-objective/README.md"},
+		OriginatingCommit: "lifecycle-bootstrap",
+	}
+}
+
+func (Detector) Detect(_ context.Context, snapshot sdk.DetectionContext) ([]sdk.Finding, error) {
+	findings := make([]sdk.Finding, 0)
+	for _, deployment := range snapshot.Deployments() {
+		if !isRequiredDeployment(deployment.Name) {
+			continue
+		}
+		desired := int32(1)
+		if deployment.Spec.Replicas != nil {
+			desired = *deployment.Spec.Replicas
+		}
+		if deployment.Status.AvailableReplicas < desired {
+			findings = append(findings, healthFinding(
+				"deployment-unavailable",
+				"A required deployment has unavailable replicas",
+				fmt.Sprintf(
+					"deployment %s/%s has %d/%d available replicas",
+					deployment.Namespace,
+					deployment.Name,
+					deployment.Status.AvailableReplicas,
+					desired,
+				),
+				sdk.ObjectRefFrom("Deployment", "apps/v1", &deployment),
+			))
+		}
+	}
+	for _, service := range snapshot.Services() {
+		if !isRequiredService(service.Name) {
+			continue
+		}
+		if service.Spec.Type == corev1.ServiceTypeExternalName || len(service.Spec.Selector) == 0 {
+			continue
+		}
+		if snapshot.ReadyEndpointCountForService(service.Namespace, service.Name) == 0 {
+			findings = append(findings, healthFinding(
+				"service-without-ready-endpoints",
+				"A selected service has no ready endpoints",
+				fmt.Sprintf("service %s/%s has zero ready endpoints", service.Namespace, service.Name),
+				sdk.ObjectRefFrom("Service", "v1", &service),
+			))
+		}
+	}
+	for _, policy := range snapshot.NetworkPolicies() {
+		if !policySelectsRequiredWorkload(policy.Spec.PodSelector.MatchLabels) {
+			continue
+		}
+		isolatesIngress := false
+		isolatesEgress := false
+		for _, policyType := range policy.Spec.PolicyTypes {
+			isolatesIngress = isolatesIngress || policyType == networkingv1.PolicyTypeIngress
+			isolatesEgress = isolatesEgress || policyType == networkingv1.PolicyTypeEgress
+		}
+		if isolatesIngress && len(policy.Spec.Ingress) == 0 && isolatesEgress && len(policy.Spec.Egress) == 0 {
+			findings = append(findings, healthFinding(
+				"network-policy-total-isolation",
+				"A network policy completely isolates selected application pods",
+				fmt.Sprintf("networkpolicy %s/%s denies all ingress and egress", policy.Namespace, policy.Name),
+				sdk.ObjectRefFrom("NetworkPolicy", "networking.k8s.io/v1", &policy),
+			))
+		}
+	}
+	return findings, nil
+}
+
+func healthFinding(ruleID string, summary string, evidence string, resource sdk.ObjectRef) sdk.Finding {
+	return sdk.Finding{
+		DetectorID: "health-objective", RuleID: ruleID, Status: sdk.FindingActive,
+		Severity: sdk.SeverityCritical, Summary: summary, Evidence: evidence,
+		PrimaryResource: resource,
+		Playbooks: []string{".sdo/playbooks/health-objective/README.md"},
+		Fingerprint: "health-objective/" + ruleID + "/" + resource.Namespace + "/" + resource.Name,
+	}
+}
+"""
+
+
+_HEALTH_DETECTOR_TEST_SOURCE = r"""package objective
+
+import (
+	"context"
+	"testing"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sds.dev/observer/sdk/sdktest"
+)
+
+func TestDetectUsesOnlyObjectiveSpecificDeploymentTargets(t *testing.T) {
+	target := ""
+	for name := range requiredDeployments {
+		target = name
+		break
+	}
+	if target == "" {
+		t.Skip("objective has no required Deployment")
+	}
+	replicas := int32(1)
+	findings, err := (Detector{}).Detect(context.Background(), sdktest.Snapshot{
+		NamespaceName: "demo",
+		DeploymentList: []appsv1.Deployment{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: target, Namespace: "demo"},
+				Spec: appsv1.DeploymentSpec{Replicas: &replicas},
+				Status: appsv1.DeploymentStatus{AvailableReplicas: 0},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "unrelated-workload", Namespace: "demo"},
+				Spec: appsv1.DeploymentSpec{Replicas: &replicas},
+				Status: appsv1.DeploymentStatus{AvailableReplicas: 0},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("detect live health: %v", err)
+	}
+	if len(findings) != 1 || findings[0].PrimaryResource.Name != target {
+		t.Fatalf("expected only the objective-specific deployment finding, got %#v", findings)
+	}
+}
+
+func TestDetectUsesOnlyObjectiveSpecificServiceTargets(t *testing.T) {
+	target := ""
+	for name := range requiredServices {
+		target = name
+		break
+	}
+	if target == "" {
+		t.Skip("objective has no required Service")
+	}
+	findings, err := (Detector{}).Detect(context.Background(), sdktest.Snapshot{
+		NamespaceName: "demo",
+		ServiceList: []corev1.Service{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: target, Namespace: "demo"},
+				Spec: corev1.ServiceSpec{Selector: map[string]string{"app": target}},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "unrelated-service", Namespace: "demo"},
+				Spec: corev1.ServiceSpec{Selector: map[string]string{"app": "other"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("detect live service health: %v", err)
+	}
+	if len(findings) != 1 || findings[0].PrimaryResource.Name != target {
+		t.Fatalf("expected only the objective-specific service finding, got %#v", findings)
+	}
+}
+
+func TestDetectRejectsTotalNetworkIsolationWithoutBenchmarkVerdict(t *testing.T) {
+	if len(requiredWorkloadLabels) == 0 {
+		t.Skip("objective has no source-backed workload labels")
+	}
+	findings, err := (Detector{}).Detect(context.Background(), sdktest.Snapshot{
+		NamespaceName: "demo",
+		NetworkPolicyList: []networkingv1.NetworkPolicy{{
+			ObjectMeta: metav1.ObjectMeta{Name: "deny-all-payment", Namespace: "demo"},
+			Spec: networkingv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{MatchLabels: requiredWorkloadLabels[0]},
+				PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+				Ingress: []networkingv1.NetworkPolicyIngressRule{},
+				Egress: []networkingv1.NetworkPolicyEgressRule{},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("detect isolated workload: %v", err)
+	}
+	if len(findings) != 1 || findings[0].RuleID != "network-policy-total-isolation" {
+		t.Fatalf("unexpected isolation findings: %#v", findings)
+	}
+}
+"""

@@ -1,0 +1,264 @@
+from __future__ import annotations
+
+import re
+import subprocess
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
+
+from app_operator.memory.models import ArtifactOwner, ValidatorNetworkPolicyCanary
+from app_operator.memory.repository import MemoryRepository, MemoryRepositoryError
+from app_operator.memory.sandbox import ContainerSandboxRunner
+
+if TYPE_CHECKING:
+    from app_operator.memory.sandbox import SandboxRunner
+
+PLACEHOLDER_RE = re.compile(r"<[A-Z][A-Z0-9_]+>")
+MARKDOWN_LINK_RE = re.compile(r"\[[^]]+\]\(([^)]+)\)")
+
+
+class MemoryValidationError(ValueError):
+    """Raised when a proposed operational-memory tree violates a trust gate."""
+
+
+class MemoryValidator:
+    def __init__(self, *, run_diagnostics: bool = True, sandbox_runner: SandboxRunner | None = None) -> None:
+        self.run_diagnostics = run_diagnostics
+        self.sandbox_runner = sandbox_runner or ContainerSandboxRunner()
+
+    def validate(
+        self,
+        app_root: Path,
+        *,
+        actor: ArtifactOwner,
+        changed_paths: list[str],
+        baseline_root: Path | None = None,
+    ) -> tuple[ValidatorNetworkPolicyCanary, ...]:
+        resolved_root = app_root.resolve()
+        normalized = [self._normalize_changed_path(path) for path in changed_paths]
+        if not normalized:
+            raise MemoryValidationError("proposal has no changed operational-memory files")
+        for path in normalized:
+            if not self._actor_owns(actor, path):
+                raise MemoryValidationError(f"{actor.value} does not own {path.as_posix()}")
+        self._reject_symlinks(resolved_root)
+
+        try:
+            repository = MemoryRepository(resolved_root)
+            if repository.is_legacy:
+                raise MemoryValidationError("legacy .sds memory is read-only")
+            repository.schema_version()
+            goal = repository.goal()
+            architecture = repository.architecture()
+            playbooks = repository.playbooks()
+            repository.diagnostics()
+            repository.outcomes()
+        except MemoryRepositoryError as exc:
+            raise MemoryValidationError(str(exc)) from exc
+        except ValueError as exc:
+            raise MemoryValidationError(f"invalid diagnostics manifest: {exc}") from exc
+
+        if not goal.body.strip():
+            raise MemoryValidationError("goal.md body must not be empty")
+        if not architecture.body.strip():
+            raise MemoryValidationError("arch.md body must not be empty")
+        if not playbooks:
+            raise MemoryValidationError("at least one playbook is required")
+        self._validate_playbooks(repository, playbooks)
+        self._validate_detector_classes(repository)
+        self._validate_detector_ownership(
+            repository,
+            actor=actor,
+            changed_paths=normalized,
+            baseline_root=baseline_root,
+        )
+        self._validate_outcomes_append_only(repository, actor=actor, baseline_root=baseline_root)
+        if self.run_diagnostics:
+            return self._run_diagnostic_checks(resolved_root)
+        return ()
+
+    @staticmethod
+    def _normalize_changed_path(raw_path: str) -> PurePosixPath:
+        path = PurePosixPath(raw_path)
+        if path.is_absolute() or ".." in path.parts or not path.parts or path.parts[0] != ".sdo":
+            raise MemoryValidationError(f"changed path must stay inside canonical .sdo memory: {raw_path}")
+        return path
+
+    @staticmethod
+    def _actor_owns(actor: ArtifactOwner, path: PurePosixPath) -> bool:
+        value = path.as_posix()
+        if actor == ArtifactOwner.HUMAN:
+            return value == ".sdo/goal.md"
+        if actor == ArtifactOwner.DEPLOYER:
+            return value == ".sdo/arch.md"
+        if actor == ArtifactOwner.UPKEEP:
+            return value in {
+                ".sdo/arch.md",
+                ".sdo/schema-version",
+                ".sdo/diagnostics/go.mod",
+                ".sdo/diagnostics/go.sum",
+            }
+        if actor == ArtifactOwner.CONTROLLER:
+            return value == ".sdo/outcomes.jsonl"
+        if actor == ArtifactOwner.HEALTH_JUDGE:
+            return value == ".sdo/diagnostics/manifest.yaml" or value.startswith(".sdo/diagnostics/detectors/health/")
+        if actor == ArtifactOwner.RESPONDER:
+            return (
+                value.startswith((".sdo/playbooks/", ".sdo/diagnostics/detectors/incidents/"))
+                or value == ".sdo/diagnostics/manifest.yaml"
+            )
+        return False
+
+    @staticmethod
+    def _reject_symlinks(app_root: Path) -> None:
+        memory_root = app_root / ".sdo"
+        if memory_root.is_symlink():
+            raise MemoryValidationError(".sdo memory root must not be a symlink")
+        if not memory_root.is_dir():
+            raise MemoryValidationError("canonical .sdo memory directory is required")
+        for path in memory_root.rglob("*"):
+            if path.is_symlink():
+                raise MemoryValidationError(f"symlink is forbidden in operational memory: {path}")
+
+    @staticmethod
+    def _validate_playbooks(repository: MemoryRepository, playbooks: list[object]) -> None:
+        playbook_root = repository.memory_root / "playbooks"
+        index_path = playbook_root / "README.md"
+        if not index_path.is_file():
+            raise MemoryValidationError("playbook index .sdo/playbooks/README.md is required")
+        index = index_path.read_text(encoding="utf-8")
+        linked: set[Path] = set()
+        for raw_target in MARKDOWN_LINK_RE.findall(index):
+            target_without_fragment = raw_target.split("#", maxsplit=1)[0].strip()
+            if not target_without_fragment or "://" in target_without_fragment:
+                continue
+            relative = PurePosixPath(target_without_fragment)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise MemoryValidationError(f"playbook index link escapes playbook root: {raw_target}")
+            target = (playbook_root / relative).resolve()
+            try:
+                target.relative_to(playbook_root.resolve())
+            except ValueError as exc:
+                raise MemoryValidationError(f"playbook index link escapes playbook root: {raw_target}") from exc
+            if target.is_dir():
+                target = target / "README.md"
+            if not target.is_file():
+                raise MemoryValidationError(f"playbook index link does not exist: {raw_target}")
+            linked.add(target)
+
+        typed_playbooks = repository.playbooks()
+        missing = [artifact.path for artifact in typed_playbooks if artifact.path not in linked]
+        if missing:
+            raise MemoryValidationError(f"playbook is missing from index: {missing[0]}")
+        for artifact in typed_playbooks:
+            if not artifact.body.strip():
+                raise MemoryValidationError(f"playbook body must not be empty: {artifact.path}")
+            if not PLACEHOLDER_RE.search(artifact.body):
+                raise MemoryValidationError(f"playbook must use a role placeholder: {artifact.path}")
+
+        for script in playbook_root.glob("*/scripts/*"):
+            if not script.is_file():
+                continue
+            if script.suffix != ".sh":
+                raise MemoryValidationError(f"playbook scripts must use the .sh extension: {script}")
+            completed = subprocess.run(
+                ["bash", "-n", str(script)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if completed.returncode != 0:
+                details = completed.stderr.strip() or "bash -n failed"
+                raise MemoryValidationError(f"invalid shell syntax in {script}: {details}")
+
+    @staticmethod
+    def _validate_detector_classes(repository: MemoryRepository) -> None:
+        manifest = repository.diagnostics()
+        for detector in manifest.detectors:
+            package = PurePosixPath(detector.package.removeprefix("./"))
+            expected_directory = "health" if detector.detector_class == "health" else "incidents"
+            expected_owner = (
+                ArtifactOwner.HEALTH_JUDGE if detector.detector_class == "health" else ArtifactOwner.RESPONDER
+            )
+            if len(package.parts) < 3 or package.parts[:2] != ("detectors", expected_directory):
+                raise MemoryValidationError(
+                    f"{detector.detector_class} detector {detector.id!r} must be under detectors/{expected_directory}"
+                )
+            if detector.owner != expected_owner:
+                raise MemoryValidationError(
+                    f"{detector.detector_class} detector {detector.id!r} must be owned by {expected_owner.value}"
+                )
+            for playbook in detector.possible_playbooks:
+                path = PurePosixPath(playbook)
+                if path.is_absolute() or ".." in path.parts or path.parts[:2] != (".sdo", "playbooks"):
+                    raise MemoryValidationError(f"detector {detector.id!r} has invalid possible playbook {playbook!r}")
+                if not (repository.app_root / path).is_file():
+                    raise MemoryValidationError(
+                        f"detector {detector.id!r} possible playbook does not exist: {playbook}"
+                    )
+
+    @staticmethod
+    def _validate_detector_ownership(
+        repository: MemoryRepository,
+        *,
+        actor: ArtifactOwner,
+        changed_paths: list[PurePosixPath],
+        baseline_root: Path | None,
+    ) -> None:
+        manifest_changed = PurePosixPath(".sdo/diagnostics/manifest.yaml") in changed_paths
+        if not manifest_changed or actor not in {ArtifactOwner.RESPONDER, ArtifactOwner.HEALTH_JUDGE}:
+            return
+        if baseline_root is None:
+            raise MemoryValidationError("agent-authored manifest edits require a baseline repository")
+        baseline = MemoryRepository(baseline_root).diagnostics()
+        candidate = repository.diagnostics()
+        if (
+            candidate.api_version != baseline.api_version
+            or candidate.kind != baseline.kind
+            or candidate.sdk_version != baseline.sdk_version
+        ):
+            raise MemoryValidationError("agents may not alter shared diagnostics manifest metadata")
+
+        protected_class = "health" if actor == ArtifactOwner.RESPONDER else "incident"
+        actor_class = "incident" if actor == ArtifactOwner.RESPONDER else "health"
+        baseline_protected = {
+            detector.id: detector for detector in baseline.detectors if detector.detector_class == protected_class
+        }
+        candidate_protected = {
+            detector.id: detector for detector in candidate.detectors if detector.detector_class == protected_class
+        }
+        if candidate_protected != baseline_protected:
+            raise MemoryValidationError(f"{actor.value} may not alter any {protected_class} detector registration")
+        baseline_ids = {detector.id for detector in baseline.detectors}
+        unauthorized_additions = [
+            detector.id
+            for detector in candidate.detectors
+            if detector.id not in baseline_ids and detector.detector_class != actor_class
+        ]
+        if unauthorized_additions:
+            raise MemoryValidationError(
+                f"{actor.value} may not add {protected_class} detector {unauthorized_additions[0]!r}"
+            )
+
+    @staticmethod
+    def _validate_outcomes_append_only(
+        repository: MemoryRepository,
+        *,
+        actor: ArtifactOwner,
+        baseline_root: Path | None,
+    ) -> None:
+        if baseline_root is None or actor != ArtifactOwner.CONTROLLER:
+            return
+        candidate = repository.memory_root / "outcomes.jsonl"
+        baseline_repository = MemoryRepository(baseline_root)
+        baseline = baseline_repository.memory_root / "outcomes.jsonl"
+        baseline_bytes = baseline.read_bytes()
+        candidate_bytes = candidate.read_bytes()
+        if not candidate_bytes.startswith(baseline_bytes) or candidate_bytes == baseline_bytes:
+            raise MemoryValidationError("outcomes.jsonl must be a non-empty append-only update")
+
+    def _run_diagnostic_checks(self, app_root: Path) -> tuple[ValidatorNetworkPolicyCanary, ...]:
+        completed = self.sandbox_runner.run(app_root)
+        if completed.returncode != 0:
+            details = completed.stderr.strip() or completed.stdout.strip() or "diagnostic checks failed"
+            raise MemoryValidationError(details)
+        return completed.network_policy_canaries

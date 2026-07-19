@@ -1,11 +1,13 @@
 agents:
-  - name: pydantic_agent
-    kickoff_command: uv run python -m sregym_agents.pydantic_agent.driver
-    kickoff_workdir: ../..
-    kickoff_env:
-      PYTHONUNBUFFERED: "1"
   - name: crucible
     kickoff_command: uv run python -m sregym_agents.crucible.driver
     kickoff_workdir: ../..
     kickoff_env:
       PYTHONUNBUFFERED: "1"
+  - name: sdo_codex
+    kickoff_command: uv run python -m app_operator.sdo_sregym.driver
+    kickoff_workdir: ../..
+    kickoff_env:
+      PYTHONUNBUFFERED: "1"
+    defer_cleanup: true
+    wait_for_natural_exit: true

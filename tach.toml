@@ -35,6 +35,14 @@ depends_on = [
     "libs.sds_core",
 ]
 
+[[modules]]
+path = "libs.sregym_lib"
+depends_on = []
+
+[[modules]]
+path = "observer.updater"
+depends_on = []
+
 # --- Layer 1: shared infrastructure ---
 
 [[modules]]
@@ -46,6 +54,37 @@ path = "app_operator.trajectory"
 depends_on = [
     "app_operator.prompts",
     "libs.agent_cli",
+]
+
+[[modules]]
+path = "app_operator.protocol"
+depends_on = []
+
+[[modules]]
+path = "app_operator.memory"
+depends_on = [
+    "app_operator.protocol",
+]
+
+[[modules]]
+path = "app_operator.lifecycle"
+depends_on = [
+    "app_operator.memory",
+]
+
+[[modules]]
+path = "app_operator.responder"
+depends_on = [
+    "app_operator.memory",
+    "app_operator.protocol",
+]
+
+[[modules]]
+path = "app_operator.sdo_sregym"
+depends_on = [
+    "app_operator.lifecycle",
+    "app_operator.memory",
+    "libs.sregym_lib",
 ]
 
 # --- Layer 2: integration modules ---
@@ -93,4 +132,5 @@ depends_on = [
     "libs.pydantic_agent",
     "libs.agent_mw",
     "libs.agent_cli",
+    "libs.sregym_lib",
 ]

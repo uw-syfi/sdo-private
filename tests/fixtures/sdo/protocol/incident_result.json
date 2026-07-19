@@ -1,0 +1,75 @@
+{
+  "schema_version": "sdo.dev/v1alpha1",
+  "incident_id": "inc-20260709-0001",
+  "status": "completed",
+  "confirmed_root_causes": [
+    {
+      "summary": "The geo Deployment referenced an absent required ConfigMap",
+      "resources": [
+        {
+          "api_version": "apps/v1",
+          "kind": "Deployment",
+          "namespace": "hotel-reservation",
+          "name": "geo"
+        },
+        {
+          "api_version": "v1",
+          "kind": "ConfigMap",
+          "namespace": "hotel-reservation",
+          "name": "geo-config"
+        }
+      ]
+    }
+  ],
+  "applied_playbooks": [
+    {
+      "path": ".sdo/playbooks/missing-configmap/README.md",
+      "parameter_bindings": {
+        "missing_config_map": {
+          "api_version": "v1",
+          "kind": "ConfigMap",
+          "namespace": "hotel-reservation",
+          "name": "geo-config"
+        },
+        "target_resource": {
+          "api_version": "apps/v1",
+          "kind": "Deployment",
+          "namespace": "hotel-reservation",
+          "name": "geo"
+        }
+      },
+      "scripts": [".sdo/playbooks/missing-configmap/scripts/verify.sh"]
+    }
+  ],
+  "repair_changes": ["deploy/kubernetes/geo-config.yaml"],
+  "final_detector_states": [
+    {
+      "detector_id": "missing-configmap",
+      "evaluated_at": "2026-07-09T18:12:30Z",
+      "status": "clear",
+      "fingerprints": []
+    }
+  ],
+  "proposed_memory_changes": [
+    ".sdo/outcomes.jsonl",
+    ".sdo/playbooks/missing-configmap/README.md"
+  ],
+  "verification_evidence": [
+    {
+      "name": "health objective",
+      "passed": true,
+      "details": "All required endpoints passed and the missing-configmap detector cleared",
+      "observed_at": "2026-07-09T18:13:00Z"
+    }
+  ],
+  "usage": {
+    "llm_calls": 1,
+    "input_tokens": 12000,
+    "output_tokens": 2200
+  },
+  "timing": {
+    "started_at": "2026-07-09T18:01:00Z",
+    "completed_at": "2026-07-09T18:13:05Z"
+  },
+  "responder_session_id": "019c-session-0001"
+}

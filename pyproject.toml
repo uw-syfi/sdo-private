@@ -38,6 +38,7 @@ test = [
 
 [project.scripts]
 operator = "app_operator.__main__:main"
+sds-observer-check = "observer.updater.check_cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -47,10 +48,17 @@ build-backend = "hatchling.build"
 prerelease = "if-necessary-or-explicit"
 
 [tool.uv.workspace]
-members = ["libs/agent_cli", "libs/sds_core", "libs/pydantic_agent", "libs/agent_mw", "libs/model_config"]
+members = [
+    "libs/agent_cli",
+    "libs/sds_core",
+    "libs/pydantic_agent",
+    "libs/agent_mw",
+    "libs/model_config",
+    "libs/sregym_lib",
+]
 
 [tool.hatch.build.targets.wheel]
-packages = ["app_operator", "libs"]
+packages = ["app_operator", "libs", "observer"]
 
 [tool.ruff]
 line-length = 120
