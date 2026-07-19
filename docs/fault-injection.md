@@ -8,7 +8,7 @@ When evaluating the production adapter, preserve this boundary:
 
 - the benchmark may prepare a fault and expose normal Kubernetes observations;
 - SDO detectors and responders may use only those ordinary observations and repository memory;
-- submission bridges and receipts remain under `app_operator/sdo_sregym/`;
+- submission bridges and receipts remain under `benchmarks/sregym/adapter/`;
 - no hidden fault identity or judge verdict may enter lifecycle provenance, detectors, controller requests, or responder prompts.
 
 Use the benchmark's own CLI and documentation for available faults and task selection. The removed standalone Compose fault injector is not a supported repository feature.

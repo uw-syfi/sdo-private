@@ -1,80 +1,70 @@
-"""
-AST-based architectural boundary tests.
+"""Static ownership and dependency checks for production SDO and benchmarks."""
 
-These tests enforce four rules using static analysis of import statements:
-
-  Rule 1 — Façade rule: cross-package imports must go through __init__.py.
-            Code in package A must not import from app_operator.B.submodule;
-            it must import from app_operator.B directly.
-
-  Rule 2 — Private module rule: _-prefixed submodules are package-private.
-            No file outside a package's directory may import from a
-            _-prefixed submodule defined within it.
-
-  Rule 3 — Public API rule: every non-trivial subpackage __init__.py must
-            declare __all__ to make its public surface explicit.
-
-  Rule 4 — Clean exports rule: __all__ must not contain _-prefixed names.
-            Private names are implementation details, not public API.
-
-Layer-ordering rules (which package may import from which) are enforced
-separately by import-linter contracts in pyproject.toml.
-
-"""
+from __future__ import annotations
 
 import ast
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Project package registry — single source of truth for all rules.
-# Maps the importable top-level name to its source directory.
-# Add a new entry here whenever a new top-level project package is introduced.
-# ---------------------------------------------------------------------------
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_REPO_ROOT = Path(__file__).parent.parent.parent
-
+# Importable project namespaces whose private modules and explicit public APIs
+# are governed here. Namespace-package parents such as ``benchmarks`` do not
+# need an ``__init__.py`` to participate.
 _PROJECT_PACKAGES: dict[str, Path] = {
-    "app_operator": _REPO_ROOT / "app_operator",
+    "sdo": _REPO_ROOT / "sdo",
+    "benchmarks": _REPO_ROOT / "benchmarks",
     "libs": _REPO_ROOT / "libs",
     "sregym_agents": _REPO_ROOT / "sregym_agents",
 }
 
-# Top-level subpackages inside app_operator (used by Rules 1 and 3).
-_APP_OPERATOR = _PROJECT_PACKAGES["app_operator"]
-_SUBPACKAGES: frozenset[str] = frozenset(
-    p.name for p in _APP_OPERATOR.iterdir() if p.is_dir() and (p / "__init__.py").exists()
+# Each entry is an independently owned package with a public __init__.py
+# facade. Imports from outside an owner must use that facade, not an internal
+# implementation module. The more-specific agent-runtime owners intentionally
+# precede their parent.
+_OWNERS: tuple[str, ...] = (
+    "sdo.agent_runtime.lifecycle",
+    "sdo.agent_runtime.responder",
+    "sdo.contracts",
+    "sdo.controller_install",
+    "sdo.operational_memory",
+    "benchmarks.sregym.adapter",
 )
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _iter_py_files(*roots: Path) -> list[Path]:
     files: list[Path] = []
     for root in roots:
-        files.extend(sorted(root.rglob("*.py")))
+        if root.exists():
+            files.extend(sorted(root.rglob("*.py")))
     return files
 
 
-def _home_package(filepath: Path) -> str | None:
-    """Return the app_operator subpackage a file belongs to, or None."""
-    try:
-        rel = filepath.relative_to(_APP_OPERATOR)
-    except ValueError:
-        return None
-    if len(rel.parts) > 1 and rel.parts[0] in _SUBPACKAGES:
-        return rel.parts[0]
+def _module_for_file(filepath: Path) -> str | None:
+    for top_level, root in _PROJECT_PACKAGES.items():
+        try:
+            relative = filepath.relative_to(root)
+        except ValueError:
+            continue
+        parts = list(relative.with_suffix("").parts)
+        if parts and parts[-1] == "__init__":
+            parts.pop()
+        return ".".join((top_level, *parts))
     return None
 
 
-def _from_imports(filepath: Path) -> list[tuple[str, int]]:
-    """Return (module_string, lineno) for every `from X import Y` in file."""
-    try:
-        tree = ast.parse(filepath.read_text(encoding="utf-8"))
-    except SyntaxError:
-        return []
-    return [(node.module, node.lineno) for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module]
+def _owner(module: str) -> str | None:
+    return next((owner for owner in _OWNERS if module == owner or module.startswith(f"{owner}.")), None)
+
+
+def _imports(filepath: Path) -> list[tuple[str, int]]:
+    tree = ast.parse(filepath.read_text(encoding="utf-8"))
+    imports: list[tuple[str, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            imports.append((node.module, node.lineno))
+        elif isinstance(node, ast.Import):
+            imports.extend((alias.name, node.lineno) for alias in node.names)
+    return imports
 
 
 def _fmt(filepath: Path, lineno: int, module: str, reason: str) -> str:
@@ -82,88 +72,39 @@ def _fmt(filepath: Path, lineno: int, module: str, reason: str) -> str:
 
 
 def _private_owner_dir(module: str) -> Path | None:
-    """
-    Return the directory that owns the first _-prefixed segment in a dotted
-    module path, or None if the module is not a project module or has no
-    private segment.
-
-    The owner is the immediate parent directory of the _-prefixed segment:
-      "libs.agent_mw._turn_logger"  →  <root>/libs/agent_mw/
-      "app_operator.memory._foo"  →  <root>/app_operator/memory/
-      "sregym_agents.crucible._bar" →  <root>/sregym_agents/crucible/
-    """
     parts = module.split(".")
     root = _PROJECT_PACKAGES.get(parts[0])
     if root is None:
         return None
-    for i, part in enumerate(parts[1:], 1):
+    for index, part in enumerate(parts[1:], 1):
         if part.startswith("_"):
-            return root.joinpath(*parts[1:i]) if i > 1 else root
+            return root.joinpath(*parts[1:index]) if index > 1 else root
     return None
 
 
-# ---------------------------------------------------------------------------
-# Rule 1: façade rule
-# ---------------------------------------------------------------------------
-
-
-def test_cross_package_imports_go_through_init():
-    """
-    From outside package X, import app_operator.X — not app_operator.X.submodule.
-    The public API lives in __init__.py; internal submodules are an impl detail.
-    """
+def test_cross_package_imports_go_through_facades() -> None:
     violations: list[str] = []
-
     for filepath in _iter_py_files(*_PROJECT_PACKAGES.values()):
-        home = _home_package(filepath)
-
-        for module, lineno in _from_imports(filepath):
-            parts = module.split(".")
-            # Only care about app_operator cross-package imports
-            if parts[0] != "app_operator" or len(parts) < 3:
+        home = _owner(_module_for_file(filepath) or "")
+        for module, lineno in _imports(filepath):
+            target = _owner(module)
+            if target is None or target == home or module == target:
                 continue
-            target_pkg = parts[1]
-            if target_pkg not in _SUBPACKAGES:
-                continue
-            # Same-package imports are always fine
-            if target_pkg == home:
-                continue
-
-            violations.append(
-                _fmt(
-                    filepath,
-                    lineno,
-                    module,
-                    f"bypass of {target_pkg}/__init__.py; use 'from app_operator.{target_pkg} import ...' instead",
-                )
-            )
-
-    assert not violations, f"{len(violations)} façade violation(s) found:\n" + "\n".join(violations)
+            violations.append(_fmt(filepath, lineno, module, f"bypasses the '{target}' facade; import from '{target}'"))
+    assert not violations, f"{len(violations)} facade violation(s) found:\n" + "\n".join(violations)
 
 
-# ---------------------------------------------------------------------------
-# Rule 2: private module rule
-# ---------------------------------------------------------------------------
-
-
-def test_no_private_submodule_imports_across_packages():
-    """
-    Modules named with a leading underscore are private to their parent directory.
-    No file outside that directory may import from them.
-    """
+def test_no_private_submodule_imports_across_packages() -> None:
     violations: list[str] = []
-
     for filepath in _iter_py_files(*_PROJECT_PACKAGES.values()):
-        for module, lineno in _from_imports(filepath):
+        for module, lineno in _imports(filepath):
             owner_dir = _private_owner_dir(module)
             if owner_dir is None:
                 continue
-
             try:
                 filepath.relative_to(owner_dir)
             except ValueError:
-                parts = module.split(".")
-                private_part = next(p for p in parts[1:] if p.startswith("_"))
+                private_part = next(part for part in module.split(".")[1:] if part.startswith("_"))
                 violations.append(
                     _fmt(
                         filepath,
@@ -172,83 +113,88 @@ def test_no_private_submodule_imports_across_packages():
                         f"'{private_part}' is private to '{owner_dir.relative_to(_REPO_ROOT)}'",
                     )
                 )
-
     assert not violations, f"{len(violations)} private-module violation(s) found:\n" + "\n".join(violations)
 
 
-# ---------------------------------------------------------------------------
-# Rule 3: __all__ declaration
-# ---------------------------------------------------------------------------
-
-_ALL_EXEMPT: frozenset[str] = frozenset(
-    {
-        # Empty __init__.py files are fine — they declare no public API
-        "app_operator/cli_agent/agents/__init__.py",
-    }
-)
-
-
-def test_subpackages_declare_all():
-    """
-    Every non-trivial subpackage __init__.py must declare __all__ so the
-    public surface is explicit and reviewable.
-    """
+def test_public_packages_declare_all() -> None:
     missing: list[str] = []
-
-    for pkg in sorted(_SUBPACKAGES):
-        init = _APP_OPERATOR / pkg / "__init__.py"
+    for package in _OWNERS:
+        top_level, *parts = package.split(".")
+        init = _PROJECT_PACKAGES[top_level].joinpath(*parts, "__init__.py")
         if not init.exists():
+            missing.append(f"  {init.relative_to(_REPO_ROOT)} (missing facade)")
             continue
-        rel_str = str(init.relative_to(_REPO_ROOT))
-        if rel_str in _ALL_EXEMPT:
-            continue
-
         source = init.read_text(encoding="utf-8").strip()
         if not source:
-            continue  # genuinely empty — no exports, no __all__ needed
-
+            continue
         tree = ast.parse(source)
-        has_all = any(
-            isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets)
-            for node in ast.walk(tree)
-        )
-        if not has_all:
-            missing.append(f"  {rel_str}")
-
-    assert not missing, "__all__ missing from subpackage __init__.py:\n" + "\n".join(missing)
-
-
-# ---------------------------------------------------------------------------
-# Rule 4: no private names in __all__
-# ---------------------------------------------------------------------------
-
-
-def test_all_does_not_export_private_names():
-    """
-    __all__ must not contain names starting with '_'.
-    Private names are implementation details and should not be part of the
-    public API surface.
-    """
-    violations: list[str] = []
-
-    for root in _PROJECT_PACKAGES.values():
-        for init in sorted(root.rglob("__init__.py")):
-            try:
-                tree = ast.parse(init.read_text(encoding="utf-8"))
-            except SyntaxError:
-                continue
-
-            for node in ast.walk(tree):
-                if not (
+        if not any(
+            isinstance(node, (ast.Assign, ast.AnnAssign))
+            and (
+                (
                     isinstance(node, ast.Assign)
-                    and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets)
-                    and isinstance(node.value, ast.List)
-                ):
-                    continue
-                violations.extend(
-                    f"  {init.relative_to(_REPO_ROOT)}:{elt.lineno}  '{elt.value}'  — private name in __all__"
-                    for elt in node.value.elts
-                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str) and elt.value.startswith("_")
+                    and any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets)
                 )
+                or (
+                    isinstance(node, ast.AnnAssign)
+                    and isinstance(node.target, ast.Name)
+                    and node.target.id == "__all__"
+                )
+            )
+            for node in ast.walk(tree)
+        ):
+            missing.append(f"  {init.relative_to(_REPO_ROOT)}")
+    assert not missing, "__all__ missing from non-empty package facade(s):\n" + "\n".join(missing)
 
-    assert not violations, f"{len(violations)} private-export violation(s) found:\n" + "\n".join(violations)
+
+def test_all_does_not_export_private_names() -> None:
+    violations: list[str] = []
+    for filepath in _iter_py_files(*_PROJECT_PACKAGES.values()):
+        if filepath.name != "__init__.py":
+            continue
+        tree = ast.parse(filepath.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign) or not any(
+                isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets
+            ):
+                continue
+            if not isinstance(node.value, (ast.List, ast.Tuple)):
+                continue
+            violations.extend(
+                f"  {filepath.relative_to(_REPO_ROOT)}:{element.lineno}  '{element.value}' — private export"
+                for element in node.value.elts
+                if isinstance(element, ast.Constant)
+                and isinstance(element.value, str)
+                and element.value.startswith("_")
+            )
+    assert not violations, f"{len(violations)} private export(s) found:\n" + "\n".join(violations)
+
+
+def test_production_sdo_does_not_import_benchmark_code() -> None:
+    forbidden = ("benchmarks", "sregym_agents", "libs.sregym_lib")
+    violations: list[str] = []
+    sdo_root = _PROJECT_PACKAGES["sdo"]
+    for filepath in _iter_py_files(sdo_root):
+        for module, lineno in _imports(filepath):
+            if any(module == prefix or module.startswith(f"{prefix}.") for prefix in forbidden):
+                violations.append(_fmt(filepath, lineno, module, "production SDO cannot depend on benchmark code"))
+    assert not violations, f"{len(violations)} production-to-benchmark import(s) found:\n" + "\n".join(violations)
+
+
+def test_operational_memory_does_not_import_agent_runtime() -> None:
+    """Operational memory is a lower layer than executable agent backends."""
+
+    violations: list[str] = []
+    root = _PROJECT_PACKAGES["sdo"] / "operational_memory"
+    for filepath in _iter_py_files(root):
+        for module, lineno in _imports(filepath):
+            if module == "sdo.agent_runtime" or module.startswith("sdo.agent_runtime."):
+                violations.append(
+                    _fmt(
+                        filepath,
+                        lineno,
+                        module,
+                        "use a structural reflector contract instead of importing an agent runtime",
+                    )
+                )
+    assert not violations, f"{len(violations)} upward operational-memory import(s) found:\n" + "\n".join(violations)

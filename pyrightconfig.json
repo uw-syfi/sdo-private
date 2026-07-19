@@ -1,5 +1,5 @@
 {
-  "include": ["app_operator", "controller", "libs", "sregym_agents"],
+  "include": ["sdo", "controller", "benchmarks", "libs", "sregym_agents"],
   "exclude": ["apps/", ".venv/", ".claude/"],
   "typeCheckingMode": "standard",
   "pythonVersion": "3.12",

@@ -72,11 +72,6 @@ agent_graph.png
 agentflow_runs/
 .sdo-runtime/
 
-# DSPy optimization artifacts
-app_operator/prompts/optimized/
-lego_agent_runs/
-!lego_agent/ui/lib/
-
 # Experiment configs and run artifacts
 e2e_config*.toml
 *_run.log

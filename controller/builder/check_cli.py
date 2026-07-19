@@ -99,7 +99,7 @@ def _build_parser() -> argparse.ArgumentParser:
     watch.add_argument(
         "--dispatcher-arg",
         action="append",
-        default=["-m", "app_operator.protocol.codex_responder"],
+        default=["-m", "sdo.agent_runtime.responder.codex"],
         help="incident responder argument; may be repeated",
     )
     watch.add_argument("--keep-workdir", action="store_true", help=argparse.SUPPRESS)
@@ -343,10 +343,10 @@ def _controller(args: argparse.Namespace) -> int:
             if exit_code != 0:
                 return exit_code
 
-        responder_args = args.responder_arg or ["-m", "app_operator.protocol.job_responder"]
+        responder_args = args.responder_arg or ["-m", "sdo.agent_runtime.responder.job"]
         broker_args = args.broker_arg or [
             "-m",
-            "app_operator.responder.broker_cli",
+            "sdo.agent_runtime.responder.broker_cli",
             "--proposal-command",
             "git diff --check HEAD --",
         ]
@@ -481,7 +481,7 @@ def _pending_controller_rollout(
         [
             sys.executable,
             "-m",
-            "app_operator.memory.rollout_cli",
+            "sdo.operational_memory.rollout_cli",
             "pending",
             "--repository",
             str(app_root),
@@ -520,7 +520,7 @@ def _persist_controller_rollout(app_root: Path, worktree_root: Path, record: dic
         [
             sys.executable,
             "-m",
-            "app_operator.memory.rollout_cli",
+            "sdo.operational_memory.rollout_cli",
             "record",
             "--repository",
             str(app_root),

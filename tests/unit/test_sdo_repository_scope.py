@@ -53,3 +53,44 @@ def test_ci_references_only_existing_repository_scripts() -> None:
     referenced = sorted(set(re.findall(r"\./(scripts/[A-Za-z0-9_./-]+\.sh)", ci)))
     missing = [relative for relative in referenced if not (REPOSITORY_ROOT / relative).is_file()]
     assert not missing, f"CI references missing scripts: {missing}"
+
+
+def test_python_implementation_uses_the_canonical_sdo_namespace() -> None:
+    legacy_package = "app" + "_operator"
+    required_packages = (
+        "sdo/agent_runtime/lifecycle",
+        "sdo/agent_runtime/responder",
+        "sdo/contracts",
+        "sdo/controller_install",
+        "sdo/operational_memory",
+    )
+
+    legacy_paths = [
+        path.relative_to(REPOSITORY_ROOT).as_posix()
+        for path in _repository_files()
+        if path.exists() and legacy_package in path.relative_to(REPOSITORY_ROOT).parts
+    ]
+
+    assert not legacy_paths, f"legacy Python package paths remain: {legacy_paths}"
+    assert all((REPOSITORY_ROOT / package).is_dir() for package in required_packages)
+
+    violations: list[str] = []
+    for path in _repository_files():
+        if not path.is_file() or path == Path(__file__).resolve():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if legacy_package in text:
+            violations.append(path.relative_to(REPOSITORY_ROOT).as_posix())
+    assert not violations, f"legacy Python package references remain: {violations}"
+
+
+def test_sregym_wrapper_uses_the_shared_benchmark_launcher() -> None:
+    wrapper = (REPOSITORY_ROOT / "scripts/run_sregym.sh").read_text(encoding="utf-8")
+
+    assert "python -m sregym_agents.run_sregym" in wrapper
+    assert not (REPOSITORY_ROOT / "scripts/run_sregym.py").exists()
+    assert not (REPOSITORY_ROOT / "sregym_agents/experiment_config.py").exists()
+    assert not (REPOSITORY_ROOT / "sregym_agents/pipeline_config.py").exists()

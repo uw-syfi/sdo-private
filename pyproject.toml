@@ -5,6 +5,7 @@ description = "Self-Defining Operator for autonomous Kubernetes operation"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "sdo-agent-cli",
     "loguru>=0.7.2",
     "tomli>=2.0.1; python_version < '3.11'",
     "jinja2>=3.1.0",
@@ -26,7 +27,7 @@ test = [
 ]
 
 [project.scripts]
-sdo = "app_operator.__main__:main"
+sdo = "sdo.__main__:main"
 sdo-detector-check = "controller.builder.check_cli:main"
 
 [build-system]
@@ -35,6 +36,9 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 prerelease = "if-necessary-or-explicit"
+
+[tool.uv.sources]
+sdo-agent-cli = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -47,11 +51,19 @@ members = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["app_operator", "libs", "controller"]
+packages = ["sdo", "controller"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/sdo",
+    "/controller",
+    "/README.md",
+    "/pyproject.toml",
+]
 
 [tool.ruff]
 line-length = 120
-exclude = ["apps/", "bench/sregym/", "exp/"]
+exclude = ["apps/", "bench/", "exp/"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -62,7 +74,7 @@ select = ["E", "F", "W", "I", "UP", "PIE", "C4", "ERA", "B", "RUF010", "RUF013",
 ignore = ["SIM117", "SIM105", "SIM108", "PT009"]
 
 [tool.coverage.run]
-source = ["app_operator", "libs"]
+source = ["sdo", "controller"]
 omit = ["*/apps/*", "*/__main__.py", "*/ui/*"]
 
 [tool.coverage.report]

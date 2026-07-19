@@ -19,15 +19,15 @@ sdo operate
 
 The main packages are:
 
-- `app_operator/lifecycle/`: source deployment, architecture capture, and health-detector bootstrap.
-- `app_operator/memory/`: the transactional commit broker, validation, worktrees, and outcome records.
-- `app_operator/protocol/` and `app_operator/responder/`: structured controller/responder requests and fresh or resumed coding-agent sessions.
-- `app_operator/runtime/`: installation of the production controller on Kubernetes.
+- `sdo/agent_runtime/lifecycle/`: source deployment, architecture capture, and health-detector bootstrap.
+- `sdo/operational_memory/`: the transactional commit broker, validation, worktrees, and outcome records.
+- `sdo/contracts/` and `sdo/agent_runtime/responder/`: structured controller/responder requests and fresh or resumed coding-agent sessions.
+- `sdo/controller_install/`: installation of the production controller on Kubernetes.
 - `controller/sdk/`: the public Go detector API.
 - `controller/core/`: detector execution and snapshot validation.
 - `controller/runtime/`: scheduling, finding persistence, batching, responder dispatch, and durable controller state.
 - `controller/builder/`: validation and generation of an application-specific controller from `.sdo/diagnostics`.
-- `sregym_agents/`, `bench/sregym/`, and `app_operator/sdo_sregym/`: benchmark agents, harnesses, and the adapter to the production runtime.
+- `sregym_agents/`, `bench/sregym/`, and `benchmarks/sregym/adapter/`: benchmark agents, harnesses, and the adapter to the production runtime.
 
 Production packages must not depend on benchmark packages.
 

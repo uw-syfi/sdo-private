@@ -399,6 +399,9 @@ def config_to_main_args(
         str(exp_dir),
     ]
 
+    if config.env.judge_model_id:
+        args.extend(["--judge-model", config.env.judge_model_id])
+
     if config.app_filter:
         args.extend(["--app-filter", config.app_filter])
     if config.deploy_from_source:

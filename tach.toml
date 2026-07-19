@@ -44,58 +44,60 @@ path = "controller.builder"
 depends_on = []
 
 [[modules]]
-path = "app_operator.protocol"
+path = "sdo.contracts"
 depends_on = []
 
 [[modules]]
-path = "app_operator.memory"
+path = "sdo.operational_memory"
 depends_on = [
-    "app_operator.protocol",
+    "sdo.contracts",
 ]
 
 [[modules]]
-path = "app_operator.lifecycle"
+path = "sdo.agent_runtime.lifecycle"
 depends_on = [
-    "app_operator.memory",
+    "libs.agent_cli",
+    "sdo.operational_memory",
 ]
 
 [[modules]]
-path = "app_operator.runtime"
+path = "sdo.controller_install"
 depends_on = [
-    "app_operator.memory",
-    "app_operator.protocol",
+    "sdo.operational_memory",
+    "sdo.contracts",
 ]
 
 [[modules]]
-path = "app_operator.responder"
+path = "sdo.agent_runtime.responder"
 depends_on = [
-    "app_operator.memory",
-    "app_operator.protocol",
+    "libs.agent_cli",
+    "sdo.operational_memory",
+    "sdo.contracts",
 ]
 
 [[modules]]
-path = "app_operator.sdo_sregym"
+path = "benchmarks.sregym.adapter"
 depends_on = [
-    "app_operator.lifecycle",
-    "app_operator.memory",
-    "app_operator.runtime",
+    "sdo.agent_runtime.lifecycle",
+    "sdo.operational_memory",
+    "sdo.controller_install",
     "libs.sregym_lib",
 ]
 
 [[modules]]
-path = "app_operator.operation"
+path = "sdo.operation"
 depends_on = [
-    "app_operator.lifecycle",
-    "app_operator.runtime",
+    "sdo.agent_runtime.lifecycle",
+    "sdo.controller_install",
 ]
 
 [[modules]]
-path = "app_operator.__main__"
+path = "sdo.__main__"
 depends_on = [
-    "app_operator.operation",
+    "sdo.operation",
 ]
 
-# --- sregym_agents (independent of app_operator) ---
+# --- sregym_agents (independent of production sdo) ---
 
 [[modules]]
 path = "sregym_agents"

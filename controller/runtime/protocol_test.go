@@ -47,7 +47,7 @@ func TestSurfacedPlaybookOmitsAbsentBindingsForPythonProtocolDefault(t *testing.
 
 func roundTripGoldenFixture(t *testing.T, name string, target any) map[string]any {
 	t.Helper()
-	path := filepath.Join("..", "..", "tests", "fixtures", "sdo", "protocol", name)
+	path := filepath.Join("..", "..", "tests", "fixtures", "sdo", "contracts", name)
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read golden fixture: %v", err)

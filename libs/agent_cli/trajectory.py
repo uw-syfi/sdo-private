@@ -1,9 +1,8 @@
 """Trajectory protocol and null implementation for the agent_cli library.
 
-This module provides the protocol interface and no-op implementation that
-standalone library code can use without depending on app_operator.
-
-The full TrajectoryRecorder implementation lives in app_operator/trajectory.py.
+This module provides the protocol interface, no-op implementation, and
+optional correlation hooks that standalone library code can use without
+depending on a concrete trajectory recorder.
 """
 
 from __future__ import annotations
@@ -149,9 +148,8 @@ def register_context_providers(
 ) -> None:
     """Register live context providers for trajectory correlation.
 
-    Called by app_operator.trajectory at import time to wire in the real
-    thread-local implementations. Standalone consumers get None from the
-    default def stubs, which is correct outside of app_operator.
+    A consumer with an active trajectory recorder may supply its own context
+    functions. Standalone consumers get ``None`` from the defaults.
     """
     global _call_id_provider, _run_id_provider
     _call_id_provider = call_id_fn

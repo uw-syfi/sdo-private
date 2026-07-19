@@ -483,9 +483,8 @@ done
     argv = controller_log.read_text(encoding="utf-8")
     assert "--dispatcher-mode job" in argv
     assert (
-        f"--dispatcher {os.sys.executable} --dispatcher-arg -m --dispatcher-arg app_operator.protocol.job_responder"
-        in argv
+        f"--dispatcher {os.sys.executable} --dispatcher-arg -m --dispatcher-arg sdo.agent_runtime.responder.job" in argv
     )
-    assert f"--broker {os.sys.executable} --broker-arg -m --broker-arg app_operator.responder.broker_cli" in argv
+    assert f"--broker {os.sys.executable} --broker-arg -m --broker-arg sdo.agent_runtime.responder.broker_cli" in argv
     assert f"--app-root {app_root}" in argv
     assert f"--broker-worktree-root {tmp_path / 'workspace' / 'worktrees'}" in argv

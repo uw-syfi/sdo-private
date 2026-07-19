@@ -108,6 +108,15 @@ def test_config_to_main_args_no_problem_spec_when_empty(tmp_path: Path) -> None:
     assert "--problem-spec" not in args
 
 
+def test_config_to_main_args_emits_explicit_judge_model(tmp_path: Path) -> None:
+    config = ExperimentConfig(env=RunnerEnv(judge_model_id="vertex-ai-gemini-2.5-pro"))
+
+    args = config_to_main_args(config, exp_dir=tmp_path, tasklist_path=None)
+
+    index = args.index("--judge-model")
+    assert args[index + 1] == "vertex-ai-gemini-2.5-pro"
+
+
 def test_config_to_main_args_does_not_emit_crucible_summary_flags(tmp_path: Path) -> None:
     config = ExperimentConfig(
         agent="crucible",

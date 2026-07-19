@@ -4,10 +4,10 @@ SDO autonomously deploys and operates applications using source-grounded agents,
 
 ## Projects
 
-- [`app_operator/`](app_operator/AGENTS.md) — lifecycle, operational memory, responder protocol, and Kubernetes runtime
+- [`sdo/`](sdo/AGENTS.md) — Python agent runtime, operational memory, contracts, and controller installation
 - `controller/` — detector SDK, execution core, long-running runtime, and controller builder
 - [`sregym_agents/`](sregym_agents/AGENTS.md) — SRE Gym benchmark agents
-- `app_operator/sdo_sregym/`, `bench/sregym/`, `libs/sregym_lib/` — benchmark-only adapters and harnesses
+- `benchmarks/sregym/adapter/`, `bench/sregym/`, `libs/sregym_lib/` — benchmark-only adapters and harnesses
 - `libs/` — shared agent and model libraries; `sdo_core` contains neutral runtime helpers
 - `apps/` — source-deployment evaluation applications
 - `tests/` — unit and integration tests
@@ -21,7 +21,7 @@ Production code must not import from SRE Gym packages. Benchmark adapters may im
 - Use Python type hints, `autopep8`, `ruff`, and `pytest`.
 - Prefer dataclasses or Pydantic models over repeated raw mapping shapes.
 - Validate configuration in `__post_init__` with `TypeError` or `ValueError`.
-- Keep exceptions in the `app_operator/exceptions.py` hierarchy where applicable.
+- Keep exceptions next to the owning SDO subsystem and preserve actionable context.
 - Delete removed code instead of commenting it out.
 - Keep code already running in an async loop on that loop: use `async`/`await`, never `run_sync()`, `asyncio.run()`, or `run_until_complete()`.
 

@@ -30,18 +30,19 @@ controller outcome --> same-session reflection --> refined playbooks/detectors
 
 ## Python orchestration
 
-`app_operator/` is retained as the implementation package name, while its public product and command name are SDO.
+`sdo/` is the canonical Python package and public product namespace. It implements the paper's agent runtime,
+operational-memory boundary, message contracts, and installation of the separate Go controller.
 
 | Package | Responsibility |
 |---|---|
-| `app_operator/lifecycle/` | Source deployment, source-backed topology inventory, independent health-judge rounds, and initial memory creation or reuse |
-| `app_operator/memory/` | Typed memory contracts, isolated worktrees, validation, transactional commit brokering, and authoritative outcomes |
-| `app_operator/protocol/` | Typed controller-to-responder and closure contracts |
-| `app_operator/responder/` | Incident response sessions, broker integration, credentials, and outcome-driven reflection |
-| `app_operator/runtime/` | Kubernetes resources, repository synchronization, controller installation, and optional transport extensions |
-| `app_operator/sdo_sregym/` | Benchmark-only adapter, submission transport, and evaluation receipts |
+| `sdo/agent_runtime/lifecycle/` | Source deployment, source-backed topology inventory, independent health-judge rounds, and initial memory creation or reuse |
+| `sdo/operational_memory/` | Typed memory contracts, isolated worktrees, validation, transactional commit brokering, and authoritative outcomes |
+| `sdo/contracts/` | Typed findings, detector evaluations, and controller-to-responder incident contracts |
+| `sdo/agent_runtime/responder/` | Incident response sessions, broker integration, credentials, and outcome-driven reflection |
+| `sdo/controller_install/` | Kubernetes resources, repository synchronization, controller installation, and optional transport extensions |
+| `benchmarks/sregym/adapter/` | Benchmark-only adapter, submission transport, and evaluation receipts |
 
-Production packages may not import `app_operator.sdo_sregym`, `sregym_agents`, `libs.sregym_lib`, or benchmark code. The dependency direction is from benchmark adapters to production APIs.
+Production packages may not import `benchmarks.sregym.adapter`, `sregym_agents`, `libs.sregym_lib`, or benchmark code. The dependency direction is from benchmark adapters to production APIs.
 
 ## Controller
 
@@ -78,15 +79,16 @@ The controller batches persistent findings into an incident request. The request
 
 After independent health verification, the controller records the outcome. Selected classifications may resume the same responder session for reflection. Reflection proposals pass through the same ownership and validation boundary before controller rollout.
 
-## Runtime boundary
+## Controller-installation boundary
 
-`app_operator/runtime/` installs the production controller in Kubernetes and exposes a narrow extension protocol for transports. The base runtime owns controller resources and repository synchronization. The SRE Gym extension adds benchmark submission resources, readiness, receipts, and cleanup without changing controller semantics.
+`sdo/controller_install/` installs the production controller in Kubernetes and exposes a narrow extension protocol for transports. The installer owns controller resources and repository synchronization. The SRE Gym extension adds benchmark submission resources, readiness, receipts, and cleanup without changing controller semantics.
 
-The runtime code provides manifests and orchestration logic. Unit and Go integration tests validate contracts; successful operation on a particular cluster still depends on cluster access, images, credentials, storage, and the target application's deployment artifacts.
+The installation code provides manifests and orchestration logic; the always-running runtime is `controller/runtime/` in Go. Unit and Go integration tests validate contracts; successful operation on a particular cluster still depends on cluster access, images, credentials, storage, and the target application's deployment artifacts.
 
 ## Shared libraries
 
-- `libs/agent_cli/`, `libs/model_config/`, `libs/agent_mw/`, and `libs/pydantic_agent/` support SRE Gym agents where configured. Production lifecycle and responder code currently use the Codex concrete backends behind their own protocols.
+- `libs/agent_cli/` provides the production coding-agent adapter; SDO's deployer, health judge, responder, and reflection backends use its structured Codex execution while retaining subsystem-owned protocols and Pydantic validation.
+- `libs/model_config/`, `libs/agent_mw/`, and `libs/pydantic_agent/` support SRE Gym agents where configured.
 - `libs/sdo_core/` contains neutral command, filesystem, and tool helpers.
 - `libs/sregym_lib/` is benchmark-only.
 

@@ -104,7 +104,7 @@ APP_ROOT="${application}" REAL_LIFECYCLE="${real_lifecycle}" uv run python - <<'
 import os
 from pathlib import Path
 
-from app_operator.lifecycle import ensure_operational_memory, run_initial_lifecycle
+from sdo.agent_runtime.lifecycle import ensure_operational_memory, run_initial_lifecycle
 
 root = Path(os.environ["APP_ROOT"])
 objective = "The smoke-api Deployment is available and its Service has a ready endpoint."
@@ -255,7 +255,7 @@ uv run python - <<'PY' &
 import os
 from pathlib import Path
 
-from app_operator.sdo_sregym.runtime import RuntimeConfig, run_production_runtime
+from benchmarks.sregym.adapter.runtime import RuntimeConfig, run_production_runtime
 
 run_production_runtime(
     RuntimeConfig(

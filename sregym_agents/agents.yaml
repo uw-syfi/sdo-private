@@ -5,7 +5,7 @@ agents:
     kickoff_env:
       PYTHONUNBUFFERED: "1"
   - name: sdo_codex
-    kickoff_command: uv run python -m app_operator.sdo_sregym.driver
+    kickoff_command: uv run python -m benchmarks.sregym.adapter.driver
     kickoff_workdir: ../..
     kickoff_env:
       PYTHONUNBUFFERED: "1"

@@ -11,10 +11,11 @@ Produce evidence-backed, numbered issue proposals. Do not file issues or change 
 
 Unless narrowed by the user, review:
 
-- `app_operator/lifecycle`, `memory`, `protocol`, `responder`, and `runtime` as production orchestration;
+- `sdo/agent_runtime/lifecycle`, `sdo/agent_runtime/responder`, `sdo/operational_memory`, `sdo/contracts`, and
+  `sdo/controller_install` as production orchestration;
 - `controller/sdk`, `core`, `runtime`, and `builder` as the production controller;
 - retained shared libraries under `libs/`;
-- `app_operator/sdo_sregym`, `sregym_agents`, `libs/sregym_lib`, and `bench/sregym` as benchmark-only code;
+- `benchmarks/sregym/adapter`, `sregym_agents`, `libs/sregym_lib`, and `bench/sregym` as benchmark-only code;
 - relevant tests, scripts, configuration, and documentation.
 
 Treat `apps/` as evaluation input unless the user requests an application review. Check that production modules do not import benchmark code and that removed bounded-operator concepts have not reappeared.

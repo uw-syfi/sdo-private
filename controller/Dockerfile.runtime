@@ -22,6 +22,7 @@ RUN apt-get update \
 RUN npm install --global "@openai/codex@${CODEX_VERSION}" \
     && npm cache clean --force
 RUN python3 -m pip install --break-system-packages --no-cache-dir \
+      loguru==0.7.3 \
       pydantic==2.12.5 \
       pyyaml==6.0.3
 ENV PATH="/usr/local/go/bin:${PATH}" \
@@ -37,12 +38,18 @@ COPY --from=go-runtime /usr/local/go /usr/local/go
 COPY --from=go-runtime /go/pkg/mod /go/pkg/mod
 COPY --from=go-runtime /opt/sdo/controller /opt/sdo/controller
 COPY --from=kubectl /bin/kubectl /usr/local/bin/kubectl
-COPY app_operator /opt/sdo/app_operator
-RUN chmod -R a+rX /opt/sdo/controller /opt/sdo/app_operator
+COPY sdo /opt/sdo/sdo
+COPY libs/__init__.py /opt/sdo/libs/__init__.py
+COPY libs/agent_cli /opt/sdo/libs/agent_cli
+RUN chmod -R a+rX /opt/sdo/controller /opt/sdo/sdo /opt/sdo/libs
 WORKDIR /opt/sdo
 
 FROM runtime AS controller
 CMD ["python3", "-m", "controller.builder.check_cli", "controller", "--help"]
 
 FROM runtime AS responder
-CMD ["python3", "-m", "app_operator.protocol.job_responder"]
+CMD ["python3", "-m", "sdo.agent_runtime.responder.job"]
+
+FROM responder AS sregym-responder
+COPY benchmarks /opt/sdo/benchmarks
+RUN chmod -R a+rX /opt/sdo/benchmarks
