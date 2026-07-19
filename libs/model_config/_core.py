@@ -25,7 +25,6 @@ _ALIAS_TO_CANONICAL: dict[str, str] = {
     "claude-code": "anthropic",
     # Gemini (Google AI Studio)
     "gemini": "gemini",
-    "rlm": "gemini",
     # Vertex AI
     "vertex": "vertex",
 }
@@ -33,7 +32,7 @@ _ALIAS_TO_CANONICAL: dict[str, str] = {
 _CANONICAL_PROVIDERS = frozenset({"openai", "anthropic", "gemini", "vertex"})
 
 # Providers that have no canonical family and must use heuristics only
-_UNRESOLVABLE_ALIASES = frozenset({"subagent", "hybrid"})
+_UNRESOLVABLE_ALIASES = frozenset({"subagent"})
 
 # ---------------------------------------------------------------------------
 # Prefix maps for string parsing
@@ -105,7 +104,7 @@ class ModelConfig:
         """Build a ModelConfig from an SDS provider alias and bare model name.
 
         Raises:
-            ValueError: If the alias has no canonical mapping (e.g. "subagent", "hybrid").
+            ValueError: If the alias has no canonical mapping (e.g. "subagent").
         """
         alias = provider.lower()
         if alias in _UNRESOLVABLE_ALIASES:
@@ -138,7 +137,7 @@ class ModelConfig:
            ``anthropic:``, ``openai:``.
         2. Slash-prefix (litellm style): ``vertex_ai/``, ``gemini/``,
            ``anthropic/``, ``openai/``.
-        3. provider_hint: canonicalise via alias map (skipped for subagent/hybrid).
+        3. provider_hint: canonicalise via alias map (skipped for subagent).
         4. Heuristic: substring match on model name.
         5. Fallback: ``openai`` (preserves existing behaviour for unknown models).
         """
@@ -266,7 +265,7 @@ def normalize_provider(alias: str) -> str:
     """Map an SDS provider alias to its canonical family name.
 
     Returns one of: "openai", "anthropic", "gemini", "vertex".
-    Raises ValueError for unresolvable aliases ("subagent", "hybrid").
+    Raises ValueError for unresolvable aliases ("subagent").
     """
     a = alias.lower()
     if a in _UNRESOLVABLE_ALIASES:

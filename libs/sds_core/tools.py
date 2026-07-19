@@ -75,9 +75,7 @@ def _build_list_files(context: ToolContext) -> Callable[[str], dict[str, Any]]:
                 }
 
             # Use iterdir() from Path is unsafe if we want to use InMemoryFilesystem fully,
-            # but FileSystemInterface doesn't have listdir.
-            # However, app_operator/langgraph/tools.py uses target.iterdir().
-            # RealFilesystem relies on Path.iterdir().
+            # but FileSystemInterface doesn't have listdir, so RealFilesystem relies on Path.iterdir().
             def _to_relative(p: Path) -> str:
                 try:
                     return str(p.relative_to(context.repo_root))

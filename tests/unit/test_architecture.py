@@ -184,7 +184,6 @@ _ALL_EXEMPT: frozenset[str] = frozenset(
     {
         # Empty __init__.py files are fine — they declare no public API
         "app_operator/cli_agent/agents/__init__.py",
-        "app_operator/cli_agent/rlm/__init__.py",
     }
 )
 

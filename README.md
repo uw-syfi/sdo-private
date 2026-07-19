@@ -52,7 +52,7 @@ Minimal `sds.toml` for the first week:
 
 ```toml
 [agent]
-provider = "gemini"   # gemini | claude | codex | openai | rlm
+provider = "gemini"   # gemini | claude | codex | openai
 model = "gemini-1.5-pro"
 
 [runtime]

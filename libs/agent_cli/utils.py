@@ -29,7 +29,7 @@ def get_interactive_env() -> dict[str, str]:
         return os.environ.copy()
 
 
-# -- File generation system prompt (shared by RLMCodingAgent & SubagentCodingAgent) --
+# -- File generation system prompt (shared by direct/file-generation agent paths) --
 
 
 FILE_GEN_SYSTEM_PROMPT = (
@@ -60,7 +60,7 @@ def generate_and_write_files(
         raw: Raw LLM response text.
         prompt: The original prompt (used to detect expected output files).
         repo_path: Root of the repository.
-        log_label: Label for log messages (e.g. ``"[RLM]"``, ``"[Subagent]"``).
+        log_label: Label for log messages (e.g. ``"[Subagent]"``).
     """
     expected_files = re.findall(r"\.sds/[\w._-]+", prompt)
 

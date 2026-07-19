@@ -1,8 +1,7 @@
 """Shared subagent primitive for isolated LLM calls.
 
 Provides ``call_subagent()`` — a single fresh litellm call with its own
-message list.  Used by RLM (isolated recursive calls) and the
-SubagentCodingAgent (fan-out analysis calls).
+message list. Used by SubagentCodingAgent fan-out analysis calls.
 """
 
 import os
@@ -50,7 +49,7 @@ def litellm_call_with_retry(
             if any(m in str(e).lower() for m in _NETWORK_ERROR_MARKERS) and attempt < max_attempts - 1:
                 delay = 15 * (2**attempt)
                 logger.warning(
-                    f"[RLM] {label}: transient network error (attempt {attempt + 1}/{max_attempts}), "
+                    f"[Subagent] {label}: transient network error (attempt {attempt + 1}/{max_attempts}), "
                     f"retrying in {delay}s: {e}"
                 )
                 time.sleep(delay)

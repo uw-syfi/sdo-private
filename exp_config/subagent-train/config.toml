@@ -1,6 +1,5 @@
 # Subagent experiment — training set (hotelReservation + socialNetwork)
 # Provider: subagent (4 sequential context-slice analysts + root synthesis call)
-# Control: same model as rlm/hybrid to isolate the effect of the decomposition strategy.
 repeats = 3
 
 apps = [
@@ -24,6 +23,3 @@ deployment_max_iters = 5
 [deployment]
 platform = "docker"
 target = "local"
-
-[dspy]
-use_optimized = false

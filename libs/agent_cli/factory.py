@@ -5,7 +5,7 @@ from app_operator.logger import logger
 
 from .base import AGENT_REGISTRY, CodingAgent
 
-for _module_name in ("claude", "codex", "gemini", "opencode", "rlm_agent"):
+for _module_name in ("claude", "codex", "gemini", "opencode"):
     importlib.import_module(f"{__package__}.{_module_name}")
 
 
@@ -41,9 +41,6 @@ def create_agent_from_config(
         logger.info(f"Using coding agent model: {model}")
 
     provider_lower = provider.lower()
-
-    if provider_lower == "rlm":
-        return AGENT_REGISTRY["rlm"](model=model, location=config.agent.location)
 
     if provider_lower in AGENT_REGISTRY:
         return AGENT_REGISTRY[provider_lower](model=model)

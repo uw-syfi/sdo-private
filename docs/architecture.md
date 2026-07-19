@@ -61,7 +61,7 @@ Every subpackage `__init__.py` declares `__all__` to make the public surface exp
 
 Two categories of accepted exceptions (documented in `tests/unit/test_architecture.py`):
 
-- **`prompts.*` submodules** — `deployer.py`, `deployment_context.py`, `subagent.py`, `rlm.py` each import back from `app_operator.prompts`, so re-exporting them from `prompts/__init__.py` would create a circular import. Direct submodule access is allowlisted.
+- **`prompts.*` submodules** — `deployer.py`, `deployment_context.py`, and `subagent.py` each import back from `app_operator.prompts`, so re-exporting them from `prompts/__init__.py` would create a circular import. Direct submodule access is allowlisted.
 ### How boundaries are enforced
 
 Two complementary mechanisms run in CI via `scripts/check_errors.sh`:
@@ -92,7 +92,6 @@ Supported providers and required credentials:
 | `gemini` (LangChain) | `GOOGLE_API_KEY` |
 | `claude` / `claude-code` / `anthropic` | `ANTHROPIC_API_KEY` |
 | `codex` / `opencode` / `openai` | `OPENAI_API_KEY` |
-| `rlm` | `GOOGLE_APPLICATION_CREDENTIALS` + litellm-compatible model string |
 
 Set credentials in `.env` at the project root.
 
@@ -104,7 +103,7 @@ The runtime controls how each agent call is orchestrated. It is orthogonal to th
 
 ### `cli_agent` (default)
 
-Communicates with external coding agents via their CLI interfaces. Broadest provider support: `codex`, `gemini`, `claude`, `claude-code`, `opencode`, `rlm`. No extra dependencies.
+Communicates with external coding agents via their CLI interfaces. Broadest provider support: `codex`, `gemini`, `claude`, `claude-code`, and `opencode`. No extra dependencies.
 
 ---
 
@@ -176,16 +175,6 @@ Run all apps in an experiment config in parallel.
 ```
 
 Reads `exp_config/<name>/config.toml`. After all apps complete, writes `results.json` to the log directory and prints a summary table.
-
-### `viz-graph`
-
-Visualize the agent dependency graph (LangGraph runtime only).
-
-```bash
-./sds_operator viz-graph [-o graph.png]
-```
-
----
 
 ## Experiment Workflow
 

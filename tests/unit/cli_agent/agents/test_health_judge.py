@@ -211,7 +211,7 @@ def test_assess_renders_correct_template(repo_path, health_check_script, monkeyp
 
     import app_operator.cli_agent.agents.health_judge as hj_module
 
-    monkeypatch.setattr(hj_module, "get_loader", lambda dspy_config: FakeLoader())
+    monkeypatch.setattr(hj_module, "get_loader", lambda: FakeLoader())
 
     agent = PlainStubAgent(response=HEALTHY_RESPONSE)
     judge = _make_judge(repo_path, health_check_script, agent)
@@ -378,7 +378,7 @@ def test_assess_survives_prompt_render_error(repo_path, health_check_script, mon
         def render(self, *args, **kwargs):
             raise RuntimeError("template not found")
 
-    monkeypatch.setattr(hj_module, "get_loader", lambda dspy_config: BrokenLoader())
+    monkeypatch.setattr(hj_module, "get_loader", lambda: BrokenLoader())
 
     agent = PlainStubAgent(response=HEALTHY_RESPONSE)
     judge = _make_judge(repo_path, health_check_script, agent)

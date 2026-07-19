@@ -7,7 +7,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from app_operator.commands import (
-    chat,
     classify_runs,
     init_exp,
     plot_exp,
@@ -85,10 +84,6 @@ Examples:
     run_parser = subparsers.add_parser("run", help="Run Codex-assisted deployment on a repository")
     run.add_arguments(run_parser)
 
-    # 'chat' command
-    chat_parser = subparsers.add_parser("chat", help="Start an interactive hybrid terminal chat for a repository")
-    chat.add_arguments(chat_parser)
-
     # 'init-exp' command
     init_exp_parser = subparsers.add_parser("init-exp", help="Initialize a new experiment from an existing application")
     init_exp.add_arguments(init_exp_parser)
@@ -118,8 +113,6 @@ Examples:
 
     if args.command == "run":
         return run.run_command(args)
-    if args.command == "chat":
-        return chat.run_command(args)
     if args.command == "init-exp":
         return init_exp.run_command(args)
     if args.command == "run-exp":

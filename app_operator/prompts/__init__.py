@@ -16,7 +16,6 @@ from app_operator.prompts.deployment_context import (
     analyze_repository,
     create_system_prompt,
 )
-from app_operator.prompts.rlm import render_fix_error_task_prompt
 from app_operator.prompts.subagent import (
     render_error_log_analyst_prompt,
     render_repo_analyst_prompt,
@@ -40,7 +39,6 @@ __all__ = [
     "override_loader",
     "prepare_error_context",
     "render_error_log_analyst_prompt",
-    "render_fix_error_task_prompt",
     "render_repo_analyst_prompt",
     "render_root_synthesis_prompt",
     "render_script_analyst_prompt",

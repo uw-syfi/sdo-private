@@ -1,6 +1,6 @@
 """Subagent-based coding agent for the SDS operator.
 
-Instead of a single RLM REPL loop, this agent calls four sequential subagents
+This agent calls four sequential subagents
 that each analyse a different slice of context (trajectory, error logs,
 deploy script, repository).  Their summaries are fed to a root LLM call that
 produces the final fix.
@@ -15,7 +15,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from app_operator.cli_agent._rlm_utils import _DIRECT_TEXT_RE, _FILE_GEN_RE, _FIX_ERROR_RE
+from app_operator.cli_agent._prompt_routing import _DIRECT_TEXT_RE, _FILE_GEN_RE, _FIX_ERROR_RE
 from app_operator.prompts import (
     render_error_log_analyst_prompt,
     render_repo_analyst_prompt,
@@ -35,7 +35,7 @@ class SubagentCodingAgent(CodingAgent):
     """Coding agent that fans out independent subagents for fix tasks.
 
     For file-generation and direct-text tasks the behaviour matches
-    ``RLMCodingAgent`` (single litellm call).  For fix tasks the agent:
+    a single litellm call.  For fix tasks the agent:
 
     1. Fans out 4 independent subagent calls (trajectory analyst, error log
        analyst, script analyst, repo analyst) — each receives a focused
@@ -89,7 +89,7 @@ class SubagentCodingAgent(CodingAgent):
 
         return result
 
-    # -- Direct / file-gen paths (same as RLMCodingAgent) ---------------------
+    # -- Direct / file-gen paths ---------------------------------------------
 
     def _generate_direct(self, prompt: str, token_acc: dict | None = None) -> str:
         import os

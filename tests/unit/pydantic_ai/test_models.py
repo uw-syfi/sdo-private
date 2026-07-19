@@ -47,25 +47,6 @@ def test_model_already_has_prefix():
     assert build_model_str(_config("openai", "openai:gpt-4o")) == "openai:gpt-4o"
 
 
-def test_heuristic_claude():
-    assert build_model_str(_config("hybrid", "claude-3-opus")) == "anthropic:claude-3-opus"
-
-
-def test_heuristic_gpt():
-    assert build_model_str(_config("hybrid", "gpt-4")) == "openai:gpt-4"
-
-
-def test_heuristic_gemini():
-    assert build_model_str(_config("hybrid", "gemini-pro")) == "google-gla:gemini-pro"
-
-
-def test_fallback_unknown():
-    # "hybrid" has no canonical mapping so heuristics run; "some-model" has no
-    # recognisable substring, so it falls back to openai.  The old bare-string
-    # return value was a bug — pydantic-ai cannot dispatch unqualified strings.
-    assert build_model_str(_config("hybrid", "some-model")) == "openai:some-model"
-
-
 def test_no_model_raises():
     with pytest.raises(ValueError, match="agent.model must be set"):
         build_model_str(

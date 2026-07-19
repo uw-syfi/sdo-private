@@ -109,24 +109,6 @@ class TestRecorderGuardConsistency:
         source = inspect.getsource(SubagentCodingAgent._generate_fix)
         assert 'hasattr(self.recorder, "add_assistant_message")' in source
 
-    def test_hybrid_record_token_usage_guarded(self):
-        """HybridCodingAgent guards record_token_usage with hasattr."""
-        import inspect
-
-        from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
-
-        source = inspect.getsource(HybridCodingAgent.generate)
-        assert 'hasattr(self.recorder, "record_token_usage")' in source
-
-    def test_hybrid_add_assistant_message_guarded(self):
-        """HybridCodingAgent guards add_assistant_message with hasattr."""
-        import inspect
-
-        from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
-
-        source = inspect.getsource(HybridCodingAgent._run_specialist_analysis)
-        assert 'hasattr(self.recorder, "add_assistant_message")' in source
-
     def test_partial_recorder_does_not_crash_subagent(self, tmp_path):
         """A recorder missing record_token_usage should not crash SubagentCodingAgent."""
         from app_operator.cli_agent.subagent_agent import SubagentCodingAgent
@@ -135,32 +117,6 @@ class TestRecorderGuardConsistency:
             """Recorder that lacks record_token_usage and add_assistant_message."""
 
         agent = SubagentCodingAgent(model="test-model", recorder=MinimalRecorder())  # type: ignore[arg-type]
-
-        resp = mock.MagicMock()
-        resp.choices = [mock.MagicMock()]
-        resp.choices[0].message.content = "summary"
-        usage = mock.MagicMock()
-        usage.prompt_tokens = 10
-        usage.completion_tokens = 5
-        usage.total_tokens = 15
-        resp.usage = usage
-
-        with mock.patch("litellm.completion", return_value=resp):
-            result = agent.generate(
-                "Provide fix_summary for the deployment.",
-                cwd=str(tmp_path),
-            )
-
-        assert result == "summary"
-
-    def test_partial_recorder_does_not_crash_hybrid(self, tmp_path):
-        """A recorder missing record_token_usage should not crash HybridCodingAgent."""
-        from app_operator.cli_agent.hybrid_agent import HybridCodingAgent
-
-        class MinimalRecorder:
-            """Recorder that lacks record_token_usage and add_assistant_message."""
-
-        agent = HybridCodingAgent(model="test-model", recorder=MinimalRecorder())  # type: ignore[arg-type]
 
         resp = mock.MagicMock()
         resp.choices = [mock.MagicMock()]
@@ -255,46 +211,3 @@ class TestLiteLLMClient:
 
         assert result == "ok"
         assert client._token_usage["total_tokens"] == 15
-
-    def test_rlm_coding_agent_file_gen_records_tokens(self, tmp_path):
-        """RLMCodingAgent file-gen path records tokens via LiteLLMClient."""
-        from app_operator.cli_agent.rlm_agent import RLMCodingAgent
-
-        recorder = mock.MagicMock()
-        agent = RLMCodingAgent(model="test-model", recorder=recorder)
-
-        with mock.patch("litellm.completion", return_value=self._make_response("content")):
-            agent.generate(
-                "Write .sds/deploy.sh for the deployment.",
-                cwd=str(tmp_path),
-            )
-
-        recorder.record_token_usage.assert_called()
-        call_args = recorder.record_token_usage.call_args[0][0]
-        assert call_args["total_tokens"] == 15
-
-    def test_compact_history_tokens_tracked(self):
-        """_compact_history() tokens are tracked via _llm_client, not lost."""
-        from app_operator.cli_agent.rlm.recursive_agent import RecursiveDeploymentAgent
-
-        recorder = mock.MagicMock()
-        agent = RecursiveDeploymentAgent(
-            trajectory=recorder,
-            llm_provider="test-model",
-            compaction=True,
-            model_context_tokens=10,  # tiny threshold so compaction triggers
-        )
-        agent._messages = [
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": "u1"},
-            {"role": "assistant", "content": "a1"},
-        ]
-
-        compact_resp = self._make_response("summary", prompt=20, completion=8, total=28)
-        with mock.patch("litellm.completion", return_value=compact_resp):
-            agent._compact_history()
-
-        assert agent._llm_client._token_usage["prompt_tokens"] == 20
-        recorder.record_token_usage.assert_called_with(
-            {"prompt_tokens": 20, "completion_tokens": 8, "total_tokens": 28}
-        )

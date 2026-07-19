@@ -20,7 +20,6 @@ class TestFromProviderAndModel:
             ("claude", "anthropic"),
             ("claude-code", "anthropic"),
             ("gemini", "gemini"),
-            ("rlm", "gemini"),
             ("vertex", "vertex"),
         ],
     )
@@ -40,10 +39,6 @@ class TestFromProviderAndModel:
     def test_subagent_raises(self):
         with pytest.raises(ValueError, match="no canonical family mapping"):
             from_provider_and_model("subagent", "some-model")
-
-    def test_hybrid_raises(self):
-        with pytest.raises(ValueError, match="no canonical family mapping"):
-            from_provider_and_model("hybrid", "some-model")
 
 
 class TestFromString:
@@ -130,11 +125,6 @@ class TestFromString:
     def test_provider_hint_claude_code_maps_to_anthropic(self):
         mc = from_string("claude-3.5-sonnet", provider_hint="claude-code")
         assert mc.provider == "anthropic"
-
-    def test_provider_hint_hybrid_ignored_uses_heuristic(self):
-        # "hybrid" is unresolvable, so heuristic takes over
-        mc = from_string("gemini-2.5-pro", provider_hint="hybrid")
-        assert mc.provider == "gemini"
 
     # --- passthrough of optional fields ---
 

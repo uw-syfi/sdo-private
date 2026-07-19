@@ -112,7 +112,6 @@ class AgentConfig:
     step_limit: int | None = 1000  # hard limit; soft limit = max(0, step_limit - 5)
     model_config: ModelConfig | None = None
 
-    # "rlm" is intentionally absent: RLMAgent is only reachable via backend="hybrid".
     VALID_BACKENDS = {
         "codex",
         "gemini",
@@ -122,9 +121,7 @@ class AgentConfig:
         "anthropic",
         "vertex",
         "openai",
-        "rlm",
         "subagent",
-        "hybrid",
     }
 
     def __post_init__(self):
@@ -160,7 +157,7 @@ class AgentConfig:
             return
         loc = self.model_config.location if self.model_config else None
         tb = self.model_config.thinking_budget if self.model_config else None
-        _UNRESOLVABLE = {"subagent", "hybrid"}
+        _UNRESOLVABLE = {"subagent"}
         if self.backend not in _UNRESOLVABLE:
             try:
                 self.model_config = from_provider_and_model(self.backend, value, location=loc, thinking_budget=tb)
@@ -194,7 +191,6 @@ PROVIDER_TO_LITELLM_PREFIX: dict[str, str] = {
     "codex": "openai",
     "openai": "openai",
     "opencode": "openai",
-    "rlm": "gemini",
 }
 
 
@@ -294,26 +290,11 @@ class RuntimeConfig:
 
 
 @dataclass
-class RLMConfig:
-    """Configuration for the CLI-agent RLM scaffold."""
-
-    VALID_MODES = {"compatibility", "paper_faithful"}
-
-    mode: str = "compatibility"
-
-    def __post_init__(self):
-        validate_field(self.mode, "mode", str)
-        if self.mode not in self.VALID_MODES:
-            raise ValueError(f"mode must be one of {sorted(self.VALID_MODES)}, got '{self.mode}'")
-
-
-@dataclass
 class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
     operator: OperatorConfig = field(default_factory=OperatorConfig)
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
-    rlm: RLMConfig = field(default_factory=RLMConfig)
     features: FeaturesConfig = field(default_factory=FeaturesConfig)
     fault_injection: FaultInjectionConfig = field(default_factory=FaultInjectionConfig)
 
@@ -339,7 +320,6 @@ class Config:
         operator_data = data.get("operator", {})
         deployment_data = data.get("deployment", {})
         runtime_data = data.get("runtime", {})
-        rlm_data = data.get("rlm", {})
         features_data = data.get("features", {})
         fault_injection_data = data.get("fault_injection", {})
 
@@ -357,13 +337,12 @@ class Config:
         cls._validate_operator_phase_fields(operator_data)
         cls._validate_fields(deployment_data, "deployment", DeploymentConfig)
         cls._validate_fields(runtime_data, "runtime", RuntimeConfig)
-        cls._validate_fields(rlm_data, "rlm", RLMConfig)
         cls._validate_fields(features_data, "features", FeaturesConfig)
         cls._validate_fields(fault_injection_data, "fault_injection", FaultInjectionConfig)
 
         # Build model_config from flat keys
         _raw_backend = agent_data.get("backend", "codex").lower()
-        _UNRESOLVABLE = {"subagent", "hybrid"}
+        _UNRESOLVABLE = {"subagent"}
         _agent_model_config = None
         if _raw_model:
             if _raw_backend not in _UNRESOLVABLE:
@@ -396,7 +375,6 @@ class Config:
             operator=cls._parse_operator_config(operator_data),
             deployment=DeploymentConfig(**deployment_data),
             runtime=runtime_config,
-            rlm=RLMConfig(**rlm_data),
             features=FeaturesConfig(**features_data),
             fault_injection=FaultInjectionConfig(**fault_injection_data),
         )

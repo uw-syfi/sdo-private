@@ -36,10 +36,8 @@ def create_agent_from_config(
 
     if backend in AGENT_REGISTRY:
         kwargs = {"model": model}
-        if backend in ("rlm", "subagent", "hybrid"):
+        if backend == "subagent":
             kwargs["location"] = config.agent.location
-        if backend == "hybrid":
-            kwargs["rlm_mode"] = config.rlm.mode
         return AGENT_REGISTRY[backend](**kwargs)
 
     available = sorted(AGENT_REGISTRY.keys())
