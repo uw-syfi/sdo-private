@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import subprocess
@@ -8,6 +9,7 @@ import pytest
 from controller.builder.manifest import load_manifest
 from sdo.agent_runtime.lifecycle.operational_memory import (
     LifecycleError,
+    _deployer_assessment,
     _judge_assessment,
     ensure_operational_memory,
 )
@@ -94,6 +96,19 @@ def test_global_source_backed_objective_does_not_accidentally_select_only_user_n
 
     assert plan["deployment_names"] == ["frontend", "user"]
     assert plan["service_names"] == ["frontend", "user"]
+
+
+def test_topology_rejects_yaml_documents_with_non_string_keys(tmp_path: Path) -> None:
+    repository = tmp_path / "application"
+    _initialize_application(repository)
+    manifest = repository / "deploy" / "application.yaml"
+    manifest.write_text("1: invalid\n" + manifest.read_text(encoding="utf-8"), encoding="utf-8")
+    _git(repository, "add", "deploy/application.yaml")
+    _git(repository, "commit", "-q", "-m", "add invalid mapping key")
+
+    assessment = _deployer_assessment({"repository": str(repository), "application": "example"})
+
+    assert assessment["resources"] == []
 
 
 def test_bootstrap_diagnostics_compile_and_test_in_the_detector_sandbox(tmp_path: Path) -> None:

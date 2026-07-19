@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from sdo.operational_memory.sandbox import ContainerSandboxRunner
 
@@ -33,8 +33,9 @@ def test_container_sandbox_is_networkless_readonly_limited_and_credential_free(
 
     result = runner.run(tmp_path)
 
-    command = captured["command"]
-    assert isinstance(command, list)
+    raw_command = captured["command"]
+    assert isinstance(raw_command, list)
+    command = cast("list[str]", raw_command)
     assert command[command.index("--network") : command.index("--network") + 2] == ["--network", "none"]
     assert "--read-only" in command
     assert "--cap-drop" in command

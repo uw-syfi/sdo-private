@@ -1,26 +1,37 @@
+# pyright: reportPrivateUsage=false
 import json
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from libs.agent_cli.claude import ClaudeCodeCodingAgent, ClaudeGenerationSession
 from libs.agent_cli.cli_agent import CLICodingAgent
+from libs.agent_cli.events import AgentEventHandler
 from libs.agent_cli.mcp_config import HttpMcpServer, StdioMcpServer
-from libs.agent_cli.trajectory import NullTrajectoryRecorder
+from libs.agent_cli.trajectory import NullTrajectoryRecorder, TrajectoryRecorderProtocol
 
 
 @pytest.fixture
-def mock_binaries(monkeypatch):
+def mock_binaries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mock binary discovery and CLI check."""
+
+    def resolve_binary(cmd: str, path: str | None = None) -> str:
+        del path
+        return f"/usr/local/bin/{cmd}"
+
+    def skip_check(_agent: CLICodingAgent) -> None:
+        return None
+
     monkeypatch.setattr(
         "libs.agent_cli.cli_agent.shutil.which",
-        lambda cmd, path=None: f"/usr/local/bin/{cmd}",
+        resolve_binary,
     )
-    monkeypatch.setattr(CLICodingAgent, "_check_cli", lambda self: None)
+    monkeypatch.setattr(CLICodingAgent, "_check_cli", skip_check)
 
 
 @pytest.fixture
-def agent(mock_binaries):
+def agent(mock_binaries: None) -> ClaudeCodeCodingAgent:
     """Create a ClaudeCodeCodingAgent with mocked binaries."""
     return ClaudeCodeCodingAgent(model="test-model")
 
@@ -28,30 +39,34 @@ def agent(mock_binaries):
 class TestClaudeCodeCodingAgentInit:
     """Tests for ClaudeCodeCodingAgent initialization."""
 
-    def test_binary_name_is_claude(self, agent):
+    def test_binary_name_is_claude(self, agent: ClaudeCodeCodingAgent):
         assert agent.binary_name == "claude"
 
-    def test_binary_path_resolved(self, agent):
+    def test_binary_path_resolved(self, agent: ClaudeCodeCodingAgent):
         assert agent.binary_path == "/usr/local/bin/claude"
 
-    def test_claude_path_property(self, agent):
+    def test_claude_path_property(self, agent: ClaudeCodeCodingAgent):
         """claude_path is a backward-compatible alias for binary_path."""
         assert agent.claude_path == agent.binary_path
 
-    def test_model_stored(self, agent):
+    def test_model_stored(self, agent: ClaudeCodeCodingAgent):
         assert agent.model == "test-model"
 
-    def test_default_model_is_none(self, mock_binaries):
+    def test_default_model_is_none(self, mock_binaries: Any):
         agent = ClaudeCodeCodingAgent()
         assert agent.model is None
 
-    def test_log_prefix(self, agent):
+    def test_log_prefix(self, agent: ClaudeCodeCodingAgent):
         assert agent._log_prefix == "[Claude]"
 
-    def test_binary_not_found_raises_runtime_error(self, monkeypatch):
+    def test_binary_not_found_raises_runtime_error(self, monkeypatch: pytest.MonkeyPatch):
+        def missing_binary(cmd: str, path: str | None = None) -> None:
+            del cmd, path
+            return None
+
         monkeypatch.setattr(
             "libs.agent_cli.cli_agent.shutil.which",
-            lambda cmd, path=None: None,
+            missing_binary,
         )
         with pytest.raises(RuntimeError, match="claude binary not found"):
             ClaudeCodeCodingAgent()
@@ -60,7 +75,7 @@ class TestClaudeCodeCodingAgentInit:
 class TestClaudeCommandConstruction:
     """Tests for _get_command method."""
 
-    def test_command_includes_required_flags(self, agent):
+    def test_command_includes_required_flags(self, agent: ClaudeCodeCodingAgent):
         cmd = agent._get_command("test prompt")
         assert agent.binary_path in cmd
         assert "-p" in cmd
@@ -69,18 +84,18 @@ class TestClaudeCommandConstruction:
         assert "stream-json" in cmd
         assert "--verbose" in cmd
 
-    def test_command_includes_model_when_set(self, agent):
+    def test_command_includes_model_when_set(self, agent: ClaudeCodeCodingAgent):
         cmd = agent._get_command("test prompt")
         assert "--model" in cmd
         idx = cmd.index("--model")
         assert cmd[idx + 1] == "test-model"
 
-    def test_command_omits_model_when_none(self, mock_binaries):
+    def test_command_omits_model_when_none(self, mock_binaries: Any):
         agent = ClaudeCodeCodingAgent(model=None)
         cmd = agent._get_command("test prompt")
         assert "--model" not in cmd
 
-    def test_command_includes_prompt(self, agent):
+    def test_command_includes_prompt(self, agent: ClaudeCodeCodingAgent):
         cmd = agent._get_command("deploy the app")
         assert "deploy the app" in cmd
 
@@ -88,7 +103,11 @@ class TestClaudeCommandConstruction:
 class TestClaudeGenerationSession:
     """Tests for ClaudeGenerationSession event processing."""
 
-    def _make_session(self, event_handler=None, recorder=None):
+    def _make_session(
+        self,
+        event_handler: AgentEventHandler | None = None,
+        recorder: TrajectoryRecorderProtocol | None = None,
+    ) -> ClaudeGenerationSession:
         return ClaudeGenerationSession(
             binary_name="claude",
             env={},
@@ -162,7 +181,7 @@ class TestClaudeGenerationSession:
         session._process_stdout(line)
         handler.on_tool_call.assert_called_once_with("Read", {"path": "/tmp"})
 
-    def test_create_session_returns_claude_session(self, agent):
+    def test_create_session_returns_claude_session(self, agent: ClaudeCodeCodingAgent):
         session = agent._create_session(cmd=["claude", "-p"])
         assert isinstance(session, ClaudeGenerationSession)
 
@@ -170,19 +189,19 @@ class TestClaudeGenerationSession:
 class TestClaudeMcpConfig:
     """Tests for MCP server configuration in Claude agent."""
 
-    def test_command_omits_mcp_when_no_servers(self, agent):
+    def test_command_omits_mcp_when_no_servers(self, agent: ClaudeCodeCodingAgent):
         cmd = agent._get_command("test")
         assert "--mcp-config" not in cmd
         assert "--strict-mcp-config" not in cmd
 
-    def test_command_includes_mcp_flags_when_servers_set(self, mock_binaries):
+    def test_command_includes_mcp_flags_when_servers_set(self, mock_binaries: Any):
         servers = [HttpMcpServer(name="test", url="http://localhost:8080")]
         agent = ClaudeCodeCodingAgent(mcp_servers=servers)
         cmd = agent._get_command("test")
         assert "--mcp-config" in cmd
         assert "--strict-mcp-config" in cmd
 
-    def test_mcp_json_http_server(self, mock_binaries):
+    def test_mcp_json_http_server(self, mock_binaries: Any):
         servers = [HttpMcpServer(name="my-srv", url="http://localhost:9000/sse")]
         agent = ClaudeCodeCodingAgent(mcp_servers=servers)
         cmd = agent._get_command("test")
@@ -190,7 +209,7 @@ class TestClaudeMcpConfig:
         config = json.loads(cmd[idx + 1])
         assert config == {"mcpServers": {"my-srv": {"url": "http://localhost:9000/sse"}}}
 
-    def test_mcp_json_stdio_server(self, mock_binaries):
+    def test_mcp_json_stdio_server(self, mock_binaries: Any):
         servers = [
             StdioMcpServer(
                 name="tool",
@@ -213,7 +232,7 @@ class TestClaudeMcpConfig:
             }
         }
 
-    def test_mcp_json_stdio_server_no_env(self, mock_binaries):
+    def test_mcp_json_stdio_server_no_env(self, mock_binaries: Any):
         servers = [StdioMcpServer(name="t", command="cmd")]
         agent = ClaudeCodeCodingAgent(mcp_servers=servers)
         cmd = agent._get_command("test")
@@ -221,7 +240,7 @@ class TestClaudeMcpConfig:
         config = json.loads(cmd[idx + 1])
         assert "env" not in config["mcpServers"]["t"]
 
-    def test_mcp_json_multiple_servers(self, mock_binaries):
+    def test_mcp_json_multiple_servers(self, mock_binaries: Any):
         servers = [
             HttpMcpServer(name="http-srv", url="http://localhost:8080"),
             StdioMcpServer(name="stdio-srv", command="node", args=["server.js"]),

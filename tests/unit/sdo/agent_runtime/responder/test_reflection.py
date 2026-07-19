@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import cast
 
 from sdo.agent_runtime.responder.reflection import CodexSessionBackend
 
@@ -36,13 +37,15 @@ def test_codex_reflection_resumes_structured_session_in_incident_worktree(tmp_pa
     )
 
     assert result.summary == "captured signature"
-    command = captured["command"]
-    assert isinstance(command, list)
+    raw_command = captured["command"]
+    assert isinstance(raw_command, list)
+    command = cast("list[str]", raw_command)
     assert command[:3] == ["codex-custom", "exec", "resume"]
     assert 'sandbox_mode="danger-full-access"' in command
     assert command[-2:] == ["session-1", "-"]
-    kwargs = captured["kwargs"]
-    assert isinstance(kwargs, dict)
+    raw_kwargs = captured["kwargs"]
+    assert isinstance(raw_kwargs, dict)
+    kwargs = cast("dict[str, object]", raw_kwargs)
     assert kwargs["cwd"] == tmp_path.resolve()
     assert kwargs["timeout"] == 456
     assert str(kwargs["input"]).startswith("Idempotency key: reflection:incident:commit")

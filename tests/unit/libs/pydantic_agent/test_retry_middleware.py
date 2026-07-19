@@ -1,7 +1,9 @@
+# pyright: reportPrivateUsage=false
 """Tests for RetryMiddleware and the on_run_error hook."""
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -17,12 +19,12 @@ from libs.pydantic_agent import AgentMiddleware, BaseAgent
 # ---------------------------------------------------------------------------
 
 
-def echo(ctx, message: str) -> str:
+def echo(ctx: Any, message: str) -> str:
     return f"echo: {message}"
 
 
-def _make_agent(middleware=None, agent_name="Test Agent"):
-    class ConcreteAgent(BaseAgent):
+def _make_agent(middleware: list[AgentMiddleware] | None = None, agent_name: str = "Test Agent") -> BaseAgent[Any]:
+    class ConcreteAgent(BaseAgent[Any]):
         def __init__(self):
             super().__init__(None, agent_name=agent_name, middleware=middleware or [])
             self._agent = Agent(
@@ -168,23 +170,23 @@ class TestBeforeRunReset:
 class TestRetryIntegration:
     @pytest.mark.asyncio
     @patch("libs.pydantic_agent._base.asyncio.sleep", new_callable=AsyncMock)
-    async def test_retry_then_succeed(self, mock_sleep):
+    async def test_retry_then_succeed(self, mock_sleep: Any):
         mw = RetryMiddleware(max_retries=3, jitter=False, initial_delay=0.1)
         agent = _make_agent(middleware=[mw])
 
         call_count = 0
         original_iter = agent._agent.iter
 
-        def _patched_iter(*args, **kwargs):
+        def _patched_iter(*args: Any, **kwargs: Any) -> Any:
             nonlocal call_count
             call_count += 1
             if call_count <= 2:
                 # Return a context manager that raises on __aenter__
                 class _Failing:
-                    async def __aenter__(self):
+                    async def __aenter__(self) -> None:
                         raise _make_http_error(429)
 
-                    async def __aexit__(self, *exc):
+                    async def __aexit__(self, *exc: object) -> bool:
                         return False
 
                 return _Failing()
@@ -198,18 +200,21 @@ class TestRetryIntegration:
 
     @pytest.mark.asyncio
     @patch("libs.pydantic_agent._base.asyncio.sleep", new_callable=AsyncMock)
-    async def test_non_retryable_error_propagates(self, mock_sleep):
+    async def test_non_retryable_error_propagates(self, mock_sleep: Any):
         mw = RetryMiddleware()
         agent = _make_agent(middleware=[mw])
 
         class _AlwaysFailing:
-            async def __aenter__(self):
+            async def __aenter__(self) -> None:
                 raise ValueError("not retryable")
 
-            async def __aexit__(self, *exc):
+            async def __aexit__(self, *exc: object) -> bool:
                 return False
 
-        agent._agent.iter = lambda *a, **kw: _AlwaysFailing()
+        def always_failing(*_args: Any, **_kwargs: Any) -> Any:
+            return _AlwaysFailing()
+
+        agent._agent.iter = always_failing
 
         with pytest.raises(ValueError, match="not retryable"):
             await agent._arun("hi")
@@ -217,18 +222,21 @@ class TestRetryIntegration:
 
     @pytest.mark.asyncio
     @patch("libs.pydantic_agent._base.asyncio.sleep", new_callable=AsyncMock)
-    async def test_retries_exhausted_propagates(self, mock_sleep):
+    async def test_retries_exhausted_propagates(self, mock_sleep: Any):
         mw = RetryMiddleware(max_retries=2, jitter=False)
         agent = _make_agent(middleware=[mw])
 
         class _AlwaysFailing:
-            async def __aenter__(self):
+            async def __aenter__(self) -> None:
                 raise _make_http_error(429)
 
-            async def __aexit__(self, *exc):
+            async def __aexit__(self, *exc: object) -> bool:
                 return False
 
-        agent._agent.iter = lambda *a, **kw: _AlwaysFailing()
+        def always_failing(*_args: Any, **_kwargs: Any) -> Any:
+            return _AlwaysFailing()
+
+        agent._agent.iter = always_failing
 
         with pytest.raises(ModelHTTPError):
             await agent._arun("hi")

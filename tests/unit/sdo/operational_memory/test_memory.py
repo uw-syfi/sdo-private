@@ -4,7 +4,7 @@ import json
 import shutil
 import subprocess
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -15,7 +15,7 @@ from sdo.operational_memory.models import (
     OutcomeRecord,
     OutcomeTimestamps,
 )
-from sdo.operational_memory.repository import MemoryRepository
+from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
 from sdo.operational_memory.sandbox import KubernetesJobSandboxRunner, LocalSandboxRunner
 from sdo.operational_memory.validation import MemoryValidationError, MemoryValidator
 
@@ -181,6 +181,15 @@ def test_repository_reads_canonical_memory_and_typed_front_matter(tmp_path: Path
     assert repository.architecture().metadata.generated_at_commit == "abc123"
     assert repository.playbooks()[0].metadata.fault_class == "missing-configmap"
     assert repository.playbooks()[0].metadata.originating_commit == "seed-commit"
+
+
+def test_repository_rejects_non_string_front_matter_keys(tmp_path: Path) -> None:
+    _write_memory(tmp_path)
+    goal = tmp_path / ".sdo" / "goal.md"
+    goal.write_text(goal.read_text(encoding="utf-8").replace("schema_version: 1\n", "schema_version: 1\n1: invalid\n"))
+
+    with pytest.raises(MemoryRepositoryError, match="front matter keys must be strings"):
+        MemoryRepository(tmp_path).goal()
 
 
 def test_validator_enforces_ownership_append_only_outcomes_and_links(tmp_path: Path) -> None:
@@ -375,7 +384,7 @@ def test_kubernetes_validator_job_isolated_from_cluster_credentials_network_and_
     repository_mount = tmp_path / "workspace"
     worktree = repository_mount / "worktrees" / "incident-1"
     worktree.mkdir(parents=True)
-    created: list[dict[str, object]] = []
+    created: list[dict[str, Any]] = []
     commands: list[list[str]] = []
 
     def command_runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:

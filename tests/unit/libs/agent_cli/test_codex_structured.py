@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -45,8 +46,9 @@ def test_fresh_structured_execution_preserves_schema_session_and_options(tmp_pat
         runner=runner,
     )
 
-    command = captured["command"]
-    assert isinstance(command, list)
+    raw_command = captured["command"]
+    assert isinstance(raw_command, list)
+    command = cast("list[str]", raw_command)
     assert command[:4] == ["codex-custom", "exec", "--sandbox", "read-only"]
     assert command[command.index("--cd") + 1] == str(tmp_path.resolve())
     assert command[command.index("--model") + 1] == "gpt-test"
@@ -91,8 +93,9 @@ def test_structured_resume_uses_existing_session_cwd_and_danger_full_access(tmp_
         runner=runner,
     )
 
-    command = captured["command"]
-    assert isinstance(command, list)
+    raw_command = captured["command"]
+    assert isinstance(raw_command, list)
+    command = cast("list[str]", raw_command)
     assert command[:3] == ["codex", "exec", "resume"]
     assert 'sandbox_mode="danger-full-access"' in command
     assert "--json" in command

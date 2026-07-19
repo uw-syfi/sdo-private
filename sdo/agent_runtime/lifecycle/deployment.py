@@ -300,7 +300,7 @@ def _run_git(repository: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def _required_text(name: str, value: str) -> None:
+def _required_text(name: str, value: object) -> None:
     if not isinstance(value, str):
         raise TypeError(f"{name} must be a string")
     if not value.strip():

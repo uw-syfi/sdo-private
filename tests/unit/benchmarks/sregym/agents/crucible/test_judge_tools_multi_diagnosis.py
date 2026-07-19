@@ -8,10 +8,11 @@ enforces a candidate cap so the agent can't blow up LLM-judge cost.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 if TYPE_CHECKING:
+    from collections.abc import Coroutine
     from pathlib import Path
 
 from benchmarks.sregym.agents.crucible.tools import (
@@ -21,6 +22,8 @@ from benchmarks.sregym.agents.crucible.tools import (
     submit_verdict,
 )
 from benchmarks.sregym.agents.crucible.tools._judge_tools import MAX_DIAGNOSIS_CANDIDATES
+
+_T = TypeVar("_T")
 
 
 def _make_judge_ctx(tmp_path: Path) -> MagicMock:
@@ -124,10 +127,10 @@ class TestSubmitVerdictMultiDiagnosis:
 
 
 class TestSubmitToBenchmarkListPayload:
-    def _run(self, coro):
+    def _run(self, coro: Coroutine[object, object, _T]) -> _T:
         return asyncio.run(coro)
 
-    def _make_mock_session(self, raw_response: str):
+    def _make_mock_session(self, raw_response: str) -> AsyncMock:
         mock_result = MagicMock()
         mock_result.content = [MagicMock(text=raw_response)]
         mock_session = AsyncMock()
@@ -151,7 +154,7 @@ class TestSubmitToBenchmarkListPayload:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, result_oracle = self._run(
+            success, _msg, _result_oracle = self._run(
                 submit_to_benchmark("http://x/sse", ["cand A", "cand B"], "diagnosis")
             )
 

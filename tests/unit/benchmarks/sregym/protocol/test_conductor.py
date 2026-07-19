@@ -11,6 +11,7 @@ Its behavior must cover both prior sites:
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -126,11 +127,10 @@ class TestPollStageBackoff:
                 wait_for="diagnosis",
                 timeout=300,
             )
-        delays = [c.args[0] for c in sleep_mock.call_args_list]
-        assert delays[0] == pytest.approx(1.0)
-        assert delays[1] == pytest.approx(1.5)
-        assert delays[2] == pytest.approx(2.25)
-        assert delays[3] == pytest.approx(3.375)
+        delays = [float(c.args[0]) for c in sleep_mock.call_args_list]
+        assert all(
+            math.isclose(actual, expected) for actual, expected in zip(delays, [1.0, 1.5, 2.25, 3.375], strict=True)
+        )
 
     async def test_delay_capped_at_30s(self) -> None:
         """Backoff never exceeds 30s."""
@@ -167,8 +167,8 @@ class TestPollStageBackoff:
             )
         assert mock_uniform.called
         # Delay should be base (1.0) + jitter (0.05) = 1.05
-        first_delay = sleep_mock.call_args_list[0].args[0]
-        assert first_delay == pytest.approx(1.05)
+        first_delay = float(sleep_mock.call_args_list[0].args[0])
+        assert math.isclose(first_delay, 1.05)
 
 
 class TestPollStageTimeoutRaise:

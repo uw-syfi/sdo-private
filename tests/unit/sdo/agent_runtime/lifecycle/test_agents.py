@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import hashlib
@@ -6,6 +7,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -27,6 +29,10 @@ from sdo.agent_runtime.lifecycle.operational_memory import (
     run_initial_lifecycle,
 )
 from sdo.operational_memory.sandbox import LocalSandboxRunner, SandboxResult
+
+
+def _topology_resources(value: object) -> list[TopologyResourceDTO]:
+    return [TopologyResourceDTO.model_validate(resource) for resource in cast("list[object]", value)]
 
 
 def _git(repository: Path, *args: str) -> str:
@@ -87,9 +93,7 @@ def _artifact(
         round=round_index,
         objective_digest=hashlib.sha256(objective.encode()).hexdigest(),
         source_commit=_git(repository, "rev-parse", "HEAD"),
-        covered_resources=[
-            TopologyResourceDTO.model_validate(resource) for resource in deployer.model_dump(mode="json")["resources"]
-        ],
+        covered_resources=_topology_resources(deployer.model_dump(mode="json")["resources"]),
         failure_patterns=["unavailable Deployment", "Service without selected ready pods"],
         detector_source=_render_health_detector(plan),
         detector_test_source=_HEALTH_DETECTOR_TEST_SOURCE,
@@ -114,7 +118,7 @@ class RecordingBackend:
             session_id=f"deployer-{len(self.deployer_calls)}",
             source_commit=str(raw["source_commit"]),
             topology_fingerprint=str(raw["topology_fingerprint"]),
-            resources=[TopologyResourceDTO.model_validate(resource) for resource in raw["resources"]],
+            resources=_topology_resources(raw["resources"]),
             architecture_summary_markdown=(
                 "# Architecture\n\nThe example Deployment serves traffic through the example Service."
             ),
@@ -449,7 +453,7 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
                 session_id="deployer-session",
                 source_commit=str(raw["source_commit"]),
                 topology_fingerprint=str(raw["topology_fingerprint"]),
-                resources=[TopologyResourceDTO.model_validate(item) for item in raw["resources"]],
+                resources=_topology_resources(raw["resources"]),
                 architecture_summary_markdown="# Architecture\n\nExample Deployment and Service.",
             )
             artifact = _artifact(repository, session_id="placeholder", round_index=1, deployer=deployer)
@@ -520,7 +524,7 @@ def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_fee
                 session_id="deployer-session",
                 source_commit=str(raw["source_commit"]),
                 topology_fingerprint=str(raw["topology_fingerprint"]),
-                resources=[TopologyResourceDTO.model_validate(item) for item in raw["resources"]],
+                resources=_topology_resources(raw["resources"]),
                 architecture_summary_markdown="# Architecture\n\nExample Deployment and Service.",
             )
             artifact = _artifact(
@@ -558,7 +562,7 @@ def test_health_judge_resource_mismatch_feedback_identifies_exact_tuple(tmp_path
         session_id="deployer",
         source_commit=str(raw["source_commit"]),
         topology_fingerprint=str(raw["topology_fingerprint"]),
-        resources=[TopologyResourceDTO.model_validate(item) for item in raw["resources"]],
+        resources=_topology_resources(raw["resources"]),
         architecture_summary_markdown="# Architecture\n\nExample Deployment and Service.",
     )
     artifact = _artifact(repository, session_id="judge", round_index=1, deployer=deployer)
@@ -583,7 +587,7 @@ def test_global_health_objective_requires_every_source_backed_deployment_and_ser
         session_id="deployer",
         source_commit=str(raw["source_commit"]),
         topology_fingerprint=str(raw["topology_fingerprint"]),
-        resources=[TopologyResourceDTO.model_validate(item) for item in raw["resources"]],
+        resources=_topology_resources(raw["resources"]),
         architecture_summary_markdown="# Architecture\n\nExample Deployment and Service.",
     )
     deployer = deployer.model_copy(
@@ -660,7 +664,7 @@ def test_global_health_objective_requires_dynamic_missing_configmap_dependency_d
         session_id="deployer",
         source_commit=str(raw["source_commit"]),
         topology_fingerprint=str(raw["topology_fingerprint"]),
-        resources=[TopologyResourceDTO.model_validate(item) for item in raw["resources"]],
+        resources=_topology_resources(raw["resources"]),
         architecture_summary_markdown="# Architecture\n\nExample Deployment and Service use runtime-script.",
     )
     artifact = _artifact(repository, session_id="judge", round_index=1, deployer=deployer)

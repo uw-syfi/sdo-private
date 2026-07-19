@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from sdo.operational_memory.models import ValidatorNetworkPolicyCanary
 
@@ -298,22 +298,38 @@ class KubernetesJobSandboxRunner:
         if observed.returncode != 0:
             return ""
         try:
-            pods = json.loads(observed.stdout).get("items", [])
+            decoded = cast("object", json.loads(observed.stdout))
         except json.JSONDecodeError:
             return ""
-        for pod in pods:
-            if not isinstance(pod, dict):
+        if not isinstance(decoded, dict):
+            return ""
+        document = cast("dict[str, object]", decoded)
+        pods = document.get("items", [])
+        if not isinstance(pods, list):
+            return ""
+        for raw_pod in cast("list[object]", pods):
+            if not isinstance(raw_pod, dict):
                 continue
-            statuses = pod.get("status", {}).get("containerStatuses", [])
+            pod = cast("dict[str, object]", raw_pod)
+            raw_status = pod.get("status")
+            if not isinstance(raw_status, dict):
+                continue
+            status_document = cast("dict[str, object]", raw_status)
+            statuses = status_document.get("containerStatuses", [])
             if not isinstance(statuses, list):
                 continue
-            for status in statuses:
-                if not isinstance(status, dict):
+            for raw_container_status in cast("list[object]", statuses):
+                if not isinstance(raw_container_status, dict):
                     continue
-                terminated = status.get("state", {}).get("terminated", {})
+                container_status = cast("dict[str, object]", raw_container_status)
+                raw_state = container_status.get("state")
+                if not isinstance(raw_state, dict):
+                    continue
+                state = cast("dict[str, object]", raw_state)
+                terminated = state.get("terminated")
                 if not isinstance(terminated, dict):
                     continue
-                message = terminated.get("message")
+                message = cast("dict[str, object]", terminated).get("message")
                 if isinstance(message, str) and message.strip():
                     return message.strip()
         return ""

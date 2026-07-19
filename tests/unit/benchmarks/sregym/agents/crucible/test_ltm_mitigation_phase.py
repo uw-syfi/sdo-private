@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Tests for the LTM mitigation phase: per-strategy execution subagents,
 short-circuit, and ``search_prior_mitigations`` integration.
 
@@ -11,7 +12,7 @@ the orchestrator submits the applied mitigation directly to the benchmark.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -291,7 +292,11 @@ class TestRunMitigationPhase:
         applied_app = _application(1, "second", applied=True)
 
         results = [failed_app, applied_app]
-        mock_run_subagent = AsyncMock(side_effect=lambda **kwargs: results.pop(0))
+
+        def next_result(**_kwargs: Any) -> MitigationApplication:
+            return results.pop(0)
+
+        mock_run_subagent = AsyncMock(side_effect=next_result)
 
         verified = await _run_mitigation_phase(
             strategies=[_strategy("hit"), _strategy("second")],

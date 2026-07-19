@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
-from sdo.contracts import (  # noqa: TC001 - Pydantic resolves these annotations at runtime.
+from sdo.contracts import (
     DetectorEvaluation,
     IncidentRequest,
     IncidentResult,
@@ -62,13 +62,22 @@ class OutcomeReflector(Protocol):
     ) -> ReflectionProposal: ...
 
 
+def _noop_checkpoint(_stage: str) -> None:
+    return None
+
+
+def _require_outcome_commit(value: object) -> None:
+    if value is None:
+        raise BrokerServiceError("closure processing did not produce an outcome commit")
+
+
 class BrokerClosure(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request: IncidentRequest
     result: IncidentResult | None = None
     dispatch_error: str | None = None
-    final_detector_states: list[DetectorEvaluation] = Field(default_factory=list)
+    final_detector_states: list[DetectorEvaluation] = Field(default_factory=list[DetectorEvaluation])
     detected_at: datetime
     dispatched_at: datetime
     responder_completed_at: datetime
@@ -137,7 +146,7 @@ class BrokerLedger(BaseModel):
     reflection_started: bool = False
     reflection_backend_completed: bool = False
     reflection_summary: str | None = None
-    reflection_proposed_changes: list[str] = Field(default_factory=list)
+    reflection_proposed_changes: list[str] = Field(default_factory=list[str])
     reflection_validation_error: str | None = None
     reflection_completed: bool = False
     reflection_commit: str | None = None
@@ -145,15 +154,17 @@ class BrokerLedger(BaseModel):
     architecture_topology_fingerprint: str | None = None
     source_topology_fingerprint: str | None = None
     stale_memory_detected: bool = False
-    accepted_detector_paths: list[str] = Field(default_factory=list)
+    accepted_detector_paths: list[str] = Field(default_factory=list[str])
     controller_update_required: bool = False
     # Optional/defaulted fields are the explicit v1 migration path for ledgers
     # written before durable rollout evidence was introduced.
     controller_update_before_fingerprint: str | None = None
     controller_update_after_fingerprint: str | None = None
-    controller_update_rollouts: list[ControllerRolloutRecord] = Field(default_factory=list)
+    controller_update_rollouts: list[ControllerRolloutRecord] = Field(default_factory=list[ControllerRolloutRecord])
     validator_evidence_commit: str | None = None
-    validator_network_policy_canaries: list[ValidatorNetworkPolicyCanary] = Field(default_factory=list)
+    validator_network_policy_canaries: list[ValidatorNetworkPolicyCanary] = Field(
+        default_factory=list[ValidatorNetworkPolicyCanary]
+    )
     ack_token: str | None = None
     acknowledged: bool = False
     cleaned: bool = False
@@ -176,9 +187,9 @@ class BrokerService:
         self.broker = broker or CommitBroker(self.target_repository)
         self.responder_backend = responder_backend
         self.responder_model = responder_model
-        self.checkpoint = checkpoint or (lambda _stage: None)
+        self.checkpoint: Callable[[str], None] = checkpoint or _noop_checkpoint
         self.reflector = reflector
-        common_dir = Path(self.broker._git(self.target_repository, "rev-parse", "--git-common-dir").strip())
+        common_dir = Path(self.broker.run_git(self.target_repository, "rev-parse", "--git-common-dir").strip())
         if not common_dir.is_absolute():
             common_dir = self.target_repository / common_dir
         self.state_root = common_dir.resolve() / "sdo-broker"
@@ -248,8 +259,7 @@ class BrokerService:
                 ledger.validator_network_policy_canaries = list(outcome_commit.validator_network_policy_canaries)
                 self._save(ledger)
 
-            if ledger.outcome_commit is None:
-                raise BrokerServiceError("closure processing did not produce an outcome commit")
+            _require_outcome_commit(ledger.outcome_commit)
             ledger = self._process_reflection(closure, ledger)
             ledger = self._ensure_validator_evidence(ledger)
             ledger.ack_token = self._ack_token(ledger)
@@ -369,7 +379,7 @@ class BrokerService:
             if reflection is not None:
                 ledger.reflection_commit = reflection
                 ledger.reflection_completed = True
-                changed_paths = self.broker._git(
+                changed_paths = self.broker.run_git(
                     self.target_repository,
                     "diff-tree",
                     "--no-commit-id",
@@ -482,7 +492,7 @@ class BrokerService:
         evidence_commit = ledger.reflection_commit or ledger.outcome_commit
         if evidence_commit is None or ledger.validator_evidence_commit == evidence_commit:
             return ledger
-        changed_paths = self.broker._git(
+        changed_paths = self.broker.run_git(
             self.target_repository,
             "diff-tree",
             "--no-commit-id",
@@ -506,7 +516,7 @@ class BrokerService:
 
     def _source_topology_fingerprint(self, root: Path) -> str:
         digest = hashlib.sha256()
-        tracked = self.broker._git(root, "ls-files", "-z").split("\0")
+        tracked = self.broker.run_git(root, "ls-files", "-z").split("\0")
         for relative in sorted(path for path in tracked if path and not path.startswith(".sdo/")):
             path = root / relative
             if not path.is_file():
@@ -541,7 +551,7 @@ class BrokerService:
 
     def _diagnostics_tree_fingerprint(self, commit: str) -> str:
         try:
-            value = self.broker._git(self.target_repository, "rev-parse", f"{commit}:.sdo/diagnostics").strip()
+            value = self.broker.run_git(self.target_repository, "rev-parse", f"{commit}:.sdo/diagnostics").strip()
         except CommitBrokerError as exc:
             raise BrokerServiceError(f"commit {commit} has no diagnostics tree") from exc
         if value:
@@ -579,8 +589,8 @@ class BrokerService:
             raise BrokerServiceError("controller rollout detector transition does not match durable ledger")
 
     def _rollback_incomplete_reflection(self, worktree: Path) -> None:
-        self.broker._git(worktree, "reset", "--hard", "HEAD")
-        self.broker._git(
+        self.broker.run_git(worktree, "reset", "--hard", "HEAD")
+        self.broker.run_git(
             worktree,
             "clean",
             "-fd",

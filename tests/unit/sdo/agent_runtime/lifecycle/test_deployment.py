@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -233,7 +234,8 @@ def test_codex_backend_runs_writable_kubernetes_session_with_structured_output(t
 
     assert attempt.agent_session_id == "codex-session"
     assert attempt.source_commit == "a" * 40
-    assert captured["command"][0:4] == ["codex", "exec", "--sandbox", "danger-full-access"]
+    command = cast("list[str]", captured["command"])
+    assert command[0:4] == ["codex", "exec", "--sandbox", "danger-full-access"]
     prompt = str(captured["prompt"])
     assert "Kubernetes" in prompt
     assert "deploy/, k8s/, or manifests/" in prompt

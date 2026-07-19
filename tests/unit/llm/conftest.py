@@ -1,12 +1,13 @@
 """Fixtures for LLM tests."""
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 
 @pytest.fixture
-def mock_llm_subprocess(monkeypatch):
+def mock_llm_subprocess(monkeypatch: pytest.MonkeyPatch) -> Any:
     """Mock subprocess operations for LLM agent tests.
 
     Provides a (mock_popen, mock_which) tuple tailored for LLM stream tests.

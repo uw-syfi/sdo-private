@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Tests for the playbook-first mitigation shortcut feature.
 
 When ``enable_playbook_shortcut`` is on, the orchestrator attempts to execute a

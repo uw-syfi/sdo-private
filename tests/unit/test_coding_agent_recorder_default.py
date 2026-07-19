@@ -3,7 +3,14 @@ from libs.agent_cli.trajectory import NullTrajectoryRecorder
 
 
 class _ConcreteAgent(CodingAgent):
-    def generate(self, prompt, cwd=None, timeout=300, silent=False):
+    def generate(
+        self,
+        prompt: str,
+        cwd: str | None = None,
+        timeout: int = 300,
+        silent: bool = False,
+    ) -> str:
+        del prompt, cwd, timeout, silent
         return ""
 
 

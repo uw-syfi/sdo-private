@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Unit tests for TokenUsage / UsageCollector and BaseAgent auto-reporting."""
 
 from __future__ import annotations

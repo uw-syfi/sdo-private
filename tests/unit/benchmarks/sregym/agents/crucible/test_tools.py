@@ -8,10 +8,11 @@ import os
 import signal
 import subprocess
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 if TYPE_CHECKING:
+    from collections.abc import Coroutine
     from pathlib import Path
 
 import pytest
@@ -34,6 +35,8 @@ from benchmarks.sregym.agents.crucible.tools import (
     submit_verdict,
     write_file,
 )
+
+_T = TypeVar("_T")
 
 
 def _make_sre_ctx(tmp_path: Path, stage: str = "diagnosis") -> MagicMock:
@@ -118,7 +121,12 @@ class TestSharedFile:
 # ---------------------------------------------------------------------------
 
 
-def _mock_popen(returncode=0, stdout="", stderr="", communicate_side_effect=None):
+def _mock_popen(
+    returncode: int = 0,
+    stdout: str = "",
+    stderr: str = "",
+    communicate_side_effect: BaseException | None = None,
+) -> MagicMock:
     """Create a mock ``subprocess.Popen`` instance for ``run_bash_sync`` tests."""
     mock_proc = MagicMock()
     mock_proc.pid = 12345
@@ -336,10 +344,10 @@ class TestCheckMutatingKubectl:
 
 
 class TestSubmitToBenchmark:
-    def _run(self, coro):
+    def _run(self, coro: Coroutine[object, object, _T]) -> _T:
         return asyncio.run(coro)
 
-    def _make_mock_session(self, raw_response: str):
+    def _make_mock_session(self, raw_response: str) -> AsyncMock:
         mock_result = MagicMock()
         mock_result.content = [MagicMock(text=raw_response)]
         mock_session = AsyncMock()
@@ -374,7 +382,7 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
+            success, _msg, oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
 
         assert success is False
         assert oracle is None
@@ -404,7 +412,7 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
+            success, msg, _oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
 
         assert success is False
         assert "not valid JSON" in msg
@@ -437,7 +445,7 @@ class TestSubmitToBenchmark:
             mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_cs.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            success, msg, result_oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
+            success, _msg, result_oracle = self._run(submit_to_benchmark("http://x/sse", "answer", "diagnosis"))
 
         assert success is False
         assert result_oracle == oracle

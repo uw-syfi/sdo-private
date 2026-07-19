@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Unit tests for the LTM retrieval subagent (search_prior_incidents)."""
 
 from __future__ import annotations
@@ -262,7 +263,7 @@ def test_flag_false_injects_summary(shared_file: SharedFile, tmp_path: Path) -> 
     mock_sre._config.stage_outputs_file = None
     sre_call_kwargs: list[dict[str, Any]] = []
 
-    async def fake_sre_run(**kwargs):
+    async def fake_sre_run(**kwargs: Any):
         sre_call_kwargs.append(kwargs)
         state = SharedState()
         state.answer = "some answer"
@@ -324,7 +325,7 @@ def test_flag_true_omits_summary(shared_file: SharedFile, tmp_path: Path) -> Non
     mock_sre._config.stage_outputs_file = None
     sre_call_kwargs: list[dict[str, Any]] = []
 
-    async def fake_sre_run(**kwargs):
+    async def fake_sre_run(**kwargs: Any):
         sre_call_kwargs.append(kwargs)
         state = SharedState()
         state.answer = "some answer"

@@ -1,15 +1,8 @@
 {
-  "include": ["sdo", "controller", "benchmarks", "libs"],
-  "exclude": ["apps/", "benchmarks/sregym/analysis/", ".venv/", ".claude/"],
-  "typeCheckingMode": "standard",
+  "include": [".agents", "benchmarks", "controller", "libs", "scripts", "sdo", "tests"],
+  "exclude": [".venv/", ".claude/"],
+  "typeCheckingMode": "strict",
   "pythonVersion": "3.12",
   "venvPath": ".",
-  "venv": ".venv",
-  "reportMissingTypeStubs": false,
-  "strict": [
-    "libs",
-    "benchmarks/sregym/agents",
-    "benchmarks/sregym/protocol",
-    "benchmarks/sregym/runner"
-  ]
+  "venv": ".venv"
 }

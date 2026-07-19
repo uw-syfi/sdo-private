@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Unit tests for SoftLimitExtension middleware."""
 
 from __future__ import annotations
@@ -120,8 +121,8 @@ class TestBeforeModelReqEditMessages:
     def test_step_limit_leq_5_fires_at_step_0(self):
         ext = SoftLimitExtension(step_limit=3)
         ctx = _make_ctx(run_step=0)  # threshold = 0
-        messages = []
-        result = ext.before_model_req_edit_messages(ctx, messages)
+        messages: list[MagicMock] = []
+        result = ext.before_model_req_edit_messages(ctx, messages)  # type: ignore[arg-type]
         assert len(result) == 1
 
 

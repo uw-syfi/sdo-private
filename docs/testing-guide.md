@@ -19,6 +19,7 @@ SDO spans Python orchestration, Go controller modules, generated detector worksp
 # Format and static checks
 bash scripts/format_code.sh
 bash scripts/check_errors.sh
+uv run pyright
 
 # Python
 uv run pytest tests/unit/
@@ -32,6 +33,8 @@ uv run pytest tests/ --cov=sdo --cov=controller
 ```
 
 Use `scripts/run_tests.sh` for the repository-wide suite. Live Codex or Kubernetes tests may require explicit markers, credentials, images, a cluster, and longer timeouts; do not infer production readiness from skipped external tests.
+
+Pyright runs in strict mode across every tracked first-party Python file: production packages, benchmark integration, tests, scripts, and repository skills. A scope regression test rejects tracked Python outside the configured include roots. Application and SREGym checkouts under `apps/` and `third_party/` are external Git submodules and are validated by their owning repositories.
 
 ## Test the paper contracts
 

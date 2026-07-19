@@ -1,9 +1,10 @@
+# pyright: reportPrivateUsage=false
 """Tests for benchmarks.sregym.agents.crucible.knowledge_base."""
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
 from unittest.mock import MagicMock as _MagicMock
 
@@ -67,12 +68,12 @@ def _make_mock_driver():
 
 
 @pytest.fixture
-def mock_driver():
+def mock_driver() -> Any:
     return _make_mock_driver()
 
 
 @pytest.fixture
-def tmp_kb(tmp_path: Path, mock_driver) -> tuple[StructuredKnowledgeBase, Path, Path]:
+def tmp_kb(tmp_path: Path, mock_driver: Any) -> tuple[StructuredKnowledgeBase, Path, Path]:
     """Return (kb, kb_dir, target_dir)."""
     kb_dir = tmp_path / "kb"
     target_dir = tmp_path / "target"
@@ -120,12 +121,12 @@ class TestSanitizeAppName:
 
 
 class TestKBDirCreatedOnInit:
-    def test_kb_dir_created_on_init(self, tmp_path: Path, mock_driver):
+    def test_kb_dir_created_on_init(self, tmp_path: Path, mock_driver: Any):
         kb_dir = tmp_path / "nested" / "kb"
         StructuredKnowledgeBase(kb_dir, app_name="myapp", renderer=_renderer, driver=mock_driver)
         assert kb_dir.is_dir()
 
-    def test_app_subdir_created_on_init(self, tmp_path: Path, mock_driver):
+    def test_app_subdir_created_on_init(self, tmp_path: Path, mock_driver: Any):
         kb_dir = tmp_path / "kb"
         kb = StructuredKnowledgeBase(kb_dir, app_name="My App!", renderer=_renderer, driver=mock_driver)
         assert kb.app_dir.is_dir()
@@ -133,7 +134,7 @@ class TestKBDirCreatedOnInit:
 
 
 class TestInject:
-    async def test_inject_no_prior_files(self, tmp_kb):
+    async def test_inject_no_prior_files(self, tmp_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, _kb_dir, target_dir = tmp_kb
         result = await kb.inject(target_dir)
         assert isinstance(result, InjectedKB)
@@ -141,7 +142,7 @@ class TestInject:
         assert result.lessons is None
         assert result.architecture is None
 
-    async def test_inject_copies_existing_files(self, tmp_kb):
+    async def test_inject_copies_existing_files(self, tmp_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, kb_dir, target_dir = tmp_kb
         kb.summary_path.write_text("summary content")
         (kb_dir / KB_LESSONS_FILENAME).write_text("lessons content")
@@ -149,35 +150,41 @@ class TestInject:
         result = await kb.inject(target_dir)
 
         assert result.summary == target_dir / KB_SUMMARY_FILENAME
+        assert result.summary is not None
         assert result.summary.read_text() == "summary content"
         assert result.lessons == target_dir / KB_LESSONS_FILENAME
+        assert result.lessons is not None
         assert result.lessons.read_text() == "lessons content"
 
-    async def test_inject_partial_summary_only(self, tmp_kb):
+    async def test_inject_partial_summary_only(self, tmp_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, _kb_dir, target_dir = tmp_kb
         kb.summary_path.write_text("summary only")
 
         result = await kb.inject(target_dir)
 
         assert result.summary == target_dir / KB_SUMMARY_FILENAME
+        assert result.summary is not None
         assert result.summary.read_text() == "summary only"
         assert result.lessons is None
 
-    async def test_inject_copies_architecture_file(self, tmp_kb):
+    async def test_inject_copies_architecture_file(self, tmp_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, _kb_dir, target_dir = tmp_kb
         kb.architecture_path.write_text("arch content")
 
         result = await kb.inject(target_dir)
 
         assert result.architecture == target_dir / KB_ARCHITECTURE_FILENAME
+        assert result.architecture is not None
         assert result.architecture.read_text() == "arch content"
 
-    async def test_inject_no_architecture_file(self, tmp_kb):
+    async def test_inject_no_architecture_file(self, tmp_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, _kb_dir, target_dir = tmp_kb
         result = await kb.inject(target_dir)
         assert result.architecture is None
 
-    async def test_inject_warns_missing_architecture(self, tmp_kb, caplog):
+    async def test_inject_warns_missing_architecture(
+        self, tmp_kb: tuple[StructuredKnowledgeBase, Path, Path], caplog: pytest.LogCaptureFixture
+    ):
         kb, _kb_dir, target_dir = tmp_kb
         assert not kb.architecture_path.exists()
 
@@ -188,7 +195,7 @@ class TestInject:
 
 
 class TestSaveIncident:
-    def test_creates_file_with_content(self, tmp_kb):
+    def test_creates_file_with_content(self, tmp_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, _kb_dir, _target_dir = tmp_kb
         incident_id = kb._save_incident("incident details", "session content here")
 
@@ -196,7 +203,7 @@ class TestSaveIncident:
         assert path.exists()
         assert path.read_text() == "incident details\n\n---\n\nsession content here"
 
-    def test_returns_timestamp_id(self, tmp_kb):
+    def test_returns_timestamp_id(self, tmp_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         import re as re_mod
 
         kb, _kb_dir, _target_dir = tmp_kb
@@ -205,7 +212,7 @@ class TestSaveIncident:
 
 
 class TestInjectIncidents:
-    async def test_copies_recent_incidents(self, tmp_kb):
+    async def test_copies_recent_incidents(self, tmp_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, _kb_dir, target_dir = tmp_kb
         kb.incidents_dir.mkdir(parents=True, exist_ok=True)
         for i in range(3):
@@ -217,7 +224,7 @@ class TestInjectIncidents:
         assert dest.is_dir()
         assert len(list(dest.glob("*.md"))) == 3
 
-    async def test_limits_to_max_incidents(self, tmp_kb):
+    async def test_limits_to_max_incidents(self, tmp_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, _kb_dir, target_dir = tmp_kb
         kb.incidents_dir.mkdir(parents=True, exist_ok=True)
         for i in range(MAX_INJECTED_INCIDENTS + 5):
@@ -228,14 +235,14 @@ class TestInjectIncidents:
         dest = target_dir / KB_INCIDENTS_DIRNAME
         assert len(list(dest.glob("*.md"))) == MAX_INJECTED_INCIDENTS
 
-    async def test_no_incidents_dir(self, tmp_kb):
+    async def test_no_incidents_dir(self, tmp_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, _kb_dir, target_dir = tmp_kb
         assert not kb.incidents_dir.exists()
         # Should not crash
         await kb.inject(target_dir)
         assert not (target_dir / KB_INCIDENTS_DIRNAME).exists()
 
-    async def test_skips_incidents_when_disabled(self, tmp_path: Path, mock_driver):
+    async def test_skips_incidents_when_disabled(self, tmp_path: Path, mock_driver: Any):
         kb_dir = tmp_path / "kb"
         target_dir = tmp_path / "target"
         target_dir.mkdir()
@@ -257,13 +264,13 @@ class TestInjectIncidents:
 
 
 class TestUpdate:
-    async def test_update_skips_missing_shared_file(self, tmp_path: Path, mock_driver):
+    async def test_update_skips_missing_shared_file(self, tmp_path: Path, mock_driver: Any):
         kb = StructuredKnowledgeBase(tmp_path / "kb", app_name="test-app", renderer=_renderer, driver=mock_driver)
         # Should not raise
         await kb.update(SessionFiles(diagnosis=tmp_path / "nonexistent.md"))
         assert not kb.summary_path.exists()
 
-    async def test_update_skips_empty_content(self, tmp_path: Path, mock_driver):
+    async def test_update_skips_empty_content(self, tmp_path: Path, mock_driver: Any):
         shared = tmp_path / "shared.md"
         shared.write_text("<benchmark_result>only this</benchmark_result>")
         kb = StructuredKnowledgeBase(tmp_path / "kb", app_name="test-app", renderer=_renderer, driver=mock_driver)
@@ -272,7 +279,7 @@ class TestUpdate:
 
     @patch.object(StructuredKnowledgeBase, "_merge_into_long_term_summary", new_callable=AsyncMock)
     @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_update_full_flow(self, mock_llm, mock_merge, tmp_path: Path, mock_driver):
+    async def test_update_full_flow(self, mock_llm: Any, mock_merge: Any, tmp_path: Path, mock_driver: Any):
         shared = tmp_path / "shared.md"
         shared.write_text("real session data")
         kb = StructuredKnowledgeBase(tmp_path / "kb", app_name="test-app", renderer=_renderer, driver=mock_driver)
@@ -296,7 +303,9 @@ class TestUpdate:
 
     @patch.object(StructuredKnowledgeBase, "_merge_into_long_term_summary", new_callable=AsyncMock)
     @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_update_skips_incident_save_when_disabled(self, mock_llm, mock_merge, tmp_path: Path, mock_driver):
+    async def test_update_skips_incident_save_when_disabled(
+        self, mock_llm: Any, mock_merge: Any, tmp_path: Path, mock_driver: Any
+    ):
         shared = tmp_path / "shared.md"
         shared.write_text("real session data")
         kb = StructuredKnowledgeBase(
@@ -322,7 +331,7 @@ class TestUpdate:
         mock_merge.assert_called_once_with("session summary", "", incident_ref="")
 
     @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_distill_lessons_reads_all_app_summaries(self, mock_llm, tmp_path: Path, mock_driver):
+    async def test_distill_lessons_reads_all_app_summaries(self, mock_llm: Any, tmp_path: Path, mock_driver: Any):
         kb_dir = tmp_path / "kb"
 
         # Create multiple per-app summary files
@@ -342,7 +351,7 @@ class TestUpdate:
         assert "summary A" in prompt_arg
         assert "summary B" in prompt_arg
 
-    def test_summary_path_uses_app_subdir(self, tmp_kb):
+    def test_summary_path_uses_app_subdir(self, tmp_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, kb_dir, _target_dir = tmp_kb
         assert kb.summary_path == kb_dir / "test-app" / KB_SUMMARY_FILENAME
 
@@ -351,11 +360,11 @@ class TestUpdate:
     @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
     async def test_update_passes_grounded_recovery_reflection_to_reflector(
         self,
-        mock_llm,
-        mock_merge,
-        mock_reflector_run,
+        mock_llm: Any,
+        mock_merge: Any,
+        mock_reflector_run: Any,
         tmp_path: Path,
-        mock_driver,
+        mock_driver: Any,
     ):
         shared = tmp_path / "shared.md"
         shared.write_text("real session data")
@@ -448,7 +457,7 @@ class TestSeedKB:
         seed_kb(dest, "")
         assert not dest.exists() or not any(dest.iterdir())
 
-    def test_missing_seed_dir_warns(self, tmp_path: Path, caplog):
+    def test_missing_seed_dir_warns(self, tmp_path: Path, caplog: pytest.LogCaptureFixture):
         dest = tmp_path / "kb"
         missing = tmp_path / "does-not-exist"
         with caplog.at_level(logging.WARNING):
@@ -457,7 +466,7 @@ class TestSeedKB:
 
 
 class TestAppendOnlyInject:
-    async def test_inject_no_prior_file(self, tmp_path: Path, mock_driver):
+    async def test_inject_no_prior_file(self, tmp_path: Path, mock_driver: Any):
         kb = AppendOnlyKnowledgeBase(tmp_path / "kb", renderer=_renderer, driver=mock_driver)
         target = tmp_path / "target"
         target.mkdir()
@@ -470,7 +479,7 @@ class TestAppendOnlyInject:
         assert result.architecture is None
         assert result.incidents_dir is None
 
-    async def test_inject_copies_existing_file(self, tmp_path: Path, mock_driver):
+    async def test_inject_copies_existing_file(self, tmp_path: Path, mock_driver: Any):
         kb = AppendOnlyKnowledgeBase(tmp_path / "kb", renderer=_renderer, driver=mock_driver)
         kb.knowledge_path.write_text("prior knowledge")
         target = tmp_path / "target"
@@ -487,12 +496,12 @@ class TestAppendOnlyInject:
 
 
 class TestAppendOnlyUpdate:
-    async def test_update_skips_missing_shared_file(self, tmp_path: Path, mock_driver):
+    async def test_update_skips_missing_shared_file(self, tmp_path: Path, mock_driver: Any):
         kb = AppendOnlyKnowledgeBase(tmp_path / "kb", renderer=_renderer, driver=mock_driver)
         await kb.update(SessionFiles(diagnosis=tmp_path / "nonexistent.md"))
         assert not kb.knowledge_path.exists()
 
-    async def test_update_skips_empty_content(self, tmp_path: Path, mock_driver):
+    async def test_update_skips_empty_content(self, tmp_path: Path, mock_driver: Any):
         shared = tmp_path / "shared.md"
         shared.write_text("<benchmark_result>only this</benchmark_result>")
         kb = AppendOnlyKnowledgeBase(tmp_path / "kb", renderer=_renderer, driver=mock_driver)
@@ -500,7 +509,7 @@ class TestAppendOnlyUpdate:
         assert not kb.knowledge_path.exists()
 
     @patch.object(AppendOnlyKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_update_appends_summary(self, mock_llm, tmp_path: Path, mock_driver):
+    async def test_update_appends_summary(self, mock_llm: Any, tmp_path: Path, mock_driver: Any):
         shared = tmp_path / "shared.md"
         shared.write_text("session data")
         kb = AppendOnlyKnowledgeBase(tmp_path / "kb", renderer=_renderer, driver=mock_driver)
@@ -514,7 +523,7 @@ class TestAppendOnlyUpdate:
         assert mock_llm.call_count == 1
 
     @patch.object(AppendOnlyKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_update_appends_multiple(self, mock_llm, tmp_path: Path, mock_driver):
+    async def test_update_appends_multiple(self, mock_llm: Any, tmp_path: Path, mock_driver: Any):
         shared = tmp_path / "shared.md"
         shared.write_text("session data")
         kb = AppendOnlyKnowledgeBase(tmp_path / "kb", renderer=_renderer, driver=mock_driver)
@@ -532,19 +541,19 @@ class TestAppendOnlyUpdate:
 
 
 class TestCreateKnowledgeBase:
-    def test_structured(self, tmp_path: Path, mock_driver):
+    def test_structured(self, tmp_path: Path, mock_driver: Any):
         kb = create_knowledge_base("structured", tmp_path / "kb", renderer=_renderer, driver=mock_driver)
         assert isinstance(kb, StructuredKnowledgeBase)
 
-    def test_append_only(self, tmp_path: Path, mock_driver):
+    def test_append_only(self, tmp_path: Path, mock_driver: Any):
         kb = create_knowledge_base("append-only", tmp_path / "kb", renderer=_renderer, driver=mock_driver)
         assert isinstance(kb, AppendOnlyKnowledgeBase)
 
-    def test_invalid_raises(self, tmp_path: Path, mock_driver):
+    def test_invalid_raises(self, tmp_path: Path, mock_driver: Any):
         with pytest.raises(ValueError, match="Unknown kb_type"):
             create_knowledge_base("invalid", tmp_path / "kb", renderer=_renderer, driver=mock_driver)
 
-    def test_include_incident_files_forwarded(self, tmp_path: Path, mock_driver):
+    def test_include_incident_files_forwarded(self, tmp_path: Path, mock_driver: Any):
         cfg = CrucibleConfig(include_incident_files=False)
         kb = create_knowledge_base(
             "structured",
@@ -556,7 +565,7 @@ class TestCreateKnowledgeBase:
         assert isinstance(kb, StructuredKnowledgeBase)
         assert kb._config.include_incident_files is False
 
-    def test_include_benchmark_results_forwarded(self, tmp_path: Path, mock_driver):
+    def test_include_benchmark_results_forwarded(self, tmp_path: Path, mock_driver: Any):
         cfg = CrucibleConfig(include_benchmark_results=True)
         kb = create_knowledge_base(
             "structured",
@@ -568,7 +577,7 @@ class TestCreateKnowledgeBase:
         assert isinstance(kb, StructuredKnowledgeBase)
         assert kb._config.include_benchmark_results is True
 
-    def test_include_benchmark_results_forwarded_append_only(self, tmp_path: Path, mock_driver):
+    def test_include_benchmark_results_forwarded_append_only(self, tmp_path: Path, mock_driver: Any):
         cfg = CrucibleConfig(include_benchmark_results=True)
         kb = create_knowledge_base(
             "append-only",
@@ -585,7 +594,7 @@ class TestIncludeBenchmarkResults:
     """Tests for the include_benchmark_results toggle."""
 
     @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_structured_preserves_benchmark_when_enabled(self, mock_llm, tmp_path: Path, mock_driver):
+    async def test_structured_preserves_benchmark_when_enabled(self, mock_llm: Any, tmp_path: Path, mock_driver: Any):
         shared = tmp_path / "shared.md"
         shared.write_text("data <benchmark_result>ground truth</benchmark_result> more data")
         kb = StructuredKnowledgeBase(
@@ -604,7 +613,7 @@ class TestIncludeBenchmarkResults:
         assert "ground truth" in summarize_prompt
 
     @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_structured_strips_benchmark_when_disabled(self, mock_llm, tmp_path: Path, mock_driver):
+    async def test_structured_strips_benchmark_when_disabled(self, mock_llm: Any, tmp_path: Path, mock_driver: Any):
         shared = tmp_path / "shared.md"
         shared.write_text("data <benchmark_result>ground truth</benchmark_result> more data")
         kb = StructuredKnowledgeBase(
@@ -622,7 +631,7 @@ class TestIncludeBenchmarkResults:
         assert "ground truth" not in summarize_prompt
 
     @patch.object(AppendOnlyKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_append_only_preserves_benchmark_when_enabled(self, mock_llm, tmp_path: Path, mock_driver):
+    async def test_append_only_preserves_benchmark_when_enabled(self, mock_llm: Any, tmp_path: Path, mock_driver: Any):
         shared = tmp_path / "shared.md"
         shared.write_text("data <benchmark_result>ground truth</benchmark_result> more data")
         kb = AppendOnlyKnowledgeBase(
@@ -639,7 +648,7 @@ class TestIncludeBenchmarkResults:
         assert "ground truth" in summarize_prompt
 
     @patch.object(AppendOnlyKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_append_only_strips_benchmark_when_disabled(self, mock_llm, tmp_path: Path, mock_driver):
+    async def test_append_only_strips_benchmark_when_disabled(self, mock_llm: Any, tmp_path: Path, mock_driver: Any):
         shared = tmp_path / "shared.md"
         shared.write_text("data <benchmark_result>ground truth</benchmark_result> more data")
         kb = AppendOnlyKnowledgeBase(
@@ -654,7 +663,7 @@ class TestIncludeBenchmarkResults:
         summarize_prompt = mock_llm.call_args_list[0][0][0]
         assert "<benchmark_result>" not in summarize_prompt
 
-    async def test_structured_empty_after_strip_still_skips(self, tmp_path: Path, mock_driver):
+    async def test_structured_empty_after_strip_still_skips(self, tmp_path: Path, mock_driver: Any):
         """When include_benchmark_results=True but content is only whitespace, still skip."""
         shared = tmp_path / "shared.md"
         shared.write_text("   ")
@@ -703,7 +712,7 @@ class TestCitationValidation:
         assert strip_citation_wrappers(text) == "incidents/a.md and incidents/b.md"
 
     @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_merge_correction_loop_fixes_bad_citation(self, mock_call_llm, tmp_path: Path, mock_driver):
+    async def test_merge_correction_loop_fixes_bad_citation(self, mock_call_llm: Any, tmp_path: Path, mock_driver: Any):
         """When LLM produces invalid citation, correction loop fixes it."""
         envelope = '\n<merge_result>{"primary_action": "noop", "primary_class_name": null}</merge_result>'
         bad_output = "root cause (1 incidents, {{ref:incidents/fake_20240730.md}})" + envelope
@@ -729,7 +738,7 @@ class TestCitationValidation:
         assert mock_driver.run.call_count == 2
 
     @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_merge_no_correction_when_citations_valid(self, mock_call_llm, tmp_path: Path, mock_driver):
+    async def test_merge_no_correction_when_citations_valid(self, mock_call_llm: Any, tmp_path: Path, mock_driver: Any):
         """When LLM produces valid citations, no correction loop runs."""
         envelope = '\n<merge_result>{"primary_action": "noop", "primary_class_name": null}</merge_result>'
         good_output = "root cause (1 incidents, {{ref:incidents/20260324_010224.md}})" + envelope
@@ -750,10 +759,12 @@ class TestCitationValidation:
 
 
 class TestReflector:
-    def _make_reflector(self, tmp_path: Path, mock_driver) -> Reflector:
+    def _make_reflector(self, tmp_path: Path, mock_driver: Any) -> Reflector:
         return Reflector(tmp_path / "kb", renderer=_renderer, driver=mock_driver)
 
-    async def test_run_skips_when_no_stage_outputs(self, tmp_path: Path, caplog, mock_driver):
+    async def test_run_skips_when_no_stage_outputs(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, mock_driver: Any
+    ):
         reflector = self._make_reflector(tmp_path, mock_driver)
         with caplog.at_level(logging.INFO, logger="benchmarks.sregym.agents.crucible.knowledge_base"):
             await reflector.run(stage_outputs_file=tmp_path / "nonexistent.md")
@@ -761,7 +772,9 @@ class TestReflector:
 
     @patch.object(Reflector, "reflect", new_callable=AsyncMock)
     @patch.object(Reflector, "apply", new_callable=AsyncMock)
-    async def test_run_updates_triage_priors(self, mock_apply, mock_reflect, tmp_path: Path, mock_driver):
+    async def test_run_updates_triage_priors(
+        self, mock_apply: Any, mock_reflect: Any, tmp_path: Path, mock_driver: Any
+    ):
         classification = FailureClassification(
             outcome="failure",
             stage_failures=[
@@ -788,7 +801,9 @@ class TestReflector:
         assert call_args[0][1] == "stage output content"
 
     @patch.object(Reflector, "reflect", new_callable=AsyncMock)
-    async def test_run_handles_reflect_exception(self, mock_reflect, tmp_path: Path, caplog, mock_driver):
+    async def test_run_handles_reflect_exception(
+        self, mock_reflect: Any, tmp_path: Path, caplog: pytest.LogCaptureFixture, mock_driver: Any
+    ):
         mock_reflect.side_effect = RuntimeError("LLM error")
 
         reflector = self._make_reflector(tmp_path, mock_driver)
@@ -805,7 +820,7 @@ class TestReflector:
         new_callable=AsyncMock,
     )
     async def test_run_logs_individual_apply_errors(
-        self, mock_cfg_apply, mock_reflect, tmp_path: Path, caplog, mock_driver
+        self, mock_cfg_apply: Any, mock_reflect: Any, tmp_path: Path, caplog: pytest.LogCaptureFixture, mock_driver: Any
     ):
         classification = FailureClassification(
             outcome="failure",
@@ -834,7 +849,7 @@ class TestReflector:
     @patch.object(Reflector, "reflect", new_callable=AsyncMock)
     @patch.object(Reflector, "apply", new_callable=AsyncMock)
     async def test_run_success_no_failures_skips_apply(
-        self, mock_apply, mock_reflect, tmp_path: Path, caplog, mock_driver
+        self, mock_apply: Any, mock_reflect: Any, tmp_path: Path, caplog: pytest.LogCaptureFixture, mock_driver: Any
     ):
         classification = FailureClassification(
             outcome="success",
@@ -879,7 +894,7 @@ class TestFailureClassification:
         assert restored.stage_failures[0].stage == "triage"
         assert restored.stage_failures[1].stage == "verification"
 
-    async def test_apply_skips_on_success(self, tmp_path: Path, caplog, mock_driver):
+    async def test_apply_skips_on_success(self, tmp_path: Path, caplog: pytest.LogCaptureFixture, mock_driver: Any):
         reflector = Reflector(tmp_path / "kb", renderer=_renderer, driver=mock_driver)
         classification = FailureClassification(
             outcome="success",
@@ -900,10 +915,10 @@ class TestFailureClassification:
     )
     async def test_apply_only_updates_failed_stages(
         self,
-        mock_md_apply,
-        mock_triage_apply,
+        mock_md_apply: Any,
+        mock_triage_apply: Any,
         tmp_path: Path,
-        mock_driver,
+        mock_driver: Any,
     ):
         reflector = Reflector(tmp_path / "kb", renderer=_renderer, driver=mock_driver)
         classification = FailureClassification(
@@ -1049,7 +1064,7 @@ _unified_config = CrucibleConfig(per_app=False)
 
 
 @pytest.fixture
-def tmp_unified_kb(tmp_path: Path, mock_driver) -> tuple[StructuredKnowledgeBase, Path, Path]:
+def tmp_unified_kb(tmp_path: Path, mock_driver: Any) -> tuple[StructuredKnowledgeBase, Path, Path]:
     """Return (kb, kb_dir, target_dir) with per_app=False."""
     kb_dir = tmp_path / "kb"
     target_dir = tmp_path / "target"
@@ -1065,33 +1080,33 @@ def tmp_unified_kb(tmp_path: Path, mock_driver) -> tuple[StructuredKnowledgeBase
 
 
 class TestUnifiedKBPaths:
-    def test_summary_path_at_root(self, tmp_unified_kb):
+    def test_summary_path_at_root(self, tmp_unified_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, kb_dir, _ = tmp_unified_kb
         assert kb.summary_path == kb_dir / KB_SUMMARY_FILENAME
 
-    def test_incidents_dir_categorized_by_app(self, tmp_unified_kb):
+    def test_incidents_dir_categorized_by_app(self, tmp_unified_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, kb_dir, _ = tmp_unified_kb
         assert kb.incidents_dir == kb_dir / KB_INCIDENTS_DIRNAME / "test-app"
 
-    def test_architecture_stays_per_app(self, tmp_unified_kb):
+    def test_architecture_stays_per_app(self, tmp_unified_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, kb_dir, _ = tmp_unified_kb
         assert kb.architecture_path == kb_dir / "test-app" / KB_ARCHITECTURE_FILENAME
 
-    def test_lessons_path_unchanged(self, tmp_unified_kb):
+    def test_lessons_path_unchanged(self, tmp_unified_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, kb_dir, _ = tmp_unified_kb
         assert kb.lessons_path == kb_dir / KB_LESSONS_FILENAME
 
 
 class TestUnifiedKBSaveIncident:
-    def test_saves_to_app_subdir(self, tmp_unified_kb):
+    def test_saves_to_app_subdir(self, tmp_unified_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, kb_dir, _ = tmp_unified_kb
         incident_id = kb._save_incident("summary", "content")
         assert (kb_dir / KB_INCIDENTS_DIRNAME / "test-app" / f"{incident_id}.md").exists()
 
 
 class TestUnifiedKBInject:
-    async def test_copies_root_summary(self, tmp_unified_kb):
-        kb, kb_dir, target_dir = tmp_unified_kb
+    async def test_copies_root_summary(self, tmp_unified_kb: tuple[StructuredKnowledgeBase, Path, Path]):
+        kb, _kb_dir, target_dir = tmp_unified_kb
         kb.summary_path.write_text("unified summary")
 
         result = await kb.inject(target_dir)
@@ -1099,7 +1114,7 @@ class TestUnifiedKBInject:
         assert result.summary is not None
         assert result.summary.read_text() == "unified summary"
 
-    async def test_copies_all_app_incidents(self, tmp_unified_kb):
+    async def test_copies_all_app_incidents(self, tmp_unified_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, kb_dir, target_dir = tmp_unified_kb
         # Create incidents for two apps
         for app in ("app-a", "app-b"):
@@ -1113,7 +1128,7 @@ class TestUnifiedKBInject:
         assert (target_dir / KB_INCIDENTS_DIRNAME / "app-a" / "20260101_120000.md").exists()
         assert (target_dir / KB_INCIDENTS_DIRNAME / "app-b" / "20260101_120000.md").exists()
 
-    async def test_no_incidents(self, tmp_unified_kb):
+    async def test_no_incidents(self, tmp_unified_kb: tuple[StructuredKnowledgeBase, Path, Path]):
         kb, _, target_dir = tmp_unified_kb
         result = await kb.inject(target_dir)
         assert result.incidents_dir is None
@@ -1122,7 +1137,7 @@ class TestUnifiedKBInject:
 class TestUnifiedKBUpdate:
     @patch.object(StructuredKnowledgeBase, "_merge_into_long_term_summary", new_callable=AsyncMock)
     @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_citation_ref_includes_app(self, mock_llm, mock_merge, tmp_path: Path, mock_driver):
+    async def test_citation_ref_includes_app(self, mock_llm: Any, mock_merge: Any, tmp_path: Path, mock_driver: Any):
         shared = tmp_path / "shared.md"
         shared.write_text("session data")
         kb = StructuredKnowledgeBase(
@@ -1144,7 +1159,7 @@ class TestUnifiedKBUpdate:
 
 class TestUnifiedKBDistillLessons:
     @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_reads_root_summary(self, mock_llm, tmp_path: Path, mock_driver):
+    async def test_reads_root_summary(self, mock_llm: Any, tmp_path: Path, mock_driver: Any):
         kb_dir = tmp_path / "kb"
         kb = StructuredKnowledgeBase(
             kb_dir, app_name="test-app", config=_unified_config, renderer=_renderer, driver=mock_driver
@@ -1159,7 +1174,7 @@ class TestUnifiedKBDistillLessons:
         assert "unified summary content" in prompt_arg
 
     @patch.object(StructuredKnowledgeBase, "_call_llm", new_callable=AsyncMock)
-    async def test_skips_when_no_summary(self, mock_llm, tmp_path: Path, mock_driver):
+    async def test_skips_when_no_summary(self, mock_llm: Any, tmp_path: Path, mock_driver: Any):
         kb = StructuredKnowledgeBase(
             tmp_path / "kb",
             app_name="test-app",

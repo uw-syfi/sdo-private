@@ -1,5 +1,7 @@
 import io
 import json
+from collections.abc import Iterator
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,20 +11,20 @@ from libs.agent_cli.gemini import GeminiCodingAgent
 
 
 @pytest.fixture
-def mock_env():
+def mock_env() -> Any:
     """Mock environment for agent initialization."""
     return {"PATH": "/usr/bin:/bin", "HOME": "/tmp", "USER": "test"}
 
 
 @pytest.fixture
-def mock_which():
+def mock_which() -> Any:
     """Mock shutil.which to return a fake binary path."""
     with patch("shutil.which", return_value="/usr/bin/gemini"):
         yield
 
 
 @pytest.fixture
-def gemini_agent(mock_which, mock_env):
+def gemini_agent(mock_which: Any, mock_env: Any) -> Iterator[GeminiCodingAgent]:
     """Create a GeminiCodingAgent instance with mocked environment."""
     with patch(
         "libs.agent_cli.cli_agent.get_interactive_env",
@@ -34,13 +36,13 @@ def gemini_agent(mock_which, mock_env):
 
 
 @pytest.fixture
-def mock_popen():
+def mock_popen() -> Any:
     """Mock subprocess.Popen."""
     with patch("subprocess.Popen") as mock:
         yield mock
 
 
-def test_generate_stream_prefixing(gemini_agent, mock_popen):
+def test_generate_stream_prefixing(gemini_agent: GeminiCodingAgent, mock_popen: Any):
     """Test that assistant output is correctly prefixed with [Gemini]."""
     mock_process = MagicMock()
     mock_process.returncode = 0
@@ -75,7 +77,7 @@ def test_generate_stream_prefixing(gemini_agent, mock_popen):
     assert "[Gemini] World" in output
 
 
-def test_tool_use_truncation_and_prefix(gemini_agent, mock_popen):
+def test_tool_use_truncation_and_prefix(gemini_agent: GeminiCodingAgent, mock_popen: Any):
     """Test that tool parameters are truncated and prefixed."""
     mock_process = MagicMock()
     mock_process.returncode = 0
@@ -104,7 +106,7 @@ def test_tool_use_truncation_and_prefix(gemini_agent, mock_popen):
     assert "x" * 300 not in output
 
 
-def test_tool_result_empty_message(gemini_agent, mock_popen):
+def test_tool_result_empty_message(gemini_agent: GeminiCodingAgent, mock_popen: Any):
     """Test that empty tool results print a success message using the tool name."""
     mock_process = MagicMock()
     mock_process.returncode = 0
@@ -144,7 +146,7 @@ def test_tool_result_empty_message(gemini_agent, mock_popen):
     assert "my_awesome_tool ran successfully" in output
 
 
-def test_generate_emits_ui_events(gemini_agent, mock_popen):
+def test_generate_emits_ui_events(gemini_agent: GeminiCodingAgent, mock_popen: Any):
     """Test that UI events are emitted during generation."""
     mock_process = MagicMock()
     mock_process.returncode = 0

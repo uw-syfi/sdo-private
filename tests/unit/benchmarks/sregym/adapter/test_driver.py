@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import importlib
@@ -5,6 +6,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -20,9 +22,9 @@ from benchmarks.sregym.adapter.driver import (
 )
 from benchmarks.sregym.adapter.runtime import (
     RuntimeConfig,
-    _controller_update_rollout_succeeded,
     _load_incident_ledger,
     _resolve_responder_dispatch,
+    _SREGymRuntimeExtension,
     _validated_controller_rollout_record,
     run_production_runtime,
     runtime_resources,
@@ -170,9 +172,9 @@ def test_sregym_adapter_delegates_execution_to_production_runtime(
         timeout_seconds=60,
         submission_api_base="http://sdo-sregym-bridge:8000",
     )
-    calls: list[tuple[object, object]] = []
+    calls: list[tuple[object, _SREGymRuntimeExtension]] = []
 
-    def fake_run(production_config: object, extension: object) -> dict[str, bool]:
+    def fake_run(production_config: object, extension: _SREGymRuntimeExtension) -> dict[str, bool]:
         calls.append((production_config, extension))
         return {"completed": True}
 
@@ -280,6 +282,7 @@ def test_adapter_persists_validated_lifecycle_seed_outside_resettable_stage(tmp_
 
     seed = persist_lifecycle_seed(repository, logs_dir)
 
+    assert seed is not None
     assert seed == tmp_path / "pipeline" / "lifecycle_seed_stage1"
     assert (seed / ".git").is_dir()
     assert (seed / ".sdo" / "lifecycle-provenance.yaml").read_text(encoding="utf-8") == ("health_judge: validated\n")
@@ -334,7 +337,11 @@ def test_controller_job_poll_retries_transient_kubernetes_api_failure(monkeypatc
         return next(responses)
 
     monkeypatch.setattr(runtime, "kubectl", fake_kubectl)
-    monkeypatch.setattr(runtime.time, "sleep", lambda _: None)
+
+    def skip_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(runtime.time, "sleep", skip_sleep)
 
     _wait_for_controller_job(
         RuntimeConfig(
@@ -456,7 +463,7 @@ def test_runtime_tar_disables_macos_appledouble_files() -> None:
 
 
 def test_strict_production_receipt_requires_job_route_reflection_clear_ack_and_cleanup() -> None:
-    receipt = {
+    receipt: dict[str, Any] = {
         "schema_version": "sdo.production-receipt/v1",
         "pre_cutover": False,
         "validator_mode": "kubernetes-job",
@@ -517,7 +524,7 @@ def test_strict_production_receipt_requires_job_route_reflection_clear_ack_and_c
         "lifecycle_provenance",
         "controller_update_rollout",
     ):
-        invalid = {**receipt, field: False}
+        invalid: dict[str, Any] = {**receipt, field: False}
         with pytest.raises(ControllerInstallError, match=field):
             validate_production_receipt(invalid)
     with pytest.raises(ControllerInstallError, match="detector_clear"):
@@ -525,21 +532,21 @@ def test_strict_production_receipt_requires_job_route_reflection_clear_ack_and_c
     with pytest.raises(ControllerInstallError, match="validator_evidence_commit=reflection_commit"):
         validate_production_receipt({**receipt, "validator_evidence_commit": "outcome"})
 
-    test_double_receipt = {**receipt, "lifecycle_provenance": False}
+    test_double_receipt: dict[str, Any] = {**receipt, "lifecycle_provenance": False}
     with pytest.raises(ControllerInstallError, match="lifecycle_provenance"):
         validate_production_receipt(test_double_receipt)
     validate_production_receipt(test_double_receipt, allow_test_lifecycle=True)
 
 
 def test_strict_production_receipt_rejects_missing_false_or_duplicate_network_policy_canaries() -> None:
-    valid_canary = {
+    valid_canary: dict[str, Any] = {
         "mode": "allow",
         "passed": True,
         "job_name": "allow-job",
         "observed_at": "2026-07-10T12:00:00+00:00",
         "details": "positive control passed",
     }
-    receipt = {
+    receipt: dict[str, Any] = {
         "schema_version": "sdo.production-receipt/v1",
         "pre_cutover": False,
         "validator_mode": "kubernetes-job",
@@ -586,15 +593,6 @@ def test_strict_production_receipt_rejects_missing_false_or_duplicate_network_po
                 "validator_network_policy_canaries": [valid_canary, {**valid_canary, "job_name": "allow-job-2"}],
             }
         )
-
-
-def test_controller_update_rollout_receipt_requires_successful_structured_record() -> None:
-    failed = '{"controller_update_rollout":"fingerprint","returncode":1,"source_commit":"commit"}\n'
-    succeeded = '{"controller_update_rollout":"fingerprint","returncode":0,"source_commit":"commit"}\n'
-
-    assert _controller_update_rollout_succeeded(failed) is False
-    assert _controller_update_rollout_succeeded("controller_update_rollout\n") is False
-    assert _controller_update_rollout_succeeded(succeeded) is True
 
 
 def _rollout_ledger(*, returncode: int = 0, success: bool = True) -> dict[str, object]:
@@ -649,15 +647,18 @@ def test_receipt_rejects_missing_or_duplicate_correlated_ledgers(tmp_path: Path)
 def test_receipt_requires_exactly_one_matching_successful_durable_rollout() -> None:
     valid = _rollout_ledger()
     record = _validated_controller_rollout_record(valid)
+    assert record is not None
     assert record["returncode"] == 0
     assert record["success"] is True
 
-    for mutation, message in (
+    rollouts = cast("list[object]", valid["controller_update_rollouts"])
+    mutations: tuple[tuple[dict[str, object], str], ...] = (
         ({"controller_update_rollouts": []}, "missing"),
         ({"reflection_commit": "different"}, "reflection"),
         ({"controller_update_before_fingerprint": "different"}, "transition"),
-        ({"controller_update_rollouts": _rollout_ledger()["controller_update_rollouts"] * 2}, "exactly one"),
-    ):
+        ({"controller_update_rollouts": rollouts * 2}, "exactly one"),
+    )
+    for mutation, message in mutations:
         with pytest.raises(ControllerInstallError, match=message):
             _validated_controller_rollout_record({**valid, **mutation})
 
@@ -667,13 +668,14 @@ def test_receipt_requires_exactly_one_matching_successful_durable_rollout() -> N
 
 def test_receipt_accepts_failed_controller_pod_before_one_success_and_never_needs_logs() -> None:
     ledger = _rollout_ledger(returncode=5, success=False)
-    successful = _rollout_ledger()["controller_update_rollouts"][0]
-    ledger["controller_update_rollouts"] = [*ledger["controller_update_rollouts"], successful]
+    failed_rollouts = cast("list[object]", ledger["controller_update_rollouts"])
+    successful_rollouts = cast("list[object]", _rollout_ledger()["controller_update_rollouts"])
+    successful = successful_rollouts[0]
+    ledger["controller_update_rollouts"] = [*failed_rollouts, successful]
 
     assert _validated_controller_rollout_record(ledger) == ControllerRolloutRecord.model_validate(
         successful
     ).model_dump(mode="json")
-    assert _controller_update_rollout_succeeded("pod logs were garbage-collected") is False
 
 
 def test_controller_supervisor_persists_rollout_with_pod_identity(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -691,11 +693,18 @@ def test_controller_supervisor_persists_rollout_with_pod_identity(monkeypatch: p
 
     monkeypatch.setenv("SDO_CONTROLLER_JOB", "sdo-controller-run")
     monkeypatch.setenv("SDO_CONTROLLER_POD_UID", "pod-uid")
-    monkeypatch.setattr(checker, "_controller", lambda _args: 0)
+
+    def fake_controller(_args: argparse.Namespace) -> int:
+        return 0
+
+    def persist_rollout(_app: Path, _worktrees: Path, record: dict[str, object]) -> None:
+        records.append(record)
+
+    monkeypatch.setattr(checker, "_controller", fake_controller)
     monkeypatch.setattr(
         checker,
         "_persist_controller_rollout",
-        lambda _app, _worktrees, record: records.append(record),
+        persist_rollout,
     )
 
     assert (
@@ -789,7 +798,7 @@ def test_four_problem_pipeline_is_source_backed_and_chains_one_hotel_workspace()
     assert [stage.chain_application_workspace for stage in config.stages] == [False, True, True, True]
 
 
-def test_runner_honors_temporary_sregym_checkout(monkeypatch, tmp_path: Path) -> None:
+def test_runner_honors_temporary_sregym_checkout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import benchmarks.sregym.run as runner
 
     monkeypatch.setenv("SDO_SREGYM_DIR", str(tmp_path))

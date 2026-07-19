@@ -1,9 +1,10 @@
+# pyright: reportPrivateUsage=false
 """Unit tests for the enable_judge=False feature in the Crucible orchestrator."""
 
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 if TYPE_CHECKING:
@@ -32,7 +33,7 @@ def _make_mock_sre(answer: str, justification: str) -> MagicMock:
     mock._config = MagicMock()
     mock._config.stage_outputs_file = None
 
-    async def fake_run(**kwargs):
+    async def fake_run(**kwargs: Any):
         state = SharedState()
         state.answer = answer
         state.answer_justification = justification
@@ -160,7 +161,7 @@ def test_with_judge_calls_judge_agent(shared_file: SharedFile) -> None:
     mock_sre._config = MagicMock()
     mock_sre._config.stage_outputs_file = None
 
-    async def fake_sre_run(**kwargs):
+    async def fake_sre_run(**kwargs: Any):
         state = SharedState()
         state.answer = "an answer"
         result = AgentResult(
@@ -172,7 +173,7 @@ def test_with_judge_calls_judge_agent(shared_file: SharedFile) -> None:
 
     mock_sre.run = AsyncMock(side_effect=fake_sre_run)
 
-    async def fake_judge_run(**kwargs):
+    async def fake_judge_run(**kwargs: Any):
         state = SharedState()
         state.verdict = "APPROVED"
         state.submitted = True

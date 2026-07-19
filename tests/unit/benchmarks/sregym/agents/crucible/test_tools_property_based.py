@@ -330,7 +330,7 @@ class TestGrepProperties:
             result = grep(ctx, "test", path=str(f))
         assert isinstance(result, str)
 
-    def test_too_long_pattern_returns_error(self, tmp_path):
+    def test_too_long_pattern_returns_error(self, tmp_path: Path):
         f = tmp_path / "f.txt"
         f.write_text("content")
         ctx = _make_sre_ctx(tmp_path)

@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """Tests for LTM verified-hypothesis direct submission.
 
 When ``CrucibleConfig.enable_ltm_verified_direct_submit`` is on and
@@ -13,7 +14,7 @@ shared session file.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -345,9 +346,9 @@ class TestRunStageLoopShortCircuit:
         mock_sre._config = MagicMock()
         mock_sre._config.stage_outputs_file = None
 
-        async def fake_sre_run(**kwargs):
+        async def fake_sre_run(**kwargs: Any) -> AgentResult[Any]:
             sc = LTMShortCircuit(confirmed=["cand A", "cand B"], iteration=1)
-            result = AgentResult(output=None, completed=False, interrupt_data=sc)
+            result = AgentResult[Any](output=None, completed=False, interrupt_data=sc)
             result.state = SharedState()  # type: ignore[attr-defined]
             return result
 
@@ -419,7 +420,7 @@ class TestRunStageLoopShortCircuit:
         mock_sre._config = MagicMock()
         mock_sre._config.stage_outputs_file = None
 
-        async def fake_sre_run(**kwargs):
+        async def fake_sre_run(**kwargs: Any):
             state = SharedState()
             state.answer = "free-form diagnosis"
             state.answer_justification = "saw X"
@@ -434,9 +435,9 @@ class TestRunStageLoopShortCircuit:
         mock_sre.run = AsyncMock(side_effect=fake_sre_run)
 
         # Mock judge agent
-        judge_calls = []
+        judge_calls: list[bool] = []
 
-        async def fake_judge_run(**kwargs):
+        async def fake_judge_run(**kwargs: Any):
             judge_calls.append(True)
             state = SharedState()
             state.verdict = "APPROVED"

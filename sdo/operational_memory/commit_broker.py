@@ -71,6 +71,11 @@ class CommitBroker:
         self.validator = validator or MemoryValidator()
         self.proposal_validator = proposal_validator or RejectingProposalValidator()
 
+    def run_git(self, cwd: Path, *args: str) -> str:
+        """Run a checked Git command for broker-owned repository operations."""
+
+        return self._git(cwd, *args)
+
     def commit(
         self,
         *,

@@ -1,7 +1,9 @@
+# pyright: reportPrivateUsage=false
 from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -40,7 +42,7 @@ def test_codex_responder_captures_resumable_session_id() -> None:
     assert completed.responder_session_id == "session-from-codex"
 
 
-def test_responder_cannot_reflect_before_controller_verification(monkeypatch) -> None:
+def test_responder_cannot_reflect_before_controller_verification(monkeypatch: pytest.MonkeyPatch) -> None:
     request = IncidentRequest.model_validate_json(_fixture("incident_request.json"))
 
     prompt = _responder_prompt(request)
@@ -82,7 +84,7 @@ def test_codex_failure_reports_structured_events_and_stderr() -> None:
 
 
 def test_codex_output_schema_is_strict_and_requires_defaulted_fields() -> None:
-    schema = _incident_result_schema()
+    schema = cast("dict[str, Any]", _incident_result_schema())
 
     assert schema["required"] == list(schema["properties"])
     assert schema["additionalProperties"] is False

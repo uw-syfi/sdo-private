@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import ValidationError
 
@@ -28,6 +28,30 @@ from sdo.controller_install import (
     controller_resources as production_controller_resources,
 )
 from sdo.operational_memory import ControllerRolloutRecord
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+
+def _string_object_mapping(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    mapping = cast("dict[object, object]", value)
+    if not all(isinstance(key, str) for key in mapping):
+        return None
+    return cast("dict[str, object]", mapping)
+
+
+def _json_object(raw: str, *, context: str) -> dict[str, object]:
+    decoded: object = json.loads(raw)
+    document = _string_object_mapping(decoded)
+    if document is None:
+        raise ControllerInstallError(f"{context} is not a JSON object")
+    return document
+
+
+def _object_list(value: object) -> list[object] | None:
+    return cast("list[object]", value) if isinstance(value, list) else None
 
 
 @dataclass(frozen=True)
@@ -95,8 +119,6 @@ def runtime_resources(config: RuntimeConfig) -> list[dict[str, Any]]:
 
 def run_production_runtime(config: RuntimeConfig) -> dict[str, Any]:
     result = install_controller(config, _SREGymRuntimeExtension(config))
-    if not isinstance(result, dict):
-        raise ControllerInstallError("benchmark runtime did not produce a production receipt")
     return result
 
 
@@ -191,8 +213,9 @@ def _wait_for_submission_bridge(config: RuntimeConfig) -> None:
             check=False,
         )
         if completed.returncode == 0:
-            document = json.loads(completed.stdout)
-            if document.get("status", {}).get("readyReplicas") == 1:
+            document = _json_object(completed.stdout, context="SREGym submission bridge deployment")
+            status = _string_object_mapping(document.get("status"))
+            if status is not None and status.get("readyReplicas") == 1:
                 return
             last_details = completed.stdout
         else:
@@ -236,16 +259,23 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         ["get", "jobs", "--selector", "app.kubernetes.io/name=sdo-responder", "-o", "json"],
         namespace=config.namespace,
     )
-    jobs = json.loads(jobs_payload.stdout).get("items", [])
-    state_document = json.loads(
-        kubectl(["get", "configmap/sdo-controller-state", "-o", "json"], namespace=config.namespace).stdout
+    jobs_document = _json_object(jobs_payload.stdout, context="responder Job inventory")
+    jobs = _object_list(jobs_document.get("items")) or []
+    state_document = _json_object(
+        kubectl(["get", "configmap/sdo-controller-state", "-o", "json"], namespace=config.namespace).stdout,
+        context="controller state ConfigMap",
     )
-    state = json.loads(state_document.get("data", {}).get("runtime-state.json", "{}"))
+    state_data = _string_object_mapping(state_document.get("data"))
+    state_raw = state_data.get("runtime-state.json") if state_data is not None else None
+    if not isinstance(state_raw, str):
+        raise ControllerInstallError("controller state ConfigMap has no runtime-state.json data")
+    state = _json_object(state_raw, context="controller runtime state")
     incident_id = state.get("last_acknowledged_incident_id")
     if not isinstance(incident_id, str) or not incident_id.strip():
         raise ControllerInstallError("controller has no durable acknowledged incident for receipt correlation")
     configmaps_payload = kubectl(["get", "configmaps", "-o", "json"], namespace=config.namespace)
-    configmaps = json.loads(configmaps_payload.stdout).get("items", [])
+    configmaps_document = _json_object(configmaps_payload.stdout, context="ConfigMap inventory")
+    configmaps = _object_list(configmaps_document.get("items")) or []
     responder_jobs, result, responder_job_evidence = _resolve_responder_dispatch(
         incident_id=incident_id,
         jobs=jobs,
@@ -267,8 +297,8 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         ],
         namespace=config.namespace,
     )
-    closure = ledger.get("closure") if isinstance(ledger.get("closure"), dict) else {}
-    detector_clear = closure.get("final_detector_states", []) if isinstance(closure, dict) else []
+    closure = _string_object_mapping(ledger.get("closure")) or {}
+    detector_clear = closure.get("final_detector_states", [])
     accepted_detector_paths = ledger.get("accepted_detector_paths", [])
     rollout_record = _validated_controller_rollout_record(ledger)
     controller_update_rollout = rollout_record is not None
@@ -316,9 +346,9 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
 def _resolve_responder_dispatch(
     *,
     incident_id: str,
-    jobs: list[Any],
-    configmaps: list[Any],
-) -> tuple[list[str], dict[str, Any], str]:
+    jobs: Sequence[object],
+    configmaps: Sequence[object],
+) -> tuple[list[str], dict[str, object], str]:
     """Resolve one responder execution from its durable request/result protocol.
 
     Responder Jobs are intentionally finite and Kubernetes can garbage-collect
@@ -328,33 +358,43 @@ def _resolve_responder_dispatch(
     exact-once evidence recoverable without recreating or rerunning a responder.
     """
 
-    documents: dict[str, dict[str, Any]] = {}
+    documents: dict[str, dict[str, object]] = {}
     for raw_document in configmaps:
-        if not isinstance(raw_document, dict):
+        document = _string_object_mapping(raw_document)
+        if document is None:
             continue
-        name = raw_document.get("metadata", {}).get("name")
+        metadata = _string_object_mapping(document.get("metadata"))
+        name = metadata.get("name") if metadata is not None else None
         if isinstance(name, str) and name:
-            documents[name] = raw_document
+            documents[name] = document
 
-    pairs: list[tuple[str, dict[str, Any]]] = []
+    pairs: list[tuple[str, dict[str, object]]] = []
     for request_name, request_document in documents.items():
         if not request_name.endswith("-request"):
             continue
         try:
-            request = json.loads(request_document.get("data", {}).get("incident-request.json", ""))
-        except (TypeError, json.JSONDecodeError):
+            request_data = _string_object_mapping(request_document.get("data"))
+            request_raw = request_data.get("incident-request.json") if request_data is not None else None
+            if not isinstance(request_raw, str):
+                continue
+            request = _json_object(request_raw, context="responder request")
+        except (TypeError, json.JSONDecodeError, ControllerInstallError):
             continue
-        if not isinstance(request, dict) or request.get("incident_id") != incident_id:
+        if request.get("incident_id") != incident_id:
             continue
         job_name = request_name.removesuffix("-request")
         result_document = documents.get(f"{job_name}-result")
         if result_document is None:
             continue
         try:
-            result = json.loads(result_document.get("data", {}).get("incident-result.json", ""))
-        except (TypeError, json.JSONDecodeError):
+            result_data = _string_object_mapping(result_document.get("data"))
+            result_raw = result_data.get("incident-result.json") if result_data is not None else None
+            if not isinstance(result_raw, str):
+                continue
+            result = _json_object(result_raw, context="responder result")
+        except (TypeError, json.JSONDecodeError, ControllerInstallError):
             continue
-        if isinstance(result, dict) and result.get("incident_id") == incident_id:
+        if result.get("incident_id") == incident_id:
             pairs.append((job_name, result))
 
     if len(pairs) != 1:
@@ -364,9 +404,11 @@ def _resolve_responder_dispatch(
         )
     job_name, result = pairs[0]
     live_jobs = sorted(
-        str(job.get("metadata", {}).get("name", ""))
+        str(metadata.get("name"))
         for job in jobs
-        if isinstance(job, dict) and job.get("metadata", {}).get("name")
+        if (job_document := _string_object_mapping(job)) is not None
+        if (metadata := _string_object_mapping(job_document.get("metadata"))) is not None
+        if metadata.get("name")
     )
     if live_jobs and live_jobs != [job_name]:
         raise ControllerInstallError(
@@ -376,16 +418,17 @@ def _resolve_responder_dispatch(
     return [job_name], result, evidence
 
 
-def _load_incident_ledger(state_root: Path, incident_id: str) -> dict[str, Any]:
+def _load_incident_ledger(state_root: Path, incident_id: str) -> dict[str, object]:
     """Load exactly one ledger by embedded incident ID, independent of mtime."""
 
-    matches: list[dict[str, Any]] = []
+    matches: list[dict[str, object]] = []
     for path in state_root.glob("*.json"):
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            decoded: object = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ControllerInstallError(f"cannot read durable broker ledger {path.name}: {exc}") from exc
-        if isinstance(payload, dict) and payload.get("incident_id") == incident_id:
+        payload = _string_object_mapping(decoded)
+        if payload is not None and payload.get("incident_id") == incident_id:
             matches.append(payload)
     if not matches:
         raise ControllerInstallError(f"production runtime produced no durable broker ledger for incident {incident_id}")
@@ -396,13 +439,14 @@ def _load_incident_ledger(state_root: Path, incident_id: str) -> dict[str, Any]:
     return matches[0]
 
 
-def _validated_controller_rollout_record(ledger: dict[str, Any]) -> dict[str, Any] | None:
+def _validated_controller_rollout_record(ledger: Mapping[str, object]) -> dict[str, Any] | None:
     """Resolve the single authoritative successful attempt for this incident."""
 
     if ledger.get("controller_update_required") is not True:
         return None
     raw_records = ledger.get("controller_update_rollouts")
-    if not isinstance(raw_records, list) or not raw_records:
+    records = _object_list(raw_records)
+    if not records:
         raise ControllerInstallError("controller rollout ledger is missing durable attempt records")
     incident_id = ledger.get("incident_id")
     reflection_commit = ledger.get("reflection_commit")
@@ -411,7 +455,7 @@ def _validated_controller_rollout_record(ledger: dict[str, Any]) -> dict[str, An
     if not all(isinstance(value, str) and value for value in (incident_id, reflection_commit, before, after)):
         raise ControllerInstallError("controller rollout ledger is missing its expected detector transition")
     successful: list[ControllerRolloutRecord] = []
-    for raw_record in raw_records:
+    for raw_record in records:
         try:
             record = ControllerRolloutRecord.model_validate(raw_record)
         except ValidationError as exc:
@@ -425,23 +469,12 @@ def _validated_controller_rollout_record(ledger: dict[str, Any]) -> dict[str, An
         if record.success:
             successful.append(record)
     if not successful:
-        returncodes = [record.get("returncode") for record in raw_records if isinstance(record, dict)]
+        returncodes = [
+            record.get("returncode")
+            for raw_record in records
+            if (record := _string_object_mapping(raw_record)) is not None
+        ]
         raise ControllerInstallError(f"durable controller rollout has no returncode=0 attempt: {returncodes}")
     if len(successful) != 1:
         raise ControllerInstallError("durable controller rollout requires exactly one successful attempt")
     return successful[0].model_dump(mode="json")
-
-
-def _controller_update_rollout_succeeded(controller_logs: str) -> bool:
-    for raw_line in controller_logs.splitlines():
-        try:
-            payload = json.loads(raw_line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        fingerprint = payload.get("controller_update_rollout")
-        returncode = payload.get("returncode")
-        if isinstance(fingerprint, str) and fingerprint and type(returncode) is int and returncode == 0:
-            return True
-    return False
