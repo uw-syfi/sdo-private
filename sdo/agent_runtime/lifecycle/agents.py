@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
@@ -31,6 +32,15 @@ class TopologyResourceDTO(BaseModel):
     namespace: str = Field(min_length=1)
     source: str = Field(min_length=1)
     dependencies: list[str]
+
+
+class ActiveTopologyResourceDTO(BaseModel):
+    """A resource selected by the deployment backend for the active variant."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(min_length=1)
+    name: str = Field(min_length=1)
 
 
 class DeployerDraft(BaseModel):
@@ -81,6 +91,7 @@ class LifecycleAgentBackend(Protocol):
         round_index: int,
         previous: HealthJudgeArtifact | None,
         correction_feedback: str | None,
+        active_resources: list[ActiveTopologyResourceDTO] | None = None,
     ) -> HealthJudgeArtifact: ...
 
 
@@ -142,8 +153,14 @@ Correction feedback from the prior fresh attempt:
         round_index: int,
         previous: HealthJudgeArtifact | None,
         correction_feedback: str | None,
+        active_resources: list[ActiveTopologyResourceDTO] | None = None,
     ) -> HealthJudgeArtifact:
         previous_payload = previous.model_dump_json(indent=2) if previous else "null"
+        active_payload = (
+            json.dumps([resource.model_dump(mode="json") for resource in active_resources], indent=2)
+            if active_resources is not None
+            else "null"
+        )
         feedback = correction_feedback or "No validator feedback is available for the first round."
         prompt = f"""You are the independent SDO health judge for application {application!r}, authoring round
 {round_index} of a bounded three-round adversarial refinement. This is a new read-only Codex session with no
@@ -154,6 +171,9 @@ Human-owned health objective:
 
 Published deployer assessment:
 {deployer.model_dump_json(indent=2)}
+
+Controller-observed active topology (null when no deployment observation is available):
+{active_payload}
 
 Prior judge artifact (null on round one):
 {previous_payload}
@@ -182,7 +202,10 @@ Never read environment variables, benchmark results, SREGym data, verdict files,
 oracle. Never call an LLM at detector runtime. Return source text in the structured fields; do not edit repository
 files. Set round exactly to {round_index}; set source_commit to the deployer's commit; cover only resources present
 in the deployer handoff; and set objective_digest to the exact objective SHA-256.
-For covered_resources, copy every resource required by the objective exactly from the deployer handoff. In
+For covered_resources, copy every resource required by the objective exactly from the deployer handoff. Never invent
+a covered ConfigMap object for a dependency that has no standalone object in the handoff. When the
+controller-observed active topology is non-null, the controller will canonicalize this provenance to exact matching
+active Deployment, Service, ConfigMap, and NetworkPolicy objects and ignore source variants that are not active. In
 particular, "all source-backed Deployments" requires every Deployment and "all selected Services" requires every
 Service in that handoff, together with every source-backed ConfigMap and NetworkPolicy that can determine those
 workloads' health; do not reduce coverage to only user-facing or application-tier names. For this global objective,

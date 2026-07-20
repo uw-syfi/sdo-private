@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -212,16 +214,38 @@ def _run(
     runner: CommandRunner | None,
     cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    selected_runner = runner or subprocess.run
-    return selected_runner(
+    if runner is not None:
+        return runner(
+            command,
+            input=prompt,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            cwd=cwd,
+        )
+
+    process = subprocess.Popen(
         command,
-        input=prompt,
-        check=False,
-        capture_output=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=timeout_seconds,
         cwd=cwd,
+        start_new_session=True,
     )
+    try:
+        stdout, stderr = process.communicate(input=prompt, timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        stdout, stderr = process.communicate()
+        raise subprocess.TimeoutExpired(
+            command,
+            timeout_seconds,
+            output=stdout,
+            stderr=stderr,
+        ) from None
+    return subprocess.CompletedProcess(command, process.returncode, stdout=stdout, stderr=stderr)
 
 
 def _raise_for_failure(completed: subprocess.CompletedProcess[str]) -> None:

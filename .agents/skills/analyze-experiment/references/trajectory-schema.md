@@ -22,10 +22,11 @@ Path: `.sdo/lifecycle-provenance.yaml`
 Expected sections:
 
 - `deployer`: session ID, source commit, topology fingerprint, resource inventory, and architecture summary.
+- `active_topology` (when supplied by the deployment adapter): sorted kind/name references for the deployed source variant and required non-optional ConfigMap dependencies.
 - `health_judge`: the accepted final detector artifact.
 - `health_judge_rounds`: ordered structured attempts with distinct session IDs, round numbers, objective digest, covered resources, source, and tests.
 
-Correlate the deployer source commit with Git and `arch.md`. Correlate the objective digest with the exact text in `goal.md`. A reused lifecycle is credible only when current source/topology and detector validation still match.
+Correlate the deployer source commit with Git and `arch.md`. Correlate the objective digest with the exact text in `goal.md`. When `active_topology` is present, verify that `covered_resources` contains no inactive source variants. A reused lifecycle is credible only when current source topology, active topology, and detector validation still match.
 
 ## Outcome records
 
@@ -41,6 +42,8 @@ Each line is one controller-owned record. Important fields include:
 - repair and memory commits;
 - responder backend/model and usage;
 - detected, dispatched, mitigated, verified, and completed timestamps.
+
+The controller runtime ConfigMap can also contain `detector_review_required`, `detector_review_required_at`, and `detector_review_reason`. These fields mean a responder completed but independent health findings did not clear within the bounded verification window; do not interpret that state as a verified incident closure.
 
 Useful queries:
 

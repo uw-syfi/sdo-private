@@ -28,6 +28,7 @@ type ControllerConfig struct {
 	HealthObjectivePath     string
 	RepositoryWorktree      string
 	ResponseTimeout         time.Duration
+	VerificationTimeout     time.Duration
 	FiringThreshold         int
 	ClearThreshold          int
 	BatchDebounce           time.Duration
@@ -64,6 +65,9 @@ type Controller struct {
 	incidentDetectedAt         time.Time
 	incidentDispatchedAt       time.Time
 	responderCompletedAt       time.Time
+	detectorReviewRequired     bool
+	detectorReviewRequiredAt   time.Time
+	detectorReviewReason       string
 	pendingClosure             *IncidentClosure
 	closureState               string
 	closureReceipt             *ClosureReceipt
@@ -99,6 +103,12 @@ func NewController(
 	}
 	if config.ResponseTimeout <= 0 {
 		return nil, fmt.Errorf("response timeout must be positive")
+	}
+	if config.VerificationTimeout < 0 {
+		return nil, fmt.Errorf("verification timeout must not be negative")
+	}
+	if config.VerificationTimeout == 0 {
+		config.VerificationTimeout = config.ResponseTimeout
 	}
 	if err := core.ValidateDetectors(detectors); err != nil {
 		return nil, err
@@ -245,6 +255,9 @@ func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 	c.incidentDetectedAt = now.UTC()
 	c.incidentDispatchedAt = time.Time{}
 	c.responderCompletedAt = time.Time{}
+	c.detectorReviewRequired = false
+	c.detectorReviewRequiredAt = time.Time{}
+	c.detectorReviewReason = ""
 	c.dispatchState = "pending"
 	if c.broker != nil {
 		c.dispatchState = "workspace_pending"
@@ -265,6 +278,13 @@ func (c *Controller) NextWake() time.Time {
 	next := c.scheduler.NextRun()
 	if deadline, ok := c.batcher.Deadline(); ok && (next.IsZero() || deadline.Before(next)) {
 		return deadline
+	}
+	c.mu.Lock()
+	verificationDeadline := c.responderCompletedAt.Add(c.config.VerificationTimeout)
+	verificationPending := c.incidentOpen && c.responderDone && !c.detectorReviewRequired
+	c.mu.Unlock()
+	if verificationPending && (next.IsZero() || verificationDeadline.Before(next)) {
+		return verificationDeadline
 	}
 	return next
 }
@@ -394,6 +414,19 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 	}
 	finalStates, verified := c.finalVerificationStates()
 	if !verified {
+		if c.detectorReviewRequired {
+			c.mu.Unlock()
+			return
+		}
+		deadline := c.responderCompletedAt.Add(c.config.VerificationTimeout)
+		if !now.Before(deadline) {
+			c.detectorReviewRequired = true
+			c.detectorReviewRequiredAt = now.UTC()
+			c.detectorReviewReason = fmt.Sprintf(
+				"health detectors did not clear within %s after responder completion",
+				c.config.VerificationTimeout,
+			)
+		}
 		c.mu.Unlock()
 		return
 	}
@@ -418,6 +451,9 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 	c.incidentDetectedAt = time.Time{}
 	c.incidentDispatchedAt = time.Time{}
 	c.responderCompletedAt = time.Time{}
+	c.detectorReviewRequired = false
+	c.detectorReviewRequiredAt = time.Time{}
+	c.detectorReviewReason = ""
 	c.dispatchState = "idle"
 	c.incidentFindingKeys = nil
 	c.mu.Unlock()
@@ -504,6 +540,9 @@ func (c *Controller) ExportState() RuntimeState {
 		IncidentResult:  cloneIncidentResult(c.currentIncidentResult), DispatchError: c.dispatchError,
 		IncidentDetectedAt: c.incidentDetectedAt, IncidentDispatchedAt: c.incidentDispatchedAt,
 		ResponderCompletedAt: c.responderCompletedAt, DispatchState: dispatchState,
+		DetectorReviewRequired:     c.detectorReviewRequired,
+		DetectorReviewRequiredAt:   c.detectorReviewRequiredAt,
+		DetectorReviewReason:       c.detectorReviewReason,
 		IncidentFindingKeys:        append([]string(nil), c.incidentFindingKeys...),
 		PendingClosure:             cloneIncidentClosure(c.pendingClosure),
 		ClosureState:               closureState,
@@ -534,6 +573,9 @@ func (c *Controller) RestoreState(state RuntimeState) error {
 	c.incidentDetectedAt = state.IncidentDetectedAt
 	c.incidentDispatchedAt = state.IncidentDispatchedAt
 	c.responderCompletedAt = state.ResponderCompletedAt
+	c.detectorReviewRequired = state.DetectorReviewRequired
+	c.detectorReviewRequiredAt = state.DetectorReviewRequiredAt
+	c.detectorReviewReason = state.DetectorReviewReason
 	c.dispatchState = state.DispatchState
 	c.incidentFindingKeys = append([]string(nil), state.IncidentFindingKeys...)
 	c.pendingClosure = cloneIncidentClosure(state.PendingClosure)
@@ -550,6 +592,18 @@ func (c *Controller) LastAcknowledgedIncidentID() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.lastAcknowledgedIncidentID
+}
+
+func (c *Controller) DetectorReviewRequired() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.detectorReviewRequired
+}
+
+func (c *Controller) DetectorReviewStatus() (bool, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.detectorReviewRequired, c.detectorReviewReason
 }
 
 func (c *Controller) PendingIncidentClosure() (IncidentClosure, bool) {

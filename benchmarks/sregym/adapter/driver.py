@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -18,7 +19,12 @@ from urllib.parse import urlsplit, urlunsplit
 from benchmarks.sregym.adapter.runtime import RuntimeConfig, run_production_runtime
 from benchmarks.sregym.protocol.conductor import get_api_base, get_app_info, poll_stage_sync, signal_cleanup
 from benchmarks.sregym.protocol.schema import READY_STAGES
-from sdo.agent_runtime.lifecycle import CodexLifecycleBackend, reuse_initial_lifecycle_if_valid, run_initial_lifecycle
+from sdo.agent_runtime.lifecycle import (
+    ActiveTopologyResourceDTO,
+    CodexLifecycleBackend,
+    reuse_initial_lifecycle_if_valid,
+    run_initial_lifecycle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -136,11 +142,17 @@ def _relay_target_api_base(api_base: str) -> str | None:
     return api_base.rstrip("/")
 
 
-def _deployed_health_objective(
+@dataclass(frozen=True)
+class DeployedLifecycleContext:
+    health_objective: str
+    active_resources: list[ActiveTopologyResourceDTO]
+
+
+def _deployed_lifecycle_context(
     namespace: str,
     *,
     command_runner: CommandRunner = subprocess.run,
-) -> str:
+) -> DeployedLifecycleContext:
     """Bind the benchmark objective to the source variant deployed by SREGym."""
 
     command = [
@@ -148,7 +160,7 @@ def _deployed_health_objective(
         "--namespace",
         namespace,
         "get",
-        "deployments,services",
+        "deployments,services,configmaps,networkpolicies",
         "--output=json",
     ]
     completed = command_runner(command, check=False, capture_output=True, text=True)
@@ -185,10 +197,39 @@ def _deployed_health_objective(
         if services
         else "the deployed workload remains reachable through its declared interfaces"
     )
-    return (
+    health_objective = (
         f"The deployed Deployments named {', '.join(deployments)} remain available; {service_clause}; "
         "required non-optional ConfigMap volume references remain present; and representative requests succeed."
     )
+    active_keys = {
+        (kind, name) for kind in ("ConfigMap", "Deployment", "NetworkPolicy", "Service") for name in names(kind)
+    }
+    for item in items:
+        if not isinstance(item, dict) or item.get("kind") != "Deployment":
+            continue
+        spec = item.get("spec")
+        template = spec.get("template") if isinstance(spec, dict) else None
+        pod_spec = template.get("spec") if isinstance(template, dict) else None
+        volumes = pod_spec.get("volumes", []) if isinstance(pod_spec, dict) else []
+        for volume in volumes if isinstance(volumes, list) else []:
+            config_map = volume.get("configMap") if isinstance(volume, dict) else None
+            name = config_map.get("name") if isinstance(config_map, dict) else None
+            if isinstance(name, str) and name and config_map.get("optional") is not True:
+                active_keys.add(("ConfigMap", name))
+    return DeployedLifecycleContext(
+        health_objective=health_objective,
+        active_resources=[ActiveTopologyResourceDTO(kind=kind, name=name) for kind, name in sorted(active_keys)],
+    )
+
+
+def _deployed_health_objective(
+    namespace: str,
+    *,
+    command_runner: CommandRunner = subprocess.run,
+) -> str:
+    """Return the human-readable portion of the deployed lifecycle context."""
+
+    return _deployed_lifecycle_context(namespace, command_runner=command_runner).health_objective
 
 
 def _run(args: argparse.Namespace) -> dict[str, Any]:
@@ -201,16 +242,19 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     repository = _application_repository()
     application = str(app_info.get("app_name") or repository.name)
     namespace = str(app_info.get("namespace") or "default")
-    health_objective = _deployed_health_objective(namespace)
+    lifecycle_context = _deployed_lifecycle_context(namespace)
+    health_objective = lifecycle_context.health_objective
     if not reuse_initial_lifecycle_if_valid(
         repository,
         application=application,
         health_objective=health_objective,
+        active_resources=lifecycle_context.active_resources,
     ):
         run_initial_lifecycle(
             repository,
             application=application,
             health_objective=health_objective,
+            active_resources=lifecycle_context.active_resources,
             backend=CodexLifecycleBackend(model=args.model),
         )
     if args.logs_dir:

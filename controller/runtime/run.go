@@ -84,6 +84,11 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	flags.Var(&brokerArgs, "broker-arg", "incident broker argument; may be repeated")
 	duration := flags.Duration("duration", 0, "bounded controller duration; zero runs until cancellation")
 	responseTimeout := flags.Duration("response-timeout", 30*time.Minute, "incident responder timeout")
+	verificationTimeout := flags.Duration(
+		"verification-timeout",
+		2*time.Minute,
+		"maximum wait for independent health detectors to clear after a response",
+	)
 	leaseName := flags.String("lease-name", "sdo-controller", "leader-election Lease name")
 	leaseDuration := flags.Duration("lease-duration", 60*time.Second, "leader-election Lease duration")
 	identity := flags.String("identity", defaultIdentity(), "unique leader-election identity")
@@ -187,7 +192,8 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		SourceCommit: resolvedSourceCommit, DeployedCommit: resolvedDeployedCommit,
 		ArchitectureSummaryPath: ".sdo/arch.md", HealthObjectivePath: ".sdo/goal.md",
 		RepositoryWorktree: resolvedRoot, ResponseTimeout: *responseTimeout,
-		FiringThreshold: 2, ClearThreshold: 2, BatchDebounce: 500 * time.Millisecond,
+		VerificationTimeout: *verificationTimeout,
+		FiringThreshold:     2, ClearThreshold: 2, BatchDebounce: 500 * time.Millisecond,
 	}, detectors, kubernetesCache, dispatcher, start)
 	if err != nil {
 		return err
@@ -250,6 +256,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err := controller.PersistState(ctx); err != nil {
 		return fmt.Errorf("persist controller state: %w", err)
 	}
+	if err := detectorReviewError(controller); err != nil {
+		return err
+	}
 	if err := executePendingEffects(runCtx, controller); err != nil {
 		if runCtx.Err() != nil {
 			return nil
@@ -282,6 +291,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			if err := controller.PersistState(ctx); err != nil {
 				return fmt.Errorf("persist controller state: %w", err)
 			}
+			if err := detectorReviewError(controller); err != nil {
+				return err
+			}
 			if err := executePendingEffects(runCtx, controller); err != nil {
 				if runCtx.Err() != nil {
 					return nil
@@ -296,6 +308,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			if err := controller.PersistState(ctx); err != nil {
 				return fmt.Errorf("persist controller state: %w", err)
 			}
+			if err := detectorReviewError(controller); err != nil {
+				return err
+			}
 			if err := executePendingEffects(runCtx, controller); err != nil {
 				if runCtx.Err() != nil {
 					return nil
@@ -309,6 +324,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			controller.handleWorkspaceCompletion(completion)
 			if err := controller.PersistState(ctx); err != nil {
 				return fmt.Errorf("persist controller state: %w", err)
+			}
+			if err := detectorReviewError(controller); err != nil {
+				return err
 			}
 			if err := executePendingEffects(runCtx, controller); err != nil {
 				if runCtx.Err() != nil {
@@ -365,6 +383,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			if err := controller.PersistState(ctx); err != nil {
 				return fmt.Errorf("persist controller state: %w", err)
 			}
+			if err := detectorReviewError(controller); err != nil {
+				return err
+			}
 			if err := executePendingEffects(runCtx, controller); err != nil {
 				if runCtx.Err() != nil {
 					return nil
@@ -373,6 +394,14 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			}
 		}
 	}
+}
+
+func detectorReviewError(controller *Controller) error {
+	required, reason := controller.DetectorReviewStatus()
+	if !required {
+		return nil
+	}
+	return fmt.Errorf("detector review required: %s", reason)
 }
 
 func stopTimerForRuntimeEvent(ctx context.Context, timer *time.Timer) bool {

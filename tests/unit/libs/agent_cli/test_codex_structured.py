@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import signal
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from libs.agent_cli import HttpMcpServer, StdioMcpServer
+from libs.agent_cli import codex as codex_module
 from libs.agent_cli.codex import CodexStructuredExecutionError, resume_codex_structured, run_codex_structured
 
 
@@ -125,3 +127,38 @@ def test_structured_execution_reports_stderr_and_json_events(tmp_path: Path) -> 
     assert captured.value.returncode == 7
     assert "PATH warning" in str(captured.value)
     assert "schema rejected" in str(captured.value)
+
+
+def test_structured_execution_kills_process_group_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    class TimedOutProcess:
+        pid = 1234
+
+        def __init__(self) -> None:
+            self.communicate_calls = 0
+
+        def communicate(self, **kwargs: object) -> tuple[str, str]:
+            self.communicate_calls += 1
+            if self.communicate_calls == 1:
+                timeout = kwargs.get("timeout")
+                assert timeout is None or isinstance(timeout, (int, float))
+                raise subprocess.TimeoutExpired(["codex"], timeout)
+            return ("partial stdout", "partial stderr")
+
+    process = TimedOutProcess()
+    popen_kwargs: dict[str, object] = {}
+    killed: list[tuple[int, signal.Signals]] = []
+
+    def fake_popen(command: list[str], **kwargs: object) -> TimedOutProcess:
+        popen_kwargs.update(kwargs)
+        return process
+
+    monkeypatch.setattr(codex_module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(codex_module.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+
+    with pytest.raises(subprocess.TimeoutExpired) as captured:
+        codex_module._run(["codex"], prompt="solve it", timeout_seconds=1, runner=None)
+
+    assert popen_kwargs["start_new_session"] is True
+    assert killed == [(1234, signal.SIGKILL)]
+    assert captured.value.stdout == "partial stdout"
+    assert captured.value.stderr == "partial stderr"

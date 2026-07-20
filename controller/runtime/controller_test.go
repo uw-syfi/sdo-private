@@ -438,6 +438,56 @@ func TestResponderCompletionDoesNotCloseIncidentUntilAllHealthFindingsClear(t *t
 	}
 }
 
+func TestControllerRequiresDetectorReviewWhenPostResponseHealthNeverClears(t *testing.T) {
+	interval := time.Second
+	health := controllerDetector(
+		"health", interval,
+		stateFinding("health"), stateFinding("health"), stateFinding("health"), stateFinding("health"),
+	)
+	health.spec.Class = sdk.DetectorClassHealth
+	health.spec.Owner = sdk.DetectorOwnerHealthJudge
+	health.spec.Persistence = sdk.PersistencePolicy{Firing: 2, Clearing: 2}
+	health.spec.Batching = sdk.BatchingPolicy{Severity: sdk.SeverityCritical}
+	health.spec.OriginatingCommit = "health-objective"
+	for index := range health.samples {
+		health.samples[index][0].Severity = sdk.SeverityCritical
+	}
+	dispatcher := &recordingDispatcher{requests: make(chan IncidentRequest, 1)}
+	config := testControllerConfig()
+	config.VerificationTimeout = 2 * time.Second
+	controller, err := NewController(
+		config, []sdk.Detector{health}, staticProvider{snapshot: sdktest.Snapshot{}}, dispatcher, time.Unix(0, 0),
+	)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+
+	for sample := 0; sample < 2; sample++ {
+		if err := controller.Step(context.Background(), time.Unix(int64(sample), 0), nil); err != nil {
+			t.Fatalf("firing step: %v", err)
+		}
+	}
+	executePendingEffect(t, controller)
+	awaitRequest(t, dispatcher.requests)
+	awaitDispatchCompletionQueued(t, controller)
+	if err := controller.Step(context.Background(), time.Unix(2, 0), nil); err != nil {
+		t.Fatalf("completion step: %v", err)
+	}
+	if controller.DetectorReviewRequired() {
+		t.Fatal("detector review was required before the verification window elapsed")
+	}
+	if err := controller.Step(context.Background(), time.Unix(4, 0), nil); err != nil {
+		t.Fatalf("verification deadline step: %v", err)
+	}
+	if !controller.DetectorReviewRequired() {
+		t.Fatal("persistent post-response health finding did not require detector review")
+	}
+	state := controller.ExportState()
+	if !state.DetectorReviewRequired || state.DetectorReviewRequiredAt.IsZero() || state.DetectorReviewReason == "" {
+		t.Fatalf("detector review state was not durable: %#v", state)
+	}
+}
+
 func controllerDetector(id string, interval time.Duration, samples ...sdk.Finding) *sequenceDetector {
 	sequences := make([][]sdk.Finding, 0, len(samples))
 	for _, finding := range samples {

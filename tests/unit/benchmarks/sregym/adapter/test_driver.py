@@ -12,6 +12,7 @@ import yaml
 from benchmarks.sregym.adapter.driver import (
     _cleanup_defer_timeout_seconds,
     _deployed_health_objective,
+    _deployed_lifecycle_context,
     _in_cluster_api_base,
     _receipt_directory,
     _relay_target_api_base,
@@ -80,6 +81,7 @@ def test_sregym_adapter_routes_only_through_production_job_controller(tmp_path: 
 
     assert command[0] == "controller"
     assert "--responder-image" in command
+    assert command[command.index("--verification-timeout") + 1] == "120s"
     assert "--repository-pvc" in command
     assert "--credentials-secret" in command
     assert "/workspace/worktrees" in command
@@ -201,7 +203,20 @@ def test_health_objective_names_only_resources_deployed_in_the_runtime_namespace
         "items": [
             {"kind": "Service", "metadata": {"name": "frontend"}},
             {"kind": "Deployment", "metadata": {"name": "mongodb-geo"}},
-            {"kind": "Deployment", "metadata": {"name": "frontend"}},
+            {
+                "kind": "Deployment",
+                "metadata": {"name": "frontend"},
+                "spec": {
+                    "template": {
+                        "spec": {
+                            "volumes": [
+                                {"name": "config", "configMap": {"name": "frontend-config"}},
+                                {"name": "optional", "configMap": {"name": "optional-config", "optional": True}},
+                            ]
+                        }
+                    }
+                },
+            },
             {"kind": "Route", "metadata": {"name": "ignored-openshift-variant"}},
         ]
     }
@@ -211,7 +226,8 @@ def test_health_objective_names_only_resources_deployed_in_the_runtime_namespace
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
 
-    objective = _deployed_health_objective("hotel-reservation", command_runner=fake_runner)
+    context = _deployed_lifecycle_context("hotel-reservation", command_runner=fake_runner)
+    objective = context.health_objective
 
     assert calls == [
         [
@@ -219,7 +235,7 @@ def test_health_objective_names_only_resources_deployed_in_the_runtime_namespace
             "--namespace",
             "hotel-reservation",
             "get",
-            "deployments,services",
+            "deployments,services,configmaps,networkpolicies",
             "--output=json",
         ]
     ]
@@ -230,6 +246,12 @@ def test_health_objective_names_only_resources_deployed_in_the_runtime_namespace
     )
     assert "source-backed" not in objective
     assert "ignored-openshift-variant" not in objective
+    assert [(resource.kind, resource.name) for resource in context.active_resources] == [
+        ("ConfigMap", "frontend-config"),
+        ("Deployment", "frontend"),
+        ("Deployment", "mongodb-geo"),
+        ("Service", "frontend"),
+    ]
 
 
 def test_health_objective_requires_a_live_deployment_inventory() -> None:
@@ -311,7 +333,11 @@ def test_sregym_adapter_passes_configured_model_to_initial_lifecycle(
         lambda *_args, **_kwargs: {"app_name": "demo", "namespace": "demo"},
     )
     monkeypatch.setattr(driver, "_application_repository", lambda: tmp_path)
-    monkeypatch.setattr(driver, "_deployed_health_objective", lambda *_args, **_kwargs: "healthy")
+    monkeypatch.setattr(
+        driver,
+        "_deployed_lifecycle_context",
+        lambda *_args, **_kwargs: driver.DeployedLifecycleContext(health_objective="healthy", active_resources=[]),
+    )
     monkeypatch.setattr(driver, "reuse_initial_lifecycle_if_valid", lambda *_args, **_kwargs: False)
 
     def fake_lifecycle(*_args: object, **kwargs: object) -> str:
