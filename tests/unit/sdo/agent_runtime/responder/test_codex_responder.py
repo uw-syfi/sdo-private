@@ -24,8 +24,10 @@ def test_codex_responder_captures_resumable_session_id() -> None:
     result = IncidentResult.model_validate_json(_fixture("incident_result.json")).model_copy(
         update={"responder_session_id": None}
     )
+    commands: list[list[str]] = []
 
     def runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
         output = Path(command[command.index("--output-last-message") + 1])
         output.write_text(result.model_dump_json(exclude_none=True), encoding="utf-8")
         return subprocess.CompletedProcess(
@@ -35,9 +37,11 @@ def test_codex_responder_captures_resumable_session_id() -> None:
             stderr="",
         )
 
-    completed = execute_incident(request, runner=runner)
+    completed = execute_incident(request, model="gpt-5.5", runner=runner)
 
     assert completed.responder_session_id == "session-from-codex"
+    assert "--model" in commands[0]
+    assert commands[0][commands[0].index("--model") + 1] == "gpt-5.5"
 
 
 def test_responder_cannot_reflect_before_controller_verification(monkeypatch) -> None:

@@ -36,12 +36,18 @@ def main() -> int:
     return 0
 
 
-def execute_incident(request: IncidentRequest, *, runner: CommandRunner = subprocess.run) -> IncidentResult:
+def execute_incident(
+    request: IncidentRequest,
+    *,
+    model: str | None = None,
+    runner: CommandRunner = subprocess.run,
+) -> IncidentResult:
     try:
         completed = run_codex_structured(
             _responder_prompt(request),
             output_schema=_incident_result_schema(),
             cwd=request.repository_worktree,
+            model=model or os.getenv("SDO_RESPONDER_MODEL") or None,
             timeout_seconds=None,
             sandbox="danger-full-access",
             runner=runner,

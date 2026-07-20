@@ -18,7 +18,7 @@ from urllib.parse import urlsplit, urlunsplit
 from benchmarks.sregym.adapter.runtime import RuntimeConfig, run_production_runtime
 from benchmarks.sregym.protocol.conductor import get_api_base, get_app_info, poll_stage_sync, signal_cleanup
 from benchmarks.sregym.protocol.schema import READY_STAGES
-from sdo.agent_runtime.lifecycle import reuse_initial_lifecycle_if_valid, run_initial_lifecycle
+from sdo.agent_runtime.lifecycle import CodexLifecycleBackend, reuse_initial_lifecycle_if_valid, run_initial_lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +211,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             repository,
             application=application,
             health_objective=health_objective,
+            backend=CodexLifecycleBackend(model=args.model),
         )
     if args.logs_dir:
         persist_lifecycle_seed(repository, Path(args.logs_dir))
