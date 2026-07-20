@@ -26,7 +26,7 @@ isolated responder worktree --> commit broker --> validated repair/memory commit
 controller outcome --> same-session reflection --> refined playbooks/detectors
 ```
 
-`sdo operate REPOSITORY --namespace NAMESPACE (--goal TEXT | --goal-file PATH)` is the public production command. Optional flags select the application name, model, controller/responder/validator images, repository PVC, credentials Secret, deployment-attempt bound, and timeout. The lifecycle is Kubernetes-only. The health objective comes from a human; the deployer and health judge run as separate agent sessions, and the controller independently validates their artifacts.
+`sdo operate REPOSITORY --namespace NAMESPACE (--goal TEXT | --goal-file PATH)` is the public production command. Optional flags select the application name, model, controller/responder/validator images, repository PVC, credentials Secret, deployment-attempt bound, and timeout. The lifecycle is Kubernetes-only. The health objective comes from a human; the deployer and health judge run as separate agent sessions, and the controller independently validates their artifacts. When the deployment adapter can observe the active topology, lifecycle provenance records that selection and judge-authored coverage is restricted to matching deployed resources rather than every source variant.
 
 ## Python orchestration
 
@@ -89,7 +89,7 @@ Incident responders never merge directly into the operational branch. The broker
 
 ## Controller/responder interaction
 
-The controller batches persistent findings into an incident request. The request includes the health objective path, architecture path, findings, surfaced playbooks, detector history, and an isolated repository worktree. A responder returns a structured result with diagnosis, applied playbooks, repair evidence, and commit information.
+The controller batches persistent findings into an incident request. The request includes the health objective path, architecture path, findings, surfaced playbooks, detector history, and an isolated repository worktree. A responder returns a structured result with diagnosis, applied playbooks, repair evidence, and commit information. Independent health detectors must clear after the response before closure. If they do not clear within the configured verification timeout, the controller durably records a detector-review-required state and exits with an actionable error instead of leaving the incident open indefinitely.
 
 After independent health verification, the controller records the outcome. Selected classifications may resume the same responder session for reflection. Reflection proposals pass through the same ownership and validation boundary before controller rollout.
 

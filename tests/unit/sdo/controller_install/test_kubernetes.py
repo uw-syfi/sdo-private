@@ -31,6 +31,7 @@ def test_production_runtime_resources_have_no_benchmark_transport() -> None:
     assert "--exit-after-closure" not in args
     assert "--duration" not in args
     assert args[args.index("--response-timeout") + 1] == "60s"
+    assert args[args.index("--verification-timeout") + 1] == "120s"
     assert "--responder-env=SDO_RESPONDER_MODEL=gpt-test" in args
 
 

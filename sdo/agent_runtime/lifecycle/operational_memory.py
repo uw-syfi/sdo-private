@@ -15,6 +15,7 @@ from typing import cast
 import yaml
 
 from sdo.agent_runtime.lifecycle.agents import (
+    ActiveTopologyResourceDTO,
     CodexLifecycleBackend,
     DeployerAssessment,
     HealthJudgeArtifact,
@@ -44,6 +45,7 @@ def reuse_initial_lifecycle_if_valid(
     *,
     application: str,
     health_objective: str,
+    active_resources: list[ActiveTopologyResourceDTO] | None = None,
     validator: SandboxRunner | None = None,
 ) -> bool:
     """Reuse a real lifecycle handoff only while its source and contracts remain valid."""
@@ -72,6 +74,12 @@ def reuse_initial_lifecycle_if_valid(
         if not isinstance(raw_attempts, list):
             return False
         attempts = [HealthJudgeArtifact.model_validate(raw) for raw in raw_attempts]
+        if active_resources is not None:
+            recorded_active = [
+                ActiveTopologyResourceDTO.model_validate(resource) for resource in provenance.get("active_topology", [])
+            ]
+            if _active_resource_keys(recorded_active) != _active_resource_keys(active_resources):
+                return False
         expected = _deployer_assessment({"repository": str(root), "application": application})
         current_deployer = deployer.model_copy(update={"source_commit": str(expected["source_commit"])})
         if _validate_deployer_assessment(root, current_deployer):
@@ -88,6 +96,7 @@ def reuse_initial_lifecycle_if_valid(
             deployer=deployer,
             health_objective=health_objective,
             expected_round=3,
+            active_resources=active_resources,
         ):
             return False
         selected_validator = validator or ContainerSandboxRunner()
@@ -101,6 +110,7 @@ def run_initial_lifecycle(
     *,
     application: str,
     health_objective: str,
+    active_resources: list[ActiveTopologyResourceDTO] | None = None,
     backend: LifecycleAgentBackend | None = None,
     validator: SandboxRunner | None = None,
     judge_rounds: int = 3,
@@ -170,6 +180,7 @@ def run_initial_lifecycle(
                     application=application,
                     health_objective=health_objective,
                     deployer=deployer,
+                    active_resources=active_resources,
                     round_index=round_index,
                     previous=previous,
                     correction_feedback=judge_feedback,
@@ -186,12 +197,18 @@ def run_initial_lifecycle(
                     f"- {error}" for error in last_errors
                 )
                 continue
+            artifact = _canonicalize_active_coverage(
+                artifact,
+                deployer=deployer,
+                active_resources=active_resources,
+            )
             judge_attempts.append(artifact)
             errors = _validate_health_judge_artifact(
                 artifact,
                 deployer=deployer,
                 health_objective=health_objective,
                 expected_round=round_index,
+                active_resources=active_resources,
             )
             if artifact.session_id in used_sessions:
                 errors.append(f"lifecycle session id {artifact.session_id!r} was reused instead of starting fresh")
@@ -241,6 +258,11 @@ def run_initial_lifecycle(
         "health_judge": final_artifact.model_dump(mode="json"),
         "health_judge_rounds": [artifact.model_dump(mode="json") for artifact in judge_attempts],
     }
+    if active_resources is not None:
+        provenance["active_topology"] = [
+            resource.model_dump(mode="json")
+            for resource in sorted(active_resources, key=lambda resource: (resource.kind, resource.name))
+        ]
     return ensure_operational_memory(
         root,
         application=application,
@@ -363,6 +385,7 @@ def _validate_health_judge_artifact(
     deployer: DeployerAssessment,
     health_objective: str,
     expected_round: int,
+    active_resources: list[ActiveTopologyResourceDTO] | None = None,
 ) -> list[str]:
     errors: list[str] = []
     expected_digest = hashlib.sha256(health_objective.strip().encode()).hexdigest()
@@ -380,6 +403,15 @@ def _validate_health_judge_artifact(
         (resource.kind, resource.name, resource.namespace, resource.source, tuple(sorted(resource.dependencies)))
         for resource in artifact.covered_resources
     }
+    active_keys = _active_resource_keys(active_resources) if active_resources is not None else None
+    inactive_covered = (
+        sorted(resource for resource in covered_resources if resource[:2] not in active_keys)
+        if active_keys is not None
+        else []
+    )
+    if inactive_covered:
+        rendered = ", ".join(f"{kind}/{name}" for kind, name, *_rest in inactive_covered)
+        errors.append("health detector covers inactive source variants; remove: " + rendered)
     if known_resources and not covered_resources:
         errors.append("health detector does not cover any published source-backed resource")
     unexpected_resources = sorted(covered_resources - known_resources)
@@ -402,7 +434,7 @@ def _validate_health_judge_artifact(
     required_resources = {
         (resource.kind, resource.name, resource.namespace, resource.source, tuple(sorted(resource.dependencies)))
         for resource in deployer.resources
-        if resource.kind in required_kinds
+        if resource.kind in required_kinds and (active_keys is None or (resource.kind, resource.name) in active_keys)
     }
     missing_required = sorted(required_resources - covered_resources)
     if missing_required:
@@ -475,6 +507,34 @@ def _validate_health_judge_artifact(
     except LifecycleError as exc:
         errors.append(str(exc))
     return errors
+
+
+def _active_resource_keys(
+    resources: list[ActiveTopologyResourceDTO] | None,
+) -> set[tuple[str, str]]:
+    if resources is None:
+        return set()
+    return {(resource.kind, resource.name) for resource in resources}
+
+
+def _canonicalize_active_coverage(
+    artifact: HealthJudgeArtifact,
+    *,
+    deployer: DeployerAssessment,
+    active_resources: list[ActiveTopologyResourceDTO] | None,
+) -> HealthJudgeArtifact:
+    """Make deployed-resource provenance a controller fact, not model output."""
+
+    if active_resources is None:
+        return artifact
+    active_keys = _active_resource_keys(active_resources)
+    covered_resources = [
+        resource
+        for resource in deployer.resources
+        if resource.kind in {"ConfigMap", "Deployment", "NetworkPolicy", "Service"}
+        and (resource.kind, resource.name) in active_keys
+    ]
+    return artifact.model_copy(update={"covered_resources": covered_resources})
 
 
 def _validate_authored_candidate(

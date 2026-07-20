@@ -473,6 +473,8 @@ done
             "sdo-codex-credentials",
             "--worktree-root",
             str(tmp_path / "workspace" / "worktrees"),
+            "--verification-timeout",
+            "90s",
         ]
     )
 
@@ -488,3 +490,4 @@ done
     assert f"--broker {os.sys.executable} --broker-arg -m --broker-arg sdo.agent_runtime.responder.broker_cli" in argv
     assert f"--app-root {app_root}" in argv
     assert f"--broker-worktree-root {tmp_path / 'workspace' / 'worktrees'}" in argv
+    assert "--verification-timeout 90s" in argv

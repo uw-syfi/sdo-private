@@ -36,6 +36,7 @@ class ControllerInstallConfig:
     model: str
     timeout_seconds: int
     validator_image: str = "sdo-detector-validator:v0.1.0"
+    verification_timeout_seconds: int = 120
     wait_for_completion: bool = False
 
 
@@ -109,6 +110,8 @@ def controller_resources(
         "/workspace/worktrees",
         "--response-timeout",
         f"{config.timeout_seconds}s",
+        "--verification-timeout",
+        f"{config.verification_timeout_seconds}s",
         f"--responder-env=CODEX_HOME={CODEX_HOME_PATH}",
         f"--responder-env=SDO_RESPONDER_MODEL={config.model}",
         "--broker-arg=-m",

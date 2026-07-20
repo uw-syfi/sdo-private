@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from sdo.agent_runtime.lifecycle.agents import (
+    ActiveTopologyResourceDTO,
     CodexLifecycleBackend,
     DeployerAssessment,
     HealthJudgeArtifact,
@@ -130,8 +131,9 @@ class RecordingBackend:
         round_index: int,
         previous: HealthJudgeArtifact | None,
         correction_feedback: str | None,
+        active_resources: list[ActiveTopologyResourceDTO] | None = None,
     ) -> HealthJudgeArtifact:
-        del application, health_objective
+        del active_resources, application, health_objective
         self.judge_calls.append((round_index, previous.session_id if previous else None, correction_feedback))
         return _artifact(
             repository,
@@ -187,6 +189,84 @@ def test_initial_lifecycle_uses_fresh_structured_agents_and_three_bounded_judge_
     assert '{APIVersion: "v1", Kind: "ConfigMap"}' in detector_source
 
 
+def test_health_judge_rejects_source_variants_outside_active_topology(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    raw = _deployer_assessment({"repository": str(repository), "application": "example"})
+    resources = [TopologyResourceDTO.model_validate(resource) for resource in raw["resources"]]
+    resources.append(
+        TopologyResourceDTO(
+            kind="Deployment",
+            name="example-knative",
+            namespace="demo",
+            source="knative.yaml",
+            dependencies=[],
+        )
+    )
+    deployer = DeployerAssessment(
+        session_id="deployer",
+        source_commit=str(raw["source_commit"]),
+        topology_fingerprint=str(raw["topology_fingerprint"]),
+        resources=resources,
+        architecture_summary_markdown="# Architecture\n\nexample and example-knative deployments with example service.",
+    )
+    artifact = _artifact(repository, session_id="judge", round_index=1, deployer=deployer)
+
+    errors = _validate_health_judge_artifact(
+        artifact,
+        deployer=deployer,
+        health_objective="Deployment example and Service example must remain available.",
+        expected_round=1,
+        active_resources=[
+            ActiveTopologyResourceDTO(kind="Deployment", name="example"),
+            ActiveTopologyResourceDTO(kind="Service", name="example"),
+        ],
+    )
+
+    assert any("inactive source variants" in error and "Deployment/example-knative" in error for error in errors)
+
+
+def test_lifecycle_canonicalizes_model_coverage_from_active_topology(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+
+    class InventedCoverageBackend(RecordingBackend):
+        def run_health_judge(self, **kwargs: object) -> HealthJudgeArtifact:
+            artifact = super().run_health_judge(**kwargs)  # type: ignore[arg-type]
+            return artifact.model_copy(
+                update={
+                    "covered_resources": [
+                        *artifact.covered_resources,
+                        TopologyResourceDTO(
+                            kind="ConfigMap",
+                            name="runtime-generated",
+                            namespace="default",
+                            source="deploy.yaml",
+                            dependencies=[],
+                        ),
+                    ]
+                }
+            )
+
+    active = [
+        ActiveTopologyResourceDTO(kind="Deployment", name="example"),
+        ActiveTopologyResourceDTO(kind="Service", name="example"),
+    ]
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective="Deployment example and Service example must remain available.",
+        active_resources=active,
+        backend=InventedCoverageBackend(),
+        validator=PassingValidator(),
+        judge_rounds=1,
+    )
+
+    provenance = __import__("yaml").safe_load((repository / ".sdo/lifecycle-provenance.yaml").read_text())
+    assert [(resource["kind"], resource["name"]) for resource in provenance["health_judge"]["covered_resources"]] == [
+        ("Deployment", "example"),
+        ("Service", "example"),
+    ]
+
+
 def test_existing_model_backed_lifecycle_is_reused_only_while_source_topology_matches(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     objective = "Deployment example and Service example must remain available."
@@ -216,6 +296,39 @@ def test_existing_model_backed_lifecycle_is_reused_only_while_source_topology_ma
         repository,
         application="example",
         health_objective=objective,
+        validator=PassingValidator(),
+    )
+
+
+def test_lifecycle_reuse_requires_the_same_active_topology(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    objective = "Deployment example and Service example must remain available."
+    active = [
+        ActiveTopologyResourceDTO(kind="Deployment", name="example"),
+        ActiveTopologyResourceDTO(kind="Service", name="example"),
+    ]
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective=objective,
+        active_resources=active,
+        backend=RecordingBackend(),
+        validator=PassingValidator(),
+        judge_rounds=3,
+    )
+
+    assert reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        active_resources=active,
+        validator=PassingValidator(),
+    )
+    assert not reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        active_resources=[ActiveTopologyResourceDTO(kind="Deployment", name="example")],
         validator=PassingValidator(),
     )
 

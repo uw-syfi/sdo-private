@@ -1,6 +1,10 @@
 """Production SDO lifecycle handoff primitives."""
 
-from sdo.agent_runtime.lifecycle.agents import CodexLifecycleBackend, LifecycleAgentBackend
+from sdo.agent_runtime.lifecycle.agents import (
+    ActiveTopologyResourceDTO,
+    CodexLifecycleBackend,
+    LifecycleAgentBackend,
+)
 from sdo.agent_runtime.lifecycle.deployment import (
     CodexDeploymentBackend,
     DeploymentAttempt,
@@ -20,6 +24,7 @@ from sdo.agent_runtime.lifecycle.operational_memory import (
 __all__ = [
     "CodexDeploymentBackend",
     "CodexLifecycleBackend",
+    "ActiveTopologyResourceDTO",
     "DeploymentAttempt",
     "DeploymentBackend",
     "DeploymentError",

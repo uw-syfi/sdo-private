@@ -38,6 +38,9 @@ type RuntimeState struct {
 	IncidentDetectedAt         time.Time               `json:"incident_detected_at,omitempty"`
 	IncidentDispatchedAt       time.Time               `json:"incident_dispatched_at,omitempty"`
 	ResponderCompletedAt       time.Time               `json:"responder_completed_at,omitempty"`
+	DetectorReviewRequired     bool                    `json:"detector_review_required,omitempty"`
+	DetectorReviewRequiredAt   time.Time               `json:"detector_review_required_at,omitempty"`
+	DetectorReviewReason       string                  `json:"detector_review_reason,omitempty"`
 	DispatchState              string                  `json:"dispatch_state"`
 	IncidentFindingKeys        []string                `json:"incident_finding_keys"`
 	PendingClosure             *IncidentClosure        `json:"pending_closure,omitempty"`
@@ -58,6 +61,10 @@ func (state RuntimeState) Validate() error {
 	}
 	if state.PendingClosure != nil && state.PendingClosure.Request.IncidentID == "" {
 		return fmt.Errorf("pending incident closure is missing its incident id")
+	}
+	if state.DetectorReviewRequired && (!state.IncidentOpen || !state.ResponderDone ||
+		state.DetectorReviewRequiredAt.IsZero() || state.DetectorReviewReason == "") {
+		return fmt.Errorf("detector review state is incomplete")
 	}
 	return nil
 }
