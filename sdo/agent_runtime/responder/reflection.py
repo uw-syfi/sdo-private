@@ -116,7 +116,7 @@ class CodexSessionBackend:
         model: str | None = None,
         reasoning_effort: str = "medium",
         timeout_seconds: int = 900,
-        command_runner: CommandRunner = subprocess.run,
+        command_runner: CommandRunner | None = None,
     ) -> None:
         self.executable = executable
         self.model = model

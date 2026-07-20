@@ -14,6 +14,7 @@ from sdo.agent_runtime.lifecycle.agents import (
     CodexLifecycleBackend,
     DeployerAssessment,
     HealthJudgeArtifact,
+    LifecycleAgentError,
     TopologyResourceDTO,
 )
 from sdo.agent_runtime.lifecycle.operational_memory import (
@@ -485,6 +486,7 @@ import (
     \"time\"
     appsv1 \"k8s.io/api/apps/v1\"
     corev1 \"k8s.io/api/core/v1\"
+    \"k8s.io/apimachinery/pkg/runtime/schema\"
     \"sdo.dev/controller/sdk\"
 )
 
@@ -492,18 +494,28 @@ func New() sdk.Detector { return Detector{} }
 type Detector struct{}
 func (Detector) Spec() sdk.DetectorSpec {
     _ = appsv1.SchemeGroupVersion
+    _ = schema.GroupVersionKind{}
     return sdk.DetectorSpec{}
 }
 func (Detector) Detect(ctx context.Context, snap sdk.DetectionContext) ([]sdk.Finding, error) {
     _ = corev1.ConditionTrue
     return nil, nil
 }
+func apiVersionForKind(kind string) string {
+    if kind == "Deployment" {
+        return "apps/v1"
+    }
+    return "v1"
+}
 """
 
     canonical = _canonicalize_health_registration(source)
 
     assert 'appsv1 "k8s.io/api/apps/v1"' not in canonical
+    assert '"k8s.io/apimachinery/pkg/runtime/schema"' not in canonical
     assert 'corev1 "k8s.io/api/core/v1"' in canonical
+    assert 'return "apps/v1"' in canonical
+    assert 'return "v1"' in canonical
 
 
 def test_lifecycle_rejects_source_default_as_a_literal_runtime_namespace(tmp_path: Path) -> None:
@@ -594,8 +606,72 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
     assert all(command[command.index("--sandbox") + 1] == "read-only" for command in calls)
     assert all("--output-schema" in command and "--json" in command for command in calls)
     assert "copy every resource required by the objective exactly from the deployer handoff" in prompts[1]
+    assert "Trusted controller/sdk API reference" in prompts[1]
+    assert "Inspect only the current application checkout" in prompts[1]
+    assert "last structured response is the only response the controller accepts" in prompts[1]
     assert "Every Go func declaration must be package-level" in prompts[1]
     assert "Mentally parse both complete files before returning them" in prompts[1].replace("\n", " ")
+
+
+def test_codex_backend_uses_managed_process_group_execution_by_default() -> None:
+    backend = CodexLifecycleBackend()
+
+    assert backend.command_runner is None
+
+
+@pytest.mark.parametrize(
+    "escaped_command",
+    [
+        "find ../older-run -name detector.go",
+        "sed -n 1,80p {outside}/detector.go",
+        "cat /proc/self/environ",
+    ],
+)
+def test_codex_backend_rejects_sessions_that_read_outside_application_repository(
+    tmp_path: Path,
+    escaped_command: str,
+) -> None:
+    repository = _repository(tmp_path)
+    raw = _deployer_assessment({"repository": str(repository), "application": "example"})
+    escaped_command = escaped_command.format(outside=tmp_path.parent / "older-run")
+
+    def runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        output_path = Path(command[command.index("--output-last-message") + 1])
+        output_path.write_text(
+            json.dumps(
+                {
+                    "source_commit": raw["source_commit"],
+                    "topology_fingerprint": raw["topology_fingerprint"],
+                    "resources": raw["resources"],
+                    "architecture_summary_markdown": "# Architecture\n\nExample Deployment and Service.",
+                }
+            ),
+            encoding="utf-8",
+        )
+        stdout = "\n".join(
+            [
+                '{"type":"thread.started","thread_id":"fresh-session"}',
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "command_execution",
+                            "command": escaped_command,
+                        },
+                    }
+                ),
+            ]
+        )
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    backend = CodexLifecycleBackend(command_runner=runner)
+
+    with pytest.raises(LifecycleAgentError, match="outside the application repository"):
+        backend.run_deployer(
+            repository=repository,
+            application="example",
+            correction_feedback=None,
+        )
 
 
 def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_feedback(

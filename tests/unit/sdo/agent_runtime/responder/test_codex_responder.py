@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import subprocess
 from pathlib import Path
 
@@ -42,6 +43,10 @@ def test_codex_responder_captures_resumable_session_id() -> None:
     assert completed.responder_session_id == "session-from-codex"
     assert "--model" in commands[0]
     assert commands[0][commands[0].index("--model") + 1] == "gpt-5.5"
+
+
+def test_codex_responder_uses_managed_process_group_execution_by_default() -> None:
+    assert inspect.signature(execute_incident).parameters["runner"].default is None
 
 
 def test_responder_cannot_reflect_before_controller_verification(monkeypatch) -> None:

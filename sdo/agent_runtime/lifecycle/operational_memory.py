@@ -836,33 +836,66 @@ def _canonicalize_health_registration(source: str) -> str:
 		OriginatingCommit: "lifecycle-bootstrap",
 	}}
 }}"""
+    replaced_spec = source[match.start() : closing_brace + 1]
     replaced = source[: match.start()] + canonical + source[closing_brace + 1 :]
-    return _prune_unused_aliased_go_imports(replaced)
+    replaced_qualifiers = set(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\.", replaced_spec))
+    return _prune_unused_aliased_go_imports(replaced, replaced_qualifiers=replaced_qualifiers)
 
 
 _ALIASED_GO_IMPORT = re.compile(
     r'^(?P<indent>[ \t]*)(?P<alias>[A-Za-z_][A-Za-z0-9_]*)[ \t]+"(?P<path>[^"]+)"[ \t]*$',
     re.MULTILINE,
 )
+_DEFAULT_GO_IMPORT = re.compile(
+    r'^(?P<indent>[ \t]*)"(?P<path>[^"]+)"[ \t]*$',
+    re.MULTILINE,
+)
+_GO_IMPORT_BLOCK = re.compile(r"^import\s*\((?P<body>.*?)^\)", re.MULTILINE | re.DOTALL)
 
 
-def _prune_unused_aliased_go_imports(source: str) -> str:
+def _prune_unused_aliased_go_imports(source: str, *, replaced_qualifiers: set[str]) -> str:
     """Remove imports made unused when the controller replaces the authored Spec."""
 
-    import_ranges = [(match.start(), match.end()) for match in _ALIASED_GO_IMPORT.finditer(source)]
+    aliased_imports: list[tuple[int, int, str]] = []
+    default_imports: list[tuple[int, int, str]] = []
+    for block in _GO_IMPORT_BLOCK.finditer(source):
+        body_start = block.start("body")
+        aliased_imports.extend(
+            (body_start + match.start(), body_start + match.end(), match.group("alias"))
+            for match in _ALIASED_GO_IMPORT.finditer(block.group("body"))
+        )
+        default_imports.extend(
+            (
+                body_start + match.start(),
+                body_start + match.end(),
+                _default_go_package_name(match.group("path")),
+            )
+            for match in _DEFAULT_GO_IMPORT.finditer(block.group("body"))
+        )
+    import_ranges = [(start, end) for start, end, _name in [*aliased_imports, *default_imports]]
     body = source
-    for start, end in reversed(import_ranges):
+    for start, end in sorted(import_ranges, reverse=True):
         body = body[:start] + (" " * (end - start)) + body[end:]
 
-    unused_ranges = [
-        (match.start(), match.end())
-        for match in _ALIASED_GO_IMPORT.finditer(source)
-        if match.group("alias") not in {"_", "."}
-        and re.search(rf"\b{re.escape(match.group('alias'))}\s*\.", body) is None
+    unused_ranges: list[tuple[int, int]] = [
+        (start, end)
+        for start, end, alias in aliased_imports
+        if alias not in {"_", "."} and re.search(rf"\b{re.escape(alias)}\s*\.", body) is None
     ]
-    for start, end in reversed(unused_ranges):
+    unused_ranges.extend(
+        (start, end)
+        for start, end, package_name in default_imports
+        if package_name in replaced_qualifiers and re.search(rf"\b{re.escape(package_name)}\s*\.", body) is None
+    )
+    for start, end in sorted(unused_ranges, reverse=True):
         source = source[:start] + source[end:]
     return source
+
+
+def _default_go_package_name(import_path: str) -> str:
+    segment = import_path.rsplit("/", 1)[-1]
+    match = re.match(r"[A-Za-z_][A-Za-z0-9_]*", segment)
+    return match.group(0) if match is not None else segment
 
 
 def _matching_go_brace(source: str, opening_brace: int) -> int:

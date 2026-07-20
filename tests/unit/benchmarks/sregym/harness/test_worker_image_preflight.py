@@ -126,8 +126,10 @@ def test_network_policy_kind_config_disables_default_cni(
 
 def test_cluster_preflight_loads_images_before_network_policy_canary(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     module = _worker_infra()
+    kubeconfig = tmp_path / "worker.kubeconfig"
     monkeypatch.setenv("SREGYM_KIND_REQUIRED_IMAGES", json.dumps(["controller:run", "validator:run"]))
     monkeypatch.setenv("SREGYM_KIND_REQUIRE_NETWORK_POLICY", "1")
     monkeypatch.setenv("SREGYM_KIND_NETWORK_POLICY_CANARY_IMAGE", "validator:run")
@@ -140,14 +142,14 @@ def test_cluster_preflight_loads_images_before_network_policy_canary(
     monkeypatch.setattr(
         module,
         "verify_network_policy_enforcement",
-        lambda cluster, image: events.append(("network-policy", cluster, image)),
+        lambda cluster, image, path: events.append(("network-policy", cluster, image, path)),
     )
 
-    module.preflight_cluster_requirements("sregym-w0")
+    module.preflight_cluster_requirements("sregym-w0", str(kubeconfig))
 
     assert events == [
         ("images", "sregym-w0", ["controller:run", "validator:run"]),
-        ("network-policy", "sregym-w0", "validator:run"),
+        ("network-policy", "sregym-w0", "validator:run", str(kubeconfig)),
     ]
 
 

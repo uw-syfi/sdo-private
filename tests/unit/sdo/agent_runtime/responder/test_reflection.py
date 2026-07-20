@@ -7,6 +7,10 @@ from pathlib import Path
 from sdo.agent_runtime.responder.reflection import CodexSessionBackend
 
 
+def test_codex_reflection_uses_managed_process_group_execution_by_default() -> None:
+    assert CodexSessionBackend().command_runner is None
+
+
 def test_codex_reflection_resumes_structured_session_in_incident_worktree(tmp_path: Path) -> None:
     captured: dict[str, object] = {}
 

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol
+from pathlib import Path
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,9 +17,6 @@ from libs.agent_cli.codex import (
     CodexStructuredOutputError,
     run_codex_structured,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class LifecycleAgentError(RuntimeError):
@@ -98,6 +97,36 @@ class LifecycleAgentBackend(Protocol):
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
+_DETECTOR_SDK_REFERENCE = """Trusted controller/sdk API reference (do not search outside the application checkout):
+
+- import path `sdo.dev/controller/sdk`; test helper import path `sdo.dev/controller/sdk/sdktest`.
+- `type Detector interface { Spec() DetectorSpec; Detect(context.Context, DetectionContext) ([]Finding, error) }`.
+- `DetectionContext` exposes `Namespace() string`, `ConfigMaps() []corev1.ConfigMap`,
+  `Services() []corev1.Service`, `Pods() []corev1.Pod`, `Deployments() []appsv1.Deployment`,
+  `ReplicaSets() []appsv1.ReplicaSet`, `Endpoints() []corev1.Endpoints`,
+  `EndpointSlices() []discoveryv1.EndpointSlice`, `NetworkPolicies() []networkingv1.NetworkPolicy`,
+  `Events() []corev1.Event`, `ReadyEndpointCountForService(namespace, service string) int`,
+  `PodsForService(namespace, service string) []corev1.Pod`, and
+  `RecentEventsFor(namespace, kind, name string) []corev1.Event`.
+- `sdk.ConfigMapReferencesForDeployment(appsv1.Deployment) []sdk.ConfigMapReference` returns sorted,
+  deduplicated volume, projected-volume, envFrom, and env ConfigMap references; each reference has `Name string`
+  and `Optional bool`.
+- `sdk.Finding` has string fields `RuleID`, `Summary`, `Evidence`, and `Fingerprint`; enum fields `Status` and
+  `Severity`; `PrimaryResource sdk.ObjectRef`; `RelatedResources []sdk.ObjectRef`; `Playbooks []string`;
+  `ParameterBindings map[string]sdk.ObjectRef`; and `Metadata map[string]any`. Use `sdk.FindingActive`,
+  `sdk.SeverityCritical`, and stable fingerprints. In particular, never use `map[string]string` for Metadata.
+- `sdk.ObjectRef` fields are `APIVersion`, `Kind`, `Namespace`, and `Name`.
+- `sdktest.Snapshot` implements DetectionContext. Its fields are `NamespaceName`, `ConfigMapList`, `ServiceList`,
+  `PodList`, `DeploymentList`, `ReplicaSetList`, `EndpointList`, `EndpointSliceList`, `NetworkPolicyList`, and
+  `EventList`.
+"""
+
+
+_ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9_.$~-])(/[A-Za-z0-9_./*?{}$@%+=:,~-]+)")
+_PARENT_PATH = re.compile(r"(?:^|[\s'\"=;(])\.\.(?:/[^\s'\";|&)]*)?(?=$|[\s'\";|&)])")
+_SYSTEM_COMMAND_ROOTS = tuple(Path(path) for path in ("/bin", "/usr/bin", "/usr/local/bin"))
+
+
 class CodexLifecycleBackend:
     """Run each lifecycle handoff as a new read-only Codex CLI session."""
 
@@ -108,7 +137,7 @@ class CodexLifecycleBackend:
         model: str | None = None,
         reasoning_effort: str = "medium",
         timeout_seconds: int = 900,
-        command_runner: CommandRunner = subprocess.run,
+        command_runner: CommandRunner | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("lifecycle agent timeout must be positive")
@@ -136,6 +165,10 @@ low-level data stores and observability resources; do not collapse named resourc
 file and do not infer resources absent from tracked source. The controller will independently compare your source
 commit, topology fingerprint, complete resource inventory, and summary coverage with deterministic repository
 inspection.
+
+Repository isolation is part of the evidence contract. Inspect only the current application checkout. Never use
+`..`, an absolute path outside this checkout, a sibling experiment, a package cache, or another SDO source tree.
+The controller audits command events and rejects the entire fresh session if any command escapes this checkout.
 
 Correction feedback from the prior fresh attempt:
 {feedback}
@@ -182,8 +215,16 @@ Validation feedback:
 {feedback}
 
 Author deterministic Go detector code and deterministic Go tests using only sdo.dev/controller/sdk's
-DetectionContext snapshot methods and Kubernetes API types already available to SDO diagnostics. Inspect the
-SDK in this repository before writing. The detector must compile as package objective, export New() sdk.Detector,
+DetectionContext snapshot methods and Kubernetes API types already available to SDO diagnostics. Use the trusted
+SDK reference below; the application checkout is intentionally not expected to contain the controller SDK.
+
+{_DETECTOR_SDK_REFERENCE}
+
+Repository isolation is part of the evidence contract. Inspect only the current application checkout. Never use
+`..`, an absolute path outside this checkout, a sibling experiment, a package cache, or another SDO source tree.
+The controller audits command events and rejects the entire fresh session if any command escapes this checkout.
+
+The detector must compile as package objective, export New() sdk.Detector,
 encode the SHA-256 digest of the exact human objective in a healthObjectiveDigest constant, and detect only
 objective-specific observable failure conditions. Its tests must include matching and near-miss cases. On later
 rounds, identify failure patterns missed by the prior code and revise it rather than merely describing them.
@@ -202,6 +243,8 @@ Never read environment variables, benchmark results, SREGym data, verdict files,
 oracle. Never call an LLM at detector runtime. Return source text in the structured fields; do not edit repository
 files. Set round exactly to {round_index}; set source_commit to the deployer's commit; cover only resources present
 in the deployer handoff; and set objective_digest to the exact objective SHA-256.
+The last structured response is the only response the controller accepts. It must repeat both complete Go files;
+never return a placeholder such as "pending", "superseded", or a reference to an earlier commentary payload.
 For covered_resources, copy every resource required by the objective exactly from the deployer handoff. Never invent
 a covered ConfigMap object for a dependency that has no standalone object in the handoff. When the
 controller-observed active topology is non-null, the controller will canonicalize this provenance to exact matching
@@ -255,8 +298,44 @@ checking for a required resource that is absent, and use each observed object's 
             raise LifecycleAgentError("Codex lifecycle session did not report a fresh thread id") from exc
         except CodexStructuredOutputError as exc:
             raise LifecycleAgentError(f"invalid structured Codex lifecycle output: {exc}") from exc
+        escaped_command = _first_repository_escape(completed.stdout, repository.resolve())
+        if escaped_command is not None:
+            raise LifecycleAgentError(
+                "Codex lifecycle session read outside the application repository; "
+                f"discarding its output: {escaped_command[:300]}"
+            )
         try:
             output = output_type.model_validate_json(completed.output_json)
         except (OSError, ValueError) as exc:
             raise LifecycleAgentError(f"invalid structured Codex lifecycle output: {exc}") from exc
         return output, completed.session_id
+
+
+def _first_repository_escape(stdout: str, repository: Path) -> str | None:
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("type") != "item.completed":
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict) or item.get("type") != "command_execution":
+            continue
+        command = item.get("command")
+        if isinstance(command, str) and _command_escapes_repository(command, repository):
+            return command
+    return None
+
+
+def _command_escapes_repository(command: str, repository: Path) -> bool:
+    if _PARENT_PATH.search(command):
+        return True
+    for raw_path in _ABSOLUTE_PATH.findall(command):
+        candidate = Path(raw_path)
+        if candidate == repository or repository in candidate.parents:
+            continue
+        if any(candidate == root or root in candidate.parents for root in _SYSTEM_COMMAND_ROOTS):
+            continue
+        return True
+    return False

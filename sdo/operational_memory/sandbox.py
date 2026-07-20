@@ -4,10 +4,12 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -33,6 +35,34 @@ class SandboxRunner(Protocol):
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
+_CONTAINER_CLEANUP_WATCHDOG = r"""
+import os
+import subprocess
+import sys
+import time
+
+parent_pid = int(sys.argv[1])
+runtime = sys.argv[2]
+container_name = sys.argv[3]
+while True:
+    try:
+        os.kill(parent_pid, 0)
+    except ProcessLookupError:
+        break
+    time.sleep(0.25)
+for _attempt in range(20):
+    completed = subprocess.run(
+        [runtime, "rm", "--force", container_name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if completed.returncode == 0:
+        break
+    time.sleep(0.25)
+"""
+
+
 class ContainerSandboxRunner:
     """Run untrusted detector compilation in a locked-down OCI container."""
 
@@ -44,7 +74,7 @@ class ContainerSandboxRunner:
         timeout_seconds: int = 600,
         cpu_limit: str = "1",
         memory_limit: str = "3g",
-        command_runner: CommandRunner = subprocess.run,
+        command_runner: CommandRunner | None = None,
     ) -> None:
         self.image = image
         self.runtime = runtime or shutil.which("docker") or shutil.which("podman") or "docker"
@@ -55,10 +85,13 @@ class ContainerSandboxRunner:
 
     def run(self, app_root: Path) -> SandboxResult:
         root = app_root.resolve()
+        container_name = f"sdo-detector-validator-{os.getpid()}-{uuid.uuid4().hex[:12]}"
         command = [
             self.runtime,
             "run",
             "--rm",
+            "--name",
+            container_name,
             "--network",
             "none",
             "--read-only",
@@ -98,14 +131,17 @@ class ContainerSandboxRunner:
             "/workspace",
         ]
         try:
-            completed = self.command_runner(
-                command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
-                env={"PATH": os.environ.get("PATH", "")},
-            )
+            if self.command_runner is None:
+                completed = self._run_managed_container(command, container_name)
+            else:
+                completed = self.command_runner(
+                    command,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout_seconds,
+                    env={"PATH": os.environ.get("PATH", "")},
+                )
         except subprocess.TimeoutExpired as exc:
             return SandboxResult(
                 returncode=124,
@@ -117,6 +153,87 @@ class ContainerSandboxRunner:
             returncode=completed.returncode,
             stdout=completed.stdout,
             stderr=completed.stderr,
+        )
+
+    def _run_managed_container(
+        self,
+        command: list[str],
+        container_name: str,
+    ) -> subprocess.CompletedProcess[str]:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={"PATH": os.environ.get("PATH", "")},
+            start_new_session=True,
+        )
+        watchdog = self._start_cleanup_watchdog(container_name)
+        previous_sigterm: signal.Handlers | None = None
+        sigterm_handler_installed = False
+
+        def terminate_after_cleanup(signum: int, _frame: object) -> None:
+            raise SystemExit(128 + signum)
+
+        try:
+            previous_sigterm = signal.signal(signal.SIGTERM, terminate_after_cleanup)
+            sigterm_handler_installed = True
+        except ValueError:
+            # Signal handlers can only be installed by the main thread. The
+            # process-group timeout cleanup still applies in worker threads.
+            pass
+        try:
+            try:
+                stdout, stderr = process.communicate(timeout=self.timeout_seconds)
+            except subprocess.TimeoutExpired:
+                self._kill_container_process(process, container_name)
+                stdout, stderr = process.communicate()
+                raise subprocess.TimeoutExpired(
+                    command,
+                    self.timeout_seconds,
+                    output=stdout,
+                    stderr=stderr,
+                ) from None
+            except BaseException:
+                self._kill_container_process(process, container_name)
+                raise
+        finally:
+            if sigterm_handler_installed and previous_sigterm is not None:
+                signal.signal(signal.SIGTERM, previous_sigterm)
+            self._stop_cleanup_watchdog(watchdog)
+        return subprocess.CompletedProcess(command, process.returncode, stdout=stdout, stderr=stderr)
+
+    def _start_cleanup_watchdog(self, container_name: str) -> subprocess.Popen[str]:
+        return subprocess.Popen(
+            [sys.executable, "-c", _CONTAINER_CLEANUP_WATCHDOG, str(os.getpid()), self.runtime, container_name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            env={"PATH": os.environ.get("PATH", "")},
+            start_new_session=True,
+        )
+
+    @staticmethod
+    def _stop_cleanup_watchdog(watchdog: subprocess.Popen[str]) -> None:
+        watchdog.terminate()
+        try:
+            watchdog.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            watchdog.kill()
+            watchdog.wait(timeout=5)
+
+    def _kill_container_process(self, process: subprocess.Popen[str], container_name: str) -> None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        subprocess.run(
+            [self.runtime, "rm", "--force", container_name],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env={"PATH": os.environ.get("PATH", "")},
         )
 
 

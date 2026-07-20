@@ -40,7 +40,7 @@ def execute_incident(
     request: IncidentRequest,
     *,
     model: str | None = None,
-    runner: CommandRunner = subprocess.run,
+    runner: CommandRunner | None = None,
 ) -> IncidentResult:
     try:
         completed = run_codex_structured(
