@@ -87,6 +87,7 @@ def test_sregym_adapter_routes_only_through_production_job_controller(tmp_path: 
     assert "evaluate-once" not in command
     assert "--responder-env=SDO_SREGYM_API_BASE=http://sdo-sregym-bridge:8000" in command
     assert "--responder-env=CODEX_HOME=/workspace/.sdo-runtime/codex" in command
+    assert "--responder-env=SDO_RESPONDER_MODEL=gpt-5" in command
     assert "--broker-arg=--validator-mode" in command
     assert "--broker-arg=kubernetes" in command
     assert "--broker-arg=--validator-image" in command
@@ -292,6 +293,36 @@ def test_sregym_passes_run_artifact_directory_to_sdo_adapter(monkeypatch: pytest
     monkeypatch.setenv("AGENT_LOGS_DIR", "/logs/problem-run/agent")
 
     assert driver._parse_args([]).logs_dir == "/logs/problem-run/agent"
+
+
+def test_sregym_adapter_passes_configured_model_to_initial_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    captured: list[str | None] = []
+    monkeypatch.setenv("SREGYM_DEFER_CLEANUP", "1")
+    monkeypatch.setattr(driver, "get_api_base", lambda: "http://localhost:8000")
+    monkeypatch.setattr(driver, "poll_stage_sync", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        driver,
+        "get_app_info",
+        lambda *_args, **_kwargs: {"app_name": "demo", "namespace": "demo"},
+    )
+    monkeypatch.setattr(driver, "_application_repository", lambda: tmp_path)
+    monkeypatch.setattr(driver, "_deployed_health_objective", lambda *_args, **_kwargs: "healthy")
+    monkeypatch.setattr(driver, "reuse_initial_lifecycle_if_valid", lambda *_args, **_kwargs: False)
+
+    def fake_lifecycle(*_args: object, **kwargs: object) -> str:
+        captured.append(kwargs["backend"].model)
+        return "commit"
+
+    monkeypatch.setattr(driver, "run_initial_lifecycle", fake_lifecycle)
+    monkeypatch.setattr(driver, "run_production_runtime", lambda *_args, **_kwargs: {"completed": True})
+
+    assert driver._run(driver._parse_args(["--model", "gpt-5.5"])) == {"completed": True}
+    assert captured == ["gpt-5.5"]
 
 
 def test_receipt_falls_back_to_experiment_directory_for_registry_agents(tmp_path: Path) -> None:

@@ -110,6 +110,7 @@ def controller_resources(
         "--response-timeout",
         f"{config.timeout_seconds}s",
         f"--responder-env=CODEX_HOME={CODEX_HOME_PATH}",
+        f"--responder-env=SDO_RESPONDER_MODEL={config.model}",
         "--broker-arg=-m",
         "--broker-arg=sdo.agent_runtime.responder.broker_cli",
         "--broker-arg=--proposal-command",
