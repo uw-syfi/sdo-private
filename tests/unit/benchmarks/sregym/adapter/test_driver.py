@@ -16,6 +16,7 @@ from benchmarks.sregym.adapter.driver import (
     _in_cluster_api_base,
     _receipt_directory,
     _relay_target_api_base,
+    _submit_recorded_result,
     persist_lifecycle_seed,
     persist_production_receipt,
 )
@@ -397,6 +398,39 @@ def test_receipt_falls_back_to_experiment_directory_for_registry_agents(tmp_path
 
     assert _receipt_directory(None, repository) == tmp_path / "experiment"
     assert _receipt_directory("/logs/problem-run/agent", repository) == Path("/logs/problem-run/agent")
+
+
+def test_submit_recorded_result_finishes_benchmark_when_responder_omitted_transport() -> None:
+    submissions: list[tuple[str, str]] = []
+    receipt = {
+        "confirmed_root_causes": [{"summary": "required ConfigMap was missing"}],
+        "repair_actions": [{"summary": "created the missing ConfigMap"}],
+    }
+
+    _submit_recorded_result(
+        receipt,
+        "http://localhost:8000",
+        current_stage=lambda _api_base: "diagnosis",
+        submitter=lambda solution, *, phase, api_base: submissions.append((phase, solution)) or {},
+    )
+
+    assert submissions == [
+        ("diagnosis", "required ConfigMap was missing"),
+        ("mitigation", "created the missing ConfigMap"),
+    ]
+
+
+def test_submit_recorded_result_does_not_duplicate_completed_transport() -> None:
+    submissions: list[tuple[str, str]] = []
+
+    _submit_recorded_result(
+        {},
+        "http://localhost:8000",
+        current_stage=lambda _api_base: "awaiting_cleanup",
+        submitter=lambda solution, *, phase, api_base: submissions.append((phase, solution)) or {},
+    )
+
+    assert submissions == []
 
 
 def test_runtime_job_state_fails_fast() -> None:

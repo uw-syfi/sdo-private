@@ -17,8 +17,15 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from benchmarks.sregym.adapter.runtime import RuntimeConfig, run_production_runtime
-from benchmarks.sregym.protocol.conductor import get_api_base, get_app_info, poll_stage_sync, signal_cleanup
-from benchmarks.sregym.protocol.schema import READY_STAGES
+from benchmarks.sregym.adapter.submission import submit_solution
+from benchmarks.sregym.protocol.conductor import (
+    get_api_base,
+    get_app_info,
+    get_current_stage_sync,
+    poll_stage_sync,
+    signal_cleanup,
+)
+from benchmarks.sregym.protocol.schema import READY_STAGES, TERMINAL_STAGES
 from sdo.agent_runtime.lifecycle import (
     ActiveTopologyResourceDTO,
     ClaudeLifecycleBackend,
@@ -71,6 +78,42 @@ def persist_production_receipt(receipt: dict[str, Any], receipt_dir: Path) -> Pa
     temporary.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     temporary.replace(path)
     return path
+
+
+def _submit_recorded_result(
+    receipt: dict[str, Any],
+    api_base: str,
+    *,
+    current_stage: Callable[[str], str | None] = get_current_stage_sync,
+    submitter: Callable[..., dict[str, Any]] = submit_solution,
+) -> None:
+    """Publish the responder-authored result when it omitted benchmark transport."""
+
+    stage = current_stage(api_base)
+    if stage in TERMINAL_STAGES:
+        return
+    if stage not in READY_STAGES:
+        raise RuntimeError(f"cannot publish SDO result while SREGym is at stage {stage!r}")
+
+    root_causes = receipt.get("confirmed_root_causes", [])
+    diagnosis = "; ".join(
+        str(item.get("summary", "")).strip()
+        for item in root_causes
+        if isinstance(item, dict) and str(item.get("summary", "")).strip()
+    )
+    repair_actions = receipt.get("repair_actions", [])
+    mitigation = "; ".join(
+        str(item.get("summary", "")).strip()
+        for item in repair_actions
+        if isinstance(item, dict) and str(item.get("summary", "")).strip()
+    )
+    if stage == "diagnosis":
+        if not diagnosis:
+            raise RuntimeError("SDO result has no confirmed root cause to submit")
+        submitter(diagnosis, phase="diagnosis", api_base=api_base)
+    if not mitigation:
+        raise RuntimeError("SDO result has no successful repair action to submit")
+    submitter(mitigation, phase="mitigation", api_base=api_base)
 
 
 def _receipt_directory(logs_dir: str | None, repository: Path) -> Path:
@@ -294,6 +337,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         logger.exception("production SDO incident lifecycle failed")
         return 1
+    _submit_recorded_result(receipt, api_base)
     persist_production_receipt(receipt, _receipt_directory(args.logs_dir, _application_repository()))
     signal_cleanup(api_base)
     return 0
