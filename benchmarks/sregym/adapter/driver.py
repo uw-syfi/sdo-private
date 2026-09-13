@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -277,23 +278,26 @@ def _deployed_health_objective(
 
 
 def _run(args: argparse.Namespace) -> dict[str, Any]:
+    started = time.monotonic()
     if os.getenv("SREGYM_DEFER_CLEANUP", "").strip() != "1":
         raise RuntimeError("sdo_codex requires defer_cleanup: true in the SREGym agent registry")
     api_base = get_api_base()
     logger.info("SDO agent backend: %s/%s", args.backend, args.provider)
     poll_stage_sync(api_base, wait_for=READY_STAGES, timeout=300, on_timeout="raise")
+    conductor_ready = time.monotonic()
     app_info = get_app_info(api_base)
     repository = _application_repository()
     application = str(app_info.get("app_name") or repository.name)
     namespace = str(app_info.get("namespace") or "default")
     lifecycle_context = _deployed_lifecycle_context(namespace)
     health_objective = lifecycle_context.health_objective
-    if not reuse_initial_lifecycle_if_valid(
+    lifecycle_reused = reuse_initial_lifecycle_if_valid(
         repository,
         application=application,
         health_objective=health_objective,
         active_resources=lifecycle_context.active_resources,
-    ):
+    )
+    if not lifecycle_reused:
         lifecycle_type = ClaudeLifecycleBackend if args.provider == "claude" else CodexLifecycleBackend
         run_initial_lifecycle(
             repository,
@@ -302,12 +306,13 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             active_resources=lifecycle_context.active_resources,
             backend=lifecycle_type(model=args.model),
         )
+    lifecycle_ready = time.monotonic()
     if args.logs_dir:
         persist_lifecycle_seed(repository, Path(args.logs_dir))
     trusted_kubeconfig = os.getenv("SREGYM_BASE_KUBECONFIG", "").strip()
     if trusted_kubeconfig:
         os.environ["KUBECONFIG"] = trusted_kubeconfig
-    return run_production_runtime(
+    receipt = run_production_runtime(
         RuntimeConfig(
             repository=repository,
             namespace=namespace,
@@ -325,6 +330,15 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             submission_relay_target_base=_relay_target_api_base(api_base),
         )
     )
+    runtime_ready = time.monotonic()
+    receipt["lifecycle_reused"] = lifecycle_reused
+    receipt["driver_phase_timings_seconds"] = {
+        "conductor_wait": conductor_ready - started,
+        "inventory_and_lifecycle": lifecycle_ready - conductor_ready,
+        "production_runtime": runtime_ready - lifecycle_ready,
+        "driver_total_before_submission": runtime_ready - started,
+    }
+    return receipt
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -337,8 +351,17 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         logger.exception("production SDO incident lifecycle failed")
         return 1
+    receipt_dir = _receipt_directory(args.logs_dir, _application_repository())
+    # Persist the SDO-authoritative recovery before optional benchmark transport
+    # so a scoring failure cannot erase evidence of a completed incident.
+    persist_production_receipt(receipt, receipt_dir)
+    submission_started = time.monotonic()
     _submit_recorded_result(receipt, api_base)
-    persist_production_receipt(receipt, _receipt_directory(args.logs_dir, _application_repository()))
+    receipt.setdefault("driver_phase_timings_seconds", {})["benchmark_submission"] = (
+        time.monotonic() - submission_started
+    )
+    persist_production_receipt(receipt, receipt_dir)
+    print(f"SDO_RUN_TELEMETRY={json.dumps(receipt, sort_keys=True)}")
     signal_cleanup(api_base)
     return 0
 

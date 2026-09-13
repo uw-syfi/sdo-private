@@ -73,6 +73,9 @@ The current receipt schema is `sdo.production-receipt/v1`. It summarizes durable
 - production job dispatch and responder-job correlation;
 - repair policy and structured repair actions; either a proposal commit or, under `recorded-actions`, at least one successful action;
 - outcome, reflection, and validator-evidence commits;
+- responder usage plus phase timings that separate operational recovery from post-recovery learning and receipt work;
+- compact memory-reuse evidence: candidate count, match reasons, applied-playbook count, and warm-path status;
+- driver timings for conductor readiness, inventory/lifecycle work, production runtime, and benchmark submission, plus whether lifecycle memory was reused;
 - same-session reflection and independent verification;
 - final detector clearing and network-policy canaries;
 - acknowledgement, cleanup, and remaining worktrees;

@@ -4,6 +4,7 @@ import importlib
 import json
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,8 @@ from benchmarks.sregym.adapter.runtime import (
     RuntimeConfig,
     _controller_update_rollout_succeeded,
     _load_incident_ledger,
+    _memory_reuse_summary,
+    _phase_timings,
     _resolve_responder_dispatch,
     _validated_controller_rollout_record,
     run_production_runtime,
@@ -354,7 +357,15 @@ def test_sregym_adapter_passes_configured_model_to_initial_lifecycle(
 
     monkeypatch.setattr(driver, "run_production_runtime", fake_runtime)
 
-    assert driver._run(driver._parse_args(["--model", "gpt-5.5"])) == {"completed": True}
+    result = driver._run(driver._parse_args(["--model", "gpt-5.5"]))
+    assert result["completed"] is True
+    assert result["lifecycle_reused"] is False
+    assert set(result["driver_phase_timings_seconds"]) == {
+        "conductor_wait",
+        "inventory_and_lifecycle",
+        "production_runtime",
+        "driver_total_before_submission",
+    }
     assert captured == ["gpt-5.5"]
     assert runtime_configs[0].repair_policy == "recorded-actions"
 
@@ -390,7 +401,9 @@ def test_sregym_adapter_uses_trusted_worker_kubeconfig_for_controller_install(
 
     monkeypatch.setattr(driver, "run_production_runtime", fake_runtime)
 
-    assert driver._run(driver._parse_args([])) == {"completed": True}
+    result = driver._run(driver._parse_args([]))
+    assert result["completed"] is True
+    assert result["lifecycle_reused"] is True
 
 
 def test_receipt_falls_back_to_experiment_directory_for_registry_agents(tmp_path: Path) -> None:
@@ -398,6 +411,45 @@ def test_receipt_falls_back_to_experiment_directory_for_registry_agents(tmp_path
 
     assert _receipt_directory(None, repository) == tmp_path / "experiment"
     assert _receipt_directory("/logs/problem-run/agent", repository) == Path("/logs/problem-run/agent")
+
+
+def test_receipt_telemetry_separates_recovery_from_post_recovery_learning() -> None:
+    closure = {
+        "detected_at": "2026-09-13T21:51:04+00:00",
+        "dispatched_at": "2026-09-13T21:51:05+00:00",
+        "responder_completed_at": "2026-09-13T21:55:13+00:00",
+        "verified_at": "2026-09-13T21:55:43+00:00",
+    }
+
+    timings = _phase_timings(closure, datetime.fromisoformat("2026-09-13T22:01:18+00:00"))
+
+    assert timings == {
+        "detection_to_dispatch": 1.0,
+        "responder": 248.0,
+        "verification": 30.0,
+        "operational_recovery": 279.0,
+        "post_recovery_learning_and_receipt": 335.0,
+        "total": 614.0,
+    }
+
+
+def test_receipt_telemetry_identifies_deterministically_retrieved_warm_path() -> None:
+    closure = {
+        "request": {
+            "relevant_outcomes": [
+                {"match_reason": "exact-fingerprint"},
+                {"match_reason": "detector-rule-resource-kind"},
+            ]
+        }
+    }
+    result = {"applied_playbooks": [{"path": ".sdo/playbooks/missing.md"}]}
+
+    assert _memory_reuse_summary(closure, result) == {
+        "candidate_count": 2,
+        "match_reasons": ["detector-rule-resource-kind", "exact-fingerprint"],
+        "applied_playbook_count": 1,
+        "warm_path": True,
+    }
 
 
 def test_submit_recorded_result_finishes_benchmark_when_responder_omitted_transport() -> None:
