@@ -172,6 +172,9 @@ func (c *Controller) Step(ctx context.Context, now time.Time, event *sdk.WatchKi
 			if finding.DetectorID == "" {
 				finding.DetectorID = spec.ID
 			}
+			if len(finding.Playbooks) == 0 && len(spec.Playbooks) > 0 {
+				finding.Playbooks = append([]string(nil), spec.Playbooks...)
+			}
 			finding.Fingerprint = FindingFingerprint(finding)
 			if validationErr := core.ValidateFinding(spec, finding); validationErr != nil {
 				c.recordDetectorError(spec.ID, now, validationErr)

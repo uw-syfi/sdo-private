@@ -128,6 +128,27 @@ func TestControllerSuppressesTransientAndBatchesPersistentFindingsExactlyOnce(t 
 	}
 }
 
+func TestControllerSurfacesDetectorPlaybooksWhenFindingOmitsThem(t *testing.T) {
+	start := time.Unix(0, 0)
+	detector := controllerDetector("health", time.Second, stateFinding("fault"))
+	detector.spec.Playbooks = []string{".sdo/playbooks/health-objective/README.md"}
+	dispatcher := &recordingDispatcher{requests: make(chan IncidentRequest, 1)}
+	config := testControllerConfig()
+	config.FiringThreshold = 1
+	controller, err := NewController(config, []sdk.Detector{detector}, staticProvider{snapshot: sdktest.Snapshot{}}, dispatcher, start)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	if err := controller.Step(context.Background(), start, nil); err != nil {
+		t.Fatalf("step: %v", err)
+	}
+	executePendingEffect(t, controller)
+	request := awaitRequest(t, dispatcher.requests)
+	if len(request.SurfacedPlaybooks) != 1 || request.SurfacedPlaybooks[0].Path != detector.spec.Playbooks[0] {
+		t.Fatalf("detector playbook was not surfaced: %#v", request.SurfacedPlaybooks)
+	}
+}
+
 func TestDispatchErrorRetriesTheSameIncidentInsteadOfOpeningADuplicate(t *testing.T) {
 	interval := time.Second
 	detector := controllerDetector("health", interval, stateFinding("fault"), stateFinding("fault"), stateFinding("fault"))
