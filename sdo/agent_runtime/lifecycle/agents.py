@@ -125,6 +125,7 @@ _DETECTOR_SDK_REFERENCE = """Trusted controller/sdk API reference (do not search
 
 _ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9_.$~-])(/[A-Za-z0-9_./*?{}$@%+=:,~-]+)")
 _PARENT_PATH = re.compile(r"(?:^|[\s'\"=;(])\.\.(?:/[^\s'\";|&)]*)?(?=$|[\s'\";|&)])")
+_WRITE_REDIRECT_ABSOLUTE_PATH = re.compile(r"(?:^|[ \t])(?:\d*>>?|&>)\s*['\"]?(/[A-Za-z0-9_./*?{}$@%+=:,~-]+)")
 _SYSTEM_COMMAND_ROOTS = tuple(Path(path) for path in ("/bin", "/usr/bin", "/usr/local/bin"))
 
 
@@ -400,7 +401,10 @@ def _first_repository_escape(stdout: str, repository: Path) -> str | None:
 def _command_escapes_repository(command: str, repository: Path) -> bool:
     if _PARENT_PATH.search(command):
         return True
+    write_only_paths = {match.group(1) for match in _WRITE_REDIRECT_ABSOLUTE_PATH.finditer(command)}
     for raw_path in _ABSOLUTE_PATH.findall(command):
+        if raw_path in write_only_paths:
+            continue
         candidate = Path(raw_path)
         if candidate == repository or repository in candidate.parents:
             continue

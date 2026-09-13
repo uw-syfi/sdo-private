@@ -16,6 +16,7 @@ from sdo.agent_runtime.lifecycle.agents import (
     HealthJudgeArtifact,
     LifecycleAgentError,
     TopologyResourceDTO,
+    _command_escapes_repository,
 )
 from sdo.agent_runtime.lifecycle.operational_memory import (
     _HEALTH_DETECTOR_TEST_SOURCE,
@@ -672,6 +673,19 @@ def test_codex_backend_rejects_sessions_that_read_outside_application_repository
             application="example",
             correction_feedback=None,
         )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat > /tmp/objective.txt << 'EOF'\nobjective\nEOF",
+        "cat > \"$TMPDIR/covered_resources.json\" << 'EOF'\n[]\nEOF",
+    ],
+)
+def test_repository_audit_allows_write_only_temporary_heredocs(tmp_path: Path, command: str) -> None:
+    repository = _repository(tmp_path)
+
+    assert not _command_escapes_repository(command, repository)
 
 
 def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_feedback(
