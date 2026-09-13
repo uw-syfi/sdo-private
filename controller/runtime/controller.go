@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -338,7 +339,7 @@ func (c *Controller) incidentRequest(now time.Time, findings []sdk.Finding) Inci
 	return IncidentRequest{
 		SchemaVersion: ProtocolSchemaVersion, Application: c.config.Application, Namespace: c.config.Namespace,
 		IncidentID: incidentID, Findings: findings,
-		DetectorHistory: append([]DetectorEvaluation(nil), c.history...), SurfacedPlaybooks: surfacedPlaybooks(findings),
+		DetectorHistory: compactDetectorHistory(c.history), SurfacedPlaybooks: surfacedPlaybooks(findings),
 		RelevantOutcomes: relevantOutcomeEvidence(c.config.RepositoryWorktree, findings, c.config.SourceCommit),
 		SourceCommit:     c.config.SourceCommit, DeployedCommit: c.config.DeployedCommit,
 		ArchitectureSummaryPath: c.config.ArchitectureSummaryPath, HealthObjectivePath: c.config.HealthObjectivePath,
@@ -347,6 +348,26 @@ func (c *Controller) incidentRequest(now time.Time, findings []sdk.Finding) Inci
 		CancellationToken: "cancel-" + incidentID,
 		RepairPolicy:      c.config.RepairPolicy,
 	}
+}
+
+func compactDetectorHistory(history []DetectorEvaluation) []DetectorEvaluation {
+	compacted := make([]DetectorEvaluation, 0, len(history))
+	keys := make([]string, 0, len(history))
+	for _, evaluation := range history {
+		key := evaluation.DetectorID + "\x00" + string(evaluation.Status) + "\x00" +
+			strings.Join(evaluation.Fingerprints, "\x00") + "\x00" + evaluation.Error
+		if len(keys) >= 2 && key == keys[len(keys)-1] && key == keys[len(keys)-2] {
+			compacted[len(compacted)-1] = evaluation
+			continue
+		}
+		compacted = append(compacted, evaluation)
+		keys = append(keys, key)
+	}
+	const limit = 12
+	if len(compacted) > limit {
+		compacted = compacted[len(compacted)-limit:]
+	}
+	return append([]DetectorEvaluation(nil), compacted...)
 }
 
 func surfacedPlaybooks(findings []sdk.Finding) []SurfacedPlaybook {
