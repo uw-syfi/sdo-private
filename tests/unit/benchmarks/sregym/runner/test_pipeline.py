@@ -292,6 +292,14 @@ class TestLoadPipelineConfig:
         assert config.defaults["app_filter"] == "hotel_reservation"
         assert config.defaults["env"]["judge_model_id"] == "judge-model"
 
+    def test_merge_stage_preserves_source_docker_builder(self) -> None:
+        config = merge_stage_config(
+            {"env": {"docker_builder": "sdo-example"}},
+            {},
+        )
+
+        assert config.env.docker_builder == "sdo-example"
+
     def test_no_stages_raises(self) -> None:
         with pytest.raises(ValueError, match="at least one stage"):
             PipelineConfig(name="empty", stages=[])

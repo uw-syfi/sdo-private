@@ -203,6 +203,7 @@ def merge_stage_config(
             force_recreate_cluster=bool(env_raw.get("force_recreate_cluster", False)),
             submit_done_returns_feedback=bool(env_raw.get("submit_done_returns_feedback", False)),
             cleanup_defer_timeout_seconds=int(env_raw.get("cleanup_defer_timeout_seconds", 0)),
+            docker_builder=str(env_raw.get("docker_builder", "")),
         ),
         agent_config=agent_config,
     )
