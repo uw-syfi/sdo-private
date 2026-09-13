@@ -171,6 +171,11 @@ inspection.
 Repository isolation is part of the evidence contract. Inspect only the current application checkout. Never use
 `..`, an absolute path outside this checkout, a sibling experiment, a package cache, or another SDO source tree.
 The controller audits command events and rejects the entire fresh session if any command escapes this checkout.
+Do not create or execute helper scripts in temporary directories. Do not use `$TMPDIR` or `/tmp`, even for files
+you create yourself: the audit treats a compound command that later reads or executes such a file as an escape.
+Use the built-in Read, Glob, and Grep tools for inspection and perform small calculations directly. If shell scratch
+space is essential, keep it under `.sdo/session-scratch/` in the current checkout; the session remains read-only, so
+prefer not to create scratch files at all.
 
 Correction feedback from the prior fresh attempt:
 {feedback}

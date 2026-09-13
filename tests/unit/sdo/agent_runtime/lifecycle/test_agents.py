@@ -609,6 +609,8 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
     assert "copy every resource required by the objective exactly from the deployer handoff" in prompts[1]
     assert "Trusted controller/sdk API reference" in prompts[1]
     assert "Inspect only the current application checkout" in prompts[1]
+    assert "Do not create or execute helper scripts in temporary directories" in prompts[0]
+    assert "Do not use `$TMPDIR` or `/tmp`" in prompts[0]
     assert "last structured response is the only response the controller accepts" in prompts[1]
     assert "Every Go func declaration must be package-level" in prompts[1]
     assert "Mentally parse both complete files before returning them" in prompts[1].replace("\n", " ")
