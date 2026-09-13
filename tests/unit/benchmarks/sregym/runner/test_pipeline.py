@@ -341,6 +341,7 @@ class TestMergeStageConfig:
             "agent": "crucible",
             "model": "gemini-flash",
             "parallel": 1,
+            "agent_timeout": 3600,
             "app_filter": "hotel_reservation",
             "deploy_from_source": True,
             "application_workspace": True,
@@ -352,6 +353,7 @@ class TestMergeStageConfig:
         assert config.agent == "crucible"
         assert config.model == "gemini-flash"
         assert config.parallel == 1
+        assert config.agent_timeout == 3600
         assert config.app_filter == "hotel_reservation"
         assert config.deploy_from_source is True
         assert config.application_workspace is True

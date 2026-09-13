@@ -182,6 +182,7 @@ def merge_stage_config(
         agent=agent,
         model=merged.get("model", "google-vertex:gemini-2.5-flash"),
         parallel=merged.get("parallel", 4),
+        agent_timeout=merged.get("agent_timeout", 1800),
         app_filter=merged.get("app_filter", ""),
         deploy_from_source=merged.get("deploy_from_source", False),
         application_workspace=merged.get("application_workspace", False),
