@@ -358,6 +358,40 @@ def test_sregym_adapter_passes_configured_model_to_initial_lifecycle(
     assert runtime_configs[0].repair_policy == "recorded-actions"
 
 
+def test_sregym_adapter_uses_trusted_worker_kubeconfig_for_controller_install(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    trusted_kubeconfig = tmp_path / "worker.kubeconfig"
+    monkeypatch.setenv("KUBECONFIG", "/tmp/sregym-agent-kubeconfig")
+    monkeypatch.setenv("SREGYM_BASE_KUBECONFIG", str(trusted_kubeconfig))
+    monkeypatch.setenv("SREGYM_DEFER_CLEANUP", "1")
+    monkeypatch.setattr(driver, "get_api_base", lambda: "http://localhost:8000")
+    monkeypatch.setattr(driver, "poll_stage_sync", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        driver,
+        "get_app_info",
+        lambda *_args, **_kwargs: {"app_name": "demo", "namespace": "demo"},
+    )
+    monkeypatch.setattr(driver, "_application_repository", lambda: tmp_path)
+    monkeypatch.setattr(
+        driver,
+        "_deployed_lifecycle_context",
+        lambda *_args, **_kwargs: driver.DeployedLifecycleContext(health_objective="healthy", active_resources=[]),
+    )
+    monkeypatch.setattr(driver, "reuse_initial_lifecycle_if_valid", lambda *_args, **_kwargs: True)
+
+    def fake_runtime(_config: RuntimeConfig) -> dict[str, bool]:
+        assert os.environ["KUBECONFIG"] == str(trusted_kubeconfig)
+        return {"completed": True}
+
+    monkeypatch.setattr(driver, "run_production_runtime", fake_runtime)
+
+    assert driver._run(driver._parse_args([])) == {"completed": True}
+
+
 def test_receipt_falls_back_to_experiment_directory_for_registry_agents(tmp_path: Path) -> None:
     repository = tmp_path / "experiment" / "application_workspace"
 

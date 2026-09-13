@@ -261,6 +261,9 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         )
     if args.logs_dir:
         persist_lifecycle_seed(repository, Path(args.logs_dir))
+    trusted_kubeconfig = os.getenv("SREGYM_BASE_KUBECONFIG", "").strip()
+    if trusted_kubeconfig:
+        os.environ["KUBECONFIG"] = trusted_kubeconfig
     return run_production_runtime(
         RuntimeConfig(
             repository=repository,
