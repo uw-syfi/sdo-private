@@ -70,7 +70,8 @@ class MemoryValidator:
             baseline_root=baseline_root,
         )
         self._validate_outcomes_append_only(repository, actor=actor, baseline_root=baseline_root)
-        if self.run_diagnostics:
+        diagnostics_changed = any(path.as_posix().startswith(".sdo/diagnostics/") for path in normalized)
+        if self.run_diagnostics and diagnostics_changed:
             return self._run_diagnostic_checks(resolved_root)
         return ()
 

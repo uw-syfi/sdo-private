@@ -284,6 +284,8 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         "responder_image": config.responder_image,
         "validator_image": config.validator_image,
         "validator_mode": "kubernetes-job",
+        "validator_execution_required": bool(accepted_detector_paths),
+        "validator_skipped_reason": None if accepted_detector_paths else "unchanged-diagnostics",
         "production_job_dispatch": len(responder_jobs) == 1,
         "responder_jobs": responder_jobs,
         "responder_job_evidence": responder_job_evidence,

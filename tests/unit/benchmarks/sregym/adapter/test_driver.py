@@ -833,6 +833,36 @@ def test_strict_production_receipt_rejects_missing_false_or_duplicate_network_po
         )
 
 
+def test_strict_receipt_accepts_skipped_executable_validation_for_unchanged_diagnostics() -> None:
+    receipt = {
+        "schema_version": "sdo.production-receipt/v1",
+        "pre_cutover": False,
+        "validator_mode": "kubernetes-job",
+        "validator_execution_required": False,
+        "validator_skipped_reason": "unchanged-diagnostics",
+        "lifecycle_provenance": True,
+        "production_job_dispatch": True,
+        "completed": True,
+        "repair_policy": "commit",
+        "repair_actions": [],
+        "proposal_commit": "proposal",
+        "outcome_commit": "outcome",
+        "reflection_commit": "reflection",
+        "validator_evidence_commit": "reflection",
+        "same_session_reflection": True,
+        "detector_clear": [{"status": "clear", "fingerprints": []}],
+        "independent_verification": [{"passed": True}],
+        "validator_network_policy_canaries": [],
+        "acknowledged": True,
+        "cleaned": True,
+        "remaining_worktrees": [],
+        "responder_jobs": ["sdo-incident-job"],
+        "controller_update_required": False,
+    }
+
+    validate_production_receipt(receipt)
+
+
 def test_controller_update_rollout_receipt_requires_successful_structured_record() -> None:
     failed = '{"controller_update_rollout":"fingerprint","returncode":1,"source_commit":"commit"}\n'
     succeeded = '{"controller_update_rollout":"fingerprint","returncode":0,"source_commit":"commit"}\n'

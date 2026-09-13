@@ -149,16 +149,25 @@ def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle
     verification = _string_keyed_objects(receipt.get("independent_verification"))
     if not verification or any(evidence.get("passed") is not True for evidence in verification):
         raise ProductionReceiptValidationError("production receipt requires passing independent_verification")
+    validator_execution_required = receipt.get("validator_execution_required", True)
     canaries = _string_keyed_objects(receipt.get("validator_network_policy_canaries"))
-    if canaries is None or len(canaries) != 2:
+    if validator_execution_required is False:
+        if canaries != [] or receipt.get("validator_skipped_reason") != "unchanged-diagnostics":
+            raise ProductionReceiptValidationError(
+                "skipped executable validation requires no canaries and unchanged-diagnostics reason"
+            )
+        canaries = []
+    elif validator_execution_required is not True:
+        raise ProductionReceiptValidationError("validator_execution_required must be a boolean")
+    if validator_execution_required and (canaries is None or len(canaries) != 2):
         raise ProductionReceiptValidationError("production receipt requires validator_network_policy_canaries")
-    if any(canary.get("passed") is not True for canary in canaries):
+    if any(canary.get("passed") is not True for canary in canaries or []):
         raise ProductionReceiptValidationError("production receipt requires network-policy canaries passed=true")
-    if {canary.get("mode") for canary in canaries} != {"allow", "deny"}:
+    if validator_execution_required and {canary.get("mode") for canary in canaries or []} != {"allow", "deny"}:
         raise ProductionReceiptValidationError(
             "production receipt requires exactly one allow and one deny network-policy canary"
         )
-    for canary in canaries:
+    for canary in canaries or []:
         for field in ("job_name", "observed_at", "details"):
             value = canary.get(field)
             if not isinstance(value, str) or not value.strip():

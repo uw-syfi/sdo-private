@@ -76,6 +76,7 @@ The current receipt schema is `sdo.production-receipt/v1`. It summarizes durable
 - responder usage plus phase timings that separate operational recovery from post-recovery learning and receipt work;
 - compact memory-reuse evidence: candidate count, match reasons, applied-playbook count, and warm-path status;
 - driver timings for conductor readiness, inventory/lifecycle work, production runtime, and benchmark submission, plus whether lifecycle memory was reused;
+- whether executable detector validation ran; unchanged diagnostics may skip the Kubernetes validator and carry `validator_skipped_reason=unchanged-diagnostics` with no fresh canaries;
 - same-session reflection and independent verification;
 - final detector clearing and network-policy canaries;
 - acknowledgement, cleanup, and remaining worktrees;

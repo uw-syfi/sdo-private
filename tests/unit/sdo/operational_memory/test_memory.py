@@ -333,6 +333,30 @@ def test_validator_rejects_symlinks_and_invalid_shell(tmp_path: Path) -> None:
         )
 
 
+def test_outcome_only_validation_does_not_recompile_unchanged_detectors(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_memory(baseline)
+    shutil.copytree(baseline, candidate)
+    MemoryRepository(candidate).append_outcome(_outcome(), actor=ArtifactOwner.CONTROLLER)
+
+    class FailingIfCalledSandbox:
+        def run(self, _app_root: Path) -> None:
+            raise AssertionError("unchanged diagnostics must not enter executable validation")
+
+    validator = MemoryValidator(sandbox_runner=FailingIfCalledSandbox())  # type: ignore[arg-type]
+
+    assert (
+        validator.validate(
+            candidate,
+            actor=ArtifactOwner.CONTROLLER,
+            changed_paths=[".sdo/outcomes.jsonl"],
+            baseline_root=baseline,
+        )
+        == ()
+    )
+
+
 def test_validator_runs_generated_detector_test_and_build_gate(tmp_path: Path) -> None:
     _write_memory(tmp_path)
 
