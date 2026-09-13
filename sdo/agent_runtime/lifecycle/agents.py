@@ -126,6 +126,7 @@ _DETECTOR_SDK_REFERENCE = """Trusted controller/sdk API reference (do not search
 _ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9_.$~-])(/[A-Za-z0-9_./*?{}$@%+=:,~-]+)")
 _PARENT_PATH = re.compile(r"(?:^|[\s'\"=;(])\.\.(?:/[^\s'\";|&)]*)?(?=$|[\s'\";|&)])")
 _WRITE_REDIRECT_ABSOLUTE_PATH = re.compile(r"(?:^|[ \t])(?:\d*>>?|&>)\s*['\"]?(/[A-Za-z0-9_./*?{}$@%+=:,~-]+)")
+_GIT_OBJECT_PATH = re.compile(r"\b[0-9a-fA-F]{7,64}:(/[A-Za-z0-9_./*?{}$@%+=,~-]+)")
 _SYSTEM_COMMAND_ROOTS = tuple(Path(path) for path in ("/bin", "/usr/bin", "/usr/local/bin"))
 
 
@@ -406,8 +407,14 @@ def _first_repository_escape(stdout: str, repository: Path) -> str | None:
 def _command_escapes_repository(command: str, repository: Path) -> bool:
     if _PARENT_PATH.search(command):
         return True
-    write_only_paths = {match.group(1) for match in _WRITE_REDIRECT_ABSOLUTE_PATH.finditer(command)}
-    for raw_path in _ABSOLUTE_PATH.findall(command):
+    # ``git show <object>:/path`` addresses a path inside this repository's object
+    # database. Mask only the path portion so unrelated absolute paths in the same
+    # compound command remain subject to the confinement audit.
+    audited_command = _GIT_OBJECT_PATH.sub(
+        lambda match: match.group(0).replace(match.group(1), ".git-object-path"), command
+    )
+    write_only_paths = {match.group(1) for match in _WRITE_REDIRECT_ABSOLUTE_PATH.finditer(audited_command)}
+    for raw_path in _ABSOLUTE_PATH.findall(audited_command):
         if raw_path in write_only_paths:
             continue
         candidate = Path(raw_path)

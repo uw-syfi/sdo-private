@@ -682,12 +682,22 @@ def test_codex_backend_rejects_sessions_that_read_outside_application_repository
     [
         "cat > /tmp/objective.txt << 'EOF'\nobjective\nEOF",
         "cat > \"$TMPDIR/covered_resources.json\" << 'EOF'\n[]\nEOF",
+        "git show ed44ea9:/.sdo/diagnostics/detectors/health/objective/detector_test.go | head -50",
     ],
 )
-def test_repository_audit_allows_write_only_temporary_heredocs(tmp_path: Path, command: str) -> None:
+def test_repository_audit_allows_safe_non_external_paths(tmp_path: Path, command: str) -> None:
     repository = _repository(tmp_path)
 
     assert not _command_escapes_repository(command, repository)
+
+
+def test_repository_audit_still_rejects_external_path_after_git_object_path(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+
+    assert _command_escapes_repository(
+        "git show ed44ea9:/.sdo/goal.md; cat /etc/passwd",
+        repository,
+    )
 
 
 def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_feedback(
