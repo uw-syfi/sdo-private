@@ -1,0 +1,51 @@
+# Two identical source-backed incidents. Stage 1 retains the application
+# repository from stage 0 so the second Haiku response sees accumulated .sdo/
+# outcomes, playbooks, and incident detectors.
+
+[pipeline]
+name = "sdo-claude-haiku-reuse"
+
+[defaults]
+agent = "sdo_codex"
+model = "haiku"
+parallel = 1
+app_filter = "hotel_reservation"
+deploy_from_source = true
+application_workspace = "persistent"
+require_strict_receipt = true
+
+[defaults.env]
+judge_model_id = "vertex-ai-gemini-2.5-pro"
+worker_cpu_limit = "3"
+reuse_cluster = true
+force_recreate_cluster = false
+cleanup_defer_timeout_seconds = 4200
+
+[defaults.variants]
+enabled = false
+
+[defaults.agent_config.sdo_codex]
+backend = "agent-cli"
+provider = "claude"
+model = "haiku"
+timeout_sec = 3600
+controller_image = "sdo-controller:v0.1.0"
+responder_image = "sdo-sregym-responder:v0.1.0"
+validator_image = "sdo-detector-validator:v0.1.0"
+credentials_secret = "sdo-agent-credentials"
+
+[[stages]]
+name = "first-incident"
+chain_kb = false
+chain_application_workspace = false
+
+[stages.runner]
+problems = ["missing_configmap_hotel_reservation"]
+
+[[stages]]
+name = "reused-incident"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["missing_configmap_hotel_reservation"]

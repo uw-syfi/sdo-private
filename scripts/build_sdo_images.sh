@@ -28,3 +28,6 @@ docker build \
 docker run --rm --user 65532:65532 \
   sdo-sregym-responder:v0.1.0 \
   python3 -m benchmarks.sregym.adapter.submission --help >/dev/null
+docker run --rm --user 65532:65532 \
+  sdo-sregym-responder:v0.1.0 \
+  python3 -c "from sdo.agent_runtime.responder.codex import execute_incident" >/dev/null
