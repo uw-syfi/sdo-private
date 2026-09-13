@@ -347,7 +347,12 @@ class TestMergeStageConfig:
             "application_workspace": True,
             "spec_names": ["wrong_service_selector"],
             "variants": {"seed": 99},
-            "env": {"judge_model_id": "judge", "reuse_cluster": True, "force_recreate_cluster": False},
+            "env": {
+                "judge_model_id": "judge",
+                "reuse_cluster": True,
+                "force_recreate_cluster": False,
+                "preserve_infrastructure": True,
+            },
         }
         config = merge_stage_config(defaults, {})
         assert config.agent == "crucible"
@@ -362,6 +367,7 @@ class TestMergeStageConfig:
         assert config.env.judge_model_id == "judge"
         assert config.env.reuse_cluster is True
         assert config.env.force_recreate_cluster is False
+        assert config.env.preserve_infrastructure is True
         assert config.env.submit_done_returns_feedback is False
 
     def test_defaults_env_preserves_submit_done_feedback(self) -> None:

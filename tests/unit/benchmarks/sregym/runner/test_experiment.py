@@ -490,6 +490,7 @@ def test_reuse_cluster_defaults_to_false() -> None:
     config = ExperimentConfig()
     assert config.env.reuse_cluster is False
     assert config.env.force_recreate_cluster is False
+    assert config.env.preserve_infrastructure is False
     assert config.env.submit_done_returns_feedback is False
 
 
@@ -506,12 +507,14 @@ def test_reuse_cluster_loaded_from_toml(tmp_path: Path) -> None:
         [runner.env]
         reuse_cluster = true
         force_recreate_cluster = false
+        preserve_infrastructure = true
         submit_done_returns_feedback = true
     """,
     )
     config = load_experiment_config(toml)
     assert config.env.reuse_cluster is True
     assert config.env.force_recreate_cluster is False
+    assert config.env.preserve_infrastructure is True
     assert config.env.submit_done_returns_feedback is True
 
 
