@@ -39,8 +39,8 @@ Each line is one controller-owned record. Important fields include:
 - surfaced, inspected, confirmed, rejected, and applied playbooks;
 - confirmed root causes;
 - `classification`;
-- repair and memory commits;
-- responder backend/model and usage;
+- repair and memory commits, plus structured live repair-action receipts;
+- responder backend/model and transport-reported usage, including cached input tokens and provider cost when available;
 - detected, dispatched, mitigated, verified, and completed timestamps.
 
 The controller runtime ConfigMap can also contain `detector_review_required`, `detector_review_required_at`, and `detector_review_reason`. These fields mean a responder completed but independent health findings did not clear within the bounded verification window; do not interpret that state as a verified incident closure.
@@ -49,7 +49,7 @@ Useful queries:
 
 ```bash
 jq -s 'length' .sdo/outcomes.jsonl
-jq -s 'map({incident_id, classification, repair_commit, memory_commit, timestamps})' .sdo/outcomes.jsonl
+jq -s 'map({incident_id, classification, repair_commit, repair_actions, memory_commit, timestamps})' .sdo/outcomes.jsonl
 jq -s 'group_by(.classification) | map({classification: .[0].classification, count: length})' .sdo/outcomes.jsonl
 ```
 
@@ -61,7 +61,7 @@ Broker state is stored under the repository's Git common directory, normally in 
 git -C <application-worktree> rev-parse --git-common-dir
 ```
 
-Ledger fields can include proposal, outcome, reflection, and validator-evidence commits; responder session ID; accepted detector paths; closure and acknowledgement state; network-policy canaries; topology fingerprints; and controller-update rollout records. Require incident IDs and commit hashes to agree with the receipt and outcome.
+Ledger fields can include proposal processing state; optional proposal commit; mandatory outcome, reflection, and validator-evidence commits; responder session ID; accepted detector paths; closure and acknowledgement state; network-policy canaries; topology fingerprints; and controller-update rollout records. Under `recorded-actions`, a missing proposal commit is valid only when the result and outcome contain a successful structured repair action. Require incident IDs and commit hashes to agree with the receipt and outcome.
 
 ## Strict production receipt
 
@@ -71,7 +71,8 @@ The current receipt schema is `sdo.production-receipt/v1`. It summarizes durable
 
 - incident, namespace, controller/responder/validator images;
 - production job dispatch and responder-job correlation;
-- proposal, outcome, reflection, and validator-evidence commits;
+- repair policy and structured repair actions; either a proposal commit or, under `recorded-actions`, at least one successful action;
+- outcome, reflection, and validator-evidence commits;
 - same-session reflection and independent verification;
 - final detector clearing and network-policy canaries;
 - acknowledgement, cleanup, and remaining worktrees;

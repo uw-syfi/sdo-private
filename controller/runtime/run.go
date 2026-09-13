@@ -89,6 +89,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		2*time.Minute,
 		"maximum wait for independent health detectors to clear after a response",
 	)
+	repairPolicy := flags.String("repair-policy", "commit", "repair evidence policy: commit or recorded-actions")
 	leaseName := flags.String("lease-name", "sdo-controller", "leader-election Lease name")
 	leaseDuration := flags.Duration("lease-duration", 60*time.Second, "leader-election Lease duration")
 	identity := flags.String("identity", defaultIdentity(), "unique leader-election identity")
@@ -104,6 +105,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	}
 	if *dispatcherMode == "job" && (*brokerCommand == "" || *brokerWorktreeRoot == "") {
 		return fmt.Errorf("broker and broker-worktree-root are required in production job mode")
+	}
+	if *repairPolicy != "commit" && *repairPolicy != "recorded-actions" {
+		return fmt.Errorf("unsupported repair policy %q", *repairPolicy)
 	}
 	resolvedRoot, err := filepath.Abs(*appRoot)
 	if err != nil {
@@ -193,6 +197,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		ArchitectureSummaryPath: ".sdo/arch.md", HealthObjectivePath: ".sdo/goal.md",
 		RepositoryWorktree: resolvedRoot, ResponseTimeout: *responseTimeout,
 		VerificationTimeout: *verificationTimeout,
+		RepairPolicy:        *repairPolicy,
 		FiringThreshold:     2, ClearThreshold: 2, BatchDebounce: 500 * time.Millisecond,
 	}, detectors, kubernetesCache, dispatcher, start)
 	if err != nil {
@@ -207,6 +212,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			brokerArgv,
 			"--repository", resolvedRoot,
 			"--worktree-root", *brokerWorktreeRoot,
+			"--repair-policy", *repairPolicy,
 		)
 		if err := controller.SetIncidentBroker(SubprocessIncidentBroker{
 			Argv: brokerArgv, Timeout: *responseTimeout,

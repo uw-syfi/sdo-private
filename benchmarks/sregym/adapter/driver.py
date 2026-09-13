@@ -21,6 +21,7 @@ from benchmarks.sregym.protocol.conductor import get_api_base, get_app_info, pol
 from benchmarks.sregym.protocol.schema import READY_STAGES
 from sdo.agent_runtime.lifecycle import (
     ActiveTopologyResourceDTO,
+    ClaudeLifecycleBackend,
     CodexLifecycleBackend,
     reuse_initial_lifecycle_if_valid,
     run_initial_lifecycle,
@@ -92,7 +93,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     config = _configuration()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", choices=("agent-cli",), default=config.get("backend", "agent-cli"))
-    parser.add_argument("--provider", choices=("codex",), default=config.get("provider", "codex"))
+    parser.add_argument("--provider", choices=("codex", "claude"), default=config.get("provider", "codex"))
     parser.add_argument("--model", default=config.get("model", os.getenv("MODEL_ID", "gpt-5.4")))
     parser.add_argument("--timeout-sec", type=int, default=int(config.get("timeout_sec", 1800)))
     parser.add_argument("--controller-image", default=config.get("controller_image", "sdo-controller:v0.1.0"))
@@ -250,12 +251,13 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         health_objective=health_objective,
         active_resources=lifecycle_context.active_resources,
     ):
+        lifecycle_type = ClaudeLifecycleBackend if args.provider == "claude" else CodexLifecycleBackend
         run_initial_lifecycle(
             repository,
             application=application,
             health_objective=health_objective,
             active_resources=lifecycle_context.active_resources,
-            backend=CodexLifecycleBackend(model=args.model),
+            backend=lifecycle_type(model=args.model),
         )
     if args.logs_dir:
         persist_lifecycle_seed(repository, Path(args.logs_dir))
@@ -271,6 +273,8 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             credentials_secret=args.credentials_secret,
             model=args.model,
             timeout_seconds=args.timeout_sec,
+            repair_policy="recorded-actions",
+            agent_provider=args.provider,
             submission_api_base=_in_cluster_api_base(api_base),
             submission_relay_target_base=_relay_target_api_base(api_base),
         )

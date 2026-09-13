@@ -561,8 +561,8 @@ class KubernetesJobSandboxRunner:
                                     {"name": "GOMODCACHE", "value": "/go/pkg/mod"},
                                     {"name": "GOPROXY", "value": "off"},
                                     {"name": "GOSUMDB", "value": "off"},
-                                    {"name": "GOMAXPROCS", "value": "1"},
-                                    {"name": "GOFLAGS", "value": "-p=1"},
+                                    {"name": "GOMAXPROCS", "value": "2"},
+                                    {"name": "GOFLAGS", "value": "-p=2"},
                                     {"name": "PYTHONDONTWRITEBYTECODE", "value": "1"},
                                 ],
                                 "securityContext": {
@@ -571,9 +571,9 @@ class KubernetesJobSandboxRunner:
                                     "capabilities": {"drop": ["ALL"]},
                                 },
                                 "resources": {
-                                    "requests": {"cpu": "250m", "memory": "512Mi"},
+                                    "requests": {"cpu": "500m", "memory": "512Mi"},
                                     "limits": {
-                                        "cpu": "500m",
+                                        "cpu": "2",
                                         "memory": "3Gi",
                                         "ephemeral-storage": "4Gi",
                                     },

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from libs.agent_cli.claude_structured import ClaudeStructuredExecutionError, resume_claude_structured
 from libs.agent_cli.codex import CodexStructuredExecutionError, resume_codex_structured
 from sdo.operational_memory import OutcomeClassification, OutcomeRecord
 
@@ -80,8 +81,10 @@ class SessionReflector:
         prompt = (
             "The controller has independently verified incident closure and committed its authoritative outcome.\n"
             f"Outcome commit: {outcome_commit}\n"
-            "Reflect using the same incident context. Edit only responder-owned `.sdo/playbooks/` and "
-            "`.sdo/diagnostics/detectors/incidents/`; never edit goal.md, health detectors, or outcomes.jsonl. "
+            "Reflect using the same incident context. Edit only responder-owned `.sdo/playbooks/`, "
+            "`.sdo/diagnostics/detectors/incidents/` (the directory name is exactly the plural `incidents`), and "
+            "the corresponding responder-owned detector entries in `.sdo/diagnostics/manifest.yaml`; "
+            "never edit goal.md, health detectors, or outcomes.jsonl. "
             "Generalize roles with placeholders and ground structural changes in the supplied history. Create a "
             "sharp fault-specific playbook for the confirmed cause, with deterministic diagnosis, repair, and "
             "independent verification steps. When the confirmed cause exposes a stable low-noise Kubernetes "
@@ -147,4 +150,48 @@ class CodexSessionBackend:
             )
         except CodexStructuredExecutionError as exc:
             raise RuntimeError(exc.stderr or exc.stdout or "Codex reflection failed") from exc
+        return ReflectionTurn.model_validate_json(completed.output_json)
+
+
+class ClaudeSessionBackend(CodexSessionBackend):
+    def __init__(
+        self,
+        *,
+        executable: str = "claude",
+        model: str | None = None,
+        reasoning_effort: str = "medium",
+        timeout_seconds: int = 900,
+        command_runner: CommandRunner | None = None,
+    ) -> None:
+        super().__init__(
+            executable=executable,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_seconds=timeout_seconds,
+            command_runner=command_runner,
+        )
+
+    def resume(
+        self,
+        *,
+        session_id: str,
+        worktree: Path,
+        prompt: str,
+        idempotency_key: str,
+    ) -> ReflectionTurn:
+        try:
+            completed = resume_claude_structured(
+                session_id,
+                f"Idempotency key: {idempotency_key}\n\n{prompt}",
+                output_schema=ReflectionTurn.model_json_schema(),
+                cwd=worktree,
+                executable=self.executable,
+                model=self.model,
+                effort=self.reasoning_effort,
+                timeout_seconds=self.timeout_seconds,
+                sandbox="danger-full-access",
+                runner=self.command_runner or subprocess.run,
+            )
+        except ClaudeStructuredExecutionError as exc:
+            raise RuntimeError(str(exc) or "Claude reflection failed") from exc
         return ReflectionTurn.model_validate_json(completed.output_json)

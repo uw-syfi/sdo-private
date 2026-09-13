@@ -324,6 +324,7 @@ def test_sregym_adapter_passes_configured_model_to_initial_lifecycle(
     import benchmarks.sregym.adapter.driver as driver
 
     captured: list[str | None] = []
+    runtime_configs: list[RuntimeConfig] = []
     monkeypatch.setenv("SREGYM_DEFER_CLEANUP", "1")
     monkeypatch.setattr(driver, "get_api_base", lambda: "http://localhost:8000")
     monkeypatch.setattr(driver, "poll_stage_sync", lambda *_args, **_kwargs: None)
@@ -345,10 +346,16 @@ def test_sregym_adapter_passes_configured_model_to_initial_lifecycle(
         return "commit"
 
     monkeypatch.setattr(driver, "run_initial_lifecycle", fake_lifecycle)
-    monkeypatch.setattr(driver, "run_production_runtime", lambda *_args, **_kwargs: {"completed": True})
+
+    def fake_runtime(config: RuntimeConfig) -> dict[str, bool]:
+        runtime_configs.append(config)
+        return {"completed": True}
+
+    monkeypatch.setattr(driver, "run_production_runtime", fake_runtime)
 
     assert driver._run(driver._parse_args(["--model", "gpt-5.5"])) == {"completed": True}
     assert captured == ["gpt-5.5"]
+    assert runtime_configs[0].repair_policy == "recorded-actions"
 
 
 def test_receipt_falls_back_to_experiment_directory_for_registry_agents(tmp_path: Path) -> None:
@@ -520,6 +527,8 @@ def test_strict_production_receipt_requires_job_route_reflection_clear_ack_and_c
         "lifecycle_provenance": True,
         "production_job_dispatch": True,
         "completed": True,
+        "repair_policy": "commit",
+        "repair_actions": [],
         "proposal_commit": "proposal",
         "outcome_commit": "outcome",
         "reflection_commit": "reflection",
@@ -588,6 +597,63 @@ def test_strict_production_receipt_requires_job_route_reflection_clear_ack_and_c
     validate_production_receipt(test_double_receipt, allow_test_lifecycle=True)
 
 
+def test_recorded_actions_receipt_accepts_actions_without_proposal_commit() -> None:
+    receipt = {
+        "schema_version": "sdo.production-receipt/v1",
+        "pre_cutover": False,
+        "validator_mode": "kubernetes-job",
+        "lifecycle_provenance": True,
+        "production_job_dispatch": True,
+        "completed": True,
+        "repair_policy": "recorded-actions",
+        "proposal_commit": None,
+        "repair_actions": [
+            {
+                "action_id": "action-1",
+                "kind": "kubernetes_patch",
+                "target": "Deployment/frontend",
+                "summary": "Restored service availability",
+                "details": "Patched the live deployment",
+                "started_at": "2026-07-10T12:00:00+00:00",
+                "completed_at": "2026-07-10T12:00:01+00:00",
+                "success": True,
+                "reversible": True,
+            }
+        ],
+        "outcome_commit": "outcome",
+        "reflection_commit": "reflection",
+        "validator_evidence_commit": "reflection",
+        "same_session_reflection": True,
+        "detector_clear": [{"status": "clear", "fingerprints": []}],
+        "independent_verification": [{"passed": True}],
+        "validator_network_policy_canaries": [
+            {
+                "mode": "allow",
+                "passed": True,
+                "job_name": "allow-job",
+                "observed_at": "2026-07-10T12:00:00+00:00",
+                "details": "positive control passed",
+            },
+            {
+                "mode": "deny",
+                "passed": True,
+                "job_name": "deny-job",
+                "observed_at": "2026-07-10T12:00:01+00:00",
+                "details": "isolation control passed",
+            },
+        ],
+        "acknowledged": True,
+        "cleaned": True,
+        "remaining_worktrees": [],
+        "responder_jobs": ["sdo-incident-job"],
+        "controller_update_required": False,
+    }
+
+    validate_production_receipt(receipt)
+    with pytest.raises(ControllerInstallError, match="repair_actions"):
+        validate_production_receipt({**receipt, "repair_actions": []})
+
+
 def test_strict_production_receipt_rejects_missing_false_or_duplicate_network_policy_canaries() -> None:
     valid_canary = {
         "mode": "allow",
@@ -603,6 +669,8 @@ def test_strict_production_receipt_rejects_missing_false_or_duplicate_network_po
         "lifecycle_provenance": True,
         "production_job_dispatch": True,
         "completed": True,
+        "repair_policy": "commit",
+        "repair_actions": [],
         "proposal_commit": "proposal",
         "outcome_commit": "outcome",
         "reflection_commit": "reflection",

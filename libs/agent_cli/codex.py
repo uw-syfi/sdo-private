@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
+from agentshim import ProviderUsage, get_provider
+
 from .base import register_provider
 from .cli_agent import CLICodingAgent
 from .mcp_config import HttpMcpServer, McpServerConfig
@@ -31,6 +33,7 @@ class CodexStructuredResult:
     session_id: str
     stdout: str
     stderr: str
+    usage: ProviderUsage
 
 
 class CodexStructuredExecutionError(RuntimeError):
@@ -104,6 +107,7 @@ def run_codex_structured(
         session_id=session_id,
         stdout=completed.stdout,
         stderr=completed.stderr,
+        usage=_codex_usage(completed.stdout),
     )
 
 
@@ -161,6 +165,7 @@ def resume_codex_structured(
         session_id=reported_session_id,
         stdout=completed.stdout,
         stderr=completed.stderr,
+        usage=_codex_usage(completed.stdout),
     )
 
 
@@ -279,6 +284,13 @@ def _codex_session_id(stdout: str) -> str | None:
         if isinstance(thread_id, str) and thread_id:
             return thread_id
     return None
+
+
+def _codex_usage(stdout: str) -> ProviderUsage:
+    parser = get_provider("codex").new_parser(lambda _event: None, expect_structured=True)
+    for line in stdout.splitlines(keepends=True):
+        parser.feed_stdout(line)
+    return parser.finish().usage
 
 
 @register_provider("openai", "codex")

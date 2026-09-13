@@ -56,6 +56,8 @@ def _build_parser() -> argparse.ArgumentParser:
     operate_parser.add_argument("--credentials-secret", default="sdo-codex-credentials")
     operate_parser.add_argument("--attempts", type=int, default=3)
     operate_parser.add_argument("--timeout-seconds", type=int, default=1800)
+    operate_parser.add_argument("--repair-policy", choices=("commit", "recorded-actions"), default="commit")
+    operate_parser.add_argument("--agent-provider", choices=("codex", "claude"), default="codex")
     return parser
 
 
@@ -78,6 +80,8 @@ def _operation_config(args: argparse.Namespace) -> OperationConfig:
         credentials_secret=args.credentials_secret,
         max_attempts=args.attempts,
         timeout_seconds=args.timeout_seconds,
+        repair_policy=args.repair_policy,
+        agent_provider=args.agent_provider,
     )
 
 

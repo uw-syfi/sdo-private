@@ -11,3 +11,4 @@ agents:
       PYTHONUNBUFFERED: "1"
     defer_cleanup: true
     wait_for_natural_exit: true
+    container_isolation: false

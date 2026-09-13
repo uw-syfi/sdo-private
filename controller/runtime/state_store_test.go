@@ -20,6 +20,7 @@ func TestCloneIncidentResultPreservesEmptyCollectionsForBrokerProtocol(t *testin
 	result.AppliedPlaybooks = []AppliedPlaybook{{Path: ".sdo/playbooks/health-objective/README.md", Scripts: []string{}}}
 	result.FinalDetectorStates = []DetectorEvaluation{}
 	result.ProposedMemoryChanges = []string{}
+	result.RepairActions = []RepairActionReceipt{}
 
 	payload, err := json.Marshal(cloneIncidentResult(&result))
 	if err != nil {
@@ -29,7 +30,8 @@ func TestCloneIncidentResultPreservesEmptyCollectionsForBrokerProtocol(t *testin
 	if err := json.Unmarshal(payload, &decoded); err != nil {
 		t.Fatalf("decode cloned result: %v", err)
 	}
-	if decoded["final_detector_states"] == nil || decoded["proposed_memory_changes"] == nil {
+	if decoded["final_detector_states"] == nil || decoded["proposed_memory_changes"] == nil ||
+		decoded["repair_actions"] == nil {
 		t.Fatalf("empty result collections became null: %s", payload)
 	}
 	applied := decoded["applied_playbooks"].([]any)[0].(map[string]any)

@@ -6,6 +6,7 @@ from sdo.contracts.models import (
     IncidentRequest,
     IncidentResult,
     IncidentStatus,
+    RepairActionReceipt,
     UsageMetrics,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "IncidentRequest",
     "IncidentResult",
     "IncidentStatus",
+    "RepairActionReceipt",
     "UsageMetrics",
 ]

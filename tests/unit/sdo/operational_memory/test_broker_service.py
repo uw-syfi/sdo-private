@@ -102,6 +102,61 @@ class RecordingSessionBackend:
         return ReflectionTurn(summary="generalized verification", proposed_changes=[str(playbook), str(detector)])
 
 
+class NoChangeSessionBackend:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def resume(
+        self,
+        *,
+        session_id: str,
+        worktree: Path,
+        prompt: str,
+        idempotency_key: str,
+    ) -> ReflectionTurn:
+        del worktree, prompt
+        self.calls.append((session_id, idempotency_key))
+        return ReflectionTurn(summary="existing memory is sufficient", proposed_changes=[])
+
+
+class PlaybookOnlyThenCorrectBackend(RecordingSessionBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempts = 0
+
+    def resume(
+        self,
+        *,
+        session_id: str,
+        worktree: Path,
+        prompt: str,
+        idempotency_key: str,
+    ) -> ReflectionTurn:
+        self.attempts += 1
+        if self.attempts == 1:
+            playbook = worktree / ".sdo" / "playbooks" / "missing-configmap" / "README.md"
+            playbook.write_text(
+                playbook.read_text(encoding="utf-8") + "\nFirst incomplete attempt.\n",
+                encoding="utf-8",
+            )
+            wrong = worktree / ".sdo" / "diagnostics" / "detectors" / "incident" / "wrong.go"
+            wrong.parent.mkdir(parents=True)
+            wrong.write_text("package incident\n", encoding="utf-8")
+            _git(worktree, "add", ".sdo/playbooks", ".sdo/diagnostics")
+            _git(worktree, "commit", "-m", "rejected reflection attempt")
+            return ReflectionTurn(summary="incomplete", proposed_changes=[str(playbook), str(wrong)])
+        assert "First incomplete attempt." not in (
+            worktree / ".sdo" / "playbooks" / "missing-configmap" / "README.md"
+        ).read_text(encoding="utf-8")
+        assert not (worktree / ".sdo" / "diagnostics" / "detectors" / "incident").exists()
+        return super().resume(
+            session_id=session_id,
+            worktree=worktree,
+            prompt=prompt,
+            idempotency_key=idempotency_key,
+        )
+
+
 class FailBeforeEditOnceBackend(RecordingSessionBackend):
     def __init__(self) -> None:
         super().__init__()
@@ -255,6 +310,99 @@ def test_closure_persists_validator_network_policy_canaries_in_durable_ledger(tm
     assert reloaded.validator_network_policy_canaries == state.validator_network_policy_canaries
 
 
+def test_recorded_actions_closure_skips_empty_repair_commit_and_persists_actions(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    validator = AcceptRepairValidator()
+    service = _service(target, worktrees, validator, repair_policy="recorded-actions")
+    workspace = service.prepare_incident("inc-20260709-0001")
+    closure = _closure(workspace.path, workspace.base_commit)
+    closure = closure.model_copy(
+        update={"request": closure.request.model_copy(update={"repair_policy": "recorded-actions"})}
+    )
+
+    receipt = service.process_closure(closure)
+
+    assert receipt.proposal_commit is None
+    assert "SDO-Phase: proposal" not in _git(target, "log", "--format=%B")
+    outcome = MemoryRepository(target).outcomes()[-1]
+    assert outcome.repair_commit is None
+    assert outcome.repair_actions == closure.result.repair_actions
+
+
+def test_recorded_actions_policy_still_commits_source_changes(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    validator = AcceptRepairValidator()
+    service = _service(target, worktrees, validator, repair_policy="recorded-actions")
+    workspace = service.prepare_incident("inc-20260709-0001")
+    (workspace.path / "application.txt").write_text("repaired\n", encoding="utf-8")
+    closure = _closure(workspace.path, workspace.base_commit)
+    closure = closure.model_copy(
+        update={"request": closure.request.model_copy(update={"repair_policy": "recorded-actions"})}
+    )
+
+    receipt = service.process_closure(closure)
+
+    assert receipt.proposal_commit is not None
+    assert (target / "application.txt").read_text(encoding="utf-8") == "repaired\n"
+    assert validator.paths == ["application.txt"]
+
+
+def test_recorded_actions_policy_brokers_responder_committed_source_changes(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    (target / "application.txt").write_text("before\n", encoding="utf-8")
+    _git(target, "add", "application.txt")
+    _git(target, "commit", "-m", "application source")
+    validator = AcceptRepairValidator()
+    service = _service(target, worktrees, validator, repair_policy="recorded-actions")
+    workspace = service.prepare_incident("inc-20260709-0001")
+    (workspace.path / "application.txt").write_text("after\n", encoding="utf-8")
+    _git(workspace.path, "add", "application.txt")
+    _git(workspace.path, "commit", "-m", "responder repair")
+    closure = _closure(workspace.path, workspace.base_commit)
+    closure = closure.model_copy(
+        update={"request": closure.request.model_copy(update={"repair_policy": "recorded-actions"})}
+    )
+
+    receipt = service.process_closure(closure)
+
+    assert receipt.proposal_commit is not None
+    assert (target / "application.txt").read_text(encoding="utf-8") == "after\n"
+    assert validator.paths == ["application.txt"]
+
+
+def test_recorded_actions_closure_rejects_confirmed_repair_without_action_or_commit(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    service = _service(target, worktrees, AcceptRepairValidator(), repair_policy="recorded-actions")
+    workspace = service.prepare_incident("inc-20260709-0001")
+    closure = _closure(workspace.path, workspace.base_commit)
+    assert closure.result is not None
+    closure = closure.model_copy(
+        update={
+            "request": closure.request.model_copy(update={"repair_policy": "recorded-actions"}),
+            "result": closure.result.model_copy(update={"repair_actions": []}),
+        }
+    )
+
+    with pytest.raises(BrokerServiceError, match="successful recorded repair action"):
+        service.process_closure(closure)
+
+
 @pytest.mark.parametrize(
     "crash_stage",
     ["proposal_commit_unrecorded", "outcome_commit_unrecorded", "ack_durable_before_cleanup"],
@@ -342,6 +490,84 @@ def test_verified_outcome_resumes_same_session_after_outcome_commit_and_recovers
     assert state.controller_update_required is True
     restarted.acknowledge(receipt)
     assert not workspace.path.exists()
+
+
+def test_verified_no_change_reflection_gets_an_attributed_empty_commit(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = NoChangeSessionBackend()
+    service = _service(
+        target,
+        worktrees,
+        AcceptRepairValidator(),
+        reflector=SessionReflector(backend),
+    )
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    receipt = service.process_closure(_closure(workspace.path, workspace.base_commit))
+
+    assert receipt.reflection_commit is not None
+    assert "SDO-Phase: reflection" in _git(target, "show", "-s", "--format=%B", receipt.reflection_commit)
+    assert backend.calls == [("019c-session-0001", f"reflection:inc-20260709-0001:{receipt.outcome_commit}")]
+
+
+def test_semantically_incomplete_reflection_is_rolled_back_and_retried(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = PlaybookOnlyThenCorrectBackend()
+    service = _service(
+        target,
+        worktrees,
+        AcceptRepairValidator(),
+        reflector=SessionReflector(backend),
+    )
+    workspace = service.prepare_incident("inc-20260709-0001")
+    closure = _closure(workspace.path, workspace.base_commit)
+
+    with pytest.raises(BrokerServiceError, match="sharp fault-specific detector"):
+        service.process_closure(closure)
+
+    state = service.completion_state("inc-20260709-0001")
+    assert state.reflection_backend_completed is False
+    assert state.reflection_validation_error
+    receipt = service.process_closure(closure)
+    assert receipt.reflection_commit is not None
+    assert backend.attempts == 2
+
+
+def test_bounded_invalid_reflection_falls_back_to_attributed_noop(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = PlaybookOnlyThenCorrectBackend()
+    service = _service(
+        target,
+        worktrees,
+        AcceptRepairValidator(),
+        reflector=SessionReflector(backend),
+        max_reflection_attempts=1,
+    )
+    workspace = service.prepare_incident("inc-20260709-0001")
+    closure = _closure(workspace.path, workspace.base_commit)
+
+    with pytest.raises(BrokerServiceError, match="sharp fault-specific detector"):
+        service.process_closure(closure)
+
+    receipt = service.process_closure(closure)
+    state = service.completion_state("inc-20260709-0001")
+    assert receipt.reflection_commit is not None
+    assert state.reflection_attempts == 1
+    assert state.reflection_validation_error
+    assert state.reflection_proposed_changes
+    assert backend.attempts == 1
 
 
 def test_controller_rollout_evidence_is_correlated_atomic_and_restart_durable(tmp_path: Path) -> None:

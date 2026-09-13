@@ -95,6 +95,7 @@ def test_operate_deploys_with_independent_verifier_then_starts_continuous_runtim
     assert runtime_config.model == "gpt-test"
     assert runtime_config.timeout_seconds == 90
     assert runtime_config.wait_for_completion is False
+    assert runtime_config.repair_policy == "commit"
 
 
 def test_controller_verifier_bootstraps_memory_and_accepts_empty_finding_stream(tmp_path: Path) -> None:

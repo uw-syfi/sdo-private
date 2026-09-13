@@ -32,6 +32,7 @@ type ControllerConfig struct {
 	FiringThreshold         int
 	ClearThreshold          int
 	BatchDebounce           time.Duration
+	RepairPolicy            string
 }
 
 type dispatchCompletion struct {
@@ -109,6 +110,12 @@ func NewController(
 	}
 	if config.VerificationTimeout == 0 {
 		config.VerificationTimeout = config.ResponseTimeout
+	}
+	if config.RepairPolicy == "" {
+		config.RepairPolicy = "commit"
+	}
+	if config.RepairPolicy != "commit" && config.RepairPolicy != "recorded-actions" {
+		return nil, fmt.Errorf("unsupported repair policy %q", config.RepairPolicy)
 	}
 	if err := core.ValidateDetectors(detectors); err != nil {
 		return nil, err
@@ -334,6 +341,7 @@ func (c *Controller) incidentRequest(now time.Time, findings []sdk.Finding) Inci
 		RepositoryWorktree: c.config.RepositoryWorktree, RepositoryBaseCommit: c.config.SourceCommit,
 		ResponseDeadline:  now.Add(c.config.ResponseTimeout).UTC(),
 		CancellationToken: "cancel-" + incidentID,
+		RepairPolicy:      c.config.RepairPolicy,
 	}
 }
 

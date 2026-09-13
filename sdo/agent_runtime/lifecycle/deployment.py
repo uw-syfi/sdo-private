@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from libs.agent_cli.claude_structured import ClaudeStructuredExecutionError, run_claude_structured
 from libs.agent_cli.codex import (
     CodexSessionIdError,
     CodexStructuredExecutionError,
@@ -169,6 +170,50 @@ failure in summary, and do not claim an uncommitted revision. Return only the re
             draft = _DeploymentAttemptDraft.model_validate_json(completed.output_json)
         except (OSError, ValueError) as exc:
             raise DeploymentAgentError(f"invalid structured Codex deployment output: {exc}") from exc
+        return draft, completed.session_id
+
+
+class ClaudeDeploymentBackend(CodexDeploymentBackend):
+    """Use a writable Claude Code session to deploy an application."""
+
+    def __init__(
+        self,
+        *,
+        executable: str = "claude",
+        model: str | None = None,
+        reasoning_effort: str = "high",
+        timeout_seconds: int = 1800,
+        command_runner: CommandRunner = subprocess.run,
+    ) -> None:
+        super().__init__(
+            executable=executable,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_seconds=timeout_seconds,
+            command_runner=command_runner,
+        )
+
+    def _execute(self, repository: Path, prompt: str) -> tuple[_DeploymentAttemptDraft, str]:
+        try:
+            completed = run_claude_structured(
+                prompt,
+                output_schema=_DeploymentAttemptDraft.model_json_schema(),
+                cwd=repository,
+                executable=self.executable,
+                model=self.model,
+                effort=self.reasoning_effort,
+                timeout_seconds=self.timeout_seconds,
+                sandbox="danger-full-access",
+                runner=self.command_runner,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise DeploymentAgentError(f"Claude deployment session timed out after {self.timeout_seconds}s") from exc
+        except ClaudeStructuredExecutionError as exc:
+            raise DeploymentAgentError(str(exc) or "Claude deployment session failed") from exc
+        try:
+            draft = _DeploymentAttemptDraft.model_validate_json(completed.output_json)
+        except (OSError, ValueError) as exc:
+            raise DeploymentAgentError(f"invalid structured Claude deployment output: {exc}") from exc
         return draft, completed.session_id
 
 

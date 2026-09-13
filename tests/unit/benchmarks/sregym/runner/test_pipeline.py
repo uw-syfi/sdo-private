@@ -106,6 +106,8 @@ def _valid_strict_receipt() -> dict[str, object]:
         "lifecycle_provenance": True,
         "production_job_dispatch": True,
         "completed": True,
+        "repair_policy": "commit",
+        "repair_actions": [],
         "proposal_commit": "proposal",
         "outcome_commit": "outcome",
         "reflection_commit": "reflection",

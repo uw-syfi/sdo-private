@@ -439,10 +439,10 @@ def test_kubernetes_validator_job_isolated_from_cluster_credentials_network_and_
     assert pod["volumes"][1]["emptyDir"] == {"sizeLimit": "3Gi"}
     assert container["securityContext"]["readOnlyRootFilesystem"] is True
     assert container["securityContext"]["capabilities"] == {"drop": ["ALL"]}
-    assert container["resources"]["limits"]["cpu"] == "500m"
+    assert container["resources"]["limits"]["cpu"] == "2"
     environment = {item["name"]: item["value"] for item in container["env"]}
-    assert environment["GOMAXPROCS"] == "1"
-    assert environment["GOFLAGS"] == "-p=1"
+    assert environment["GOMAXPROCS"] == "2"
+    assert environment["GOFLAGS"] == "-p=2"
     assert job["spec"]["activeDeadlineSeconds"] == 600  # type: ignore[index]
     assert any("delete" in command for command in commands)
 

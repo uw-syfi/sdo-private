@@ -126,6 +126,7 @@ def _build_parser() -> argparse.ArgumentParser:
     controller.add_argument("--broker-arg", action="append", default=[])
     controller.add_argument("--response-timeout", default="30m")
     controller.add_argument("--verification-timeout", default="2m")
+    controller.add_argument("--repair-policy", choices=("commit", "recorded-actions"), default="commit")
     controller.add_argument("--duration", default="")
     controller.add_argument("--lease-name", default="sdo-controller")
     controller.add_argument("--exit-after-closure", action="store_true")
@@ -390,6 +391,8 @@ def _controller(args: argparse.Namespace) -> int:
                 args.response_timeout,
                 "--verification-timeout",
                 args.verification_timeout,
+                "--repair-policy",
+                args.repair_policy,
                 "--lease-name",
                 args.lease_name,
             ]

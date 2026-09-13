@@ -37,6 +37,15 @@ wheels = [
 ]
 
 [[package]]
+name = "agentshim"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d5/06/5c16b00fc50f5dc82e172f0f1cb11dd2402214209c6bbc263dff5e67e889/agentshim-0.6.1.tar.gz", hash = "sha256:ffc82a169709ac838700bfec72d39ec49fa7ecb659f0dfbf9c9f785a4e12ff94", size = 78761, upload-time = "2026-09-10T21:26:06.348Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/88/29/0980ec9fb52b89816ff4370e59fe156f8e985579fc2559c5fc8a30541367/agentshim-0.6.1-py3-none-any.whl", hash = "sha256:c15c428ac4b3fdba8b665bbb97ae70fb57c59f6fd38807827525377df80a4633", size = 101612, upload-time = "2026-09-10T21:26:04.965Z" },
+]
+
+[[package]]
 name = "aiofile"
 version = "3.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3432,12 +3441,14 @@ name = "sdo-agent-cli"
 version = "0.1.0"
 source = { editable = "libs/agent_cli" }
 dependencies = [
+    { name = "agentshim" },
     { name = "litellm" },
     { name = "loguru" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "agentshim", specifier = ">=0.6.1,<0.7" },
     { name = "litellm", specifier = ">=1.0.0" },
     { name = "loguru", specifier = ">=0.7.2" },
 ]

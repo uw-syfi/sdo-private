@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
 from collections.abc import Callable
 
+from libs.agent_cli.claude_structured import ClaudeStructuredExecutionError, run_claude_structured
 from libs.agent_cli.codex import (
     CodexSessionIdError,
     CodexStructuredExecutionError,
@@ -40,32 +42,60 @@ def execute_incident(
     request: IncidentRequest,
     *,
     model: str | None = None,
+    provider: str | None = None,
     runner: CommandRunner | None = None,
 ) -> IncidentResult:
+    selected_provider = (provider or os.getenv("SDO_AGENT_PROVIDER") or "codex").strip().lower()
     try:
-        completed = run_codex_structured(
-            _responder_prompt(request),
-            output_schema=_incident_result_schema(),
-            cwd=request.repository_worktree,
-            model=model or os.getenv("SDO_RESPONDER_MODEL") or None,
-            timeout_seconds=None,
-            sandbox="danger-full-access",
-            runner=runner,
-        )
+        if selected_provider == "claude":
+            completed = run_claude_structured(
+                _responder_prompt(request),
+                output_schema=_incident_result_schema(),
+                cwd=request.repository_worktree,
+                model=model or os.getenv("SDO_RESPONDER_MODEL") or None,
+                timeout_seconds=None,
+                sandbox="danger-full-access",
+                runner=runner or subprocess.run,
+            )
+        elif selected_provider == "codex":
+            completed = run_codex_structured(
+                _responder_prompt(request),
+                output_schema=_incident_result_schema(),
+                cwd=request.repository_worktree,
+                model=model or os.getenv("SDO_RESPONDER_MODEL") or None,
+                timeout_seconds=None,
+                sandbox="danger-full-access",
+                runner=runner,
+            )
+        else:
+            raise ResponderExecutionError(f"unsupported agent provider {selected_provider!r}")
     except CodexStructuredExecutionError as exc:
         raise ResponderExecutionError(str(exc) or "Codex responder failed") from exc
     except CodexSessionIdError as exc:
         raise ResponderExecutionError("Codex did not report a resumable session id") from exc
     except CodexStructuredOutputError as exc:
         raise ResponderExecutionError(f"invalid Codex incident result: {exc}") from exc
+    except ClaudeStructuredExecutionError as exc:
+        raise ResponderExecutionError(str(exc) or "Claude responder failed") from exc
     try:
-        result = IncidentResult.model_validate_json(completed.output_json)
+        payload = json.loads(completed.output_json)
+        tokens = completed.usage.tokens
+        payload["usage"] = {
+            "llm_calls": tokens.turns,
+            "input_tokens": tokens.input_tokens,
+            "output_tokens": tokens.output_tokens,
+            "cached_input_tokens": tokens.cached_input_tokens,
+            "cache_write_input_tokens": tokens.cache_write_input_tokens,
+            "reasoning_output_tokens": tokens.reasoning_output_tokens,
+            "total_cost_usd": completed.usage.total_cost_usd,
+        }
+        result = IncidentResult.model_validate(payload)
     except (OSError, ValueError) as exc:
-        raise ResponderExecutionError(f"invalid Codex incident result: {exc}") from exc
+        raise ResponderExecutionError(f"invalid {selected_provider} incident result: {exc}") from exc
     if result.responder_session_id is None:
         result = result.model_copy(update={"responder_session_id": completed.session_id})
     if result.incident_id != request.incident_id:
-        raise ResponderExecutionError("Codex result incident_id does not match request")
+        raise ResponderExecutionError(f"{selected_provider} result incident_id does not match request")
     return result
 
 
@@ -106,6 +136,35 @@ def _incident_result_schema() -> dict[str, object]:
             },
         },
         "repair_changes": {"type": "array", "items": {"type": "string"}},
+        "repair_actions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "action_id": {"type": "string", "minLength": 1},
+                    "kind": {"type": "string", "minLength": 1},
+                    "target": {"type": "string", "minLength": 1},
+                    "summary": {"type": "string", "minLength": 1},
+                    "details": {"type": "string", "minLength": 1},
+                    "started_at": {"type": "string", "format": "date-time"},
+                    "completed_at": {"type": "string", "format": "date-time"},
+                    "success": {"type": "boolean"},
+                    "reversible": {"type": "boolean"},
+                },
+                "required": [
+                    "action_id",
+                    "kind",
+                    "target",
+                    "summary",
+                    "details",
+                    "started_at",
+                    "completed_at",
+                    "success",
+                    "reversible",
+                ],
+                "additionalProperties": False,
+            },
+        },
         "verification_evidence": {
             "type": "array",
             "items": {
@@ -119,16 +178,6 @@ def _incident_result_schema() -> dict[str, object]:
                 "required": ["name", "passed", "details", "observed_at"],
                 "additionalProperties": False,
             },
-        },
-        "usage": {
-            "type": "object",
-            "properties": {
-                "llm_calls": {"type": "integer", "minimum": 0},
-                "input_tokens": {"type": "integer", "minimum": 0},
-                "output_tokens": {"type": "integer", "minimum": 0},
-            },
-            "required": ["llm_calls", "input_tokens", "output_tokens"],
-            "additionalProperties": False,
         },
         "timing": {
             "type": "object",
@@ -162,6 +211,9 @@ def _responder_prompt(request: IncidentRequest) -> str:
         "verifies recovery after this response and records the authoritative outcome; only then may the broker open "
         "a same-session reflection turn with narrowly scoped write access. Return only the IncidentResult JSON "
         "required by the output schema.\n\n"
+        f"Repair evidence mode: {request.repair_policy}. For every live mutation, return a repair action receipt "
+        "with its target, timing, result, and reversibility. In recorded-actions mode, a successful live-only "
+        "repair must have at least one successful receipt; repository changes are still committed when present.\n\n"
         f"{additional_context}\n"
         f"Incident request:\n{request.model_dump_json(indent=2)}\n"
     )

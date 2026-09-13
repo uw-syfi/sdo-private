@@ -132,9 +132,11 @@ class BrokerLedger(BaseModel):
     base_commit: str
     closure: BrokerClosure | None = None
     responder_session_id: str | None = None
+    proposal_processed: bool = False
     proposal_commit: str | None = None
     outcome_commit: str | None = None
     reflection_started: bool = False
+    reflection_attempts: int = 0
     reflection_backend_completed: bool = False
     reflection_summary: str | None = None
     reflection_proposed_changes: list[str] = Field(default_factory=list)
@@ -170,7 +172,13 @@ class BrokerService:
         responder_model: str = "unknown",
         checkpoint: Callable[[str], None] | None = None,
         reflector: OutcomeReflector | None = None,
+        repair_policy: Literal["commit", "recorded-actions"] = "commit",
+        max_reflection_attempts: int = 3,
     ) -> None:
+        if repair_policy not in ("commit", "recorded-actions"):
+            raise ValueError(f"unsupported repair policy: {repair_policy!r}")
+        if max_reflection_attempts < 1:
+            raise ValueError("max_reflection_attempts must be at least 1")
         self.target_repository = target_repository.resolve()
         self.worktrees = WorktreeManager(self.target_repository, worktree_root)
         self.broker = broker or CommitBroker(self.target_repository)
@@ -178,6 +186,8 @@ class BrokerService:
         self.responder_model = responder_model
         self.checkpoint = checkpoint or (lambda _stage: None)
         self.reflector = reflector
+        self.repair_policy = repair_policy
+        self.max_reflection_attempts = max_reflection_attempts
         common_dir = Path(self.broker._git(self.target_repository, "rev-parse", "--git-common-dir").strip())
         if not common_dir.is_absolute():
             common_dir = self.target_repository / common_dir
@@ -209,6 +219,11 @@ class BrokerService:
         with self._locked():
             ledger = self._required_ledger(incident_id)
             self._validate_closure_workspace(closure, ledger)
+            if closure.request.repair_policy != self.repair_policy:
+                raise BrokerServiceError(
+                    "closure repair policy does not match the broker repair policy: "
+                    f"{closure.request.repair_policy!r} != {self.repair_policy!r}"
+                )
             if ledger.closure is None:
                 ledger.closure = closure
                 ledger.responder_session_id = None if closure.result is None else closure.result.responder_session_id
@@ -218,15 +233,20 @@ class BrokerService:
             ledger = self._recover_commits(ledger)
             worktree = Path(ledger.worktree)
 
-            if ledger.proposal_commit is None and ledger.outcome_commit is None:
+            if not ledger.proposal_processed and ledger.outcome_commit is None:
                 changed_paths = self.broker.changed_paths(worktree)
-                proposal = self.broker.commit_proposal(
-                    incident_worktree=worktree,
-                    incident_id=incident_id,
-                    allow_empty=not changed_paths,
-                )
-                self.checkpoint("proposal_commit_unrecorded")
-                ledger.proposal_commit = proposal.commit_sha
+                committed_changes = self.broker.has_committed_changes(worktree)
+                if changed_paths or committed_changes or self.repair_policy == "commit":
+                    proposal = self.broker.commit_proposal(
+                        incident_worktree=worktree,
+                        incident_id=incident_id,
+                        allow_empty=not changed_paths and not committed_changes,
+                    )
+                    self.checkpoint("proposal_commit_unrecorded")
+                    ledger.proposal_commit = proposal.commit_sha
+                else:
+                    self._validate_recorded_actions(closure)
+                ledger.proposal_processed = True
                 self._save(ledger)
 
             if ledger.outcome_commit is None:
@@ -352,13 +372,30 @@ class BrokerService:
             )
         )
 
+    @staticmethod
+    def _validate_recorded_actions(closure: BrokerClosure) -> None:
+        result = closure.result
+        health_verified = bool(closure.final_detector_states) and all(
+            evaluation.status.value == "clear" for evaluation in closure.final_detector_states
+        )
+        if not health_verified or result is None or result.status.value != "completed":
+            return
+        if not any(action.success for action in result.repair_actions):
+            raise BrokerServiceError(
+                "a confirmed repair without source changes requires at least one successful recorded repair action"
+            )
+
     def _recover_commits(self, ledger: BrokerLedger) -> BrokerLedger:
         changed = False
         if ledger.proposal_commit is None:
             proposal = self.broker.find_attributed_commit(ledger.incident_id, "proposal")
             if proposal is not None:
                 ledger.proposal_commit = proposal
+                ledger.proposal_processed = True
                 changed = True
+        elif not ledger.proposal_processed:
+            ledger.proposal_processed = True
+            changed = True
         if ledger.outcome_commit is None:
             outcome = self.broker.find_attributed_commit(ledger.incident_id, "outcome")
             if outcome is not None:
@@ -385,6 +422,11 @@ class BrokerService:
                 )
                 ledger.controller_update_required = bool(ledger.accepted_detector_paths)
                 ledger = self._ensure_controller_update_transition(ledger)
+                if not changed_paths:
+                    # A completed no-op reflection is still an attributable,
+                    # durable event. Its tree is identical to the already
+                    # validated outcome tree, so retain those canaries.
+                    ledger.validator_evidence_commit = reflection
                 changed = True
         if changed:
             self._save(ledger)
@@ -413,13 +455,15 @@ class BrokerService:
             ledger.reflection_completed = True
             self._save(ledger)
             return ledger
-        changed_paths = self.broker.changed_paths(worktree)
+        changed_paths = self.broker.proposal_changed_paths(worktree)
         if ledger.reflection_started and not ledger.reflection_backend_completed:
             if changed_paths:
                 self._rollback_incomplete_reflection(worktree)
                 changed_paths = []
             ledger.reflection_started = False
             self._save(ledger)
+        if ledger.reflection_attempts >= self.max_reflection_attempts:
+            return self._commit_noop_reflection(ledger, worktree)
         if not ledger.reflection_backend_completed:
             ledger.reflection_started = True
             self._save(ledger)
@@ -432,12 +476,13 @@ class BrokerService:
                 outcome_commit=ledger.outcome_commit or "",
                 validation_feedback=ledger.reflection_validation_error,
             )
+            ledger.reflection_attempts += 1
             ledger.reflection_backend_completed = True
             ledger.reflection_summary = turn.summary
             ledger.reflection_proposed_changes = list(turn.proposed_changes)
             self._save(ledger)
             self.checkpoint("reflection_resumed_unrecorded")
-            changed_paths = self.broker.changed_paths(worktree)
+            changed_paths = self.broker.proposal_changed_paths(worktree)
         if changed_paths:
             detector_paths = sorted(
                 path
@@ -449,9 +494,14 @@ class BrokerService:
                 and outcome.confirmed_root_causes
                 and not detector_paths
             ):
-                raise BrokerServiceError(
-                    "successful confirmed incident reflection must include a sharp fault-specific detector update"
+                error = (
+                    "successful confirmed incident reflection must include a sharp fault-specific detector update "
+                    "under .sdo/diagnostics/detectors/incidents/ and register it in the detector manifest"
                 )
+                ledger.reflection_backend_completed = False
+                ledger.reflection_validation_error = error
+                self._save(ledger)
+                raise BrokerServiceError(error)
             try:
                 reflection = self.broker.commit_proposal(
                     incident_worktree=worktree,
@@ -472,6 +522,34 @@ class BrokerService:
             ledger.accepted_detector_paths = detector_paths
             ledger.controller_update_required = bool(detector_paths)
             ledger = self._ensure_controller_update_transition(ledger)
+            ledger.reflection_validation_error = None
+        else:
+            return self._commit_noop_reflection(ledger, worktree, clear_error=True)
+        ledger.reflection_completed = True
+        self._save(ledger)
+        return ledger
+
+    def _commit_noop_reflection(
+        self,
+        ledger: BrokerLedger,
+        worktree: Path,
+        *,
+        clear_error: bool = False,
+    ) -> BrokerLedger:
+        reflection = self.broker.commit_proposal(
+            incident_worktree=worktree,
+            incident_id=ledger.incident_id,
+            phase="reflection",
+            allow_empty=True,
+        )
+        self.checkpoint("reflection_commit_unrecorded")
+        ledger.reflection_commit = reflection.commit_sha
+        # A no-op reflection preserves the validated outcome tree, so its
+        # isolation evidence remains applicable.
+        ledger.validator_evidence_commit = reflection.commit_sha
+        ledger.accepted_detector_paths = []
+        ledger.controller_update_required = False
+        if clear_error:
             ledger.reflection_validation_error = None
         ledger.reflection_completed = True
         self._save(ledger)
@@ -579,14 +657,15 @@ class BrokerService:
             raise BrokerServiceError("controller rollout detector transition does not match durable ledger")
 
     def _rollback_incomplete_reflection(self, worktree: Path) -> None:
-        self.broker._git(worktree, "reset", "--hard", "HEAD")
+        target_head = self.broker._git(self.target_repository, "rev-parse", "HEAD").strip()
+        self.broker._git(worktree, "reset", "--hard", target_head)
         self.broker._git(
             worktree,
             "clean",
             "-fd",
             "--",
             ".sdo/playbooks",
-            ".sdo/diagnostics/detectors/incidents",
+            ".sdo/diagnostics",
         )
 
     @staticmethod

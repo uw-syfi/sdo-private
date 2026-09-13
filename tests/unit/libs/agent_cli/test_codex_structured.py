@@ -27,7 +27,11 @@ def test_fresh_structured_execution_preserves_schema_session_and_options(tmp_pat
         return subprocess.CompletedProcess(
             command,
             0,
-            stdout='not json\n{"type":"thread.started","thread_id":"fresh-thread"}\n',
+            stdout=(
+                'not json\n{"type":"thread.started","thread_id":"fresh-thread"}\n'
+                '{"type":"turn.completed","usage":{"input_tokens":210,'
+                '"cached_input_tokens":60,"output_tokens":35}}\n'
+            ),
             stderr="",
         )
 
@@ -65,6 +69,11 @@ def test_fresh_structured_execution_preserves_schema_session_and_options(tmp_pat
     assert result.output_json == '{"answer":"done"}'
     assert result.session_id == "fresh-thread"
     assert result.stdout.startswith("not json")
+    assert result.usage.provider == "codex"
+    assert result.usage.tokens.input_tokens == 210
+    assert result.usage.tokens.cached_input_tokens == 60
+    assert result.usage.tokens.output_tokens == 35
+    assert result.usage.tokens.turns == 1
 
 
 def test_structured_resume_uses_existing_session_cwd_and_danger_full_access(tmp_path: Path) -> None:

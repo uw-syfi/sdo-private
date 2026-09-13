@@ -11,6 +11,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from libs.agent_cli.claude_structured import ClaudeStructuredExecutionError, run_claude_structured
 from libs.agent_cli.codex import (
     CodexSessionIdError,
     CodexStructuredExecutionError,
@@ -311,13 +312,81 @@ checking for a required resource that is absent, and use each observed object's 
         return output, completed.session_id
 
 
+class ClaudeLifecycleBackend(CodexLifecycleBackend):
+    """Run lifecycle handoffs as fresh structured Claude Code sessions."""
+
+    def __init__(
+        self,
+        *,
+        executable: str = "claude",
+        model: str | None = None,
+        reasoning_effort: str = "medium",
+        timeout_seconds: int = 900,
+        command_runner: CommandRunner = subprocess.run,
+    ) -> None:
+        super().__init__(
+            executable=executable,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_seconds=timeout_seconds,
+            command_runner=command_runner,
+        )
+
+    def _execute(
+        self,
+        repository: Path,
+        prompt: str,
+        output_type: type[DeployerDraft] | type[HealthJudgeDraft],
+    ) -> tuple[DeployerDraft | HealthJudgeDraft, str]:
+        try:
+            completed = run_claude_structured(
+                prompt,
+                output_schema=output_type.model_json_schema(),
+                cwd=repository,
+                executable=self.executable,
+                model=self.model,
+                effort=self.reasoning_effort,
+                timeout_seconds=self.timeout_seconds,
+                sandbox="read-only",
+                runner=self.command_runner or subprocess.run,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise LifecycleAgentError(f"Claude lifecycle session timed out after {self.timeout_seconds}s") from exc
+        except ClaudeStructuredExecutionError as exc:
+            raise LifecycleAgentError(str(exc) or "Claude lifecycle session failed") from exc
+        escaped_command = _first_repository_escape(completed.stdout, repository.resolve())
+        if escaped_command is not None:
+            raise LifecycleAgentError(
+                "Claude lifecycle session read outside the application repository; "
+                f"discarding its output: {escaped_command[:300]}"
+            )
+        try:
+            output = output_type.model_validate_json(completed.output_json)
+        except (OSError, ValueError) as exc:
+            raise LifecycleAgentError(f"invalid structured Claude lifecycle output: {exc}") from exc
+        return output, completed.session_id
+
+
 def _first_repository_escape(stdout: str, repository: Path) -> str | None:
     for line in stdout.splitlines():
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if not isinstance(event, dict) or event.get("type") != "item.completed":
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "assistant":
+            message = event.get("message")
+            content = message.get("content", []) if isinstance(message, dict) else []
+            for item in content if isinstance(content, list) else []:
+                if not isinstance(item, dict) or item.get("type") != "tool_use" or item.get("name") != "Bash":
+                    continue
+                arguments = item.get("input")
+                command = arguments.get("command") if isinstance(arguments, dict) else None
+                if isinstance(command, str) and _command_escapes_repository(command, repository):
+                    return command
+            continue
+        if event.get("type") != "item.completed":
             continue
         item = event.get("item")
         if not isinstance(item, dict) or item.get("type") != "command_execution":

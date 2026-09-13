@@ -84,5 +84,6 @@
   "repository_worktree": "/workspace/inc-20260709-0001",
   "repository_base_commit": "1111111111111111111111111111111111111111",
   "response_deadline": "2026-07-09T18:30:00Z",
-  "cancellation_token": "cancel-inc-20260709-0001"
+  "cancellation_token": "cancel-inc-20260709-0001",
+  "repair_policy": "commit"
 }

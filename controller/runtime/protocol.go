@@ -55,6 +55,7 @@ type IncidentRequest struct {
 	RepositoryBaseCommit    string               `json:"repository_base_commit"`
 	ResponseDeadline        time.Time            `json:"response_deadline"`
 	CancellationToken       string               `json:"cancellation_token"`
+	RepairPolicy            string               `json:"repair_policy"`
 }
 
 type ConfirmedRootCause struct {
@@ -76,14 +77,30 @@ type VerificationEvidence struct {
 }
 
 type UsageMetrics struct {
-	LLMCalls     int64 `json:"llm_calls"`
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
+	LLMCalls          int64    `json:"llm_calls"`
+	InputTokens       int64    `json:"input_tokens"`
+	OutputTokens      int64    `json:"output_tokens"`
+	CachedInputTokens int64    `json:"cached_input_tokens"`
+	CacheWriteTokens  int64    `json:"cache_write_input_tokens"`
+	ReasoningTokens   int64    `json:"reasoning_output_tokens"`
+	TotalCostUSD      *float64 `json:"total_cost_usd,omitempty"`
 }
 
 type TimingMetrics struct {
 	StartedAt   time.Time `json:"started_at"`
 	CompletedAt time.Time `json:"completed_at"`
+}
+
+type RepairActionReceipt struct {
+	ActionID    string    `json:"action_id"`
+	Kind        string    `json:"kind"`
+	Target      string    `json:"target"`
+	Summary     string    `json:"summary"`
+	Details     string    `json:"details"`
+	StartedAt   time.Time `json:"started_at"`
+	CompletedAt time.Time `json:"completed_at"`
+	Success     bool      `json:"success"`
+	Reversible  bool      `json:"reversible"`
 }
 
 type IncidentResult struct {
@@ -93,6 +110,7 @@ type IncidentResult struct {
 	ConfirmedRootCauses   []ConfirmedRootCause   `json:"confirmed_root_causes"`
 	AppliedPlaybooks      []AppliedPlaybook      `json:"applied_playbooks"`
 	RepairChanges         []string               `json:"repair_changes"`
+	RepairActions         []RepairActionReceipt  `json:"repair_actions"`
 	FinalDetectorStates   []DetectorEvaluation   `json:"final_detector_states"`
 	ProposedMemoryChanges []string               `json:"proposed_memory_changes"`
 	VerificationEvidence  []VerificationEvidence `json:"verification_evidence"`
@@ -132,6 +150,9 @@ func (request IncidentRequest) Validate() error {
 	if strings.TrimSpace(request.RepositoryWorktree) == "" || strings.TrimSpace(request.RepositoryBaseCommit) == "" {
 		return fmt.Errorf("repository worktree and base commit are required")
 	}
+	if request.RepairPolicy != "commit" && request.RepairPolicy != "recorded-actions" {
+		return fmt.Errorf("unsupported repair policy %q", request.RepairPolicy)
+	}
 	return nil
 }
 
@@ -150,6 +171,21 @@ func (result IncidentResult) ValidateFor(request IncidentRequest) error {
 	}
 	if result.Timing.CompletedAt.Before(result.Timing.StartedAt) {
 		return fmt.Errorf("completion time is before start time")
+	}
+	actionIDs := make(map[string]struct{}, len(result.RepairActions))
+	for _, action := range result.RepairActions {
+		if strings.TrimSpace(action.ActionID) == "" || strings.TrimSpace(action.Kind) == "" ||
+			strings.TrimSpace(action.Target) == "" || strings.TrimSpace(action.Summary) == "" ||
+			strings.TrimSpace(action.Details) == "" {
+			return fmt.Errorf("repair action identity, kind, target, summary, and details are required")
+		}
+		if action.StartedAt.IsZero() || action.CompletedAt.IsZero() || action.CompletedAt.Before(action.StartedAt) {
+			return fmt.Errorf("repair action timing is invalid")
+		}
+		if _, exists := actionIDs[action.ActionID]; exists {
+			return fmt.Errorf("repair action id %q is duplicated", action.ActionID)
+		}
+		actionIDs[action.ActionID] = struct{}{}
 	}
 	return nil
 }

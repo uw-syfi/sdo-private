@@ -287,6 +287,8 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         "responder_jobs": responder_jobs,
         "responder_job_evidence": responder_job_evidence,
         "completed": result.get("status") == "completed",
+        "repair_policy": config.repair_policy,
+        "repair_actions": result.get("repair_actions", []),
         "proposal_commit": ledger.get("proposal_commit"),
         "outcome_commit": ledger.get("outcome_commit"),
         "reflection_commit": ledger.get("reflection_commit"),

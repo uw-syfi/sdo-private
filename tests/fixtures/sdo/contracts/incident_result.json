@@ -42,6 +42,19 @@
     }
   ],
   "repair_changes": ["deploy/kubernetes/geo-config.yaml"],
+  "repair_actions": [
+    {
+      "action_id": "action-1",
+      "kind": "kubernetes_apply",
+      "target": "ConfigMap/geo-config",
+      "summary": "Applied the repaired ConfigMap and waited for the rollout",
+      "details": "ConfigMap applied without recording secret values",
+      "started_at": "2026-07-09T18:08:00Z",
+      "completed_at": "2026-07-09T18:09:00Z",
+      "success": true,
+      "reversible": true
+    }
+  ],
   "final_detector_states": [
     {
       "detector_id": "missing-configmap",
@@ -65,7 +78,10 @@
   "usage": {
     "llm_calls": 1,
     "input_tokens": 12000,
-    "output_tokens": 2200
+    "output_tokens": 2200,
+    "cached_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "reasoning_output_tokens": 0
   },
   "timing": {
     "started_at": "2026-07-09T18:01:00Z",

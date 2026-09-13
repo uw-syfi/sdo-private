@@ -69,6 +69,7 @@ def derive_outcome(facts: OutcomeFacts) -> OutcomeRecord:
         final_health_detector_state=facts.final_health_detector_state,
         classification=classification,
         repair_commit=facts.repair_commit,
+        repair_actions=[] if result is None else result.repair_actions,
         memory_commit=facts.memory_commit,
         responder_backend=facts.responder_backend,
         responder_model=facts.responder_model,

@@ -57,6 +57,26 @@ class _ControllerRolloutRecord(BaseModel):
         return self
 
 
+class _RepairActionReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action_id: str = Field(min_length=1)
+    kind: str = Field(min_length=1)
+    target: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    details: str = Field(min_length=1)
+    started_at: datetime
+    completed_at: datetime
+    success: bool
+    reversible: bool
+
+    @model_validator(mode="after")
+    def validate_attempt(self) -> _RepairActionReceipt:
+        if self.completed_at < self.started_at:
+            raise ValueError("completed_at must not precede started_at")
+        return self
+
+
 def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle: bool = False) -> None:
     """Validate the strict, standalone SDO production receipt contract."""
 
@@ -93,7 +113,28 @@ def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle
             raise ProductionReceiptValidationError("production receipt rollout incident_id mismatch")
         if rollout.reflection_commit != receipt.get("reflection_commit"):
             raise ProductionReceiptValidationError("production receipt rollout reflection_commit mismatch")
-    for field in ("proposal_commit", "outcome_commit", "reflection_commit"):
+    repair_policy = receipt.get("repair_policy")
+    if repair_policy not in ("commit", "recorded-actions"):
+        raise ProductionReceiptValidationError("production receipt requires a valid repair_policy")
+    proposal_commit = receipt.get("proposal_commit")
+    if proposal_commit is not None and (not isinstance(proposal_commit, str) or not proposal_commit):
+        raise ProductionReceiptValidationError("production receipt proposal_commit must be a non-empty string")
+    try:
+        actions = [_RepairActionReceipt.model_validate(action) for action in receipt.get("repair_actions", [])]
+    except (TypeError, ValidationError) as exc:
+        raise ProductionReceiptValidationError("production receipt requires valid repair_actions") from exc
+    action_ids = [action.action_id for action in actions]
+    if len(action_ids) != len(set(action_ids)):
+        raise ProductionReceiptValidationError("production receipt repair_actions IDs must be unique")
+    if repair_policy == "commit" and (not isinstance(proposal_commit, str) or not proposal_commit):
+        raise ProductionReceiptValidationError("production receipt requires proposal_commit")
+    if (
+        repair_policy == "recorded-actions"
+        and not proposal_commit
+        and (not actions or not any(action.success for action in actions))
+    ):
+        raise ProductionReceiptValidationError("production receipt requires successful repair_actions")
+    for field in ("outcome_commit", "reflection_commit"):
         if not isinstance(receipt.get(field), str) or not receipt[field]:
             raise ProductionReceiptValidationError(f"production receipt requires {field}")
     if receipt.get("validator_evidence_commit") != receipt["reflection_commit"]:

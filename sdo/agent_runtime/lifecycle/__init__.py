@@ -2,10 +2,12 @@
 
 from sdo.agent_runtime.lifecycle.agents import (
     ActiveTopologyResourceDTO,
+    ClaudeLifecycleBackend,
     CodexLifecycleBackend,
     LifecycleAgentBackend,
 )
 from sdo.agent_runtime.lifecycle.deployment import (
+    ClaudeDeploymentBackend,
     CodexDeploymentBackend,
     DeploymentAttempt,
     DeploymentBackend,
@@ -24,6 +26,8 @@ from sdo.agent_runtime.lifecycle.operational_memory import (
 __all__ = [
     "CodexDeploymentBackend",
     "CodexLifecycleBackend",
+    "ClaudeDeploymentBackend",
+    "ClaudeLifecycleBackend",
     "ActiveTopologyResourceDTO",
     "DeploymentAttempt",
     "DeploymentBackend",

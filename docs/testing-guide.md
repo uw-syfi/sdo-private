@@ -76,4 +76,12 @@ Tests for `benchmarks/sregym/adapter/` should prove that benchmark resources are
 
 Kubernetes smoke scripts validate a different layer from unit tests: image contents, RBAC, storage, network policy, repository synchronization, generated controller startup, responder jobs, and cleanup. Record the exact cluster, images, model, application commit, and command whenever reporting a live result.
 
+Run the reproducible Claude Haiku incident example with:
+
+```bash
+bash scripts/run_sdo_example_kind.sh
+```
+
+It requires Docker, Kind, `kubectl`, `uv`, and either `ANTHROPIC_API_KEY` or an authenticated Claude Code configuration. The default keeps lifecycle generation deterministic while using Haiku for the real response and same-session reflection. `SDO_SMOKE_REAL_LIFECYCLE=1` opts into model-generated initial memory and detectors as a less deterministic external integration check.
+
 A green unit suite establishes repository contracts. It does not establish that every target application deploys successfully or that an agent repairs every incident.
