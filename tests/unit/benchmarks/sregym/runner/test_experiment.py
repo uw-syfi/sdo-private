@@ -107,6 +107,15 @@ def test_config_to_main_args_no_problem_spec_when_empty(tmp_path: Path) -> None:
     assert "--problem-spec" not in args
 
 
+def test_config_to_main_args_emits_agent_timeout(tmp_path: Path) -> None:
+    config = ExperimentConfig(agent_timeout=3600)
+
+    args = config_to_main_args(config, exp_dir=tmp_path, tasklist_path=None)
+
+    index = args.index("--agent-timeout")
+    assert args[index + 1] == "3600"
+
+
 def test_config_to_main_args_emits_explicit_judge_model(tmp_path: Path) -> None:
     config = ExperimentConfig(env=RunnerEnv(judge_model_id="vertex-ai-gemini-2.5-pro"))
 

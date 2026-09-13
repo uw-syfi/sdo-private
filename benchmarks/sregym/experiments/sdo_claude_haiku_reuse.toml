@@ -9,6 +9,7 @@ name = "sdo-claude-haiku-reuse"
 agent = "sdo_codex"
 model = "haiku"
 parallel = 1
+agent_timeout = 3600
 app_filter = "hotel_reservation"
 deploy_from_source = true
 application_workspace = "persistent"

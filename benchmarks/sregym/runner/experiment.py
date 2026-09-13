@@ -129,6 +129,7 @@ class ExperimentConfig:
     agent: str = "crucible"
     model: str = "google-vertex:gemini-2.5-flash"
     parallel: int = 4
+    agent_timeout: int = 1800
     app_filter: str = ""
     deploy_from_source: bool = False
     application_workspace: ApplicationWorkspaceSetting = False
@@ -232,6 +233,7 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         agent=agent,
         model=runner.get("model", "google-vertex:gemini-2.5-flash"),
         parallel=runner.get("parallel", 4),
+        agent_timeout=runner.get("agent_timeout", 1800),
         app_filter=runner.get("app_filter", ""),
         deploy_from_source=runner.get("deploy_from_source", False),
         application_workspace=runner.get("application_workspace", False),
@@ -395,6 +397,8 @@ def config_to_main_args(
         config.model,
         "--parallel",
         str(config.parallel),
+        "--agent-timeout",
+        str(config.agent_timeout),
         "--experiment-dir",
         str(exp_dir),
     ]
@@ -520,6 +524,7 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"agent = {_toml_value(config.agent)}")
     lines.append(f"model = {_toml_value(config.model)}")
     lines.append(f"parallel = {_toml_value(config.parallel)}")
+    lines.append(f"agent_timeout = {_toml_value(config.agent_timeout)}")
     lines.append(f"app_filter = {_toml_value(config.app_filter)}")
     lines.append(f"deploy_from_source = {_toml_value(config.deploy_from_source)}")
     lines.append(f"application_workspace = {_toml_value(config.application_workspace)}")
