@@ -7,7 +7,7 @@ import pytest
 
 from controller.builder.check_cli import _diagnostics_fingerprint
 from controller.builder.check_cli import main as check_main
-from controller.builder.go_runner import GoRunner
+from controller.builder.go_runner import GoRunner, seed_go_cache_from_environment
 from controller.builder.manifest import ManifestError, load_manifest
 from controller.builder.paths import find_app_root
 from controller.builder.workspace import BuildWorkspace, BuildWorkspaceConfig
@@ -494,3 +494,18 @@ done
     assert f"--broker-worktree-root {tmp_path / 'workspace' / 'worktrees'}" in argv
     assert "--verification-timeout 90s" in argv
     assert "--repair-policy recorded-actions" in argv
+
+
+def test_seed_go_cache_copies_trusted_image_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed = tmp_path / "seed"
+    target = tmp_path / "target"
+    (seed / "ab").mkdir(parents=True)
+    (seed / "ab" / "entry").write_text("compiled", encoding="utf-8")
+    monkeypatch.setenv("SDO_GO_CACHE_SEED", str(seed))
+    monkeypatch.setenv("GOCACHE", str(target))
+
+    assert seed_go_cache_from_environment() is True
+    assert (target / "ab" / "entry").read_text(encoding="utf-8") == "compiled"

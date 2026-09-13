@@ -443,6 +443,7 @@ def test_kubernetes_validator_job_isolated_from_cluster_credentials_network_and_
     environment = {item["name"]: item["value"] for item in container["env"]}
     assert environment["GOMAXPROCS"] == "2"
     assert environment["GOFLAGS"] == "-p=2"
+    assert environment["SDO_GO_CACHE_SEED"] == "/opt/sdo/go-build-cache"
     assert job["spec"]["activeDeadlineSeconds"] == 600  # type: ignore[index]
     assert any("delete" in command for command in commands)
 

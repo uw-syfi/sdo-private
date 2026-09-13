@@ -117,6 +117,7 @@ class ContainerSandboxRunner:
             "PATH=/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
             "HOME=/tmp",
             "GOCACHE=/tmp/go-cache",
+            "SDO_GO_CACHE_SEED=/opt/sdo/go-build-cache",
             "GOMODCACHE=/go/pkg/mod",
             "GOPROXY=off",
             "GOSUMDB=off",
@@ -558,6 +559,7 @@ class KubernetesJobSandboxRunner:
                                 "env": [
                                     {"name": "HOME", "value": "/tmp"},
                                     {"name": "GOCACHE", "value": "/tmp/go-cache"},
+                                    {"name": "SDO_GO_CACHE_SEED", "value": "/opt/sdo/go-build-cache"},
                                     {"name": "GOMODCACHE", "value": "/go/pkg/mod"},
                                     {"name": "GOPROXY", "value": "off"},
                                     {"name": "GOSUMDB", "value": "off"},

@@ -50,6 +50,7 @@ def test_container_sandbox_is_networkless_readonly_limited_and_credential_free(
     ]
     assert f"{tmp_path.resolve()}:/workspace:ro" in command
     assert "GOCACHE=/tmp/go-cache" in command
+    assert "SDO_GO_CACHE_SEED=/opt/sdo/go-build-cache" in command
     assert "GOMODCACHE=/go/pkg/mod" in command
     assert "GOPROXY=off" in command
     assert "GOSUMDB=off" in command
