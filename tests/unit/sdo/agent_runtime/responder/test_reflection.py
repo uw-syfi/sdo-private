@@ -20,7 +20,13 @@ def test_codex_reflection_resumes_structured_session_in_incident_worktree(tmp_pa
         assert "proposed_changes" in json.loads(schema_path.read_text(encoding="utf-8"))["properties"]
         output_path = Path(command[command.index("--output-last-message") + 1])
         output_path.write_text(
-            json.dumps({"summary": "captured signature", "proposed_changes": [".sdo/playbooks/example.md"]}),
+            json.dumps(
+                {
+                    "summary": "captured signature",
+                    "learning_decision": "updated",
+                    "proposed_changes": [".sdo/playbooks/example.md"],
+                }
+            ),
             encoding="utf-8",
         )
         return subprocess.CompletedProcess(command, 0, '{"type":"thread.started","thread_id":"session-1"}\n', "")
@@ -61,7 +67,12 @@ def test_claude_reflection_resumes_structured_session(tmp_path: Path) -> None:
             "type": "result",
             "session_id": "session-1",
             "is_error": False,
-            "structured_output": {"summary": "learned", "proposed_changes": []},
+            "structured_output": {
+                "summary": "existing memory covers the incident",
+                "learning_decision": "no_change",
+                "no_change_reason": "the existing playbook already captures this verified signature",
+                "proposed_changes": [],
+            },
         }
         return subprocess.CompletedProcess(command, 0, json.dumps(event) + "\n", "")
 
@@ -76,4 +87,4 @@ def test_claude_reflection_resumes_structured_session(tmp_path: Path) -> None:
     assert isinstance(command, list)
     assert command[command.index("--resume") + 1] == "session-1"
     assert command[command.index("--model") + 1] == "haiku"
-    assert result.summary == "learned"
+    assert result.learning_decision == "no_change"

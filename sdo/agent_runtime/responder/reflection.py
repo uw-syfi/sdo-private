@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,7 +31,18 @@ class ReflectionTurn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str = Field(min_length=1)
+    learning_decision: Literal["updated", "no_change"]
+    no_change_reason: str | None = Field(default=None, min_length=1)
     proposed_changes: list[str]
+
+    def model_post_init(self, __context: object) -> None:
+        if self.learning_decision == "updated" and not self.proposed_changes:
+            raise ValueError("updated reflection requires proposed_changes")
+        if self.learning_decision == "no_change":
+            if self.proposed_changes:
+                raise ValueError("no_change reflection cannot propose changes")
+            if self.no_change_reason is None:
+                raise ValueError("no_change reflection requires no_change_reason")
 
 
 class StatefulResponderBackend(Protocol):
@@ -92,6 +103,10 @@ class SessionReflector:
             "near-miss test. Register it with owner responder, class incident, originatingIncident set to this "
             "incident, and originatingCommit set to the authoritative outcome commit. Preserve every existing health "
             "detector and shared manifest field.\n"
+            "Return learning_decision=updated when you edit memory. Use learning_decision=no_change only when no "
+            "safe reusable signature or playbook improvement exists, leave proposed_changes empty, and provide a "
+            "specific no_change_reason grounded in this incident. Never claim files were changed unless they exist "
+            "in the worktree.\n"
             "Apply classification-aware learning: false-positive refinement must tighten an over-broad signature and "
             "add a regression near-miss; false-negative refinement must add or widen a signature with a reproducing "
             "test; repeated success may only generalize fields supported by history. Compare arch.md's topology "

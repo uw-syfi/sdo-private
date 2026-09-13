@@ -99,7 +99,11 @@ class RecordingSessionBackend:
             encoding="utf-8",
         )
         self.calls.append((session_id, idempotency_key))
-        return ReflectionTurn(summary="generalized verification", proposed_changes=[str(playbook), str(detector)])
+        return ReflectionTurn(
+            summary="generalized verification",
+            learning_decision="updated",
+            proposed_changes=[str(playbook), str(detector)],
+        )
 
 
 class NoChangeSessionBackend:
@@ -116,7 +120,12 @@ class NoChangeSessionBackend:
     ) -> ReflectionTurn:
         del worktree, prompt
         self.calls.append((session_id, idempotency_key))
-        return ReflectionTurn(summary="existing memory is sufficient", proposed_changes=[])
+        return ReflectionTurn(
+            summary="existing memory is sufficient",
+            learning_decision="no_change",
+            no_change_reason="the existing detector and playbook already encode this exact verified signature",
+            proposed_changes=[],
+        )
 
 
 class PlaybookOnlyThenCorrectBackend(RecordingSessionBackend):
@@ -144,7 +153,11 @@ class PlaybookOnlyThenCorrectBackend(RecordingSessionBackend):
             wrong.write_text("package incident\n", encoding="utf-8")
             _git(worktree, "add", ".sdo/playbooks", ".sdo/diagnostics")
             _git(worktree, "commit", "-m", "rejected reflection attempt")
-            return ReflectionTurn(summary="incomplete", proposed_changes=[str(playbook), str(wrong)])
+            return ReflectionTurn(
+                summary="incomplete",
+                learning_decision="updated",
+                proposed_changes=[str(playbook), str(wrong)],
+            )
         assert "First incomplete attempt." not in (
             worktree / ".sdo" / "playbooks" / "missing-configmap" / "README.md"
         ).read_text(encoding="utf-8")
@@ -541,7 +554,7 @@ def test_semantically_incomplete_reflection_is_rolled_back_and_retried(tmp_path:
     assert backend.attempts == 2
 
 
-def test_bounded_invalid_reflection_falls_back_to_attributed_noop(tmp_path: Path) -> None:
+def test_bounded_invalid_reflection_remains_failed_instead_of_claiming_noop(tmp_path: Path) -> None:
     target = tmp_path / "target"
     worktrees = tmp_path / "worktrees"
     target.mkdir()
@@ -561,9 +574,10 @@ def test_bounded_invalid_reflection_falls_back_to_attributed_noop(tmp_path: Path
     with pytest.raises(BrokerServiceError, match="sharp fault-specific detector"):
         service.process_closure(closure)
 
-    receipt = service.process_closure(closure)
+    with pytest.raises(BrokerServiceError, match="exhausted its validation attempts"):
+        service.process_closure(closure)
     state = service.completion_state("inc-20260709-0001")
-    assert receipt.reflection_commit is not None
+    assert state.reflection_commit is None
     assert state.reflection_attempts == 1
     assert state.reflection_validation_error
     assert state.reflection_proposed_changes

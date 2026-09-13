@@ -37,6 +37,8 @@ class BrokerServiceError(RuntimeError):
 
 class ReflectionProposal(Protocol):
     summary: str
+    learning_decision: Literal["updated", "no_change"]
+    no_change_reason: str | None
     proposed_changes: list[str]
 
 
@@ -139,6 +141,8 @@ class BrokerLedger(BaseModel):
     reflection_attempts: int = 0
     reflection_backend_completed: bool = False
     reflection_summary: str | None = None
+    reflection_learning_decision: Literal["updated", "no_change"] | None = None
+    reflection_no_change_reason: str | None = None
     reflection_proposed_changes: list[str] = Field(default_factory=list)
     reflection_validation_error: str | None = None
     reflection_completed: bool = False
@@ -463,7 +467,10 @@ class BrokerService:
             ledger.reflection_started = False
             self._save(ledger)
         if ledger.reflection_attempts >= self.max_reflection_attempts:
-            return self._commit_noop_reflection(ledger, worktree)
+            raise BrokerServiceError(
+                "reflection exhausted its validation attempts without producing valid operational memory: "
+                f"{ledger.reflection_validation_error or 'unknown validation failure'}"
+            )
         if not ledger.reflection_backend_completed:
             ledger.reflection_started = True
             self._save(ledger)
@@ -479,11 +486,19 @@ class BrokerService:
             ledger.reflection_attempts += 1
             ledger.reflection_backend_completed = True
             ledger.reflection_summary = turn.summary
+            ledger.reflection_learning_decision = turn.learning_decision
+            ledger.reflection_no_change_reason = turn.no_change_reason
             ledger.reflection_proposed_changes = list(turn.proposed_changes)
             self._save(ledger)
             self.checkpoint("reflection_resumed_unrecorded")
             changed_paths = self.broker.proposal_changed_paths(worktree)
         if changed_paths:
+            if ledger.reflection_learning_decision != "updated":
+                error = "reflection changed files but did not declare learning_decision=updated"
+                ledger.reflection_backend_completed = False
+                ledger.reflection_validation_error = error
+                self._save(ledger)
+                raise BrokerServiceError(error)
             detector_paths = sorted(
                 path
                 for path in changed_paths
@@ -524,6 +539,12 @@ class BrokerService:
             ledger = self._ensure_controller_update_transition(ledger)
             ledger.reflection_validation_error = None
         else:
+            if ledger.reflection_learning_decision != "no_change" or not ledger.reflection_no_change_reason:
+                error = "reflection made no changes without declaring learning_decision=no_change and a concrete reason"
+                ledger.reflection_backend_completed = False
+                ledger.reflection_validation_error = error
+                self._save(ledger)
+                raise BrokerServiceError(error)
             return self._commit_noop_reflection(ledger, worktree, clear_error=True)
         ledger.reflection_completed = True
         self._save(ledger)
