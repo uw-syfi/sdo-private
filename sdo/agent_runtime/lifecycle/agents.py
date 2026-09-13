@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -196,6 +197,7 @@ Correction feedback from the prior fresh attempt:
         correction_feedback: str | None,
         active_resources: list[ActiveTopologyResourceDTO] | None = None,
     ) -> HealthJudgeArtifact:
+        objective_digest = hashlib.sha256(health_objective.strip().encode()).hexdigest()
         previous_payload = previous.model_dump_json(indent=2) if previous else "null"
         active_payload = (
             json.dumps([resource.model_dump(mode="json") for resource in active_resources], indent=2)
@@ -209,6 +211,9 @@ conversation state. Continuity comes only from the structured deployer handoff a
 
 Human-owned health objective:
 {health_objective}
+
+Authoritative objective SHA-256: {objective_digest}
+Copy this exact value into objective_digest and the detector's healthObjectiveDigest constant; do not recompute it.
 
 Published deployer assessment:
 {deployer.model_dump_json(indent=2)}
@@ -250,7 +255,7 @@ and OriginatingCommit "lifecycle-bootstrap". Do not substitute incident/responde
 Never read environment variables, benchmark results, SREGym data, verdict files, hidden fault labels, or any external
 oracle. Never call an LLM at detector runtime. Return source text in the structured fields; do not edit repository
 files. Set round exactly to {round_index}; set source_commit to the deployer's commit; cover only resources present
-in the deployer handoff; and set objective_digest to the exact objective SHA-256.
+in the deployer handoff; and copy the authoritative objective SHA-256 above exactly.
 The last structured response is the only response the controller accepts. It must repeat both complete Go files;
 never return a placeholder such as "pending", "superseded", or a reference to an earlier commentary payload.
 For covered_resources, copy every resource required by the objective exactly from the deployer handoff. Never invent

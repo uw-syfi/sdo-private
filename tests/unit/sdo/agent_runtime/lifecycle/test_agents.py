@@ -611,6 +611,9 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
     assert "Inspect only the current application checkout" in prompts[1]
     assert "Do not create or execute helper scripts in temporary directories" in prompts[0]
     assert "Do not use `$TMPDIR` or `/tmp`" in prompts[0]
+    assert (
+        "Authoritative objective SHA-256: 1e71839b3094cb9c80bc60d0fa0186c30746b677eb96b7cb094de4e1140401cb"
+    ) in prompts[1]
     assert "last structured response is the only response the controller accepts" in prompts[1]
     assert "Every Go func declaration must be package-level" in prompts[1]
     assert "Mentally parse both complete files before returning them" in prompts[1].replace("\n", " ")
