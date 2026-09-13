@@ -20,6 +20,7 @@ worker_cpu_limit = "3"
 reuse_cluster = true
 force_recreate_cluster = false
 cleanup_defer_timeout_seconds = 4200
+docker_builder = "sdo-example"
 
 [defaults.variants]
 enabled = false

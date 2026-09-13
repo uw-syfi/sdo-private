@@ -91,6 +91,7 @@ class RunnerEnv:
     force_recreate_cluster: bool = False
     submit_done_returns_feedback: bool = False
     cleanup_defer_timeout_seconds: int = 0
+    docker_builder: str = ""
 
 
 def promote_crucible_legacy_config(
@@ -213,6 +214,7 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         force_recreate_cluster=bool(env_raw.get("force_recreate_cluster", False)),
         submit_done_returns_feedback=bool(env_raw.get("submit_done_returns_feedback", False)),
         cleanup_defer_timeout_seconds=int(env_raw.get("cleanup_defer_timeout_seconds", 0)),
+        docker_builder=str(env_raw.get("docker_builder", "")),
     )
 
     agent = runner.get("agent", "crucible")
@@ -469,6 +471,8 @@ def config_to_env(config: ExperimentConfig, project_root: Path, exp_dir: Path | 
     env["SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK"] = "1" if config.env.submit_done_returns_feedback else "0"
     if config.env.cleanup_defer_timeout_seconds > 0:
         env["SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS"] = str(config.env.cleanup_defer_timeout_seconds)
+    if config.env.docker_builder:
+        env["SREGYM_DOCKER_BUILDER"] = config.env.docker_builder
 
     env["SREGYM_PROGRESS_MODE"] = "rich"
     if exp_dir is not None:
@@ -553,6 +557,7 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"force_recreate_cluster = {_toml_value(config.env.force_recreate_cluster)}")
     lines.append(f"submit_done_returns_feedback = {_toml_value(config.env.submit_done_returns_feedback)}")
     lines.append(f"cleanup_defer_timeout_seconds = {_toml_value(config.env.cleanup_defer_timeout_seconds)}")
+    lines.append(f"docker_builder = {_toml_value(config.env.docker_builder)}")
 
     agent_configs = promote_crucible_legacy_config(
         agent=config.agent,

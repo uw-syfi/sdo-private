@@ -574,6 +574,14 @@ def test_config_to_env_emits_cleanup_deferral_timeout(tmp_path: Path) -> None:
     assert env["SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS"] == "1800"
 
 
+def test_config_to_env_emits_source_docker_builder(tmp_path: Path) -> None:
+    config = ExperimentConfig(env=RunnerEnv(docker_builder="sdo-example"))
+
+    env = config_to_env(config, tmp_path)
+
+    assert env["SREGYM_DOCKER_BUILDER"] == "sdo-example"
+
+
 def test_config_to_env_omits_reuse_flags_when_false(tmp_path: Path) -> None:
     config = ExperimentConfig()
     env = config_to_env(config, project_root=tmp_path)
