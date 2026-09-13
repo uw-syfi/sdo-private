@@ -71,6 +71,16 @@ class SurfacedPlaybook(ContractModel):
     parameter_bindings: dict[str, ObjectRef] = Field(default_factory=dict)
 
 
+class PriorOutcomeEvidence(ContractModel):
+    incident_id: str = Field(min_length=1)
+    match_reason: Literal["exact-fingerprint", "detector-rule-resource-kind"]
+    root_cause_summaries: list[str] = Field(default_factory=list)
+    repair_action_summaries: list[str] = Field(default_factory=list)
+    applied_playbooks: list[str] = Field(default_factory=list)
+    source_commit: str = Field(min_length=1)
+    exact_source_match: bool
+
+
 class IncidentRequest(ContractModel):
     schema_version: Literal["sdo.dev/v1alpha1"] = SCHEMA_VERSION
     application: str = Field(min_length=1)
@@ -79,6 +89,7 @@ class IncidentRequest(ContractModel):
     findings: list[Finding] = Field(min_length=1)
     detector_history: list[DetectorEvaluation] = Field(min_length=1)
     surfaced_playbooks: list[SurfacedPlaybook] = Field(default_factory=list)
+    relevant_outcomes: list[PriorOutcomeEvidence] = Field(default_factory=list, max_length=3)
     source_commit: str = Field(min_length=1)
     deployed_commit: str = Field(min_length=1)
     architecture_summary_path: str = Field(min_length=1)

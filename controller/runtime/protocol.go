@@ -39,23 +39,34 @@ type SurfacedPlaybook struct {
 	ParameterBindings map[string]sdk.ObjectRef `json:"parameter_bindings,omitempty"`
 }
 
+type PriorOutcomeEvidence struct {
+	IncidentID            string   `json:"incident_id"`
+	MatchReason           string   `json:"match_reason"`
+	RootCauseSummaries    []string `json:"root_cause_summaries"`
+	RepairActionSummaries []string `json:"repair_action_summaries"`
+	AppliedPlaybooks      []string `json:"applied_playbooks"`
+	SourceCommit          string   `json:"source_commit"`
+	ExactSourceMatch      bool     `json:"exact_source_match"`
+}
+
 type IncidentRequest struct {
-	SchemaVersion           string               `json:"schema_version"`
-	Application             string               `json:"application"`
-	Namespace               string               `json:"namespace"`
-	IncidentID              string               `json:"incident_id"`
-	Findings                []sdk.Finding        `json:"findings"`
-	DetectorHistory         []DetectorEvaluation `json:"detector_history"`
-	SurfacedPlaybooks       []SurfacedPlaybook   `json:"surfaced_playbooks"`
-	SourceCommit            string               `json:"source_commit"`
-	DeployedCommit          string               `json:"deployed_commit"`
-	ArchitectureSummaryPath string               `json:"architecture_summary_path"`
-	HealthObjectivePath     string               `json:"health_objective_path"`
-	RepositoryWorktree      string               `json:"repository_worktree"`
-	RepositoryBaseCommit    string               `json:"repository_base_commit"`
-	ResponseDeadline        time.Time            `json:"response_deadline"`
-	CancellationToken       string               `json:"cancellation_token"`
-	RepairPolicy            string               `json:"repair_policy"`
+	SchemaVersion           string                 `json:"schema_version"`
+	Application             string                 `json:"application"`
+	Namespace               string                 `json:"namespace"`
+	IncidentID              string                 `json:"incident_id"`
+	Findings                []sdk.Finding          `json:"findings"`
+	DetectorHistory         []DetectorEvaluation   `json:"detector_history"`
+	SurfacedPlaybooks       []SurfacedPlaybook     `json:"surfaced_playbooks"`
+	RelevantOutcomes        []PriorOutcomeEvidence `json:"relevant_outcomes"`
+	SourceCommit            string                 `json:"source_commit"`
+	DeployedCommit          string                 `json:"deployed_commit"`
+	ArchitectureSummaryPath string                 `json:"architecture_summary_path"`
+	HealthObjectivePath     string                 `json:"health_objective_path"`
+	RepositoryWorktree      string                 `json:"repository_worktree"`
+	RepositoryBaseCommit    string                 `json:"repository_base_commit"`
+	ResponseDeadline        time.Time              `json:"response_deadline"`
+	CancellationToken       string                 `json:"cancellation_token"`
+	RepairPolicy            string                 `json:"repair_policy"`
 }
 
 type ConfirmedRootCause struct {
