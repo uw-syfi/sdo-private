@@ -27,6 +27,9 @@ from sdo.agent_runtime.lifecycle.operational_memory import (
     _judge_assessment,
     _render_health_detector,
     _validate_health_judge_artifact,
+    _write_health_judge_authoring_context,
+    check_detector_workspace,
+    ensure_operational_memory,
     reuse_initial_lifecycle_if_valid,
     run_initial_lifecycle,
 )
@@ -256,6 +259,39 @@ def test_initial_lifecycle_allows_judge_to_edit_and_self_check_an_isolated_works
     assert "edited in workspace" in (repository / ".sdo/diagnostics/detectors/health/objective/detector.go").read_text(
         encoding="utf-8"
     )
+
+
+def test_authoring_check_returns_semantic_feedback_before_starting_compiler(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    backend = RecordingBackend()
+    deployer = backend.run_deployer(repository=repository, application="example", correction_feedback=None)
+    artifact = _artifact(repository, session_id="judge", round_index=1, deployer=deployer)
+    objective = "Deployment example and Service example must remain available."
+    ensure_operational_memory(
+        repository,
+        application="example",
+        health_objective=objective,
+        health_judge_artifact=artifact,
+        architecture_summary_markdown=deployer.architecture_summary_markdown,
+    )
+    _write_health_judge_authoring_context(
+        repository,
+        deployer=deployer,
+        health_objective=objective,
+        round_index=1,
+        active_resources=None,
+    )
+    source = repository / ".sdo/diagnostics/detectors/health/objective/detector.go"
+    source.write_text(source.read_text(encoding="utf-8").replace(artifact.objective_digest, "0" * 64))
+
+    class CompilerMustNotRun:
+        def run(self, _app_root: Path) -> SandboxResult:
+            raise AssertionError("semantic failures should be returned before compilation")
+
+    result = check_detector_workspace(repository, validator=CompilerMustNotRun())
+
+    assert result.returncode == 1
+    assert "exact objective digest" in result.stderr
 
 
 def test_health_judge_rejects_source_variants_outside_active_topology(tmp_path: Path) -> None:

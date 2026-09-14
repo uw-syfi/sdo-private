@@ -47,11 +47,91 @@ class TopologyResource:
 def check_detector_workspace(app_root: Path, *, validator: SandboxRunner | None = None) -> SandboxResult:
     """Run the fixed isolated detector check used by authoring agents."""
 
+    root = app_root.resolve()
+    semantic_errors = _health_judge_authoring_errors(root)
+    if semantic_errors:
+        return SandboxResult(
+            returncode=1,
+            stderr="semantic detector checks failed:\n" + "\n".join(f"- {error}" for error in semantic_errors),
+        )
     selected = validator or ContainerSandboxRunner(
         detector_ids=("health-objective",),
         authoring_check=True,
     )
-    return selected.run(app_root.resolve())
+    return selected.run(root)
+
+
+def _health_judge_authoring_errors(root: Path) -> list[str]:
+    context_path = root / ".sdo/session-scratch/health-judge-context.json"
+    if not context_path.is_file():
+        return []
+    try:
+        context = json.loads(context_path.read_text(encoding="utf-8"))
+        deployer = DeployerAssessment.model_validate(context["deployer"])
+        health_objective = str(context["health_objective"])
+        round_index = int(context["round_index"])
+        raw_active = context.get("active_resources")
+        active_resources = (
+            [ActiveTopologyResourceDTO.model_validate(resource) for resource in raw_active]
+            if isinstance(raw_active, list)
+            else None
+        )
+        detector = root / ".sdo/diagnostics/detectors/health/objective"
+        artifact = HealthJudgeArtifact(
+            session_id="authoring-self-check",
+            round=round_index,
+            objective_digest=hashlib.sha256(health_objective.strip().encode()).hexdigest(),
+            source_commit=deployer.source_commit,
+            covered_resources=deployer.resources,
+            failure_patterns=["authoring draft"],
+            detector_source=(detector / "detector.go").read_text(encoding="utf-8"),
+            detector_test_source=(detector / "detector_test.go").read_text(encoding="utf-8"),
+        )
+        artifact = _canonicalize_active_coverage(
+            artifact,
+            deployer=deployer,
+            health_objective=health_objective,
+            active_resources=active_resources,
+        )
+        return _validate_health_judge_artifact(
+            artifact,
+            deployer=deployer,
+            health_objective=health_objective,
+            expected_round=round_index,
+            active_resources=active_resources,
+        )
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        return [f"invalid controller-authored health-judge context: {exc}"]
+
+
+def _write_health_judge_authoring_context(
+    root: Path,
+    *,
+    deployer: DeployerAssessment,
+    health_objective: str,
+    round_index: int,
+    active_resources: list[ActiveTopologyResourceDTO] | None,
+) -> None:
+    scratch = root / ".sdo/session-scratch"
+    scratch.mkdir(parents=True, exist_ok=True)
+    (scratch / "health-judge-context.json").write_text(
+        json.dumps(
+            {
+                "deployer": deployer.model_dump(mode="json"),
+                "health_objective": health_objective,
+                "round_index": round_index,
+                "active_resources": (
+                    [resource.model_dump(mode="json") for resource in active_resources]
+                    if active_resources is not None
+                    else None
+                ),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def reuse_initial_lifecycle_if_valid(
@@ -667,6 +747,14 @@ def _run_workspace_authored_candidate(
             health_judge_artifact=previous,
             architecture_summary_markdown=deployer.architecture_summary_markdown,
         )
+        _write_health_judge_authoring_context(
+            candidate,
+            deployer=deployer,
+            health_objective=health_objective,
+            round_index=round_index,
+            active_resources=active_resources,
+        )
+        _commit(candidate, "sdo: add controller-authored detector context")
         baseline_commit = _git(candidate, "rev-parse", "HEAD")
         metadata: HealthJudgeWorkspaceArtifact = backend.run_health_judge_workspace(
             repository=candidate,
