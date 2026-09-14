@@ -355,6 +355,14 @@ def test_lifecycle_attestation_is_invalidated_by_validator_or_diagnostics_change
         validator=changed_validator,
     )
     assert len(changed_validator.runs) == 1
+    repeated_changed_validator = IdentifiedPassingValidator("validator-image@sha256:new")
+    assert reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=repeated_changed_validator,
+    )
+    assert repeated_changed_validator.runs == []
 
     detector = repository / ".sdo/diagnostics/detectors/health/objective/detector.go"
     detector.write_text(detector.read_text(encoding="utf-8") + "\n// changed\n", encoding="utf-8")

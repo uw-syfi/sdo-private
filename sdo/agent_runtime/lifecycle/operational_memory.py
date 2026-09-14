@@ -112,7 +112,18 @@ def reuse_initial_lifecycle_if_valid(
             and validation.get("diagnostics_digest") == _diagnostics_digest(root)
         ):
             return True
-        return selected_validator.run(root).returncode == 0
+        result = selected_validator.run(root)
+        if result.returncode != 0:
+            return False
+        if validation_identity is not None:
+            provenance["validation"] = {
+                "schema_version": _VALIDATION_ATTESTATION_SCHEMA,
+                "diagnostics_digest": _diagnostics_digest(root),
+                "validator_identity": validation_identity,
+            }
+            provenance_path.write_text(yaml.safe_dump(provenance, sort_keys=True), encoding="utf-8")
+            _commit(root, "sdo: attest independently validated lifecycle memory")
+        return True
     except (LifecycleError, OSError, TypeError, ValueError, yaml.YAMLError):
         return False
 
