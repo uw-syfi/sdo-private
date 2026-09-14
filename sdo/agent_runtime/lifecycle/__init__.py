@@ -18,10 +18,12 @@ from sdo.agent_runtime.lifecycle.deployment import (
 )
 from sdo.agent_runtime.lifecycle.operational_memory import (
     LifecycleError,
+    check_detector_workspace,
     ensure_operational_memory,
     reuse_initial_lifecycle_if_valid,
     run_initial_lifecycle,
 )
+from sdo.operational_memory import SandboxResult, SandboxRunner
 
 __all__ = [
     "CodexDeploymentBackend",
@@ -36,6 +38,9 @@ __all__ = [
     "DeploymentVerifier",
     "LifecycleAgentBackend",
     "LifecycleError",
+    "SandboxResult",
+    "SandboxRunner",
+    "check_detector_workspace",
     "deploy_from_source",
     "ensure_operational_memory",
     "reuse_initial_lifecycle_if_valid",

@@ -76,3 +76,23 @@ def test_resume_claude_structured_preserves_session(tmp_path: Path) -> None:
     command, _kwargs = calls[0]
     assert command[command.index("--resume") + 1] == "session-123"
     assert result.session_id == "session-123"
+
+
+def test_workspace_write_confines_reads_without_disabling_edit_tools(tmp_path: Path) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    run_claude_structured(
+        "edit and validate",
+        output_schema={"type": "object"},
+        cwd=tmp_path,
+        sandbox="workspace-write",
+        runner=_runner(calls),
+    )
+
+    command, _kwargs = calls[0]
+    settings = json.loads(command[command.index("--settings") + 1])
+    assert settings["sandbox"]["enabled"] is True
+    assert settings["sandbox"]["allowUnsandboxedCommands"] is False
+    assert "denyWrite" not in settings["sandbox"].get("filesystem", {})
+    assert "--disallowedTools" not in command
+    assert "hooks" in settings

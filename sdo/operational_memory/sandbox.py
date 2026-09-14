@@ -74,6 +74,8 @@ class ContainerSandboxRunner:
         timeout_seconds: int = 600,
         cpu_limit: str = "1",
         memory_limit: str = "3g",
+        detector_ids: tuple[str, ...] = (),
+        authoring_check: bool = False,
         command_runner: CommandRunner | None = None,
     ) -> None:
         self.image = image
@@ -81,6 +83,8 @@ class ContainerSandboxRunner:
         self.timeout_seconds = timeout_seconds
         self.cpu_limit = cpu_limit
         self.memory_limit = memory_limit
+        self.detector_ids = detector_ids
+        self.authoring_check = authoring_check
         self.command_runner = command_runner
         self._resolved_image_id: str | None = None
 
@@ -158,10 +162,12 @@ class ContainerSandboxRunner:
             "python",
             "-m",
             "controller.builder.check_cli",
-            "test",
+            "draft-test" if self.authoring_check else "test",
             "--app",
             "/workspace",
         ]
+        for detector_id in self.detector_ids:
+            command.extend(["--detector-id", detector_id])
         try:
             if self.command_runner is None:
                 completed = self._run_managed_container(command, container_name)

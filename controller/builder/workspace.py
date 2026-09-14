@@ -21,6 +21,7 @@ class BuildWorkspaceConfig:
     core_dir: Path
     runtime_dir: Path | None = None
     keep: bool = False
+    detector_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,18 @@ class BuildWorkspace:
         app_root = config.app_root.resolve()
         diagnostics_dir = find_diagnostics_dir(app_root)
         manifest = load_manifest(diagnostics_dir / "manifest.yaml", app_root=app_root)
+        if config.detector_ids:
+            requested = set(config.detector_ids)
+            selected = [detector for detector in manifest.detectors if detector.id in requested]
+            missing = sorted(requested - {detector.id for detector in selected})
+            if missing:
+                raise ValueError(f"requested detector id(s) not found: {', '.join(missing)}")
+            excluded_packages = {
+                _clean_package_path(detector.package) for detector in manifest.detectors if detector.id not in requested
+            } - {_clean_package_path(detector.package) for detector in selected}
+            manifest = manifest.model_copy(update={"detectors": selected})
+        else:
+            excluded_packages = set()
         _reject_symlinks(diagnostics_dir)
 
         temp_dir: tempfile.TemporaryDirectory[str] | None = None
@@ -46,6 +59,8 @@ class BuildWorkspace:
             workspace_path = Path(temp_dir.name).resolve()
 
         shutil.copytree(diagnostics_dir, workspace_path, dirs_exist_ok=True)
+        for package in excluded_packages:
+            shutil.rmtree(workspace_path / package)
         module_path = _module_path(workspace_path / "go.mod")
         _write_go_mod(
             workspace_path / "go.mod",

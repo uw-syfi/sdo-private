@@ -15,6 +15,7 @@ from sdo.operation import (
     OperationError,
     operate,
 )
+from sdo.operational_memory.sandbox import SandboxResult
 
 
 def _repository(root: Path) -> Path:
@@ -212,7 +213,7 @@ def test_controller_verifier_rejects_findings_and_errors(
     assert feedback in result.feedback
 
 
-def test_cli_exposes_only_sdo_operate_and_maps_all_flags(tmp_path: Path) -> None:
+def test_cli_exposes_sdo_operate_and_maps_all_flags(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     captured: list[OperationConfig] = []
 
@@ -263,6 +264,26 @@ def test_cli_exposes_only_sdo_operate_and_maps_all_flags(tmp_path: Path) -> None
             timeout_seconds=120,
         )
     ]
+
+
+def test_cli_detector_check_validates_only_the_current_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repository = _repository(tmp_path)
+    checked: list[Path] = []
+
+    class Validator:
+        def run(self, app_root: Path) -> SandboxResult:
+            checked.append(app_root)
+            return SandboxResult(returncode=0, stdout="detector checks passed\n")
+
+    monkeypatch.chdir(repository)
+
+    exit_code = main(["detector", "check"], detector_check_runner=Validator())
+
+    assert exit_code == 0
+    assert checked == [repository.resolve()]
+    assert capsys.readouterr().out == "detector checks passed\n"
 
 
 def test_cli_reads_goal_file_and_returns_clear_operation_error(

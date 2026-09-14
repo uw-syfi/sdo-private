@@ -22,9 +22,14 @@ from sdo.agent_runtime.lifecycle import (
     DeploymentVerifier,
     LifecycleAgentBackend,
     LifecycleError,
+    SandboxResult,
+    SandboxRunner,
     deploy_from_source,
     reuse_initial_lifecycle_if_valid,
     run_initial_lifecycle,
+)
+from sdo.agent_runtime.lifecycle import (
+    check_detector_workspace as _check_detector_workspace,
 )
 from sdo.controller_install import (
     ControllerInstallConfig,
@@ -36,6 +41,12 @@ from sdo.controller_install import (
 
 class OperationError(RuntimeError):
     """Raised when the production operation path cannot be started."""
+
+
+def check_detector_workspace(app_root: Path, *, validator: SandboxRunner | None = None) -> SandboxResult:
+    """Expose the lifecycle's isolated authoring check through the public command layer."""
+
+    return _check_detector_workspace(app_root, validator=validator)
 
 
 @dataclass(frozen=True)

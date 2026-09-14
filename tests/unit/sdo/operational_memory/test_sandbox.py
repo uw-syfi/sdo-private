@@ -64,6 +64,23 @@ def test_container_sandbox_is_networkless_readonly_limited_and_credential_free(
     assert result.returncode == 0
 
 
+def test_container_sandbox_can_run_a_narrow_authoring_check(tmp_path: Path) -> None:
+    captured: list[str] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured.extend(command)
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    ContainerSandboxRunner(
+        command_runner=fake_run,
+        detector_ids=("health-objective",),
+        authoring_check=True,
+    ).run(tmp_path)
+
+    assert "draft-test" in captured
+    assert captured[captured.index("--detector-id") + 1] == "health-objective"
+
+
 def test_container_sandbox_converts_hung_validation_to_failure(tmp_path: Path) -> None:
     def timeout(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired("docker", 1)

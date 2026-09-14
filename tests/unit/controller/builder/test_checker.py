@@ -170,6 +170,46 @@ def test_build_workspace_generates_registration_without_mutating_app_go_mod(tmp_
     assert app_go_mod.read_text(encoding="utf-8") == original_go_mod
 
 
+def test_build_workspace_can_limit_an_authoring_check_to_one_detector(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    tool_root = tmp_path / "sdo"
+    _write_app_diagnostics(app_root)
+    _write_tool_root(tool_root)
+    diagnostics = app_root / ".sdo/diagnostics"
+    second = diagnostics / "detectors/second"
+    second.mkdir()
+    (second / "detector.go").write_text("package second\n", encoding="utf-8")
+    manifest = diagnostics / "manifest.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8")
+        + """  - id: second
+    package: ./detectors/second
+    constructor: New
+    class: incident
+    owner: responder
+    watches: []
+    interval: 1m
+    persistence: {firing: 1, clearing: 1}
+    batching: {severity: critical, debounce: "0"}
+    possiblePlaybooks: []
+    originatingIncident: second
+    originatingCommit: abc123
+""",
+        encoding="utf-8",
+    )
+
+    config = BuildWorkspaceConfig(
+        app_root=app_root,
+        sdk_dir=tool_root / "controller/sdk",
+        core_dir=tool_root / "controller/core",
+        detector_ids=("missing-endpoints",),
+    )
+    with BuildWorkspace.create(config) as workspace:
+        assert [detector.id for detector in workspace.manifest.detectors] == ["missing-endpoints"]
+        assert not (workspace.path / "detectors/second").exists()
+        assert "detectors/second" not in (workspace.path / "generated/detectors.go").read_text(encoding="utf-8")
+
+
 def test_build_workspace_prefers_canonical_sdo_diagnostics(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     tool_root = tmp_path / "sdo"

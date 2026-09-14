@@ -14,6 +14,7 @@ from sdo.agent_runtime.lifecycle.agents import (
     CodexLifecycleBackend,
     DeployerAssessment,
     HealthJudgeArtifact,
+    HealthJudgeWorkspaceArtifact,
     LifecycleAgentError,
     TopologyResourceDTO,
     _command_escapes_repository,
@@ -198,6 +199,63 @@ def test_initial_lifecycle_uses_fresh_structured_agents_and_three_bounded_judge_
         encoding="utf-8"
     )
     assert '{APIVersion: "v1", Kind: "ConfigMap"}' in detector_source
+
+
+def test_initial_lifecycle_allows_judge_to_edit_and_self_check_an_isolated_workspace(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    objective = "Deployment example and Service example must remain available."
+
+    class WorkspaceBackend(RecordingBackend):
+        def run_health_judge_workspace(
+            self,
+            *,
+            repository: Path,
+            application: str,
+            health_objective: str,
+            deployer: DeployerAssessment,
+            round_index: int,
+            previous: HealthJudgeArtifact | None,
+            correction_feedback: str | None,
+            active_resources: list[ActiveTopologyResourceDTO] | None = None,
+        ) -> HealthJudgeWorkspaceArtifact:
+            del application, health_objective, previous, correction_feedback, active_resources
+            assert (repository / ".sdo/diagnostics/manifest.yaml").is_file()
+            authored = _artifact(
+                repository,
+                session_id=f"workspace-{round_index}",
+                round_index=round_index,
+                deployer=deployer,
+            )
+            detector = repository / ".sdo/diagnostics/detectors/health/objective/detector.go"
+            detector.write_text(authored.detector_source + "\n// edited in workspace\n", encoding="utf-8")
+            test = repository / ".sdo/diagnostics/detectors/health/objective/detector_test.go"
+            test.write_text(authored.detector_test_source, encoding="utf-8")
+            return HealthJudgeWorkspaceArtifact(
+                session_id=authored.session_id,
+                round=round_index,
+                objective_digest=authored.objective_digest,
+                source_commit=deployer.source_commit,
+                covered_resources=authored.covered_resources,
+                failure_patterns=authored.failure_patterns,
+            )
+
+        def run_health_judge(self, **kwargs: object) -> HealthJudgeArtifact:
+            raise AssertionError("structured source fallback should not run")
+
+    validator = PassingValidator()
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective=objective,
+        backend=WorkspaceBackend(),
+        validator=validator,
+        judge_rounds=1,
+    )
+
+    assert len(validator.runs) == 1
+    assert "edited in workspace" in (repository / ".sdo/diagnostics/detectors/health/objective/detector.go").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_health_judge_rejects_source_variants_outside_active_topology(tmp_path: Path) -> None:
@@ -821,7 +879,17 @@ def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_fee
                 round_index=judge_calls - 1,
                 deployer=deployer,
             )
-            output = artifact.model_dump(mode="json", exclude={"session_id"})
+            if "detector_source" in schema["properties"]:
+                output = artifact.model_dump(mode="json", exclude={"session_id"})
+            else:
+                candidate = Path(command[command.index("--cd") + 1])
+                detector = candidate / ".sdo/diagnostics/detectors/health/objective"
+                (detector / "detector.go").write_text(artifact.detector_source, encoding="utf-8")
+                (detector / "detector_test.go").write_text(artifact.detector_test_source, encoding="utf-8")
+                output = artifact.model_dump(
+                    mode="json",
+                    exclude={"session_id", "detector_source", "detector_test_source"},
+                )
         output_path.write_text(json.dumps(output), encoding="utf-8")
         session = f"fresh-session-{len(prompts)}"
         return subprocess.CompletedProcess(command, 0, f'{{"type":"thread.started","thread_id":"{session}"}}\n', "")

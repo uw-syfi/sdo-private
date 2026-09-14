@@ -19,8 +19,10 @@ from sdo.agent_runtime.lifecycle.agents import (
     CodexLifecycleBackend,
     DeployerAssessment,
     HealthJudgeArtifact,
+    HealthJudgeWorkspaceArtifact,
     LifecycleAgentBackend,
     LifecycleAgentError,
+    WorkspaceHealthJudgeBackend,
 )
 from sdo.operational_memory import ContainerSandboxRunner, SandboxResult, SandboxRunner
 
@@ -40,6 +42,16 @@ class TopologyResource:
     namespace: str
     source: str
     dependencies: tuple[str, ...]
+
+
+def check_detector_workspace(app_root: Path, *, validator: SandboxRunner | None = None) -> SandboxResult:
+    """Run the fixed isolated detector check used by authoring agents."""
+
+    selected = validator or ContainerSandboxRunner(
+        detector_ids=("health-objective",),
+        authoring_check=True,
+    )
+    return selected.run(app_root.resolve())
 
 
 def reuse_initial_lifecycle_if_valid(
@@ -199,17 +211,34 @@ def run_initial_lifecycle(
         round_passed = False
         for attempt_index in range(1, judge_corrections_per_round + 1):
             try:
-                artifact = selected_backend.run_health_judge(
-                    repository=root,
-                    application=application,
-                    health_objective=health_objective,
-                    deployer=deployer,
-                    active_resources=active_resources,
-                    round_index=round_index,
-                    previous=previous,
-                    correction_feedback=judge_feedback,
-                )
-            except (LifecycleAgentError, ValueError) as exc:
+                workspace_author = getattr(selected_backend, "run_health_judge_workspace", None)
+                if callable(workspace_author):
+                    artifact, workspace_validation, candidate_digest = _run_workspace_authored_candidate(
+                        root,
+                        application=application,
+                        health_objective=health_objective,
+                        deployer=deployer,
+                        active_resources=active_resources,
+                        round_index=round_index,
+                        previous=previous,
+                        correction_feedback=judge_feedback,
+                        backend=cast("WorkspaceHealthJudgeBackend", selected_backend),
+                        validator=selected_validator,
+                    )
+                else:
+                    artifact = selected_backend.run_health_judge(
+                        repository=root,
+                        application=application,
+                        health_objective=health_objective,
+                        deployer=deployer,
+                        active_resources=active_resources,
+                        round_index=round_index,
+                        previous=previous,
+                        correction_feedback=judge_feedback,
+                    )
+                    workspace_validation = None
+                    candidate_digest = None
+            except (LifecycleAgentError, LifecycleError, OSError, ValueError) as exc:
                 last_errors = [str(exc)]
                 logger.warning(
                     "health judge round %d attempt %d failed before validation: %s",
@@ -238,14 +267,16 @@ def run_initial_lifecycle(
                 errors.append(f"lifecycle session id {artifact.session_id!r} was reused instead of starting fresh")
             used_sessions.add(artifact.session_id)
             if not errors:
-                validation, candidate_digest = _validate_authored_candidate(
-                    root,
-                    application=application,
-                    health_objective=health_objective,
-                    deployer=deployer,
-                    artifact=artifact,
-                    validator=selected_validator,
-                )
+                validation = workspace_validation
+                if validation is None:
+                    validation, candidate_digest = _validate_authored_candidate(
+                        root,
+                        application=application,
+                        health_objective=health_objective,
+                        deployer=deployer,
+                        artifact=artifact,
+                        validator=selected_validator,
+                    )
                 if validation.returncode != 0:
                     details = validation.stderr.strip() or validation.stdout.strip() or "detector validation failed"
                     errors.append(details)
@@ -597,6 +628,72 @@ def _validate_authored_candidate(
             architecture_summary_markdown=deployer.architecture_summary_markdown,
         )
         return validator.run(candidate), _diagnostics_digest(candidate)
+
+
+def _run_workspace_authored_candidate(
+    root: Path,
+    *,
+    application: str,
+    health_objective: str,
+    deployer: DeployerAssessment,
+    active_resources: list[ActiveTopologyResourceDTO] | None,
+    round_index: int,
+    previous: HealthJudgeArtifact | None,
+    correction_feedback: str | None,
+    backend: WorkspaceHealthJudgeBackend,
+    validator: SandboxRunner,
+) -> tuple[HealthJudgeArtifact, SandboxResult, str]:
+    """Let a judge edit a disposable checkout, then validate it independently."""
+
+    with tempfile.TemporaryDirectory(prefix="sdo-lifecycle-authoring-") as temp_dir:
+        candidate = Path(temp_dir) / "application"
+        cloned = subprocess.run(
+            ["git", "clone", "--quiet", "--no-hardlinks", str(root), str(candidate)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if cloned.returncode != 0:
+            details = cloned.stderr.strip() or cloned.stdout.strip()
+            raise LifecycleError(f"create lifecycle authoring candidate failed: {details}")
+        ensure_operational_memory(
+            candidate,
+            application=application,
+            health_objective=health_objective,
+            health_judge_artifact=previous,
+            architecture_summary_markdown=deployer.architecture_summary_markdown,
+        )
+        baseline_commit = _git(candidate, "rev-parse", "HEAD")
+        metadata: HealthJudgeWorkspaceArtifact = backend.run_health_judge_workspace(
+            repository=candidate,
+            application=application,
+            health_objective=health_objective,
+            deployer=deployer,
+            active_resources=active_resources,
+            round_index=round_index,
+            previous=previous,
+            correction_feedback=correction_feedback,
+        )
+        allowed = {
+            ".sdo/diagnostics/detectors/health/objective/detector.go",
+            ".sdo/diagnostics/detectors/health/objective/detector_test.go",
+        }
+        changed = set(_git(candidate, "diff", "--name-only", baseline_commit).splitlines())
+        changed.update(_git(candidate, "ls-files", "--others", "--exclude-standard").splitlines())
+        unexpected = sorted(path for path in changed if path and path not in allowed)
+        if unexpected:
+            raise LifecycleError("health judge edited files outside its ownership: " + ", ".join(unexpected))
+        detector = candidate / ".sdo/diagnostics/detectors/health/objective/detector.go"
+        detector_test = candidate / ".sdo/diagnostics/detectors/health/objective/detector_test.go"
+        source = _canonicalize_health_registration(detector.read_text(encoding="utf-8"))
+        detector.write_text(source.rstrip() + "\n", encoding="utf-8")
+        artifact = HealthJudgeArtifact(
+            **metadata.model_dump(exclude={"session_id"}),
+            session_id=metadata.session_id,
+            detector_source=source,
+            detector_test_source=detector_test.read_text(encoding="utf-8"),
+        )
+        return artifact, validator.run(candidate), _diagnostics_digest(candidate)
 
 
 def _validator_identity(validator: SandboxRunner) -> str | None:

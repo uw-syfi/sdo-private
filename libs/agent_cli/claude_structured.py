@@ -11,7 +11,7 @@ from agentshim import ParsedTurn, ProviderUsage, get_provider
 
 from libs.agent_cli.sandbox import SandboxConfig, build_claude_sandbox_settings
 
-ClaudeSandbox = Literal["read-only", "danger-full-access"]
+ClaudeSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
@@ -95,7 +95,7 @@ def _execute(
     runner: CommandRunner,
     session_id: str | None = None,
 ) -> ClaudeStructuredResult:
-    if sandbox not in ("read-only", "danger-full-access"):
+    if sandbox not in ("read-only", "workspace-write", "danger-full-access"):
         raise ValueError(f"unsupported Claude sandbox {sandbox!r}")
     command = [
         executable,
@@ -113,21 +113,16 @@ def _execute(
         command.extend(["--model", model])
     if session_id:
         command.extend(["--resume", session_id])
-    if sandbox == "read-only":
+    if sandbox in ("read-only", "workspace-write"):
         settings = build_claude_sandbox_settings(
             SandboxConfig(
-                deny_write=[str(cwd.resolve())],
+                deny_write=[str(cwd.resolve())] if sandbox == "read-only" else [],
                 confine_native_reads_to=[str(cwd.resolve())],
             )
         )
-        command.extend(
-            [
-                "--settings",
-                json.dumps(settings),
-                "--disallowedTools",
-                "Edit,Write,NotebookEdit",
-            ]
-        )
+        command.extend(["--settings", json.dumps(settings)])
+        if sandbox == "read-only":
+            command.extend(["--disallowedTools", "Edit,Write,NotebookEdit"])
     completed = runner(
         command,
         input=prompt,

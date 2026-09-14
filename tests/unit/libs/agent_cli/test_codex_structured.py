@@ -76,6 +76,31 @@ def test_fresh_structured_execution_preserves_schema_session_and_options(tmp_pat
     assert result.usage.tokens.turns == 1
 
 
+def test_fresh_structured_execution_supports_workspace_write(tmp_path: Path) -> None:
+    captured: list[str] = []
+
+    def runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured.extend(command)
+        output_path = Path(command[command.index("--output-last-message") + 1])
+        output_path.write_text('{"ok":true}', encoding="utf-8")
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout='{"type":"thread.started","thread_id":"fresh-thread"}\n',
+            stderr="",
+        )
+
+    run_codex_structured(
+        "edit",
+        output_schema={"type": "object"},
+        cwd=tmp_path,
+        sandbox="workspace-write",
+        runner=runner,
+    )
+
+    assert captured[captured.index("--sandbox") + 1] == "workspace-write"
+
+
 def test_structured_resume_uses_existing_session_cwd_and_danger_full_access(tmp_path: Path) -> None:
     captured: dict[str, object] = {}
 

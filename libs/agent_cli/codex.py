@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from .sandbox import SandboxConfig
     from .trajectory import TrajectoryRecorderProtocol
 
-CodexSandbox = Literal["read-only", "danger-full-access"]
+CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
@@ -179,7 +179,7 @@ def _validate_execution_options(
         raise ValueError("reasoning_effort must not be empty")
     if timeout_seconds is not None and timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
-    if sandbox not in {"read-only", "danger-full-access"}:
+    if sandbox not in {"read-only", "workspace-write", "danger-full-access"}:
         raise ValueError(f"unsupported Codex sandbox mode: {sandbox!r}")
 
 

@@ -73,6 +73,22 @@ class HealthJudgeArtifact(HealthJudgeDraft):
     session_id: str = Field(min_length=1)
 
 
+class HealthJudgeWorkspaceDraft(BaseModel):
+    """Metadata handoff from a judge that authored source directly in a workspace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    round: int = Field(ge=1)
+    objective_digest: str = Field(min_length=64, max_length=64)
+    source_commit: str = Field(min_length=1)
+    covered_resources: list[TopologyResourceDTO]
+    failure_patterns: list[str] = Field(min_length=1)
+
+
+class HealthJudgeWorkspaceArtifact(HealthJudgeWorkspaceDraft):
+    session_id: str = Field(min_length=1)
+
+
 class LifecycleAgentBackend(Protocol):
     def run_deployer(
         self,
@@ -94,6 +110,21 @@ class LifecycleAgentBackend(Protocol):
         correction_feedback: str | None,
         active_resources: list[ActiveTopologyResourceDTO] | None = None,
     ) -> HealthJudgeArtifact: ...
+
+
+class WorkspaceHealthJudgeBackend(Protocol):
+    def run_health_judge_workspace(
+        self,
+        *,
+        repository: Path,
+        application: str,
+        health_objective: str,
+        deployer: DeployerAssessment,
+        round_index: int,
+        previous: HealthJudgeArtifact | None,
+        correction_feedback: str | None,
+        active_resources: list[ActiveTopologyResourceDTO] | None = None,
+    ) -> HealthJudgeWorkspaceArtifact: ...
 
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -285,12 +316,92 @@ checking for a required resource that is absent, and use each observed object's 
         draft, session_id = self._execute(repository, prompt, HealthJudgeDraft)
         return HealthJudgeArtifact(**draft.model_dump(), session_id=session_id)
 
+    def run_health_judge_workspace(
+        self,
+        *,
+        repository: Path,
+        application: str,
+        health_objective: str,
+        deployer: DeployerAssessment,
+        round_index: int,
+        previous: HealthJudgeArtifact | None,
+        correction_feedback: str | None,
+        active_resources: list[ActiveTopologyResourceDTO] | None = None,
+    ) -> HealthJudgeWorkspaceArtifact:
+        objective_digest = hashlib.sha256(health_objective.strip().encode()).hexdigest()
+        previous_payload = (
+            previous.model_dump_json(indent=2, exclude={"detector_source", "detector_test_source"})
+            if previous
+            else "null"
+        )
+        active_payload = (
+            json.dumps([resource.model_dump(mode="json") for resource in active_resources], indent=2)
+            if active_resources is not None
+            else "null"
+        )
+        feedback = correction_feedback or "No validator feedback is available for the first round."
+        prompt = f"""You are the independent SDO health judge for application {application!r}, authoring round
+{round_index} of bounded adversarial refinement. You have an isolated, writable copy of the application repository.
+
+Human-owned health objective:
+{health_objective}
+
+Authoritative objective SHA-256: {objective_digest}
+Published deployer assessment:
+{deployer.model_dump_json(indent=2)}
+Controller-observed active topology:
+{active_payload}
+Prior judge metadata (the current source files contain the prior implementation):
+{previous_payload}
+Validation feedback:
+{feedback}
+
+Edit these files directly:
+- .sdo/diagnostics/detectors/health/objective/detector.go
+- .sdo/diagnostics/detectors/health/objective/detector_test.go
+
+Inspect the application source and existing detector, implement deterministic objective-specific checks, and add
+matching plus near-miss tests. Use `sdo detector check` to compile and run the detector tests in the isolated
+no-network validator. Read its diagnostics, revise the files, and repeat until it exits successfully. Do not run Go
+source or tests by any other route. Do not edit the manifest or any application file. The controller will independently
+validate the resulting files after your session ends; your self-check is not acceptance evidence.
+
+{_DETECTOR_SDK_REFERENCE}
+
+The detector must remain package objective, export New() sdk.Detector, and copy the exact objective digest above into
+healthObjectiveDigest. Its Spec is controller-owned and already present in detector.go; preserve it. Never read
+environment variables, benchmark results, SREGym data, verdict files, hidden fault labels, or an external oracle.
+Inspect only this checkout; never use `..` or paths outside it.
+
+All named helper functions must be package-level. Derive required ConfigMaps from every observed Deployment pod
+template, including volume, projected-volume, envFrom, and env references, and compare them with the snapshot rather
+than relying only on hard-coded names. Use DetectionContext.Namespace() for absent runtime objects and each observed
+object's namespace for objects that exist; never embed "default" as a runtime namespace. When active topology is
+provided, cover the matching Deployment, Service, ConfigMap, and NetworkPolicy resources required by the objective,
+including low-level dependencies rather than only user-facing workloads. Do not invent resource objects absent from
+the deployer handoff.
+
+Return only metadata in the final structured response. Set round to {round_index}, source_commit to
+{deployer.source_commit!r}, copy the objective digest exactly, list objective-relevant failure patterns, and use only
+covered resources from the deployer handoff. Do not include source code in the response because the files are the
+authoritative draft.
+"""
+        draft, session_id = self._execute(
+            repository,
+            prompt,
+            HealthJudgeWorkspaceDraft,
+            sandbox="workspace-write",
+        )
+        return HealthJudgeWorkspaceArtifact(**draft.model_dump(), session_id=session_id)
+
     def _execute(
         self,
         repository: Path,
         prompt: str,
-        output_type: type[DeployerDraft] | type[HealthJudgeDraft],
-    ) -> tuple[DeployerDraft | HealthJudgeDraft, str]:
+        output_type: type[DeployerDraft] | type[HealthJudgeDraft] | type[HealthJudgeWorkspaceDraft],
+        *,
+        sandbox: str = "read-only",
+    ) -> tuple[DeployerDraft | HealthJudgeDraft | HealthJudgeWorkspaceDraft, str]:
         try:
             completed = run_codex_structured(
                 prompt,
@@ -300,7 +411,7 @@ checking for a required resource that is absent, and use each observed object's 
                 model=self.model,
                 reasoning_effort=self.reasoning_effort,
                 timeout_seconds=self.timeout_seconds,
-                sandbox="read-only",
+                sandbox=sandbox,  # type: ignore[arg-type]
                 runner=self.command_runner,
             )
         except subprocess.TimeoutExpired as exc:
@@ -348,8 +459,10 @@ class ClaudeLifecycleBackend(CodexLifecycleBackend):
         self,
         repository: Path,
         prompt: str,
-        output_type: type[DeployerDraft] | type[HealthJudgeDraft],
-    ) -> tuple[DeployerDraft | HealthJudgeDraft, str]:
+        output_type: type[DeployerDraft] | type[HealthJudgeDraft] | type[HealthJudgeWorkspaceDraft],
+        *,
+        sandbox: str = "read-only",
+    ) -> tuple[DeployerDraft | HealthJudgeDraft | HealthJudgeWorkspaceDraft, str]:
         try:
             completed = run_claude_structured(
                 prompt,
@@ -359,7 +472,7 @@ class ClaudeLifecycleBackend(CodexLifecycleBackend):
                 model=self.model,
                 effort=self.reasoning_effort,
                 timeout_seconds=self.timeout_seconds,
-                sandbox="read-only",
+                sandbox=sandbox,  # type: ignore[arg-type]
                 runner=self.command_runner or subprocess.run,
             )
         except subprocess.TimeoutExpired as exc:
