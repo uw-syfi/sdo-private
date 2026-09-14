@@ -139,6 +139,21 @@ def test_stage_results_error_accepts_completed_semantic_result(tmp_path: Path) -
     assert _stage_results_error(tmp_path) is None
 
 
+def test_stage_results_error_accepts_current_parallel_runner_layout_with_strict_receipt(tmp_path: Path) -> None:
+    run = tmp_path / "runs" / "000000_problem" / "worker_0" / "results" / "sdo_codex" / "problem" / "run_1"
+    run.mkdir(parents=True)
+    (run / "problem_results.csv").write_text(
+        '"Diagnosis.success","Mitigation.success","problem_id"\nTrue,True,"problem"\n',
+        encoding="utf-8",
+    )
+    (run / "sdo_production_receipt_strict.json").write_text(
+        json.dumps(_valid_strict_receipt()) + "\n",
+        encoding="utf-8",
+    )
+
+    assert _stage_results_error(tmp_path, require_strict_receipt=True) is None
+
+
 @pytest.mark.parametrize(
     ("header", "values", "expected"),
     [
