@@ -119,6 +119,7 @@ def _execute(
                 deny_write=[str(cwd.resolve())] if sandbox == "read-only" else [],
                 confine_native_reads_to=[str(cwd.resolve())],
                 denied_bash_executables=["go"] if sandbox == "workspace-write" else [],
+                excluded_commands=["sdo detector check"] if sandbox == "workspace-write" else [],
             )
         )
         command.extend(["--settings", json.dumps(settings)])

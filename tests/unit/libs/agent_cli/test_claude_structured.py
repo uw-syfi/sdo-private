@@ -93,6 +93,7 @@ def test_workspace_write_confines_reads_without_disabling_edit_tools(tmp_path: P
     settings = json.loads(command[command.index("--settings") + 1])
     assert settings["sandbox"]["enabled"] is True
     assert settings["sandbox"]["allowUnsandboxedCommands"] is False
+    assert settings["sandbox"]["excludedCommands"] == ["sdo detector check"]
     assert "denyWrite" not in settings["sandbox"].get("filesystem", {})
     assert "--disallowedTools" not in command
     hooks = settings["hooks"]["PreToolUse"]
