@@ -17,6 +17,7 @@ from benchmarks.sregym.adapter.driver import (
     _in_cluster_api_base,
     _receipt_directory,
     _relay_target_api_base,
+    _remove_sdo_jobs_before_benchmark_grading,
     _submit_recorded_result,
     persist_lifecycle_seed,
     persist_production_receipt,
@@ -294,6 +295,36 @@ def test_adapter_persists_standalone_strict_receipt_beside_run_artifacts(tmp_pat
     assert __import__("json").loads(path.read_text(encoding="utf-8")) == updated
     assert list(tmp_path.glob("sdo_production_receipt_*.json")) == [path]
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_adapter_removes_sdo_jobs_before_benchmark_grades_application_pods() -> None:
+    calls: list[list[str]] = []
+
+    def fake_runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "deleted", "")
+
+    _remove_sdo_jobs_before_benchmark_grading(
+        {
+            "controller_workload": "batch/v1 Job/sdo-controller-run",
+            "responder_jobs": ["sdo-incident-deadbeef"],
+        },
+        "demo",
+        command_runner=fake_runner,
+    )
+
+    assert calls == [
+        [
+            "kubectl",
+            "--namespace",
+            "demo",
+            "delete",
+            "job/sdo-controller-run",
+            "job/sdo-incident-deadbeef",
+            "--ignore-not-found=true",
+            "--wait=true",
+        ]
+    ]
 
 
 def test_adapter_persists_validated_lifecycle_seed_outside_resettable_stage(tmp_path: Path) -> None:

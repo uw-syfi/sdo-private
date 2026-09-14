@@ -46,7 +46,8 @@ def test_submission_bridge_records_diagnosis_through_autonomous_endpoint() -> No
     ]
 
 
-def test_submission_bridge_records_mitigation_then_completes_autonomous_run() -> None:
+@pytest.mark.parametrize("terminal_stage", ["done", "awaiting_cleanup"])
+def test_submission_bridge_records_mitigation_then_completes_autonomous_run(terminal_stage: str) -> None:
     requests = []
 
     def opener(request, timeout: int):
@@ -57,7 +58,7 @@ def test_submission_bridge_records_mitigation_then_completes_autonomous_run() ->
             return Response({"status": "200", "message": "Submission received"})
         assert request.full_url.endswith("/status")
         assert request.data is None
-        return Response({"stage": "done"})
+        return Response({"stage": terminal_stage})
 
     result = submit_solution(
         "policy deleted",
@@ -68,7 +69,7 @@ def test_submission_bridge_records_mitigation_then_completes_autonomous_run() ->
 
     assert result == {
         "mitigation": {"status": "200", "message": "Submission received"},
-        "done": {"status": "done"},
+        "done": {"status": terminal_stage},
     }
     assert [request.full_url for request in requests] == [
         "http://conductor:8123/submit",

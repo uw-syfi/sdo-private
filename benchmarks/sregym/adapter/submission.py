@@ -16,6 +16,8 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any, Literal
 
+from benchmarks.sregym.protocol.schema import TERMINAL_STAGES
+
 
 class SubmissionBridgeError(RuntimeError):
     """Raised when the benchmark is not ready to receive a submission."""
@@ -73,8 +75,8 @@ def submit_solution(
     if phase == "diagnosis":
         _wait_for_stage(base, {"mitigation", "done"}, opener=opener)
         return result
-    _wait_for_stage(base, {"done"}, opener=opener)
-    done = {"status": "done"}
+    terminal_stage = _wait_for_stage(base, set(TERMINAL_STAGES), opener=opener)
+    done = {"status": terminal_stage}
     return {"mitigation": result, "done": done}
 
 

@@ -81,6 +81,37 @@ def persist_production_receipt(receipt: dict[str, Any], receipt_dir: Path) -> Pa
     return path
 
 
+def _remove_sdo_jobs_before_benchmark_grading(
+    receipt: dict[str, Any],
+    namespace: str,
+    *,
+    command_runner: CommandRunner = subprocess.run,
+) -> None:
+    """Keep completed SDO infrastructure out of application-pod grading."""
+
+    responder_jobs = receipt.get("responder_jobs", [])
+    names = ["sdo-controller-run"]
+    if isinstance(responder_jobs, list):
+        names.extend(name for name in responder_jobs if isinstance(name, str) and name.startswith("sdo-"))
+    completed = command_runner(
+        [
+            "kubectl",
+            "--namespace",
+            namespace,
+            "delete",
+            *(f"job/{name}" for name in dict.fromkeys(names)),
+            "--ignore-not-found=true",
+            "--wait=true",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        details = completed.stderr.strip() or completed.stdout.strip() or "kubectl delete failed"
+        raise RuntimeError(f"remove SDO jobs before benchmark grading failed: {details}")
+
+
 def _submit_recorded_result(
     receipt: dict[str, Any],
     api_base: str,
@@ -368,6 +399,7 @@ def main(argv: list[str] | None = None) -> int:
     # Persist the SDO-authoritative recovery before optional benchmark transport
     # so a scoring failure cannot erase evidence of a completed incident.
     persist_production_receipt(receipt, receipt_dir)
+    _remove_sdo_jobs_before_benchmark_grading(receipt, str(receipt["namespace"]))
     submission_started = time.monotonic()
     _submit_recorded_result(receipt, api_base)
     receipt.setdefault("driver_phase_timings_seconds", {})["benchmark_submission"] = (
