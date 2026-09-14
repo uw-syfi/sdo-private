@@ -353,7 +353,13 @@ def test_sregym_adapter_passes_configured_model_to_initial_lifecycle(
 
     def fake_runtime(config: RuntimeConfig) -> dict[str, bool]:
         runtime_configs.append(config)
-        return {"completed": True}
+        return {
+            "completed": True,
+            "phase_timings_seconds": {
+                "operational_recovery": 12.5,
+                "post_recovery_learning_and_receipt": 4.0,
+            },
+        }
 
     monkeypatch.setattr(driver, "run_production_runtime", fake_runtime)
 
@@ -368,6 +374,14 @@ def test_sregym_adapter_passes_configured_model_to_initial_lifecycle(
     }
     assert captured == ["gpt-5.5"]
     assert runtime_configs[0].repair_policy == "recorded-actions"
+    assert result["incident_resolution_seconds"] == 12.5
+    assert result["incident_resolution_scope"] == "detected_to_independently_verified_health"
+    assert result["excluded_from_incident_resolution_seconds"] == {
+        "pre_incident_inventory_and_lifecycle": pytest.approx(
+            result["driver_phase_timings_seconds"]["inventory_and_lifecycle"]
+        ),
+        "post_recovery_learning_and_receipt": 4.0,
+    }
 
 
 def test_sregym_adapter_uses_trusted_worker_kubeconfig_for_controller_install(

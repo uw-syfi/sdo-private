@@ -25,6 +25,7 @@ Expected sections:
 - `active_topology` (when supplied by the deployment adapter): sorted kind/name references for the deployed source variant and required non-optional ConfigMap dependencies.
 - `health_judge`: the accepted final detector artifact.
 - `health_judge_rounds`: ordered structured attempts with distinct session IDs, round numbers, objective digest, covered resources, source, and tests.
+- `validation` (when the validator exposes an immutable identity): the diagnostics-tree digest, immutable validator identity, and `sdo.lifecycle-validation/v1` attestation schema. An exact match permits validation reuse without recompilation; a missing or mismatched field requires fresh isolated validation.
 
 Correlate the deployer source commit with Git and `arch.md`. Correlate the objective digest with the exact text in `goal.md`. When `active_topology` is present, verify that `covered_resources` contains no inactive source variants. A reused lifecycle is credible only when current source topology, active topology, and detector validation still match.
 
@@ -75,7 +76,7 @@ The current receipt schema is `sdo.production-receipt/v1`. It summarizes durable
 - outcome, reflection, and validator-evidence commits;
 - responder usage plus phase timings that separate operational recovery from post-recovery learning and receipt work;
 - compact memory-reuse evidence: candidate count, match reasons, applied-playbook count, and warm-path status;
-- driver timings for conductor readiness, inventory/lifecycle work, production runtime, and benchmark submission, plus whether lifecycle memory was reused;
+- driver timings for conductor readiness, inventory/lifecycle work, production runtime, and benchmark submission, plus whether lifecycle memory was reused; `incident_resolution_seconds` is strictly detection through independently verified health, while the receipt lists pre-incident lifecycle and post-recovery learning as excluded time;
 - whether executable detector validation ran; unchanged diagnostics may skip the Kubernetes validator and carry `validator_skipped_reason=unchanged-diagnostics` with no fresh canaries;
 - same-session reflection and independent verification;
 - final detector clearing and network-policy canaries;

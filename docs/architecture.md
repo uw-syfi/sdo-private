@@ -83,7 +83,7 @@ The application repository is the shared durable memory. Five artifact classes l
 | `diagnostics/` | Health judge and responder | Health and incident detector source, tests, module, and manifest |
 | `outcomes.jsonl` | Controller | Append-only authoritative incident outcomes and evidence |
 
-`schema-version` and `lifecycle-provenance.yaml` are validation metadata. They do not change the five ownership classes.
+`schema-version` and `lifecycle-provenance.yaml` are validation metadata. They do not change the five ownership classes. Lifecycle provenance may attest an exact diagnostics-tree digest against an immutable validator image identity; only that exact pair can reuse a prior successful compilation, while any detector or validator change forces isolated validation again.
 
 Incident responders never merge directly into the operational branch. The broker creates isolated worktrees, checks path ownership and append-only rules, runs repository and detector validation, and accepts only attributable commits. Two repair-evidence policies are supported. `commit` retains a proposal commit for every response, including an empty attribution commit. `recorded-actions` permits a live-only repair without a proposal commit when the responder returns a structured, successful action receipt; any repository changes are still validated and committed. In both modes the controller commits the authoritative outcome and reflection, and independently owned health detectors must verify recovery. The source deployer separately authors attributable deployment commits during the initial lifecycle. Health detectors remain judge-owned; responders may change responder-owned playbooks and incident detectors after closure.
 

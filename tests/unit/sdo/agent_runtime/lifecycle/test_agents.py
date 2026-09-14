@@ -155,6 +155,15 @@ class PassingValidator:
         return SandboxResult(returncode=0, stdout="compiled")
 
 
+class IdentifiedPassingValidator(PassingValidator):
+    def __init__(self, identity: str = "validator-image@sha256:trusted") -> None:
+        super().__init__()
+        self.identity = identity
+
+    def validation_identity(self) -> str:
+        return self.identity
+
+
 def test_initial_lifecycle_uses_fresh_structured_agents_and_three_bounded_judge_rounds(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     backend = RecordingBackend()
@@ -300,6 +309,63 @@ def test_existing_model_backed_lifecycle_is_reused_only_while_source_topology_ma
         health_objective=objective,
         validator=PassingValidator(),
     )
+
+
+def test_lifecycle_reuse_skips_identical_independent_validation_with_attestation(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    objective = "Deployment example and Service example must remain available."
+    validator = IdentifiedPassingValidator()
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective=objective,
+        backend=RecordingBackend(),
+        validator=validator,
+        judge_rounds=3,
+    )
+    assert len(validator.runs) == 3
+
+    reuse_validator = IdentifiedPassingValidator()
+    assert reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=reuse_validator,
+    )
+    assert reuse_validator.runs == []
+
+
+def test_lifecycle_attestation_is_invalidated_by_validator_or_diagnostics_change(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    objective = "Deployment example and Service example must remain available."
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective=objective,
+        backend=RecordingBackend(),
+        validator=IdentifiedPassingValidator(),
+        judge_rounds=3,
+    )
+
+    changed_validator = IdentifiedPassingValidator("validator-image@sha256:new")
+    assert reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=changed_validator,
+    )
+    assert len(changed_validator.runs) == 1
+
+    detector = repository / ".sdo/diagnostics/detectors/health/objective/detector.go"
+    detector.write_text(detector.read_text(encoding="utf-8") + "\n// changed\n", encoding="utf-8")
+    changed_detector_validator = IdentifiedPassingValidator()
+    assert reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=changed_detector_validator,
+    )
+    assert len(changed_detector_validator.runs) == 1
 
 
 def test_lifecycle_reuse_requires_the_same_active_topology(tmp_path: Path) -> None:

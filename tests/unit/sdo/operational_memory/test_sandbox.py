@@ -125,7 +125,10 @@ def test_container_sandbox_kills_process_group_and_removes_named_container_on_ti
     container_name = command[command.index("--name") + 1]
     assert launched["kwargs"]["start_new_session"] is True
     assert killed == [(4321, signal.SIGKILL)]
-    assert cleanup_commands == [["docker", "rm", "--force", container_name]]
+    assert cleanup_commands == [
+        ["docker", "image", "inspect", "--format={{.Id}}", "sdo-detector-validator:v0.1.0"],
+        ["docker", "rm", "--force", container_name],
+    ]
     assert result.returncode == 124
     assert result.stdout == "partial stdout"
     assert result.stderr == "partial stderr"
@@ -180,7 +183,10 @@ def test_container_sandbox_cleans_named_container_when_worker_receives_sigterm(
 
     container_name = launched_command[launched_command.index("--name") + 1]
     assert captured.value.code == 128 + signal.SIGTERM
-    assert cleanup_commands == [["docker", "rm", "--force", container_name]]
+    assert cleanup_commands == [
+        ["docker", "image", "inspect", "--format={{.Id}}", "sdo-detector-validator:v0.1.0"],
+        ["docker", "rm", "--force", container_name],
+    ]
 
 
 def test_container_sandbox_default_timeout_allows_cold_offline_go_build(tmp_path: Path) -> None:

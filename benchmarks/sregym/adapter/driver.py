@@ -338,6 +338,19 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         "production_runtime": runtime_ready - lifecycle_ready,
         "driver_total_before_submission": runtime_ready - started,
     }
+    runtime_timings = receipt.get("phase_timings_seconds")
+    if isinstance(runtime_timings, dict):
+        operational_recovery = runtime_timings.get("operational_recovery")
+        post_recovery = runtime_timings.get("post_recovery_learning_and_receipt")
+        if isinstance(operational_recovery, (int, float)):
+            receipt["incident_resolution_seconds"] = float(operational_recovery)
+            receipt["incident_resolution_scope"] = "detected_to_independently_verified_health"
+            excluded: dict[str, float] = {
+                "pre_incident_inventory_and_lifecycle": lifecycle_ready - conductor_ready,
+            }
+            if isinstance(post_recovery, (int, float)):
+                excluded["post_recovery_learning_and_receipt"] = float(post_recovery)
+            receipt["excluded_from_incident_resolution_seconds"] = excluded
     return receipt
 
 

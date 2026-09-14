@@ -26,6 +26,8 @@ from sdo.operational_memory import ContainerSandboxRunner, SandboxResult, Sandbo
 
 logger = logging.getLogger(__name__)
 
+_VALIDATION_ATTESTATION_SCHEMA = "sdo.lifecycle-validation/v1"
+
 
 class LifecycleError(RuntimeError):
     """Raised when deployment-to-controller operational memory cannot be initialized."""
@@ -100,6 +102,16 @@ def reuse_initial_lifecycle_if_valid(
         ):
             return False
         selected_validator = validator or ContainerSandboxRunner()
+        validation_identity = _validator_identity(selected_validator)
+        validation = provenance.get("validation")
+        if (
+            validation_identity is not None
+            and isinstance(validation, dict)
+            and validation.get("schema_version") == _VALIDATION_ATTESTATION_SCHEMA
+            and validation.get("validator_identity") == validation_identity
+            and validation.get("diagnostics_digest") == _diagnostics_digest(root)
+        ):
+            return True
         return selected_validator.run(root).returncode == 0
     except (LifecycleError, OSError, TypeError, ValueError, yaml.YAMLError):
         return False
@@ -170,6 +182,7 @@ def run_initial_lifecycle(
     previous: HealthJudgeArtifact | None = None
     used_sessions = {deployer.session_id}
     final_artifact: HealthJudgeArtifact | None = None
+    final_validation_digest: str | None = None
     last_errors: list[str] = []
     for round_index in range(1, judge_rounds + 1):
         round_passed = False
@@ -214,7 +227,7 @@ def run_initial_lifecycle(
                 errors.append(f"lifecycle session id {artifact.session_id!r} was reused instead of starting fresh")
             used_sessions.add(artifact.session_id)
             if not errors:
-                validation = _validate_authored_candidate(
+                validation, candidate_digest = _validate_authored_candidate(
                     root,
                     application=application,
                     health_objective=health_objective,
@@ -239,6 +252,7 @@ def run_initial_lifecycle(
                 )
                 continue
             final_artifact = artifact
+            final_validation_digest = candidate_digest
             round_passed = True
             judge_feedback = (
                 "The prior artifact passed compilation and tests. Adversarially identify another objective-specific "
@@ -258,6 +272,13 @@ def run_initial_lifecycle(
         "health_judge": final_artifact.model_dump(mode="json"),
         "health_judge_rounds": [artifact.model_dump(mode="json") for artifact in judge_attempts],
     }
+    validation_identity = _validator_identity(selected_validator)
+    if validation_identity is not None and final_validation_digest is not None:
+        provenance["validation"] = {
+            "schema_version": _VALIDATION_ATTESTATION_SCHEMA,
+            "diagnostics_digest": final_validation_digest,
+            "validator_identity": validation_identity,
+        }
     if active_resources is not None:
         provenance["active_topology"] = [
             resource.model_dump(mode="json")
@@ -545,7 +566,7 @@ def _validate_authored_candidate(
     deployer: DeployerAssessment,
     artifact: HealthJudgeArtifact,
     validator: SandboxRunner,
-) -> SandboxResult:
+) -> tuple[SandboxResult, str]:
     with tempfile.TemporaryDirectory(prefix="sdo-lifecycle-candidate-") as temp_dir:
         candidate = Path(temp_dir) / "application"
         cloned = subprocess.run(
@@ -564,7 +585,29 @@ def _validate_authored_candidate(
             health_judge_artifact=artifact,
             architecture_summary_markdown=deployer.architecture_summary_markdown,
         )
-        return validator.run(candidate)
+        return validator.run(candidate), _diagnostics_digest(candidate)
+
+
+def _validator_identity(validator: SandboxRunner) -> str | None:
+    identity_method = getattr(validator, "validation_identity", None)
+    if not callable(identity_method):
+        return None
+    identity = identity_method()
+    return identity if isinstance(identity, str) and identity.strip() else None
+
+
+def _diagnostics_digest(root: Path) -> str:
+    diagnostics = root / ".sdo" / "diagnostics"
+    digest = hashlib.sha256()
+    for path in sorted(diagnostics.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        relative = path.relative_to(diagnostics).as_posix()
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def ensure_operational_memory(

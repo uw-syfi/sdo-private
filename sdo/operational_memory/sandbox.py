@@ -82,6 +82,37 @@ class ContainerSandboxRunner:
         self.cpu_limit = cpu_limit
         self.memory_limit = memory_limit
         self.command_runner = command_runner
+        self._resolved_image_id: str | None = None
+
+    def validation_identity(self) -> str | None:
+        """Return the immutable validator identity used by ``run`` when available."""
+
+        image_id = self._resolved_image()
+        if image_id is None:
+            return None
+        return f"container-sandbox/v1:{image_id}:controller.builder.check_cli-test/v1"
+
+    def _resolved_image(self) -> str | None:
+        if self._resolved_image_id is not None:
+            return self._resolved_image_id
+        # Injected runners are generally test doubles.  More importantly, they
+        # cannot guarantee that an image-inspect result and the subsequent run
+        # refer to the same local runtime state, so do not attest them.
+        if self.command_runner is not None:
+            return None
+        completed = subprocess.run(
+            [self.runtime, "image", "inspect", "--format={{.Id}}", self.image],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env={"PATH": os.environ.get("PATH", "")},
+        )
+        image_id = completed.stdout.strip()
+        if completed.returncode != 0 or not image_id.startswith("sha256:"):
+            return None
+        self._resolved_image_id = image_id
+        return image_id
 
     def run(self, app_root: Path) -> SandboxResult:
         root = app_root.resolve()
@@ -111,7 +142,7 @@ class ContainerSandboxRunner:
             f"{root}:/workspace:ro",
             "--tmpfs",
             "/tmp:rw,exec,nosuid,nodev,size=3g",
-            self.image,
+            self._resolved_image() or self.image,
             "env",
             "-i",
             "PATH=/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
