@@ -95,4 +95,7 @@ def test_workspace_write_confines_reads_without_disabling_edit_tools(tmp_path: P
     assert settings["sandbox"]["allowUnsandboxedCommands"] is False
     assert "denyWrite" not in settings["sandbox"].get("filesystem", {})
     assert "--disallowedTools" not in command
-    assert "hooks" in settings
+    hooks = settings["hooks"]["PreToolUse"]
+    assert any(
+        entry["matcher"] == "Bash" and "deny_bash_executables.py" in entry["hooks"][0]["command"] for entry in hooks
+    )
