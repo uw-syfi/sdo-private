@@ -1,8 +1,8 @@
 """Narrow node-network relay for autonomous SREGym submissions.
 
 Kind pods cannot route directly to Docker Desktop's host gateway, while Kind
-nodes can.  This relay is the only host-networked component and exposes only
-the three autonomous submission endpoints needed by the responder.
+nodes can. This relay is the only host-networked component and exposes only
+the SREGym submission and status endpoints needed by the responder.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from urllib.parse import urlsplit, urlunsplit
 SUBMISSION_TIMEOUT_SECONDS = 300
 HEALTH_TIMEOUT_SECONDS = 5
 MAX_REQUEST_BYTES = 1024 * 1024
-ALLOWED_PATHS = frozenset({"/submit_diagnosis", "/submit_mitigation", "/submit_done"})
+ALLOWED_PATHS = frozenset({"/submit"})
 
 
 class RelayRequestError(ValueError):
@@ -144,6 +144,29 @@ def forward_request(
         )
 
 
+def forward_status(
+    *,
+    target_base: str,
+    opener: Opener = urllib.request.urlopen,
+) -> RelayResponse:
+    """Forward the single read-only status request used for stage polling."""
+
+    request = urllib.request.Request(f"{target_base.rstrip('/')}/status", method="GET")
+    try:
+        response = opener(request, timeout=HEALTH_TIMEOUT_SECONDS)
+    except urllib.error.HTTPError as exc:
+        response = exc
+    with response:
+        status = response.status
+        if status is None:
+            raise RelayRequestError("relay target response has no HTTP status")
+        return RelayResponse(
+            status=int(status),
+            body=response.read(),
+            content_type=str(response.headers.get("Content-Type", "application/json")),
+        )
+
+
 def _target_is_healthy(
     target_base: str,
     *,
@@ -162,17 +185,21 @@ def _handler(target_base: str) -> type[BaseHTTPRequestHandler]:
 
     class SubmissionRelayHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            if self.path != "/healthz":
+            if self.path not in {"/healthz", "/status"}:
                 self.send_error(404)
                 return
             try:
-                resolver.resolve()
+                selected_target = resolver.resolve()
             except RelayRequestError:
                 self.send_error(503, "SREGym target is unavailable")
                 return
-            body = b'{"status":"ok"}'
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            if self.path == "/healthz":
+                response = RelayResponse(200, b'{"status":"ok"}', "application/json")
+            else:
+                response = forward_status(target_base=selected_target)
+            body = response.body
+            self.send_response(response.status)
+            self.send_header("Content-Type", response.content_type)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
