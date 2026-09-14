@@ -606,12 +606,15 @@ def _validate_health_judge_artifact(
         }
     )
     if global_objective and referenced_config_maps:
-        derives_config_maps = (
-            "ConfigMaps()" in source
+        reads_config_maps = "ConfigMaps()" in source
+        uses_sdk_reference_helper = "sdk.ConfigMapReferencesForDeployment(" in source
+        traverses_pod_spec = (
+            reads_config_maps
             and re.search(r"\.Spec\s*\.\s*Template\s*\.\s*Spec", source) is not None
             and re.search(r"\.\s*Volumes\b", source) is not None
             and re.search(r"\.\s*ConfigMap\b", source) is not None
         )
+        derives_config_maps = reads_config_maps and (uses_sdk_reference_helper or traverses_pod_spec)
         if not derives_config_maps:
             rendered = ", ".join(f"ConfigMap/{name}" for name in referenced_config_maps)
             errors.append(

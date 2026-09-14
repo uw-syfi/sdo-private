@@ -1110,6 +1110,26 @@ def test_global_health_objective_requires_dynamic_missing_configmap_dependency_d
     assert any("derive missing ConfigMap dependencies from Deployment pod specs" in error for error in errors)
     assert any("ConfigMap/runtime-script" in error for error in errors)
 
+    helper_artifact = artifact.model_copy(
+        update={
+            "detector_source": artifact.detector_source
+            + "\n// uses sdk.ConfigMapReferencesForDeployment(deployment) with snapshot.ConfigMaps()\n"
+        }
+    )
+    helper_errors = _validate_health_judge_artifact(
+        helper_artifact,
+        deployer=deployer,
+        health_objective=(
+            "All source-backed Deployments remain available, all selected Services have ready endpoints, "
+            "and representative requests succeed."
+        ),
+        expected_round=1,
+    )
+
+    assert not any(
+        "derive missing ConfigMap dependencies from Deployment pod specs" in error for error in helper_errors
+    )
+
 
 @pytest.mark.live_codex
 @pytest.mark.skipif(
