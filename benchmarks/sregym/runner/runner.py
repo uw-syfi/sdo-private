@@ -556,6 +556,7 @@ def run_pipeline(
                     return 1
 
             stage_state.status = "completed"
+            stage_state.error = ""
             write_pipeline_state(state, pipeline_dir)
             prev_kb_dir = str(stage_exp_dir / "kb")
             print(f"\nStage {i} completed.\n")
