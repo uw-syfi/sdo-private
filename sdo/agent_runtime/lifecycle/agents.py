@@ -155,7 +155,7 @@ _DETECTOR_SDK_REFERENCE = """Trusted controller/sdk API reference (do not search
 """
 
 
-_ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9_.$~-])(/[A-Za-z0-9_./*?{}$@%+=:,~-]+)")
+_ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9_.$~*?{}-])(/[A-Za-z0-9_./*?{}$@%+=:,~-]+)")
 _PARENT_PATH = re.compile(r"(?:^|[\s'\"=;(])\.\.(?:/[^\s'\";|&)]*)?(?=$|[\s'\";|&)])")
 _WRITE_REDIRECT_ABSOLUTE_PATH = re.compile(r"(?:^|[ \t])(?:\d*>>?|&>)\s*['\"]?(/[A-Za-z0-9_./*?{}$@%+=:,~-]+)")
 _GIT_OBJECT_PATH = re.compile(r"\b[0-9a-fA-F]{7,64}:(/[A-Za-z0-9_./*?{}$@%+=,~-]+)")
@@ -365,6 +365,8 @@ matching plus near-miss tests. Use `sdo detector check` to compile and run the d
 no-network validator. Read its diagnostics, revise the files, and repeat until it exits successfully. Do not run Go
 source or tests by any other route. Do not edit the manifest or any application file. The controller will independently
 validate the resulting files after your session ends; your self-check is not acceptance evidence.
+The deployer assessment above is trusted and complete. Do not rediscover topology with repository-wide `find` or
+`grep`; inspect the current detector files first and open only source manifests named in that assessment when needed.
 
 {_DETECTOR_SDK_REFERENCE}
 
@@ -383,8 +385,9 @@ the deployer handoff.
 
 Return only metadata in the final structured response. Set round to {round_index}, source_commit to
 {deployer.source_commit!r}, copy the objective digest exactly, list objective-relevant failure patterns, and use only
-covered resources from the deployer handoff. Do not include source code in the response because the files are the
-authoritative draft.
+covered resources from the deployer handoff. For a global all-Deployments/all-Services objective, return an empty
+covered_resources list: the controller deterministically fills it from trusted topology, avoiding a large duplicated
+handoff. Do not include source code in the response because the files are the authoritative draft.
 """
         draft, session_id = self._execute(
             repository,

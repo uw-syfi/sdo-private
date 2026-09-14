@@ -253,6 +253,7 @@ def run_initial_lifecycle(
             artifact = _canonicalize_active_coverage(
                 artifact,
                 deployer=deployer,
+                health_objective=health_objective,
                 active_resources=active_resources,
             )
             judge_attempts.append(artifact)
@@ -584,18 +585,21 @@ def _canonicalize_active_coverage(
     artifact: HealthJudgeArtifact,
     *,
     deployer: DeployerAssessment,
+    health_objective: str,
     active_resources: list[ActiveTopologyResourceDTO] | None,
 ) -> HealthJudgeArtifact:
     """Make deployed-resource provenance a controller fact, not model output."""
 
-    if active_resources is None:
+    objective_lower = health_objective.lower()
+    global_objective = "all source-backed deployments" in objective_lower or "all selected services" in objective_lower
+    if active_resources is None and not global_objective:
         return artifact
-    active_keys = _active_resource_keys(active_resources)
+    active_keys = _active_resource_keys(active_resources) if active_resources is not None else None
     covered_resources = [
         resource
         for resource in deployer.resources
         if resource.kind in {"ConfigMap", "Deployment", "NetworkPolicy", "Service"}
-        and (resource.kind, resource.name) in active_keys
+        and (active_keys is None or (resource.kind, resource.name) in active_keys)
     ]
     return artifact.model_copy(update={"covered_resources": covered_resources})
 

@@ -336,6 +336,41 @@ def test_lifecycle_canonicalizes_model_coverage_from_active_topology(tmp_path: P
     ]
 
 
+def test_lifecycle_canonicalizes_global_objective_coverage_without_active_topology(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+
+    class OmittedCoverageBackend(RecordingBackend):
+        def run_health_judge(self, **kwargs: object) -> HealthJudgeArtifact:
+            artifact = super().run_health_judge(**kwargs)  # type: ignore[arg-type]
+            objective = str(kwargs["health_objective"])
+            digest = hashlib.sha256(objective.encode()).hexdigest()
+            return artifact.model_copy(
+                update={
+                    "covered_resources": [],
+                    "objective_digest": digest,
+                    "detector_source": artifact.detector_source.replace(artifact.objective_digest, digest),
+                }
+            )
+
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective=(
+            "All source-backed Deployments remain available, all selected Services have ready endpoints, "
+            "and representative requests succeed."
+        ),
+        backend=OmittedCoverageBackend(),
+        validator=PassingValidator(),
+        judge_rounds=1,
+    )
+
+    provenance = __import__("yaml").safe_load((repository / ".sdo/lifecycle-provenance.yaml").read_text())
+    assert [(resource["kind"], resource["name"]) for resource in provenance["health_judge"]["covered_resources"]] == [
+        ("Deployment", "example"),
+        ("Service", "example"),
+    ]
+
+
 def test_existing_model_backed_lifecycle_is_reused_only_while_source_topology_matches(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     objective = "Deployment example and Service example must remain available."
@@ -818,6 +853,7 @@ def test_codex_backend_rejects_sessions_that_read_outside_application_repository
         "cat > /tmp/objective.txt << 'EOF'\nobjective\nEOF",
         "cat > \"$TMPDIR/covered_resources.json\" << 'EOF'\n[]\nEOF",
         "git show ed44ea9:/.sdo/diagnostics/detectors/health/objective/detector_test.go | head -50",
+        'find . -name "*deployment*.yaml" -path "*/kubernetes/*"',
     ],
 )
 def test_repository_audit_allows_safe_non_external_paths(tmp_path: Path, command: str) -> None:
