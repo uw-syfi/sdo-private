@@ -554,7 +554,7 @@ def test_semantically_incomplete_reflection_is_rolled_back_and_retried(tmp_path:
     assert backend.attempts == 2
 
 
-def test_bounded_invalid_reflection_remains_failed_instead_of_claiming_noop(tmp_path: Path) -> None:
+def test_bounded_invalid_reflection_records_explicit_no_change_and_allows_closure(tmp_path: Path) -> None:
     target = tmp_path / "target"
     worktrees = tmp_path / "worktrees"
     target.mkdir()
@@ -574,13 +574,17 @@ def test_bounded_invalid_reflection_remains_failed_instead_of_claiming_noop(tmp_
     with pytest.raises(BrokerServiceError, match="sharp fault-specific detector"):
         service.process_closure(closure)
 
-    with pytest.raises(BrokerServiceError, match="exhausted its validation attempts"):
-        service.process_closure(closure)
+    receipt = service.process_closure(closure)
     state = service.completion_state("inc-20260709-0001")
-    assert state.reflection_commit is None
+    assert receipt.reflection_commit is not None
+    assert state.reflection_commit == receipt.reflection_commit
+    assert state.reflection_completed is True
     assert state.reflection_attempts == 1
     assert state.reflection_validation_error
-    assert state.reflection_proposed_changes
+    assert state.reflection_learning_decision == "no_change"
+    assert state.reflection_no_change_reason
+    assert "failed independent validation" in state.reflection_no_change_reason
+    assert state.reflection_proposed_changes == []
     assert backend.attempts == 1
 
 

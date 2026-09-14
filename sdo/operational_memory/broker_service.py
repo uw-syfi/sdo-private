@@ -467,10 +467,18 @@ class BrokerService:
             ledger.reflection_started = False
             self._save(ledger)
         if ledger.reflection_attempts >= self.max_reflection_attempts:
-            raise BrokerServiceError(
-                "reflection exhausted its validation attempts without producing valid operational memory: "
-                f"{ledger.reflection_validation_error or 'unknown validation failure'}"
+            failure = ledger.reflection_validation_error or "unknown validation failure"
+            if changed_paths:
+                self._rollback_incomplete_reflection(worktree)
+            ledger.reflection_backend_completed = True
+            ledger.reflection_summary = "No operational-memory update was accepted after bounded validation."
+            ledger.reflection_learning_decision = "no_change"
+            ledger.reflection_no_change_reason = (
+                "Learning was attempted, but every proposed update failed independent validation: " + failure
             )
+            ledger.reflection_proposed_changes = []
+            self._save(ledger)
+            return self._commit_noop_reflection(ledger, worktree)
         if not ledger.reflection_backend_completed:
             ledger.reflection_started = True
             self._save(ledger)
