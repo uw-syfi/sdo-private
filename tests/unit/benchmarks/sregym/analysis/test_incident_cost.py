@@ -12,9 +12,11 @@ from benchmarks.sregym.analysis.incident_cost import (
     IncidentCostError,
     TokenUsage,
     build_report,
+    first_mutation_at,
     load_codex_runs,
     load_sdo_pipeline,
     main,
+    read_verdict,
 )
 
 PROBLEM_A = "missing_configmap_hotel_reservation"
@@ -274,3 +276,147 @@ def test_reflection_turn_seconds_count_only_the_stage_incident_in_a_shared_usage
     (only,) = load_sdo_pipeline(root)
 
     assert only.reflection_turn_seconds == 42.0
+
+
+def _timing_csv(results: Path, **row: object) -> None:
+    results.mkdir(parents=True, exist_ok=True)
+    with (results / "codex_ALL_results.csv").open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(row))
+        writer.writeheader()
+        writer.writerow(row)
+
+
+def test_judge_excluded_time_subtracts_the_diagnosis_grading_wait(tmp_path: Path) -> None:
+    # Diagnosis POSTed 20 s after injection; the conductor finished grading it and opened the
+    # mitigation stage at TTL = 37 s; the mitigation POST came at 96 s.
+    _timing_csv(
+        tmp_path,
+        **{
+            "Diagnosis.success": "True",
+            "Mitigation.success": "True",
+            "fault_injected_at": 1000.0,
+            "diagnosis_submitted_at": 1020.0,
+            "TTL": 37.0,
+            "mitigation_submitted_at": 1096.0,
+        },
+    )
+
+    verdict = read_verdict(tmp_path)
+
+    assert verdict is not None
+    assert verdict.primary_seconds == pytest.approx(96.0)
+    assert verdict.grading_wait_seconds == pytest.approx(17.0)
+    assert verdict.judge_excluded_seconds == pytest.approx(79.0)
+
+
+def test_judge_excluded_time_is_unknown_without_stage_timestamps(tmp_path: Path) -> None:
+    _timing_csv(
+        tmp_path,
+        **{
+            "Diagnosis.success": "True",
+            "Mitigation.success": "True",
+            "fault_injected_at": 1000.0,
+            "mitigation_submitted_at": 1096.0,
+        },
+    )
+
+    verdict = read_verdict(tmp_path)
+
+    assert verdict is not None
+    assert verdict.grading_wait_seconds is None
+    assert verdict.judge_excluded_seconds is None
+
+
+def _tool_rollout(path: Path, calls: list[tuple[str, dict[str, object]]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "".join(
+            json.dumps({"timestamp": ts, "type": "response_item", "payload": payload}) + "\n" for ts, payload in calls
+        ),
+        encoding="utf-8",
+    )
+
+
+def _code_mode(cmd: str) -> dict[str, object]:
+    return {
+        "type": "custom_tool_call",
+        "name": "exec",
+        "input": f"const r = await tools.exec_command({{cmd:{json.dumps(cmd)}}});",
+    }
+
+
+def test_first_mutation_is_the_first_state_changing_command_after_injection(tmp_path: Path) -> None:
+    rollout = tmp_path / "rollout-a.jsonl"
+    _tool_rollout(
+        rollout,
+        [
+            (
+                "2026-09-27T12:00:05.000Z",
+                _code_mode("kubectl -n hotel-reservation delete pod stale"),
+            ),  # before injection
+            ("2026-09-27T12:00:20.000Z", _code_mode("kubectl -n hotel-reservation get cm && kubectl logs deploy/geo")),
+            (
+                "2026-09-27T12:00:30.000Z",
+                _code_mode("bash -n .sdo/playbooks/x/scripts/repair.sh; cat scripts/repair.sh"),
+            ),
+            ("2026-09-27T12:00:40.000Z", _code_mode("python3 -m benchmarks.sregym.adapter.submission diagnosis 'x'")),
+            ("2026-09-27T12:00:51.500Z", _code_mode("kubectl create configmap mongo-geo-script -n hotel-reservation")),
+            ("2026-09-27T12:01:10.000Z", _code_mode("kubectl -n hotel-reservation rollout restart deploy/geo")),
+        ],
+    )
+    injected = 1790510410.0  # 2026-09-27T12:00:10Z
+
+    assert first_mutation_at([rollout], after=injected) == pytest.approx(injected + 41.5)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        {
+            "type": "function_call",
+            "name": "exec_command",
+            "arguments": json.dumps({"cmd": "bash .sdo/playbooks/m/scripts/repair.sh hotel-reservation geo"}),
+        },
+        _code_mode("cd /app && .sdo/playbooks/m/scripts/repair.sh hotel-reservation"),
+        _code_mode("kubectl --namespace=hotel-reservation patch deployment geo -p '{}'"),
+        _code_mode("cat <<'EOF' | kubectl apply -f -\nkind: ConfigMap\nEOF"),
+    ],
+)
+def test_first_mutation_recognizes_playbook_repairs_and_kubectl_writes(tmp_path: Path, call: dict[str, object]) -> None:
+    rollout = tmp_path / "rollout-b.jsonl"
+    _tool_rollout(rollout, [("2026-09-27T12:00:30.000Z", call)])
+
+    assert first_mutation_at([rollout], after=1790510410.0) == pytest.approx(1790510430.0)
+
+
+def test_codex_runs_report_when_the_mitigation_was_applied(tmp_path: Path) -> None:
+    results = tmp_path / "exp" / "runs" / f"000000_{PROBLEM_A}" / "worker_0" / "results"
+    _timing_csv(
+        results,
+        **{
+            "Diagnosis.success": "True",
+            "Mitigation.success": "True",
+            "fault_injected_at": 1790510410.0,
+            "diagnosis_submitted_at": 1790510440.0,
+            "TTL": 45.0,
+            "mitigation_submitted_at": 1790510500.0,
+        },
+    )
+    _tool_rollout(
+        results / "codex" / PROBLEM_A / "run_1" / "sessions" / "rollout-c.jsonl",
+        [("2026-09-27T12:01:00.000Z", _code_mode("kubectl apply -f cm.yaml"))],
+    )
+
+    (run,) = load_codex_runs(tmp_path / "exp")
+
+    assert run.verdict.mitigation_applied_seconds == pytest.approx(50.0)
+    assert run.verdict.judge_excluded_seconds == pytest.approx(90.0 - 15.0)
+
+
+def test_json_report_carries_judge_excluded_stage_time(pipeline: Path, tmp_path: Path) -> None:
+    out = tmp_path / "report.json"
+    main([str(pipeline), "--json", str(out)])
+
+    for stage in json.loads(out.read_text(encoding="utf-8"))["stages"]:
+        assert "judge_excluded_seconds" in stage["verdict"]
+        assert "mitigation_applied_seconds" in stage["verdict"]
