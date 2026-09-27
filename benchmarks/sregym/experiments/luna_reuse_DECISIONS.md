@@ -1027,3 +1027,32 @@ All times are in seconds. Summary, as mean [min–max] with the standard deviati
   - The reflection session mode can be chosen for cost, since speed does not distinguish them. The Step 3 token tables decide it.
   - The judge-free headline matters: raw times including the judge (34.5 vs 102.5 s) inflate SDO's warm time by about 16 s of grading wait.
 - **Next action:** pick the reflection mode on tokens (3.3). Extend the warm vs cold comparison to other fault types, which the sequence rerun does.
+
+### 3.2 Variants and sequence: SDO vs Codex (single runs)
+
+| Problem | SDO | Codex |
+|---|---|---|
+| missing_configmap (variants 1st) | pass, TTD 20.6, TTM 77.4 | pass, TTD 42.0, TTM 84.1 |
+| missing_configmap_mongodb_rate (variant) | pass, TTD 22.6, TTM 75.4 (warm path fired on the family, reflection ran) | pass, TTD 39.4, TTM 71.4 |
+| missing_configmap_mongodb_geo_rate (variant) | **pass**, TTD 12.2, TTM 33.9 (exact match, reflection skipped) | **fail** (M−, left a helper pod behind), TTD 88.8 |
+| sequence: readiness_probe (1st) | pass, TTD 24.8, TTM 54.9 | pass, TTD 35.3, TTM 117.3 |
+| sequence: missing_configmap (2nd) | pass, TTD 35.0, TTM 176.6 | **fail** (D−/M−, revoked-roles red herring) |
+| sequence stages 2–7 | not run (user stop) | 3/6 pass; wrong_service_selector failed both times |
+
+**Pass counts:**
+- Variants: SDO 3/3, Codex 2/3.
+- Sequence: SDO 2/2 completed, Codex 4/8 overall (1/2 on the same two positions).
+
+**Takeaways**
+- **What the data shows:**
+  - SDO did not fail any incident it attempted (5/5 across variants and the partial sequence). Codex failed 5/11 on the same problem streams.
+  - All five Codex failures trace to one repeatable mistake: taking the app's shipped fault-script ConfigMaps for live faults.
+  - SDO's speedup on a variant arrives only once memory matches exactly (stage 2: 33.9 s). A family-level match (stage 1: 75.4 s) gives about cold speed while reflection learns the variant.
+- **Confidence:** low. There is one run per arm, and the sequence was stopped after 2 of 8 stages. The pass-rate gap is suggestive, but it rests on a handful of incidents and on one distractor pattern in this app.
+- **Implications for SDO:**
+  - It is consistent with the claim that source-grounded memory and live-state detectors avoid distractors a memoryless agent falls for, but it does not yet prove it.
+  - For variants, the design works as intended: a near match surfaces the right playbook and reflection generalizes it. The time benefit comes one incident later.
+  - The paper should state the app's dormant fault scripts as a known distractor.
+- **Next action:**
+  - Rerun the full SDO and Codex sequences (priority) and replicate variants at n=3 after the quota reset.
+  - Look at whether the warm prompt for a family-level match could let the responder apply the generalized playbook directly.
