@@ -108,6 +108,9 @@ class _SREGymRuntimeExtension:
         return receipt
 
     def cleanup(self, config: ControllerInstallConfig) -> None:
+        # Cleanup also runs after a failed controller Job, when logs matter most.
+        if self.config.wait_for_completion:
+            _export_controller_logs(self.config.namespace, self.config.artifacts_dir)
         _delete_submission_bridge(self.config)
 
 
@@ -282,6 +285,58 @@ def _export_runtime_artifacts(namespace: str, artifacts_dir: Path | None) -> dic
             logger.warning("could not unpack SDO runtime artifacts: %s", error)
             return {"directory": None, "error": f"tar extraction failed: {error}"}
     return {"directory": str(destination), "error": None}
+
+
+CONTROLLER_LOGS_DIRNAME = "controller_logs"
+_CONTROLLER_JOB_SELECTOR = "job-name=sdo-controller-run"
+
+
+def _export_controller_logs(namespace: str, artifacts_dir: Path | None) -> dict[str, str | None]:
+    """Write each controller Job pod's timestamped logs into the run's results.
+
+    The controller's evaluation stream carries no timestamps of its own, so
+    ``kubectl logs --timestamps`` is what lets a run be reconstructed. This is
+    diagnostic evidence: a failure is recorded beside the logs and never raised.
+    """
+
+    if artifacts_dir is None:
+        return {"directory": None, "error": "no artifacts directory"}
+    destination = artifacts_dir / RUNTIME_ARTIFACTS_DIRNAME / CONTROLLER_LOGS_DIRNAME
+    errors: list[str] = []
+    try:
+        destination.mkdir(parents=True, exist_ok=True)
+        pods = kubectl(
+            ["get", "pods", "--selector", _CONTROLLER_JOB_SELECTOR, "-o", "jsonpath={.items[*].metadata.name}"],
+            namespace=namespace,
+            check=False,
+        )
+        names = pods.stdout.split() if pods.returncode == 0 else []
+        if pods.returncode != 0:
+            errors.append(f"list controller pods: {pods.stderr.strip() or f'exit {pods.returncode}'}")
+        elif not names:
+            errors.append(f"no controller pods match {_CONTROLLER_JOB_SELECTOR}")
+        for name in names:
+            logs = kubectl(
+                ["logs", f"pod/{name}", "--all-containers=true", "--timestamps=true"],
+                namespace=namespace,
+                check=False,
+            )
+            if logs.returncode != 0:
+                errors.append(f"logs pod/{name}: {logs.stderr.strip() or f'exit {logs.returncode}'}")
+                continue
+            (destination / f"{name}.log").write_text(logs.stdout, encoding="utf-8")
+    except (OSError, subprocess.SubprocessError, ControllerInstallError) as exc:
+        errors.append(f"{type(exc).__name__}: {exc}")
+    if not errors:
+        return {"directory": str(destination), "error": None}
+    error = "; ".join(errors)
+    logger.warning("could not export SDO controller logs: %s", error)
+    try:
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / "export_error.txt").write_text(error + "\n", encoding="utf-8")
+    except OSError:
+        return {"directory": None, "error": error}
+    return {"directory": str(destination), "error": error}
 
 
 def _reflection_telemetry(ledger: dict[str, Any]) -> dict[str, int | str | None]:
