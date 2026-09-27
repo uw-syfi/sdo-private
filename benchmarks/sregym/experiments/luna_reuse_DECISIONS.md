@@ -596,3 +596,20 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - `20260927_201151_pipeline_sdo-codex-luna-sequence` was stopped about 5 minutes in, before any fault, so the checkout could be updated with nothing in flight (renamed `stopped_…`). It is rerun after the fix.
   - reuse2 (`20260927_195104`), fresh2 (`20260927_195127`), fresh3 (`20260927_200838`) and reuse3 (`20260927_200727`) ran before the fix. SDO's client never POSTs mitigation during grading, so the fix cannot change their outcome or timing. They stay valid.
   - All Codex runs counted from here on (x5, variants, sequence) run with the fix.
+
+### SDO bug: a verified source repair was rejected for trailing whitespace (`ca8f741`)
+
+- **Found in fresh3 (`20260927_200838`, w1).** Stage 0 passed both oracles. The responder restored the missing `mongo-geo-script` ConfigMap and committed `kubernetes/geo/mongo-geo-script-configmap.yaml`, which embeds the application's own `k8s-geo-mongo.sh` verbatim, blank lines included.
+  - The broker's only source-repair gate, `git diff --check HEAD --`, also enforces whitespace style. It rejected the closure ("trailing whitespace"), and the controller retried it forever (about 26,000 failures in 20 minutes).
+  - The incident was never acknowledged, so stage 1's reflection drain waited on it. It would have failed only at the 3600 s drain timeout.
+- **Decision: keep the gate for what it protects against (conflict markers) and stop it enforcing whitespace style.**
+  - The new command is `SOURCE_REPAIR_CHECK_COMMAND = git -c core.whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab diff --check HEAD --`.
+  - The production installer and the local controller builder use the same command. `controller.builder` may not import `sdo`, so a test pins its literal to the constant.
+  - The test runs the installed command on a real repository: verbatim whitespace passes and conflict markers are rejected.
+  - Images were not rebuilt. The command reaches the in-image broker as an explicit `--broker-arg` from the host-side installer, and the new command is part of the install fingerprint.
+  - Not changed: the controller's unbounded closure retry on a permanent validation failure. Bounding it is a Go runtime change and would need new images. With the root cause fixed it cannot recur for this cause, and the drain timeout still bounds a hang. I record it as a known robustness gap.
+- **fresh3 is not counted** (an SDO bug, not an agent failure). It was stopped and renamed `sdobug_20260927_200838_…`, and it is rerun after the fix on luna-w1.
+- **Other runs:**
+  - reuse1, fresh1, reuse2, fresh2 and reuse3 are unaffected: their closures committed, and a closure failure would have hung their drains the same way.
+  - reuse3 (`20260927_200727`, w2) finished before the fix and stays valid.
+  - Nothing was in flight when the checkout moved to this fix.
