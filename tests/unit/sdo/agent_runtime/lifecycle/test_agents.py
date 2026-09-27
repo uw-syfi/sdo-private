@@ -7,7 +7,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from agentshim.providers.codex import CodexSandboxConfig, parse_sandbox
@@ -18,6 +18,8 @@ from sdo.agent_runtime.lifecycle.agents import (
     ClaudeTaskOutputs,
     CodexLifecycleBackend,
     DeployerAssessment,
+    DeployerDraft,
+    DeployerHandoff,
     HealthJudgeArtifact,
     HealthJudgeWorkspaceArtifact,
     LifecycleAgentError,
@@ -221,6 +223,56 @@ def test_initial_lifecycle_uses_fresh_structured_agents_and_three_bounded_judge_
         encoding="utf-8"
     )
     assert '{APIVersion: "v1", Kind: "ConfigMap"}' in detector_source
+
+
+def test_controller_attaches_deterministic_inventory_to_the_deployer_handoff(tmp_path: Path) -> None:
+    """The deployer summarizes; it does not transcribe the controller-derived inventory.
+
+    Codex deployers repeatedly returned ``resources: []`` for a 136-resource inventory
+    and spent a whole retry session copying it back verbatim.
+    """
+    repository = _repository(tmp_path)
+
+    class SummaryOnlyBackend(RecordingBackend):
+        def run_deployer(
+            self,
+            *,
+            repository: Path,
+            application: str,
+            correction_feedback: str | None,
+        ) -> DeployerHandoff:
+            self.deployer_calls.append(correction_feedback)
+            raw = _deployer_assessment({"repository": str(repository), "application": application})
+            return DeployerHandoff(
+                session_id=f"deployer-{len(self.deployer_calls)}",
+                source_commit=str(raw["source_commit"]),
+                topology_fingerprint=str(raw["topology_fingerprint"]),
+                architecture_summary_markdown=(
+                    "# Architecture\n\nThe example Deployment serves traffic through the example Service."
+                ),
+            )
+
+    backend = SummaryOnlyBackend()
+
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective="Deployment example and Service example must remain available.",
+        backend=backend,
+        validator=PassingValidator(),
+    )
+
+    assert len(backend.deployer_calls) == 1
+    assert "controller attaches the resource inventory" in str(backend.deployer_calls[0])
+    provenance = __import__("yaml").safe_load((repository / ".sdo/lifecycle-provenance.yaml").read_text())
+    expected = _deployer_assessment({"repository": str(repository), "application": "example"})
+    assert provenance["deployer"]["resources"] == expected["resources"]
+    assert provenance["deployer"]["session_id"] == "deployer-1"
+
+
+def test_deployer_output_schema_omits_the_controller_owned_inventory() -> None:
+    assert "resources" not in DeployerDraft.model_json_schema()["properties"]
+    assert "resources" in DeployerAssessment.model_json_schema()["properties"]
 
 
 def test_initial_lifecycle_allows_judge_to_edit_and_self_check_an_isolated_workspace(tmp_path: Path) -> None:
@@ -892,13 +944,15 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
     repository = _repository(tmp_path)
     raw = _deployer_assessment({"repository": str(repository), "application": "example"})
 
+    schemas: list[dict[str, object]] = []
+
     def respond(request: CommandRequest) -> FakeRun:
         schema = turn_schema(request)
+        schemas.append(schema)
         if "architecture_summary_markdown" in schema["properties"]:
             output = {
                 "source_commit": raw["source_commit"],
                 "topology_fingerprint": raw["topology_fingerprint"],
-                "resources": raw["resources"],
                 "architecture_summary_markdown": "# Architecture\n\nExample Deployment and Service.",
             }
         else:
@@ -924,7 +978,10 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
         repository=repository,
         application="example",
         health_objective="Deployment example and Service example must remain available.",
-        deployer=deployer,
+        deployer=DeployerAssessment(
+            **deployer.model_dump(),
+            resources=[TopologyResourceDTO.model_validate(item) for item in raw["resources"]],
+        ),
         round_index=1,
         previous=None,
         correction_feedback=None,
@@ -937,6 +994,8 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
     assert all("resume" not in argv for argv in agent.argvs)
     assert all(parse_sandbox(argv) == CodexSandboxConfig(mode="read-only") for argv in agent.argvs)
     assert all("--output-schema" in argv and "--json" in argv for argv in agent.argvs)
+    assert "resources" not in cast("dict[str, object]", schemas[0]["properties"])
+    assert "controller attaches the deterministic inventory" in prompts[0].replace("\n", " ")
     assert "copy every resource required by the objective exactly from the deployer handoff" in prompts[1]
     assert "Trusted controller/sdk API reference" in prompts[1]
     assert "Inspect only the current application checkout" in prompts[1]
@@ -972,7 +1031,6 @@ def test_codex_backend_rejects_sessions_that_read_outside_application_repository
             {
                 "source_commit": raw["source_commit"],
                 "topology_fingerprint": raw["topology_fingerprint"],
-                "resources": raw["resources"],
                 "architecture_summary_markdown": "# Architecture\n\nExample Deployment and Service.",
             },
             session_id="fresh-session",
@@ -1106,7 +1164,6 @@ def test_claude_backend_accepts_session_that_reads_its_own_background_task_outpu
             {
                 "source_commit": raw["source_commit"],
                 "topology_fingerprint": raw["topology_fingerprint"],
-                "resources": raw["resources"],
                 "architecture_summary_markdown": "# Architecture\n\nExample Deployment and Service.",
             },
             session_id="claude-session",
@@ -1135,7 +1192,6 @@ def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_fee
             output = {
                 "source_commit": raw["source_commit"],
                 "topology_fingerprint": raw["topology_fingerprint"],
-                "resources": raw["resources"],
                 "architecture_summary_markdown": "# Architecture\n\nExample Deployment and Service.",
             }
         else:
