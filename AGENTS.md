@@ -23,6 +23,7 @@ Production code must not import from SREGym packages. Benchmark adapters may imp
 - Validate configuration in `__post_init__` with `TypeError` or `ValueError`.
 - Keep exceptions next to the owning SDO subsystem and preserve actionable context.
 - Delete removed code instead of commenting it out.
+- Cap fuzz and property-test runs (for example a Hypothesis fuzz profile) at 5 minutes of wall-clock time. Run longer only when the user explicitly asks for a long run.
 - Keep code already running in an async loop on that loop: use `async`/`await`, never `run_sync()`, `asyncio.run()`, or `run_until_complete()`.
 
 ## SDO invariants
