@@ -32,7 +32,7 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from agentshim import (
     AgentShimError,
@@ -348,8 +348,13 @@ def _is_model_response_token_count(line: str) -> bool:
         record = json.loads(line)
     except json.JSONDecodeError:
         return False
-    payload = record.get("payload") if isinstance(record, dict) else None
-    return isinstance(payload, dict) and payload.get("type") == "token_count" and payload.get("info") is not None
+    if not isinstance(record, dict):
+        return False
+    payload = cast("dict[str, object]", record).get("payload")
+    if not isinstance(payload, dict):
+        return False
+    fields = cast("dict[str, object]", payload)
+    return fields.get("type") == "token_count" and fields.get("info") is not None
 
 
 def _provider_for(

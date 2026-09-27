@@ -30,7 +30,7 @@ from sdo.operational_memory.warm_path import warm_playbook_matches
 from sdo.operational_memory.worktrees import IncidentWorktree, WorktreeManager
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Mapping
 
 
 class BrokerServiceError(RuntimeError):
@@ -42,6 +42,9 @@ class ReflectionProposal(Protocol):
     learning_decision: Literal["updated", "no_change"]
     no_change_reason: str | None
     proposed_changes: list[str]
+
+    @property
+    def usage(self) -> Mapping[str, int | float]: ...
 
 
 class TopologyReview(BaseModel):
