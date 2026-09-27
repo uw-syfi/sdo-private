@@ -577,3 +577,22 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - w1: reuse2, then fresh3, then codex_sequence.
   - w2: fresh2, then reuse3, then sdo_variants, then codex_variants.
 - **Every valid run from here on uses the main checkout at `91b0080` with SREGym `b4275585`.** reuse1 and fresh1 ran at `8c83a04` with SREGym `38cbf4c7`. The only differences are harness isolation and analysis code, which do not affect a single-cluster run, and the images are unchanged.
+
+### Harness bug: mitigation dropped while diagnosis was being graded (SREGym `dec0e283`)
+
+- **Found in Codex x5 (`20260927_195049_codex`, attempt 4).** Codex fixed the fault (first mutation at +48 s), POSTed diagnosis, and immediately POSTed its mitigation. The conductor was still grading the diagnosis.
+  - `Conductor.submit` answered `200 {"message":"Submission received"}` and discarded the submission.
+  - Codex exited. The mitigation stage opened with no agent left, so the attempt has no mitigation verdict and no primary time.
+  - The same attempt index had shown the same symptom in the invalid parallel-window run.
+  - This is the defect recorded above for SDO (line "Conductor.submit answers a submit made during an evaluation…"). SDO's client works around it by waiting for the stage client-side. Stock Codex has no workaround, so the harness penalised the baseline for submitting quickly.
+- **Decision: count it as a harness defect, not an agent failure.** The agent had fixed the fault and got a success response. The fix, test-first:
+  - The conductor raises `SubmissionWhileEvaluating` instead of dropping.
+  - `/submit` (and the MCP submit tool) holds the request until the next stage opens. That is what the API's existing retry loop was evidently meant to do. The window grew from 60 s to 600 s, because xhigh judge grading has taken up to about 75 s.
+  - **Symmetry:** a submission accepted after waiting is stamped at acceptance, the same time an agent that polls `/status` first (SDO's client) would POST. Both arms therefore pay the grading wait in the primary metric, and `judge_excluded` removes it for both. The judge-excluded formula stays valid, because `mitigation_submitted_at` can no longer precede the stage opening.
+  - Rejected: returning 409 so the agent retries. It is honest, but it leaves stock Codex's behaviour to chance, and the held-request semantics already exist in the API.
+  - Checked: SDO's fallback submitter can POST a duplicate diagnosis during diagnosis grading. That now becomes the mitigation submission once the stage opens. It runs only after the responder has resolved the incident, so it is graded against the already-healthy cluster at stage-open time, the same outcome and timing as before.
+- **Runs affected:**
+  - The pre-fix Codex x5 is superseded (renamed `superseded_prefix_20260927_195049_codex`). It is reported only as a supplementary table, and a full 5-attempt rerun follows after the fix.
+  - `20260927_201151_pipeline_sdo-codex-luna-sequence` was stopped about 5 minutes in, before any fault, so the checkout could be updated with nothing in flight (renamed `stopped_…`). It is rerun after the fix.
+  - reuse2 (`20260927_195104`), fresh2 (`20260927_195127`), fresh3 (`20260927_200838`) and reuse3 (`20260927_200727`) ran before the fix. SDO's client never POSTs mitigation during grading, so the fix cannot change their outcome or timing. They stay valid.
+  - All Codex runs counted from here on (x5, variants, sequence) run with the fix.
