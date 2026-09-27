@@ -148,7 +148,9 @@ def _responder_instructions() -> str:
         "live detectors. Do not begin repair until diagnosis is acknowledged. Before mitigation, wait for every "
         "affected rollout to finish, require desired, updated, ready, and available replicas to agree, require each "
         "affected Service to expose a ready endpoint for the current rollout, and exercise a representative request. "
-        "Do not return the incident result until mitigation reports done."
+        "Do not return the incident result until mitigation reports done. Submit mitigation once: any `done.status` "
+        "(done, completed, finished, or awaiting_cleanup) means the benchmark accepted it and the problem ended; "
+        "a repeated call only reports `already_submitted`."
     )
 
 
