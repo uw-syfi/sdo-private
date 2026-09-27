@@ -21,7 +21,6 @@ import argparse
 import json
 import logging
 import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -86,6 +85,8 @@ def _up(args: argparse.Namespace) -> int:
         "SREGYM_DEPLOY_FROM_SOURCE": "1",
         "SREGYM_APP_SOURCE_DIR": str(workspace),
         "SREGYM_PRESERVE_INFRASTRUCTURE": "1",
+        # `up --redeploy` reuses the app image while its build context is unchanged.
+        "SREGYM_SOURCE_BUILD_CACHE": "1",
     }
     if args.builder:
         worker_env["SREGYM_DOCKER_BUILDER"] = args.builder
@@ -146,6 +147,11 @@ def _sdo_agent(args: argparse.Namespace, environment: FastloopEnvironment, resul
     from benchmarks.sregym.adapter.persistent import KubectlClusterOps, control_namespace_for
     from benchmarks.sregym.adapter.runtime import RuntimeConfig
     from benchmarks.sregym.fastloop.sdo_agent import SdoAgentSettings, SdoPersistentAgent
+    from sdo.agent_runtime.lifecycle import LifecycleValidationCache
+
+    validation_cache = (
+        None if args.no_validation_cache else LifecycleValidationCache(environment.run_dir / "validation-cache")
+    )
 
     runtime_config = RuntimeConfig(
         repository=environment.workspace,
@@ -172,6 +178,7 @@ def _sdo_agent(args: argparse.Namespace, environment: FastloopEnvironment, resul
         results_dir=results_dir,
         kubeconfig=str(environment.kubeconfig),
         verification_timeout_seconds=float(args.timeout + 300),
+        validation_cache=validation_cache,
     )
     return SdoPersistentAgent(
         settings,
@@ -183,6 +190,7 @@ def _sdo_agent(args: argparse.Namespace, environment: FastloopEnvironment, resul
             context=context,
             provider=args.provider,
             model=args.model,
+            validation_cache=validation_cache,
         ),
     )
 
@@ -223,12 +231,9 @@ def _run_codex(
 ) -> list[IncidentRecord]:
     from benchmarks.sregym.fastloop.codex_agent import CodexBaselineAgent, CodexSettings, SubmissionStub
 
-    codex_home = results_dir / "codex_home"
-    codex_home.mkdir(parents=True, exist_ok=True)
     auth = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "auth.json"
     if not auth.is_file():
         raise SystemExit(f"{auth} is required for the Codex baseline")
-    shutil.copyfile(auth, codex_home / "auth.json")
     proxy = worker.request(
         "proxy",
         port=args.proxy_port or _free_port(),
@@ -237,7 +242,7 @@ def _run_codex(
     )
     settings = CodexSettings(
         model=args.model,
-        codex_home=codex_home,
+        auth_file=auth,
         kubeconfig=Path(str(proxy["kubeconfig"])),
         results_dir=results_dir,
         timeout_seconds=float(args.timeout),
@@ -434,6 +439,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--reflection-session", choices=("resume", "fresh"), default="resume")
     run.add_argument("--reasoning-effort", default=None, help="Codex baseline reasoning effort (default: Codex's)")
     run.add_argument("--timeout", type=int, default=3600, help="per-incident agent timeout in seconds")
+    run.add_argument(
+        "--no-validation-cache",
+        action="store_true",
+        help="revalidate the lifecycle detectors instead of sharing verdicts in <run-dir>/validation-cache",
+    )
     run.add_argument("--health-timeout", type=float, default=300.0, help="seconds to wait for health after recovery")
     run.add_argument("--proxy-port", type=int, default=0, help="Codex baseline API proxy port (default: free port)")
     run.add_argument("--run-id", default=None)

@@ -97,7 +97,11 @@ FAKE_CODEX = textwrap.dedent(
                                          headers={"Content-Type": "application/json"})
         urllib.request.urlopen(request).read()
     assert os.environ["KUBECONFIG"].endswith("agent.kubeconfig")
-    assert os.environ["CODEX_HOME"].endswith("codex_home")
+    home = os.environ["CODEX_HOME"]
+    # A fresh home per incident: the baseline must not carry Codex memories between incidents.
+    assert home.endswith("_missing_configmap_hotel_reservation/codex_home"), home
+    assert sorted(os.listdir(home)) == ["auth.json"], os.listdir(home)
+    open(os.path.join(home, "memories_1.sqlite"), "w").write("learned")
     post("mongo-geo-script ConfigMap was deleted")
     post("")
     print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 500, "cached_input_tokens": 400,
@@ -112,11 +116,12 @@ def test_agent_injects_runs_codex_and_reports_submissions_and_tokens(tmp_path: P
     launcher = tmp_path / "codex"
     launcher.write_text(f'#!/bin/sh\nexec {sys.executable} {script} "$@"\n', encoding="utf-8")
     launcher.chmod(0o755)
-    (tmp_path / "codex_home").mkdir()
+    auth = tmp_path / "auth.json"
+    auth.write_text('{"token": "x"}', encoding="utf-8")
     settings = CodexSettings(
         model="gpt-6-luna",
         codex_binary=str(launcher),
-        codex_home=tmp_path / "codex_home",
+        auth_file=auth,
         kubeconfig=tmp_path / "agent.kubeconfig",
         results_dir=tmp_path / "incidents",
         timeout_seconds=60,
@@ -134,8 +139,10 @@ def test_agent_injects_runs_codex_and_reports_submissions_and_tokens(tmp_path: P
             prompt_for=lambda problem_id, api_base: f"Fix {problem_id}. The submission endpoint is: {api_base}/submit",
         )
         outcome = agent.resolve(0, "missing_configmap_hotel_reservation", inject)
+        second = agent.resolve(1, "missing_configmap_hotel_reservation", inject)
 
-    assert injected == ["fault"]
+    assert injected == ["fault", "fault"]
+    assert second.error is None
     assert outcome.diagnosis == "mongo-geo-script ConfigMap was deleted"
     assert outcome.mitigation_applied_at is not None
     assert outcome.resolved_at is not None
@@ -152,7 +159,7 @@ def test_settings_validate_timeout(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="timeout"):
         CodexSettings(
             model="m",
-            codex_home=tmp_path,
+            auth_file=tmp_path / "auth.json",
             kubeconfig=tmp_path / "k",
             results_dir=tmp_path,
             timeout_seconds=0,

@@ -67,6 +67,10 @@ class AgentOutcome:
     setup_seconds: float | None = None
     controller_installed: bool | None = None
     lifecycle_reused: bool | None = None
+    #: How lifecycle validation was satisfied when the opt-in validation cache is on.
+    lifecycle_validation_source: str | None = None
+    #: Waiting for the previous incident's reflection before this one could start.
+    previous_reflection_drain_seconds: float | None = None
     incident_id: str | None = None
     artifacts_dir: str | None = None
     #: A non-fatal problem the agent reports alongside its evidence (for example a rejected receipt).
@@ -236,6 +240,8 @@ def _outcome_fields(outcome: AgentOutcome) -> dict[str, object]:
         "setup_seconds": outcome.setup_seconds,
         "controller_installed": outcome.controller_installed,
         "lifecycle_reused": outcome.lifecycle_reused,
+        "lifecycle_validation_source": outcome.lifecycle_validation_source,
+        "previous_reflection_drain_seconds": outcome.previous_reflection_drain_seconds,
         "incident_id": outcome.incident_id,
         "artifacts_dir": outcome.artifacts_dir,
     }

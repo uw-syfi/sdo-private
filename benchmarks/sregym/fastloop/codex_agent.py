@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -168,7 +169,8 @@ def codex_usage(stream: str) -> TokenCounts:
 @dataclass(frozen=True)
 class CodexSettings:
     model: str
-    codex_home: Path
+    #: Copied into a fresh ``CODEX_HOME`` for every incident, so the baseline never carries Codex memories.
+    auth_file: Path
     kubeconfig: Path
     results_dir: Path
     timeout_seconds: float = 3600.0
@@ -208,13 +210,18 @@ class CodexBaselineAgent:
         incident_dir.mkdir(parents=True, exist_ok=True)
         workdir = incident_dir / "workdir"
         workdir.mkdir(exist_ok=True)
+        codex_home = incident_dir / "codex_home"
+        if codex_home.exists():
+            shutil.rmtree(codex_home)
+        codex_home.mkdir()
+        shutil.copyfile(settings.auth_file, codex_home / "auth.json")
         self._stub.reset()
         prompt = self._prompt_for(problem_id, self._stub.url)
         (incident_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
         env = {
             **os.environ,
             "KUBECONFIG": str(settings.kubeconfig),
-            "CODEX_HOME": str(settings.codex_home),
+            "CODEX_HOME": str(codex_home),
         }
         env.pop("OPENAI_API_KEY", None)
         command = codex_command(

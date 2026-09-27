@@ -12,6 +12,7 @@ from benchmarks.sregym.adapter.persistent import Clock, ControllerPod, Persisten
 from benchmarks.sregym.adapter.runtime import RuntimeConfig
 from benchmarks.sregym.fastloop.loop import InjectionWindow
 from benchmarks.sregym.fastloop.sdo_agent import SdoAgentSettings, SdoPersistentAgent
+from sdo.agent_runtime.lifecycle.validation_cache import LifecycleValidationCache
 from sdo.controller_install import ControllerInstallError
 
 if TYPE_CHECKING:
@@ -133,7 +134,13 @@ def _clock() -> Clock:
     return Clock(monotonic=lambda: now[0], sleep=sleep, now=lambda: INJECTED)
 
 
-def _agent(tmp_path: Path, ops: FakeOps, lifecycle_calls: list[str]) -> SdoPersistentAgent:
+def _agent(
+    tmp_path: Path,
+    ops: FakeOps,
+    lifecycle_calls: list[str],
+    *,
+    validation_cache: LifecycleValidationCache | None = None,
+) -> SdoPersistentAgent:
     repository = tmp_path / "application_workspace"
     repository.mkdir(exist_ok=True)
     namespace = "hotel-reservation"
@@ -157,12 +164,15 @@ def _agent(tmp_path: Path, ops: FakeOps, lifecycle_calls: list[str]) -> SdoPersi
         state_path=tmp_path / "sdo_persistent_controller.json",
         results_dir=tmp_path / "incidents",
         verification_timeout_seconds=600,
+        validation_cache=validation_cache,
     )
     context = DeployedLifecycleContext(health_objective="objective", active_resources=[])
 
     def run_lifecycle(received: DeployedLifecycleContext) -> bool:
         assert received == context
         lifecycle_calls.append("lifecycle")
+        if validation_cache is not None:
+            validation_cache.source = "validation-cache"
         return True
 
     return SdoPersistentAgent(
@@ -194,6 +204,8 @@ def test_first_incident_installs_once_and_reports_resolution_from_controller_evi
     assert outcome.mitigation == "restored ConfigMap"
     assert outcome.baseline_gate_seconds == pytest.approx(1.5)
     assert outcome.controller_installed is True
+    assert outcome.lifecycle_validation_source is None  # the validation cache is opt-in
+    assert outcome.previous_reflection_drain_seconds == pytest.approx(0.0)
     assert outcome.artifacts_dir == str(tmp_path / "incidents" / "000_missing_configmap_hotel_reservation")
 
 
@@ -245,3 +257,12 @@ def test_an_injection_failure_propagates_to_the_loop(tmp_path: Path) -> None:
 
     with pytest.raises(ControllerInstallError, match="could not inject"):
         agent.resolve(0, "p", failing_inject)
+
+
+def test_a_cached_lifecycle_validation_is_recorded(tmp_path: Path) -> None:
+    ops, calls = FakeOps(), []
+    agent = _agent(tmp_path, ops, calls, validation_cache=LifecycleValidationCache(tmp_path / "validation-cache"))
+
+    outcome = agent.resolve(0, "p", _inject)
+
+    assert outcome.lifecycle_validation_source == "validation-cache"

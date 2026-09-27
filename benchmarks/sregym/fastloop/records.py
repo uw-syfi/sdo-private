@@ -108,6 +108,10 @@ class IncidentRecord(_PersistedModel):
     setup_seconds: float | None = None
     controller_installed: bool | None = None
     lifecycle_reused: bool | None = None
+    #: ``validation-cache``, ``validator`` or ``workspace-attestation`` when the opt-in cache is on.
+    lifecycle_validation_source: str | None = None
+    #: Waiting for the previous incident's reflection before this one could start (part of the wall time).
+    previous_reflection_drain_seconds: float | None = None
     fault_recovery_seconds: float | None = None
     #: Wall time from the start of this incident to the loop being ready for the next one.
     incident_wall_seconds: float | None = None

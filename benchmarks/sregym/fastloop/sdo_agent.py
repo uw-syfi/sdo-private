@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
     from benchmarks.sregym.adapter.driver import DeployedLifecycle, DeployedLifecycleContext
     from benchmarks.sregym.adapter.runtime import RuntimeConfig
+    from sdo.agent_runtime.lifecycle import LifecycleValidationCache
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ class SdoAgentSettings:
     results_dir: Path
     kubeconfig: str | None = None
     verification_timeout_seconds: float = 3900.0
+    validation_cache: LifecycleValidationCache | None = None
 
     def __post_init__(self) -> None:
         if self.runtime_config.submission_api_base or self.runtime_config.submission_relay_target_base:
@@ -119,6 +121,7 @@ class SdoPersistentAgent:
                 state_path=settings.state_path,
                 kubeconfig=settings.kubeconfig,
                 verification_timeout_seconds=settings.verification_timeout_seconds,
+                validation_cache=settings.validation_cache,
             ),
             ops=self._ops,
             run_lifecycle=lambda: self._run_lifecycle(lifecycle.context),
@@ -157,6 +160,8 @@ class SdoPersistentAgent:
             + float(costs.get("controller_install_or_reuse", 0.0)),
             controller_installed=controller.get("installed_this_stage"),
             lifecycle_reused=resolution.get("lifecycle_reused"),
+            lifecycle_validation_source=(resolution.get("lifecycle_validation") or {}).get("source"),
+            previous_reflection_drain_seconds=costs.get("previous_incident_reflection_drain"),
             incident_id=str(resolution["incident_id"]),
             artifacts_dir=str(receipt_dir),
         )
