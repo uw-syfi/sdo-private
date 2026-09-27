@@ -677,7 +677,20 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - Compare the SDO warm (stage 1) TTM from the higher-load lanes against the earlier 15.0–30.8 s, and the Codex TTM against the pre-fix Codex x5 (53.9–79.8 s).
   - `scratchpad/check_ratelimit.sh` scans harness logs and post-relaunch rollouts for 429, "rate limit", `usage_limit` and retry signals.
   - If any appear, drop one lane and log it. There were none at 21:03Z.
-- **Follow-up for the next queue, not this one:**
-  - Make the kind clusters 1 control plane plus 1 worker instead of 3 workers.
-  - Lower pod CPU requests to fractional values (50–100m) while keeping limits generous, so pods can burst during restarts.
-  - Together these let many more lanes fit. The manifests are unchanged mid-queue for consistency.
+- **Follow-up for the next queue, not this one:** the only cluster change is 1 control plane plus 1 worker instead of 3 workers, so that more lanes fit. Nothing changes mid-queue, for consistency.
+  - Keep the app's CPU settings. The Hotel Reservation manifests already request 100m and limit 1000m per container, so lowering requests frees nothing.
+  - Lowering limits would slow pod restarts, which fall inside TTM, and could change the resource-related faults.
+  - This corrects the first version of this note (in `5e709c1`), which suggested lowering CPU requests.
+
+### fresh3 rerun (post-fix, luna-w1): pass
+
+- **Run:** `20260927_205746_pipeline_sdo-codex-luna-persistent-fresh`, 20:57–21:15Z; load 17–38 (another project's test workers early on).
+- **Stage 0:** D+/M+. TTD 13.1 s, TTM 73.3 s (raw including judge 94.5 s, last mutation 59.2 s). Responder 404K tokens, reflection 656K.
+- **Stage 1:** D+/M+. The warm path fired. TTD 8.8 s, TTM 21.5 s (raw 36.8 s, last mutation 21.5 s). Responder 287K tokens, reflection skipped. Reflection drain 97.1 s.
+- **Fairness:** stage 1 TTM is inside the earlier warm range of 15.0–30.8 s, although this lane ran alongside four others.
+- **The whitespace fix held:** the source-repair closure committed, and the drain finished in 97 s instead of hanging.
+- **Rate limits:**
+  - No 429s, error events or `rate_limit_reached_type` in any post-relaunch rollout or harness log.
+  - The earlier scan's hits were Codex's per-turn `rate_limits` usage snapshots, which are informational. `scratchpad/check_ratelimit.sh` now counts only real errors and limit-reached flags.
+  - **Budget risk:** those snapshots show the account's weekly Codex window (10080 min, resets 2026-10-03 18:19Z) at 88% used, rising about 1 point per 12 minutes with 5 lanes.
+  - Decision: keep 5 lanes, because the remaining items should finish within the remaining budget. Watch the weekly usage and start no new lane items past 97%. If the limit is hit mid-run, that run counts as infrastructure-broken, not as an agent failure.
