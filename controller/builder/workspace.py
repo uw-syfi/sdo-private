@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 from controller.builder.manifest import DetectorManifest, duration_nanoseconds, load_manifest
 from controller.builder.paths import find_diagnostics_dir
 
 MODULE_RE = re.compile(r"^\s*module\s+(\S+)\s*$", re.MULTILINE)
 DEFAULT_MODULE_PATH = "app-diagnostics"
+SERVICE_NAME_RE = re.compile(r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?")
+EXTERNALNAME_PROBE_SERVICE = "sdo-externalname-probe"
+_SOURCE_SCAN_SKIPPED_DIRS = frozenset({"node_modules", "vendor"})
+_SOURCE_SCAN_MAX_FILE_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -70,6 +77,7 @@ class BuildWorkspace:
             runtime_dir=(config.runtime_dir or config.core_dir.parent / "runtime").resolve(),
         )
         _write_generated_registration(workspace_path, module_path=module_path, manifest=manifest)
+        _write_generated_externalname_invariant(workspace_path / "generated", _source_service_names(app_root))
         _write_generated_main(workspace_path, module_path=module_path)
 
         return cls(
@@ -244,6 +252,80 @@ func TestRegistrationContracts(t *testing.T) {
         + "\n}\n"
     )
     (generated_dir / "registrations_test.go").write_text(source, encoding="utf-8")
+
+
+def _source_service_names(app_root: Path) -> list[str]:
+    """Return Service names declared in the application's Kubernetes YAML.
+
+    Hidden directories such as ``.git`` and ``.sdo`` are skipped, as are
+    unparsable documents such as Helm templates.
+    """
+
+    names: set[str] = set()
+    for directory, subdirectories, files in os.walk(app_root):
+        subdirectories[:] = sorted(
+            name for name in subdirectories if not name.startswith(".") and name not in _SOURCE_SCAN_SKIPPED_DIRS
+        )
+        for file_name in files:
+            path = Path(directory) / file_name
+            if path.suffix.lower() not in {".yaml", ".yml"} or path.is_symlink():
+                continue
+            try:
+                if path.stat().st_size > _SOURCE_SCAN_MAX_FILE_BYTES:
+                    continue
+                documents = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            except (OSError, UnicodeDecodeError, yaml.YAMLError):
+                continue
+            for document in documents:
+                if not isinstance(document, dict) or document.get("kind") != "Service":
+                    continue
+                metadata = document.get("metadata")
+                name = metadata.get("name") if isinstance(metadata, dict) else None
+                if isinstance(name, str) and SERVICE_NAME_RE.fullmatch(name):
+                    names.add(name)
+    return sorted(names)
+
+
+def _write_generated_externalname_invariant(generated_dir: Path, service_names: list[str]) -> None:
+    """Reject health detectors that report ExternalName Services for missing endpoints.
+
+    Kubernetes never backs an ExternalName Service with endpoints, and an
+    environment may replace any source Service with such an alias. The check
+    uses the application's own Service names, so detectors scoped to a source
+    inventory are exercised, plus a probe name for detectors that scan every
+    Service.
+    """
+
+    names = sorted({EXTERNALNAME_PROBE_SERVICE, *service_names})
+    rendered_names = "".join(f"\t{json.dumps(name)},\n" for name in names)
+    source = (
+        """package generated
+
+import (
+\t"testing"
+
+\t"sdo.dev/controller/sdk"
+\t"sdo.dev/controller/sdk/sdktest"
+)
+
+var externalNameCheckServices = []string{
+"""
+        + rendered_names
+        + """}
+
+func TestHealthDetectorsExemptExternalNameServicesFromEndpointChecks(t *testing.T) {
+\tfor _, detector := range All() {
+\t\tif detector.Spec().Class != sdk.DetectorClassHealth {
+\t\t\tcontinue
+\t\t}
+\t\tfor _, violation := range sdktest.ExternalNameEndpointViolations(detector, externalNameCheckServices) {
+\t\t\tt.Error(violation)
+\t\t}
+\t}
+}
+"""
+    )
+    (generated_dir / "externalname_invariants_test.go").write_text(source, encoding="utf-8")
 
 
 def _write_generated_main(workspace_path: Path, *, module_path: str) -> None:

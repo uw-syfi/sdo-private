@@ -549,3 +549,166 @@ def test_seed_go_cache_copies_trusted_image_cache(
 
     assert seed_go_cache_from_environment() is True
     assert (target / "ab" / "entry").read_text(encoding="utf-8") == "compiled"
+
+
+_ENDPOINT_HEALTH_DETECTOR = """package objective
+
+import (
+    "context"
+    "fmt"
+    "time"
+
+    "sdo.dev/controller/sdk"
+)
+
+var requiredServices = map[string]struct{}{"frontend": {}, "jaeger": {}}
+
+type Detector struct{}
+
+func New() sdk.Detector { return Detector{} }
+
+func (Detector) Spec() sdk.DetectorSpec {
+    return sdk.DetectorSpec{
+        ID: "health-objective", Class: sdk.DetectorClassHealth, Owner: sdk.DetectorOwnerHealthJudge,
+        Interval: 30 * time.Second,
+        Watches: []sdk.WatchKind{{APIVersion: "v1", Kind: "Service"}},
+        Persistence: sdk.PersistencePolicy{Firing: 2, Clearing: 2},
+        Batching: sdk.BatchingPolicy{Severity: sdk.SeverityCritical, Debounce: 500 * time.Millisecond},
+        Playbooks: []string{},
+        OriginatingCommit: "lifecycle-bootstrap",
+    }
+}
+
+func (Detector) Detect(_ context.Context, snapshot sdk.DetectionContext) ([]sdk.Finding, error) {
+    findings := make([]sdk.Finding, 0)
+    for _, service := range snapshot.Services() {
+        if _, required := requiredServices[service.Name]; !required {
+            continue
+        }
+        __GUARD__
+        if snapshot.ReadyEndpointCountForService(service.Namespace, service.Name) == 0 {
+            findings = append(findings, sdk.Finding{
+                RuleID: "service-without-ready-endpoints", Status: sdk.FindingActive,
+                Severity: sdk.SeverityCritical, Summary: "A selected service has no ready endpoints",
+                Evidence: fmt.Sprintf("service %s/%s has zero ready endpoints", service.Namespace, service.Name),
+                PrimaryResource: sdk.ObjectRefFrom("Service", "v1", &service),
+            })
+        }
+    }
+    return findings, nil
+}
+"""
+
+
+def _write_health_app(app_root: Path, *, guard: str) -> None:
+    diagnostics = app_root / ".sdo" / "diagnostics"
+    detector_dir = diagnostics / "detectors" / "health" / "objective"
+    detector_dir.mkdir(parents=True)
+    (diagnostics / "go.mod").write_text(
+        "module app-diagnostics\n\ngo 1.24\n\nrequire sdo.dev/controller/sdk v0.0.0\n",
+        encoding="utf-8",
+    )
+    (diagnostics / "manifest.yaml").write_text(
+        """apiVersion: sdo.dev/v1alpha1
+kind: DetectorManifest
+sdkVersion: v0.1
+detectors:
+  - id: health-objective
+    package: ./detectors/health/objective
+    constructor: New
+    class: health
+    owner: health_judge
+    watches:
+      - apiVersion: v1
+        kind: Service
+    interval: 30s
+    persistence:
+      firing: 2
+      clearing: 2
+    batching:
+      severity: critical
+      debounce: 500ms
+    possiblePlaybooks: []
+    originatingCommit: lifecycle-bootstrap
+""",
+        encoding="utf-8",
+    )
+    (detector_dir / "detector.go").write_text(_ENDPOINT_HEALTH_DETECTOR.replace("__GUARD__", guard), encoding="utf-8")
+    # The source declares jaeger as an ordinary selected Service; the runtime
+    # environment may still replace it with an ExternalName alias.
+    source = app_root / "kubernetes" / "services.yaml"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        """apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+spec:
+  selector:
+    app: frontend
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+spec:
+  selector:
+    app: jaeger
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: not-a-service
+""",
+        encoding="utf-8",
+    )
+
+
+def test_build_workspace_generates_externalname_invariant_for_source_services(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    tool_root = tmp_path / "sdo"
+    _write_health_app(app_root, guard="")
+    _write_tool_root(tool_root)
+    hidden = app_root / ".sdo" / "scratch.yaml"
+    hidden.write_text("kind: Service\nmetadata:\n  name: memory-only\n", encoding="utf-8")
+
+    config = BuildWorkspaceConfig(
+        app_root=app_root,
+        sdk_dir=tool_root / "controller" / "sdk",
+        core_dir=tool_root / "controller" / "core",
+    )
+    with BuildWorkspace.create(config) as workspace:
+        invariant = (workspace.path / "generated" / "externalname_invariants_test.go").read_text(encoding="utf-8")
+
+    assert "sdktest.ExternalNameEndpointViolations" in invariant
+    assert "sdk.DetectorClassHealth" in invariant
+    assert '"frontend"' in invariant
+    assert '"jaeger"' in invariant
+    assert '"not-a-service"' not in invariant
+    assert '"memory-only"' not in invariant
+
+
+@pytest.mark.parametrize(
+    ("guard", "expected_exit"),
+    [
+        pytest.param("", 1, id="unguarded"),
+        pytest.param("if !sdk.ServiceExpectsEndpoints(service) { continue }", 0, id="sdk-guard"),
+        pytest.param('if service.Spec.Type == "ExternalName" { continue }', 0, id="type-guard"),
+    ],
+)
+def test_check_cli_test_rejects_health_detector_that_flags_externalname_endpoints(
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    guard: str,
+    expected_exit: int,
+) -> None:
+    app_root = tmp_path / "app"
+    _write_health_app(app_root, guard=guard)
+
+    exit_code = check_main(["test", "--app", str(app_root)])
+
+    output = capfd.readouterr()
+    assert exit_code == expected_exit, output.out + output.err
+    if expected_exit:
+        assert "ExternalName Service sdo-externalname-check/jaeger" in output.out
+        assert "sdk.ServiceExpectsEndpoints" in output.out

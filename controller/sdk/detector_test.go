@@ -126,3 +126,44 @@ func TestConfigMapReferencesForDeploymentDeduplicatesAndRequiredReferenceWins(t 
 		t.Fatalf("unexpected ConfigMap references: got %#v, want %#v", got, want)
 	}
 }
+
+func TestServiceExpectsEndpointsExemptsExternalNameServices(t *testing.T) {
+	cases := []struct {
+		name    string
+		service corev1.Service
+		want    bool
+	}{
+		{
+			name: "selected cluster ip",
+			service: corev1.Service{Spec: corev1.ServiceSpec{
+				Type: corev1.ServiceTypeClusterIP, Selector: map[string]string{"app": "api"},
+			}},
+			want: true,
+		},
+		{
+			name:    "defaulted type",
+			service: corev1.Service{Spec: corev1.ServiceSpec{Selector: map[string]string{"app": "api"}}},
+			want:    true,
+		},
+		{
+			name: "external name alias",
+			service: corev1.Service{Spec: corev1.ServiceSpec{
+				Type: corev1.ServiceTypeExternalName, ExternalName: "collector.observe.svc.cluster.local",
+			}},
+			want: false,
+		},
+		{
+			name: "external name that kept its selector after a type patch",
+			service: corev1.Service{Spec: corev1.ServiceSpec{
+				Type: corev1.ServiceTypeExternalName, ExternalName: "collector.observe.svc.cluster.local",
+				Selector: map[string]string{"app": "jaeger"},
+			}},
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		if got := ServiceExpectsEndpoints(tc.service); got != tc.want {
+			t.Fatalf("%s: ServiceExpectsEndpoints() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

@@ -110,6 +110,59 @@ def test_bootstrap_diagnostics_compile_and_test_in_the_detector_sandbox(tmp_path
     assert result.returncode == 0, result.stderr or result.stdout
 
 
+_TEMPLATE_EXTERNALNAME_GUARD = "service.Spec.Type == corev1.ServiceTypeExternalName || len(service.Spec.Selector) == 0"
+
+
+@pytest.mark.parametrize(
+    ("guard", "rejected"),
+    [
+        pytest.param(_TEMPLATE_EXTERNALNAME_GUARD, False, id="template-guard"),
+        # The live judge dropped the guard; NodePort keeps corev1 imported.
+        pytest.param("service.Spec.Type == corev1.ServiceTypeNodePort", True, id="guard-dropped"),
+        pytest.param(
+            "len(service.Spec.Selector) == 0 || service.Spec.Type == corev1.ServiceTypeNodePort",
+            True,
+            id="selector-only-guard",
+        ),
+    ],
+)
+def test_detector_sandbox_rejects_health_detectors_that_flag_externalname_endpoints(
+    tmp_path: Path,
+    guard: str,
+    *,
+    rejected: bool,
+) -> None:
+    repository = tmp_path / "application"
+    _initialize_application(repository)
+    # Source declares jaeger as an ordinary Service, but the runtime
+    # environment may replace it with an ExternalName alias.
+    (repository / "deploy" / "jaeger.yaml").write_text(
+        "apiVersion: v1\nkind: Service\nmetadata:\n  name: jaeger\nspec:\n  selector:\n    app: jaeger\n",
+        encoding="utf-8",
+    )
+    _git(repository, "add", "deploy/jaeger.yaml")
+    _git(repository, "commit", "-q", "-m", "add jaeger service")
+    ensure_operational_memory(
+        repository,
+        application="example",
+        health_objective="All user-facing requests succeed.",
+    )
+    detector = repository / ".sdo" / "diagnostics" / "detectors" / "health" / "objective" / "detector.go"
+    source = detector.read_text(encoding="utf-8")
+    assert '"jaeger": {}' in source
+    assert _TEMPLATE_EXTERNALNAME_GUARD in source
+    detector.write_text(source.replace(_TEMPLATE_EXTERNALNAME_GUARD, guard), encoding="utf-8")
+
+    result = LocalSandboxRunner(timeout_seconds=300).run(repository)
+
+    if rejected:
+        assert result.returncode != 0
+        assert "ExternalName Service sdo-externalname-check/jaeger" in result.stdout
+        assert "sdk.ServiceExpectsEndpoints" in result.stdout
+    else:
+        assert result.returncode == 0, result.stderr or result.stdout
+
+
 def test_lifecycle_upgrades_legacy_static_health_detector(tmp_path: Path) -> None:
     repository = tmp_path / "application"
     _initialize_application(repository)
