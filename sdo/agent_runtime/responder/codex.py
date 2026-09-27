@@ -4,11 +4,12 @@ import json
 import os
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_structured_turn
-from sdo.contracts import Finding, IncidentRequest, IncidentResult
+from sdo.contracts import DetectorEvaluation, DetectorEvaluationStatus, Finding, IncidentRequest, IncidentResult
 from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
 from sdo.operational_memory.warm_path import warm_incident_findings
 
@@ -249,6 +250,55 @@ def warm_playbooks(request: IncidentRequest) -> list[WarmPlaybook]:
     return playbooks
 
 
+#: goal.md is inlined only when it is at most this long; otherwise it stays a path.
+_GOAL_INLINE_MAX_CHARS = 4_000
+
+
+def _detector_evidence(request: IncidentRequest) -> str:
+    """The latest evaluation per detector, plus its latest firing one when that is older."""
+
+    latest: dict[str, DetectorEvaluation] = {}
+    latest_firing: dict[str, DetectorEvaluation] = {}
+    for evaluation in sorted(request.detector_history, key=lambda item: item.evaluated_at):
+        latest[evaluation.detector_id] = evaluation
+        if evaluation.status == DetectorEvaluationStatus.FIRING:
+            latest_firing[evaluation.detector_id] = evaluation
+
+    def line(evaluation: DetectorEvaluation) -> str:
+        text = f"{evaluation.detector_id}: {evaluation.status.value} at {_timestamp(evaluation.evaluated_at)}"
+        if evaluation.fingerprints:
+            text += f" [{', '.join(evaluation.fingerprints)}]"
+        if evaluation.error:
+            text += f" error: {evaluation.error}"
+        return f"- {text}\n"
+
+    lines = []
+    for detector_id in sorted(latest):
+        firing = latest_firing.get(detector_id)
+        if firing is not None and firing is not latest[detector_id]:
+            lines.append(line(firing))
+        lines.append(line(latest[detector_id]))
+    return "Latest detector evidence (compacted from detector_history):\n" + "".join(lines)
+
+
+def _timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _inlined_health_objective(request: IncidentRequest) -> str:
+    worktree = Path(request.repository_worktree)
+    goal = _contained_file(worktree, request.health_objective_path, worktree.resolve())
+    if goal is None:
+        return ""
+    try:
+        text = goal.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+    if len(text) > _GOAL_INLINE_MAX_CHARS:
+        return ""
+    return f"Health objective (`{request.health_objective_path}`, inlined; do not re-read it):\n{text.rstrip()}\n\n"
+
+
 def _cold_instructions() -> str:
     return (
         "The incident request may contain compact relevant_outcomes selected deterministically from prior verified "
@@ -318,7 +368,9 @@ def _responder_prompt(request: IncidentRequest) -> str:
         "with its target, timing, result, and reversibility. In recorded-actions mode, a successful live-only "
         "repair must have at least one successful receipt; repository changes are still committed when present.\n\n"
         f"{additional_context}\n"
-        f"Incident request:\n{request.model_dump_json(indent=2)}\n"
+        f"{_inlined_health_objective(request)}"
+        f"{_detector_evidence(request)}\n"
+        f"Incident request:\n{request.model_dump_json(indent=2, exclude={'detector_history'})}\n"
     )
 
 

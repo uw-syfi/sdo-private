@@ -229,3 +229,31 @@ def test_warm_path_caps_inlined_playbook_text(tmp_path: Path) -> None:
     assert "TAIL-MARKER" not in prompt
     assert "truncated" in prompt
     assert len(prompt) < 30_000
+
+
+def test_prompt_compacts_detector_history_to_latest_evidence(tmp_path: Path) -> None:
+    request = IncidentRequest.model_validate_json(_fixture("incident_request.json")).model_copy(
+        update={"repository_worktree": str(tmp_path)}
+    )
+
+    prompt = _responder_prompt(request)
+
+    assert '"detector_history"' not in prompt
+    assert "2026-07-09T18:00:00Z" not in prompt
+    assert "missing-configmap: firing at 2026-07-09T18:00:30Z" in prompt
+    assert "hotel-reservation/geo/geo-config" in prompt
+
+
+def test_prompt_inlines_a_small_health_objective(tmp_path: Path) -> None:
+    _write_memory(tmp_path)
+    request = IncidentRequest.model_validate_json(_fixture("incident_request.json")).model_copy(
+        update={"repository_worktree": str(tmp_path)}
+    )
+
+    prompt = _responder_prompt(request)
+
+    assert "The application serves successful requests." in prompt
+    assert "do not re-read it" in prompt
+
+    (tmp_path / ".sdo" / "goal.md").write_text("---\nowner: human\n---\n" + "y" * 20_000, encoding="utf-8")
+    assert "y" * 5_000 not in _responder_prompt(request)
