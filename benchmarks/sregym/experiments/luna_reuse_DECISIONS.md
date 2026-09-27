@@ -812,3 +812,28 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
 - **Stage 2:** it matched stage 1's learned playbook `required-mongodb-init-configmap-missing` by exact fingerprint, repaired both databases in 33.9 s, and skipped reflection.
 - **Tokens:** the counts above use the old accounting. The final token tables come from the new `incident_cost` once it lands.
 - **Rate limits:** none. Weekly window at 89% at 21:37Z.
+
+### Token-accounting audit
+
+- **Method:** rebuilt every SDO and pre-fix Codex total from the exported Codex rollouts. `token_count.total_token_usage` is cumulative over the session and `last_token_usage` is per request. The analysis uses receipt and `usage_metrics` values, which match the rollouts' final cumulative totals exactly. Nothing sums cumulative values as deltas.
+- **Correct:**
+  - SDO responder totals (cold mean 665,829; warm mean 182,850, range 170,747–191,927).
+  - Codex totals (mean 279,522).
+  - Both arms count `input_tokens` (which includes cached input) plus `output_tokens` (which includes reasoning), under the same rule.
+- **Bug: resumed reflection counted the responder turn again.** With `reflection_session_mode = "resume"`, `codex exec resume` reports session-cumulative usage. `libs/agent_cli/structured.py` stored it as the turn's usage, so `reflection_usage` = responder + reflection.
+  - Reported vs actual reflection: reuse1 1,403,020 vs 809,274; reuse2 1,114,932 vs 585,991; reuse3 1,408,470 vs 674,373.
+  - The fresh-mode figures (757,371 and 244,577) were right.
+  - The corrected reflection range is 245K–809K (mean 614K), not 245K–1.4M.
+  - `model_requests` was right, because it was already computed as a rollout delta.
+- **Fix:**
+  - Codex turn usage is now the rollout's cumulative-counter delta across the turn; this also fills `reasoning_output_tokens`, which agentshim's Codex parser drops (it was always 0).
+  - `incident_cost` recomputes a resumed reflection's own turns from the shared rollout, so existing receipts report correctly.
+  - Tests are in `test_structured.py` and `test_incident_cost.py`.
+- **Not in any incident total:**
+  - The one-time lifecycle (deployer + 3 health-judge rounds) is 1,766,420 tokens: 228,783 uncached, 1,517,312 cached, 20,325 output. It was spent by `20260927_093811_pipeline_sdo-codex-luna-reuse` (`.runtime/sdo_codex/anon_c4ffcb5e…/sdo_turn_usage.jsonl`, session IDs match `lifecycle-provenance.yaml`).
+  - All five pipelines reuse it (`lifecycle_reused: true`), so `incident_cost` printed 0. Pass `--lifecycle-usage` with that file.
+  - Diagnosis and mitigation submission, the controller and the detectors make no model calls. The responder's own submission commands are inside its session.
+- **Reasoning effort:** both arms actually ran at `medium`: the rollouts' `turn_context` shows `"effort":"medium"` for the Codex baseline and the SDO responder. Future queues should pin the Codex baseline's effort in its config rather than rely on the CLI default (see "Reasoning effort: both arms at `medium`" above).
+- **Headline decision:** report uncached input, cached input and output separately, plus a cost-weighted total (cached 0.1x, output 8x, i.e. GPT-5-family price ratios; state them).
+  - Weighted means: warm 52.1K vs Codex 69.7K (0.75x; the raw ratio is 0.65x); cold responder 147.6K; reflection 177.8K; lifecycle 543K.
+  - Report tokens per whole responder session, not "per TTM": warm sessions last 50–61 s over 9–10 requests, and 31–42% of their tokens come after the mitigation POST (Codex: 23–31%).
