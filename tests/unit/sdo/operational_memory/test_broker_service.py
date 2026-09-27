@@ -953,6 +953,18 @@ def _exact_match_outcome(match_reason: str = "exact-fingerprint") -> PriorOutcom
     )
 
 
+def _own_playbook(target: Path) -> None:
+    """Register the fixture playbook in its incident detector's possiblePlaybooks."""
+
+    manifest = target / ".sdo" / "diagnostics" / "manifest.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "possiblePlaybooks: []", "possiblePlaybooks: [.sdo/playbooks/missing-configmap/README.md]"
+        ),
+        encoding="utf-8",
+    )
+
+
 def _warm_closure(
     worktree: Path,
     base_commit: str,
@@ -961,9 +973,14 @@ def _warm_closure(
     incident_status: DetectorEvaluationStatus | None = DetectorEvaluationStatus.CLEAR,
     repair_success: bool = True,
     applied_playbook: bool = True,
+    incident_detector_fired: bool = True,
 ) -> BrokerClosure:
     closure = _closure(worktree, base_commit)
     request = closure.request.model_copy(update={"relevant_outcomes": [_exact_match_outcome(match_reason)]})
+    if not incident_detector_fired:
+        # Only the health detector fired at dispatch; the learned incident detector had not.
+        findings = [finding.model_copy(update={"detector_id": "health-objective"}) for finding in request.findings]
+        request = request.model_copy(update={"findings": findings, "surfaced_playbooks": []})
     assert closure.result is not None
     actions = [action.model_copy(update={"success": repair_success}) for action in closure.result.repair_actions]
     result = closure.result.model_copy(
@@ -985,32 +1002,58 @@ def _warm_closure(
         ]
     )
     return closure.model_copy(
-        update={"request": request, "result": result, "incident_detector_states": incident_states}
+        update={
+            "request": request,
+            "result": result,
+            "incident_detector_states": incident_states,
+        }
     )
 
 
-def test_repeated_exact_match_success_records_deterministic_noop_reflection(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("variant", "expected_state"),
+    [
+        ({}, "missing-configmap clear after the response"),
+        ({"incident_status": None}, "missing-configmap not evaluated after the response"),
+        (
+            {"incident_detector_fired": False, "incident_status": None},
+            "missing-configmap not evaluated after the response",
+        ),
+    ],
+)
+def test_repeated_exact_match_success_records_deterministic_noop_reflection(
+    tmp_path: Path, variant: dict[str, object], expected_state: str
+) -> None:
     target = tmp_path / "target"
     worktrees = tmp_path / "worktrees"
     target.mkdir()
     _write_memory(target)
+    _own_playbook(target)
     _init_repository(target)
     diagnostics_before = _git(target, "rev-parse", "HEAD:.sdo/diagnostics")
     backend = MustNotReflectBackend()
     service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
     workspace = service.prepare_incident("inc-20260709-0001")
 
-    receipt = service.process_closure(_warm_closure(workspace.path, workspace.base_commit))
+    receipt = service.process_closure(
+        _warm_closure(workspace.path, workspace.base_commit, **variant)  # type: ignore[arg-type]
+    )
 
     state = service.completion_state("inc-20260709-0001")
     assert backend.calls == []
     assert state.reflection_attempts == 0
     assert state.reflection_usage == {}
     assert state.reflection_completed is True
-    assert state.reflection_skipped_reason is not None
-    assert "exact-match" in state.reflection_skipped_reason
+    reason = state.reflection_skipped_reason
+    assert reason is not None
+    assert reason.startswith("repeated exact-match success: prior verified outcome(s) inc-20260701-0001")
+    assert ".sdo/playbooks/missing-configmap/README.md (detector missing-configmap" in reason
+    fired = variant.get("incident_detector_fired", True)
+    assert ("fired at dispatch" if fired else "had not fired at dispatch") in reason
+    assert "the controller verified health" in reason
+    assert expected_state in reason
     assert state.reflection_learning_decision == "no_change"
-    assert state.reflection_no_change_reason == state.reflection_skipped_reason
+    assert state.reflection_no_change_reason == reason
     assert state.accepted_detector_paths == []
     assert state.controller_update_required is False
     assert receipt.reflection_commit is not None
@@ -1023,10 +1066,11 @@ def test_repeated_exact_match_success_records_deterministic_noop_reflection(tmp_
     "variant",
     [
         {"match_reason": "detector-rule-resource-kind"},
-        {"incident_status": None},
         {"incident_status": DetectorEvaluationStatus.FIRING},
+        {"incident_detector_fired": False, "incident_status": DetectorEvaluationStatus.FIRING},
         {"repair_success": False},
         {"applied_playbook": False},
+        {"owned": False},
     ],
 )
 def test_non_exact_or_unproven_warm_success_still_runs_full_reflection(
@@ -1036,6 +1080,9 @@ def test_non_exact_or_unproven_warm_success_still_runs_full_reflection(
     worktrees = tmp_path / "worktrees"
     target.mkdir()
     _write_memory(target)
+    variant = dict(variant)
+    if variant.pop("owned", True):
+        _own_playbook(target)
     _init_repository(target)
     backend = RecordingSessionBackend()
     service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))

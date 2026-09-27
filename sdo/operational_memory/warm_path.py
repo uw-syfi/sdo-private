@@ -115,20 +115,3 @@ def warm_playbook_matches(request: IncidentRequest, manifest: DiagnosticsManifes
                     )
                 )
     return sorted(matches, key=lambda match: (match.path, match.detector.id))
-
-
-def warm_incident_findings(request: IncidentRequest, manifest: DiagnosticsManifest) -> list[Finding]:
-    """Active incident-detector findings with a playbook, when a prior success matched exactly."""
-
-    if not has_exact_fingerprint_match(request):
-        return []
-    incident_detectors = {
-        detector.id
-        for detector in manifest.detectors
-        if detector.detector_class == "incident" and detector.owner == ArtifactOwner.RESPONDER
-    }
-    return [
-        finding
-        for finding in request.findings
-        if finding.status == FindingStatus.ACTIVE and finding.detector_id in incident_detectors and finding.playbooks
-    ]

@@ -26,7 +26,7 @@ from sdo.operational_memory.models import (
 from sdo.operational_memory.outcomes import OutcomeFacts, derive_outcome
 from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
 from sdo.operational_memory.validation import MemoryValidationError
-from sdo.operational_memory.warm_path import warm_incident_findings
+from sdo.operational_memory.warm_path import warm_playbook_matches
 from sdo.operational_memory.worktrees import IncidentWorktree, WorktreeManager
 
 if TYPE_CHECKING:
@@ -633,11 +633,15 @@ class BrokerService:
         """Why reflection can be skipped for a repeated exact-match success, or ``None``.
 
         Only a fully successful, verified repair of an incident whose validated
-        incident detector and playbook already encode it qualifies: the prior
-        verified outcome matched by exact fingerprint, the repair applied that
-        detector's playbook, every repair action and verification passed, the
-        controller verified health, and the incident detector cleared after the
-        response. Anything else runs the full reflection turn.
+        incident detector and playbook already encode it qualifies: the warm
+        rule held (an exact-fingerprint prior outcome surfaced a playbook owned
+        by a registered incident detector), the responder applied that
+        playbook, every repair action and verification passed, and the
+        controller verified health. The owning incident detector must not be
+        firing in its latest post-response evaluation; a detector with no
+        post-response evaluation (it never fired, so the controller did not
+        track it) is accepted because health verification already cleared.
+        Anything else runs the full reflection turn.
         """
 
         result = closure.result
@@ -655,28 +659,32 @@ class BrokerService:
             manifest = repository.diagnostics()
         except (MemoryRepositoryError, ValueError):
             return None
-        findings = warm_incident_findings(closure.request, manifest)
         applied = {playbook.path for playbook in result.applied_playbooks}
-        cleared = {
-            state.detector_id
-            for state in closure.incident_detector_states
-            if state.status == DetectorEvaluationStatus.CLEAR and not state.fingerprints
-        }
-        matched = sorted(
-            {
-                finding.detector_id
-                for finding in findings
-                if applied.intersection(finding.playbooks) and finding.detector_id in cleared
-            }
-        )
-        if not matched:
+        matches = [match for match in warm_playbook_matches(closure.request, manifest) if match.path in applied]
+        if not matches:
             return None
-        playbooks = sorted(applied.intersection(path for finding in findings for path in finding.playbooks))
+        latest = {state.detector_id: state for state in closure.incident_detector_states}
+        detector_states: list[str] = []
+        for detector_id in sorted({match.detector.id for match in matches}):
+            state = latest.get(detector_id)
+            if state is None:
+                detector_states.append(f"{detector_id} not evaluated after the response")
+            elif state.status == DetectorEvaluationStatus.CLEAR and not state.fingerprints:
+                detector_states.append(f"{detector_id} clear after the response")
+            else:
+                return None
+        playbooks = ", ".join(
+            f"{match.path} (detector {match.detector.id} "
+            f"{'fired' if match.detector_fired else 'had not fired'} at dispatch; surfaced via "
+            f"{'+'.join(match.sources)})"
+            for match in matches
+        )
+        priors = sorted({incident for match in matches for incident in match.prior_incidents})
         return (
-            "repeated exact-match success: validated incident detector(s) "
-            f"{', '.join(matched)} fired, their playbook(s) {', '.join(playbooks)} repaired the incident, the "
-            "detector(s) cleared after the response, and the controller verified health; existing memory already "
-            "encodes this incident"
+            f"repeated exact-match success: prior verified outcome(s) {', '.join(priors)} matched by exact "
+            f"fingerprint; the responder applied validated incident playbook(s) {playbooks}; every repair action and "
+            "verification passed; the controller verified health; incident detector state: "
+            f"{'; '.join(detector_states)}; existing memory already encodes this incident"
         )
 
     def _reject_reflection(self, ledger: BrokerLedger, worktree: Path, error: str) -> None:
