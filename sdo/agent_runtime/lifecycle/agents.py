@@ -146,6 +146,10 @@ _DETECTOR_SDK_REFERENCE = """Trusted controller/sdk API reference (do not search
 - `sdk.ConfigMapReferencesForDeployment(appsv1.Deployment) []sdk.ConfigMapReference` returns sorted,
   deduplicated volume, projected-volume, envFrom, and env ConfigMap references; each reference has `Name string`
   and `Optional bool`.
+- `sdk.ServiceExpectsEndpoints(corev1.Service) bool` is false for ExternalName Services. They are DNS aliases that
+  never have Endpoints, EndpointSlices, or selected pods, and the runtime environment may replace any source Service
+  with one. Skip them before endpoint or pod readiness checks, whatever the health objective says about endpoints;
+  the independent validator rejects a health detector that reports an ExternalName Service for missing endpoints.
 - `sdk.Finding` has string fields `RuleID`, `Summary`, `Evidence`, and `Fingerprint`; enum fields `Status` and
   `Severity`; `PrimaryResource sdk.ObjectRef`; `RelatedResources []sdk.ObjectRef`; `Playbooks []string`;
   `ParameterBindings map[string]sdk.ObjectRef`; and `Metadata map[string]any`. Use `sdk.FindingActive`,

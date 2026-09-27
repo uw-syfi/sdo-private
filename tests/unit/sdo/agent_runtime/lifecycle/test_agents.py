@@ -752,6 +752,40 @@ def test_lifecycle_retries_failed_validation_within_the_same_judge_round(
     ]
 
 
+def test_lifecycle_correction_feedback_keeps_go_test_failures_next_to_toolchain_noise(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    backend = RecordingBackend()
+    violation = (
+        'detector "health-objective" reported ExternalName Service sdo-externalname-check/jaeger '
+        "only when it had no ready endpoints or pods"
+    )
+
+    class GoTestFailureValidator(PassingValidator):
+        def run(self, app_root: Path) -> SandboxResult:
+            result = super().run(app_root)
+            if len(self.runs) == 1:
+                return SandboxResult(
+                    returncode=1,
+                    stdout=f"--- FAIL: TestHealthDetectorsExemptExternalNameServices\n    {violation}\n",
+                    stderr="go: downloading k8s.io/api v0.30.3\n",
+                )
+            return result
+
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective="Deployment example and Service example must remain available.",
+        backend=backend,
+        validator=GoTestFailureValidator(),
+        judge_rounds=1,
+        judge_corrections_per_round=2,
+    )
+
+    feedback = str(backend.judge_calls[1][2])
+    assert violation in feedback
+    assert "go: downloading" in feedback
+
+
 def test_lifecycle_enforces_immutable_health_registration_around_judge_authored_checks(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
 

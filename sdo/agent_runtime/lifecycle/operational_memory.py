@@ -424,7 +424,11 @@ def run_initial_lifecycle(
                         validator=selected_validator,
                     )
                 if validation.returncode != 0:
-                    details = validation.stderr.strip() or validation.stdout.strip() or "detector validation failed"
+                    # Go reports test failures on stdout; stderr may hold only toolchain noise.
+                    details = (
+                        "\n".join(stream.strip() for stream in (validation.stderr, validation.stdout) if stream.strip())
+                        or "detector validation failed"
+                    )
                     errors.append(details)
             previous = artifact
             last_errors = errors
