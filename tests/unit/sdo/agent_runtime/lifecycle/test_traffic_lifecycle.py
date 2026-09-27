@@ -1,4 +1,4 @@
-"""The lifecycle installs health-judge traffic mixes and the generic symptom detectors."""
+"""The lifecycle installs health-judge synthetic traffic and the generic symptom detectors."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import yaml
 from controller.builder.manifest import load_manifest
 from sdo.agent_runtime.lifecycle.agents import (
     ActiveTopologyResourceDTO,
-    AuthoredTrafficMix,
+    AuthoredTrafficFile,
     CodexLifecycleBackend,
     DeployerAssessment,
     HealthJudgeArtifact,
@@ -40,36 +40,60 @@ if TYPE_CHECKING:
 
 OBJECTIVE = "Deployment example and Service example must remain available."
 
-EXAMPLE_MIX = """apiVersion: sdo.dev/v1alpha1
-kind: TrafficMix
-name: web
-target:
-  service: example
-  port: 80
-routes:
-  - id: home
-    method: GET
-    path: /
+GENERATORS = """package generators
+
+import "sdo.dev/controller/sdk/traffic"
+
+func Scenarios() traffic.Catalog {
+\treturn traffic.Catalog{{
+\t\tID: "home", Target: traffic.Target{Service: "example", Port: 80}, SideEffect: traffic.SideEffectRead,
+\t\tSteps: []traffic.Step{{Name: "home", Endpoint: traffic.GET("/", nil)}},
+\t}}
+}
 """
 
 
-def _judged(tmp_path: Path, *, mixes: list[AuthoredTrafficMix]) -> tuple[Path, DeployerAssessment, HealthJudgeArtifact]:
+def _workload(name: str, purpose: str = "health-probe") -> str:
+    document: dict[str, object] = {
+        "apiVersion": "sdo.dev/v1alpha1",
+        "kind": "TrafficWorkload",
+        "name": name,
+        "purpose": purpose,
+        "scenarios": [{"id": "home"}],
+    }
+    if purpose != "health-probe":
+        document["duration"] = "3s"
+    return yaml.safe_dump(document)
+
+
+def _files(**overrides: str) -> list[AuthoredTrafficFile]:
+    files = {
+        "generators/generators.go": GENERATORS,
+        "workloads/health.yaml": _workload("health"),
+        "workloads/verify.yaml": _workload("verify", "verify-burst"),
+        **overrides,
+    }
+    return [AuthoredTrafficFile(path=path, content=content) for path, content in files.items()]
+
+
+def _judged(
+    tmp_path: Path, *, files: list[AuthoredTrafficFile]
+) -> tuple[Path, DeployerAssessment, HealthJudgeArtifact]:
     repository = _repository(tmp_path)
     deployer = RecordingBackend().run_deployer(repository=repository, application="example", correction_feedback=None)
     artifact = _artifact(repository, session_id="judge", round_index=1, deployer=deployer)
-    return repository, deployer, artifact.model_copy(update={"traffic_mixes": mixes})
+    return repository, deployer, artifact.model_copy(update={"traffic_files": files})
 
 
-def test_judge_output_schema_requires_traffic_mixes_for_strict_structured_turns() -> None:
+def test_judge_output_schema_requires_traffic_files_for_strict_structured_turns() -> None:
     schema = HealthJudgeDraft.model_json_schema()
-    assert "traffic_mixes" in schema["required"]
-    mix_schema = schema["$defs"]["AuthoredTrafficMix"]
-    assert sorted(mix_schema["required"]) == sorted(mix_schema["properties"])
+    assert "traffic_files" in schema["required"]
+    file_schema = schema["$defs"]["AuthoredTrafficFile"]
+    assert sorted(file_schema["required"]) == sorted(file_schema["properties"])
 
 
-def test_lifecycle_installs_mix_traffic_detector_and_endpoint_detector(tmp_path: Path) -> None:
-    mixes = [AuthoredTrafficMix(name="web", document_yaml=EXAMPLE_MIX)]
-    repository, deployer, artifact = _judged(tmp_path, mixes=mixes)
+def test_lifecycle_installs_traffic_and_one_detector_per_health_probe_workload(tmp_path: Path) -> None:
+    repository, deployer, artifact = _judged(tmp_path, files=_files())
 
     ensure_operational_memory(
         repository,
@@ -79,31 +103,33 @@ def test_lifecycle_installs_mix_traffic_detector_and_endpoint_detector(tmp_path:
         architecture_summary_markdown=deployer.architecture_summary_markdown,
     )
 
-    assert [mix.name for mix in MemoryRepository(repository).traffic_mixes()] == ["web"]
+    traffic = repository / ".sdo" / "diagnostics" / "traffic"
+    assert (traffic / "generators" / "generators.go").read_text(encoding="utf-8") == GENERATORS
+    assert [workload.name for workload in MemoryRepository(repository).traffic_workloads()] == ["health", "verify"]
     manifest = load_manifest(repository / ".sdo/diagnostics/manifest.yaml", app_root=repository)
     registrations = {detector.id: detector for detector in manifest.detectors}
-    assert sorted(registrations) == ["health-objective", "service-endpoints", "traffic-web"]
-    for detector_id in ("service-endpoints", "traffic-web"):
+    assert sorted(registrations) == ["health-objective", "service-endpoints", "traffic-health"]
+    for detector_id in ("service-endpoints", "traffic-health"):
         registration = registrations[detector_id]
         assert registration.detector_class == "health"
         assert registration.owner == "health_judge"
         assert registration.package.startswith("./detectors/health/")
-    assert [(watch.api_version, watch.kind) for watch in registrations["traffic-web"].watches] == [
+    assert [(watch.api_version, watch.kind) for watch in registrations["traffic-health"].watches] == [
         ("sdo.dev/v1alpha1", "SyntheticTraffic")
     ]
-    source = (repository / ".sdo/diagnostics/detectors/health/traffic-web/detector.go").read_text(encoding="utf-8")
+    source = (repository / ".sdo/diagnostics/detectors/health/traffic-health/detector.go").read_text(encoding="utf-8")
     assert "traffic.NewDetector(" in source
-    assert '"web")' in source
+    assert '"health")' in source
     MemoryValidator(run_diagnostics=False).validate(
         repository,
         actor=ArtifactOwner.HEALTH_JUDGE,
-        changed_paths=[".sdo/diagnostics/traffic/web.yaml"],
+        changed_paths=[".sdo/diagnostics/traffic/workloads/health.yaml"],
         baseline_root=repository,
     )
 
 
-def test_lifecycle_without_mixes_still_installs_the_endpoint_detector(tmp_path: Path) -> None:
-    repository, deployer, artifact = _judged(tmp_path, mixes=[])
+def test_lifecycle_without_traffic_still_installs_the_endpoint_detector(tmp_path: Path) -> None:
+    repository, deployer, artifact = _judged(tmp_path, files=[])
 
     ensure_operational_memory(
         repository,
@@ -115,33 +141,42 @@ def test_lifecycle_without_mixes_still_installs_the_endpoint_detector(tmp_path: 
 
     manifest = load_manifest(repository / ".sdo/diagnostics/manifest.yaml", app_root=repository)
     assert sorted(detector.id for detector in manifest.detectors) == ["health-objective", "service-endpoints"]
-    assert MemoryRepository(repository).traffic_mixes() == []
+    assert MemoryRepository(repository).traffic_workloads() == []
 
 
-def test_judge_mix_must_be_valid_and_target_a_source_backed_service(tmp_path: Path) -> None:
-    repository, deployer, artifact = _judged(
+def test_judge_traffic_must_be_valid_and_target_source_backed_services(tmp_path: Path) -> None:
+    _, deployer, artifact = _judged(
         tmp_path,
-        mixes=[
-            AuthoredTrafficMix(name="web", document_yaml=EXAMPLE_MIX.replace("service: example", "service: ghost")),
-            AuthoredTrafficMix(name="admin", document_yaml=EXAMPLE_MIX),
-            AuthoredTrafficMix(name="bad", document_yaml=EXAMPLE_MIX.replace("name: web", "name: bad").replace(
-                "path: /", "path: http://evil.example/")),
-        ],
+        files=_files(
+            **{
+                "generators/generators.go": GENERATORS.replace('Service: "example"', 'Service: "ghost"'),
+                "workloads/health.yaml": _workload("admin"),
+                "workloads/incident-x.yaml": _workload("incident-x", "journey"),
+                "workloads/verify.yaml": _workload("verify").replace("scenarios", "sceanrios"),
+            }
+        ),
     )
 
-    errors = _validate_health_judge_artifact(
-        artifact, deployer=deployer, health_objective=OBJECTIVE, expected_round=1
-    )
+    errors = _validate_health_judge_artifact(artifact, deployer=deployer, health_objective=OBJECTIVE, expected_round=1)
 
     joined = "\n".join(errors)
     assert "Service/ghost" in joined
-    assert "'admin'" in joined
-    assert "'bad'" in joined
-    assert "path" in joined
-    del repository
+    assert "declares name 'admin'" in joined
+    assert "incident-" in joined
+    assert "workloads/verify.yaml' is invalid" in joined
 
 
-def test_workspace_judge_may_author_traffic_mixes_but_nothing_else_new(tmp_path: Path) -> None:
+def test_judge_generators_need_a_health_probe_workload(tmp_path: Path) -> None:
+    _, deployer, artifact = _judged(
+        tmp_path, files=[AuthoredTrafficFile(path="generators/generators.go", content=GENERATORS)]
+    )
+
+    errors = _validate_health_judge_artifact(artifact, deployer=deployer, health_objective=OBJECTIVE, expected_round=1)
+
+    assert any("health-probe workload" in error for error in errors)
+
+
+def test_workspace_judge_may_author_traffic_but_nothing_else_new(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
 
     class WorkspaceBackend(RecordingBackend):
@@ -158,11 +193,14 @@ def test_workspace_judge_may_author_traffic_mixes_but_nothing_else_new(tmp_path:
             active_resources: list[ActiveTopologyResourceDTO] | None = None,
         ) -> HealthJudgeWorkspaceArtifact:
             del application, health_objective, previous, correction_feedback, active_resources
-            authored = _artifact(repository, session_id=f"workspace-{round_index}", round_index=round_index,
-                                 deployer=deployer)
+            authored = _artifact(
+                repository, session_id=f"workspace-{round_index}", round_index=round_index, deployer=deployer
+            )
             traffic = repository / ".sdo/diagnostics/traffic"
-            traffic.mkdir(parents=True, exist_ok=True)
-            (traffic / "web.yaml").write_text(EXAMPLE_MIX, encoding="utf-8")
+            for authored_file in _files():
+                path = traffic / authored_file.path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(authored_file.content, encoding="utf-8")
             return HealthJudgeWorkspaceArtifact(
                 session_id=authored.session_id,
                 round=round_index,
@@ -181,13 +219,18 @@ def test_workspace_judge_may_author_traffic_mixes_but_nothing_else_new(tmp_path:
         judge_rounds=1,
     )
 
-    assert (repository / ".sdo/diagnostics/traffic/web.yaml").read_text(encoding="utf-8") == EXAMPLE_MIX
+    traffic = repository / ".sdo/diagnostics/traffic"
+    assert (traffic / "generators" / "generators.go").read_text(encoding="utf-8") == GENERATORS
     provenance = yaml.safe_load((repository / ".sdo/lifecycle-provenance.yaml").read_text(encoding="utf-8"))
-    assert [mix["name"] for mix in provenance["health_judge"]["traffic_mixes"]] == ["web"]
-    assert (repository / ".sdo/diagnostics/detectors/health/traffic-web/detector.go").is_file()
+    assert [item["path"] for item in provenance["health_judge"]["traffic_files"]] == [
+        "generators/generators.go",
+        "workloads/health.yaml",
+        "workloads/verify.yaml",
+    ]
+    assert (repository / ".sdo/diagnostics/detectors/health/traffic-health/detector.go").is_file()
 
 
-def test_judge_prompts_ask_for_a_source_grounded_traffic_mix(tmp_path: Path) -> None:
+def test_judge_prompts_ask_for_source_grounded_generators_and_workloads(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     deployer = RecordingBackend().run_deployer(repository=repository, application="example", correction_feedback=None)
     artifact = _artifact(repository, session_id="placeholder", round_index=1, deployer=deployer)
@@ -208,5 +251,16 @@ def test_judge_prompts_ask_for_a_source_grounded_traffic_mix(tmp_path: Path) -> 
     )
 
     prompt = agent.prompts[0]
-    for expected in (".sdo/diagnostics/traffic/", "syntheticMarker", "dataPolicy", "read and write", ".sdo/arch.md"):
+    for expected in (
+        ".sdo/diagnostics/traffic/",
+        "generators/",
+        "workloads/<name>.yaml",
+        "health-probe",
+        "verify-burst",
+        "DependsOn",
+        "Marker",
+        "read and write",
+        ".sdo/arch.md",
+        "traffic_files",
+    ):
         assert expected in prompt

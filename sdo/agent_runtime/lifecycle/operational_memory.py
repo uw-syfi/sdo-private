@@ -17,7 +17,7 @@ import yaml
 
 from sdo.agent_runtime.lifecycle.agents import (
     ActiveTopologyResourceDTO,
-    AuthoredTrafficMix,
+    AuthoredTrafficFile,
     CodexLifecycleBackend,
     DeployerAssessment,
     DeployerHandoff,
@@ -30,12 +30,14 @@ from sdo.agent_runtime.lifecycle.agents import (
 )
 from sdo.operational_memory import (
     BROKER_AUTHOR_EMAIL,
+    TRAFFIC_DIRECTORY,
+    TRAFFIC_INCIDENT_WORKLOAD_PREFIX,
     VALIDATION_PASSED_TRAILER,
     ContainerSandboxRunner,
     SandboxResult,
     SandboxRunner,
+    TrafficWorkload,
 )
-from sdo.operational_memory.models import TRAFFIC_MIX_DIRECTORY, TrafficMix
 
 if TYPE_CHECKING:
     from sdo.agent_runtime.lifecycle.validation_cache import LifecycleValidationCache
@@ -100,7 +102,7 @@ def _health_judge_authoring_errors(root: Path) -> list[str]:
             failure_patterns=["authoring draft"],
             detector_source=(detector / "detector.go").read_text(encoding="utf-8"),
             detector_test_source=(detector / "detector_test.go").read_text(encoding="utf-8"),
-            traffic_mixes=_authored_traffic_mixes(root),
+            traffic_files=_authored_traffic_files(root),
         )
         artifact = _canonicalize_active_coverage(
             artifact,
@@ -766,7 +768,7 @@ def _validate_health_judge_artifact(
         _canonicalize_health_registration(source)
     except LifecycleError as exc:
         errors.append(str(exc))
-    errors.extend(_traffic_mix_errors(artifact.traffic_mixes, deployer))
+    errors.extend(_traffic_errors(artifact.traffic_files, deployer))
     return errors
 
 
@@ -890,7 +892,7 @@ def _run_workspace_authored_candidate(
         changed = set(_git(candidate, "diff", "--name-only", baseline_commit).splitlines())
         changed.update(_git(candidate, "ls-files", "--others", "--exclude-standard").splitlines())
         unexpected = sorted(
-            path for path in changed if path and path not in allowed and not _TRAFFIC_MIX_PATH.fullmatch(path)
+            path for path in changed if path and path not in allowed and not _is_judge_traffic_path(path)
         )
         if unexpected:
             raise LifecycleError("health judge edited files outside its ownership: " + ", ".join(unexpected))
@@ -903,9 +905,9 @@ def _run_workspace_authored_candidate(
             session_id=metadata.session_id,
             detector_source=source,
             detector_test_source=detector_test.read_text(encoding="utf-8"),
-            traffic_mixes=_authored_traffic_mixes(candidate),
+            traffic_files=_authored_traffic_files(candidate),
         )
-        # The judge authors mixes; the lifecycle installs the detectors that judge them.
+        # The judge authors traffic; the lifecycle installs the detectors that judge it.
         _ensure_generic_health_detectors(candidate)
         return artifact, validator.run(candidate), _diagnostics_digest(candidate)
 
@@ -1070,7 +1072,7 @@ detectors:
         _write_health_detector(detector, plan)
     else:
         _write_authored_health_detector(detector, health_judge_artifact)
-        _write_traffic_mixes(root, health_judge_artifact.traffic_mixes)
+        _write_traffic_files(root, health_judge_artifact.traffic_files)
     _ensure_generic_health_detectors(root)
     _commit(root, "sdo: capture goal, architecture, and independent health judge")
     return _git(root, "rev-parse", "HEAD")
@@ -1101,7 +1103,7 @@ def _refresh_model_backed_operational_memory(
     if health_judge_artifact is not None:
         detector = memory / "diagnostics" / "detectors" / "health" / "objective"
         _write_authored_health_detector(detector, health_judge_artifact)
-        _write_traffic_mixes(root, health_judge_artifact.traffic_mixes)
+        _write_traffic_files(root, health_judge_artifact.traffic_files)
     _ensure_health_configmap_watch(root)
     _ensure_generic_health_detectors(root)
     if lifecycle_provenance is not None:
@@ -1136,35 +1138,67 @@ _GENERIC_BLOCK_RE = re.compile(
 )
 
 
-_TRAFFIC_MIX_PATH = re.compile(rf"{re.escape(TRAFFIC_MIX_DIRECTORY)}/[a-z0-9]([-a-z0-9]{{0,61}}[a-z0-9])?\.yaml")
+#: Judge-authored traffic files, relative to ``.sdo/diagnostics/traffic/``;
+#: the responder-owned ``generators/incident/`` and ``incident-*`` workloads are excluded.
+_JUDGE_TRAFFIC_FILE = re.compile(
+    rf"generators/[a-z0-9_]+\.go|workloads/(?!{TRAFFIC_INCIDENT_WORKLOAD_PREFIX})[a-z0-9]([-a-z0-9]{{0,61}}[a-z0-9])?\.yaml"
+)
 
 
-def traffic_detector_id(mix_name: str) -> str:
-    return f"{TRAFFIC_DETECTOR_PREFIX}{mix_name}"
+def _is_judge_traffic_path(path: str) -> bool:
+    prefix = f"{TRAFFIC_DIRECTORY}/"
+    return path.startswith(prefix) and bool(_JUDGE_TRAFFIC_FILE.fullmatch(path.removeprefix(prefix)))
 
 
-def _write_traffic_mixes(root: Path, mixes: list[AuthoredTrafficMix]) -> None:
-    """Make the judge's mixes the complete set under ``.sdo/diagnostics/traffic/``."""
-
-    directory = root / TRAFFIC_MIX_DIRECTORY
-    if directory.is_dir():
-        for stale in directory.glob("*.yaml"):
-            stale.unlink()
-    if not mixes:
-        return
-    directory.mkdir(parents=True, exist_ok=True)
-    for mix in mixes:
-        (directory / f"{mix.name}.yaml").write_text(mix.document_yaml.rstrip() + "\n", encoding="utf-8")
+def traffic_detector_id(workload: str) -> str:
+    return f"{TRAFFIC_DETECTOR_PREFIX}{workload}"
 
 
-def _authored_traffic_mixes(root: Path) -> list[AuthoredTrafficMix]:
-    directory = root / TRAFFIC_MIX_DIRECTORY
+def _judge_traffic_files(root: Path) -> list[Path]:
+    directory = root / TRAFFIC_DIRECTORY
     if not directory.is_dir():
         return []
+    return sorted(
+        path
+        for path in directory.rglob("*")
+        if path.is_file() and _JUDGE_TRAFFIC_FILE.fullmatch(path.relative_to(directory).as_posix())
+    )
+
+
+def _write_traffic_files(root: Path, files: list[AuthoredTrafficFile]) -> None:
+    """Make the judge's files the complete judge-owned set under ``.sdo/diagnostics/traffic/``."""
+
+    for stale in _judge_traffic_files(root):
+        stale.unlink()
+    directory = root / TRAFFIC_DIRECTORY
+    for authored in files:
+        path = directory / authored.path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(authored.content.rstrip() + "\n", encoding="utf-8")
+
+
+def _authored_traffic_files(root: Path) -> list[AuthoredTrafficFile]:
+    directory = root / TRAFFIC_DIRECTORY
     return [
-        AuthoredTrafficMix(name=path.stem, document_yaml=path.read_text(encoding="utf-8"))
-        for path in sorted(directory.glob("*.yaml"))
+        AuthoredTrafficFile(path=path.relative_to(directory).as_posix(), content=path.read_text(encoding="utf-8"))
+        for path in _judge_traffic_files(root)
     ]
+
+
+def _health_probe_workloads(root: Path) -> list[str]:
+    """Judge-owned health-probe workloads; invalid ones are reported by validation, not here."""
+
+    names = []
+    for path in _judge_traffic_files(root):
+        if path.suffix != ".yaml":
+            continue
+        try:
+            workload = TrafficWorkload.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+        except (yaml.YAMLError, ValueError):
+            continue
+        if workload.purpose == "health-probe" and workload.name == path.stem:
+            names.append(workload.name)
+    return sorted(names)
 
 
 def _generic_registration(detector_id: str, package: str, watches: list[tuple[str, str]], interval: str) -> str:
@@ -1242,11 +1276,11 @@ func TestRegistration(t *testing.T) {{
 """
 
 
-def _traffic_detector_source(mix_name: str) -> str:
+def _traffic_detector_source(workload: str) -> str:
     return f"""// Code generated by the SDO lifecycle. DO NOT EDIT.
 
-// Package synthetic judges the health judge's traffic mix
-// .sdo/diagnostics/traffic/{mix_name}.yaml with controller/sdk/traffic.
+// Package synthetic judges the health judge's health-probe workload
+// .sdo/diagnostics/traffic/workloads/{workload}.yaml with controller/sdk/traffic.
 package synthetic
 
 import (
@@ -1258,16 +1292,16 @@ import (
 
 func New() sdk.Detector {{
 	return traffic.NewDetector(sdk.DetectorSpec{{
-		ID:          "{traffic_detector_id(mix_name)}",
+		ID:          "{traffic_detector_id(workload)}",
 {_GENERIC_SPEC_FIELDS}
 		Watches:     []sdk.WatchKind{{traffic.Watch}},
 		Interval:    10 * time.Second,
-	}}, "{mix_name}")
+	}}, "{workload}")
 }}
 """
 
 
-def _traffic_detector_test_source(mix_name: str) -> str:
+def _traffic_detector_test_source(workload: str) -> str:
     return f"""// Code generated by the SDO lifecycle. DO NOT EDIT.
 
 package synthetic
@@ -1280,15 +1314,15 @@ import (
 
 func TestRegistration(t *testing.T) {{
 	consumer, ok := New().(traffic.Consumer)
-	if !ok || len(consumer.TrafficMixes()) != 1 || consumer.TrafficMixes()[0] != "{mix_name}" {{
-		t.Fatalf("detector must judge traffic mix {mix_name}")
+	if !ok || len(consumer.TrafficWorkloads()) != 1 || consumer.TrafficWorkloads()[0] != "{workload}" {{
+		t.Fatalf("detector must judge traffic workload {workload}")
 	}}
 }}
 """
 
 
 def _ensure_generic_health_detectors(root: Path) -> None:
-    """Install the endpoint check and one traffic detector per stored mix, idempotently.
+    """Install the endpoint check and one traffic detector per health-probe workload, idempotently.
 
     Their registrations sit in marked blocks at the end of the detector list so a
     refresh replaces exactly them and never touches responder-owned entries.
@@ -1296,12 +1330,12 @@ def _ensure_generic_health_detectors(root: Path) -> None:
 
     diagnostics = root / ".sdo" / "diagnostics"
     health = diagnostics / "detectors" / "health"
-    mix_names = sorted(path.stem for path in (root / TRAFFIC_MIX_DIRECTORY).glob("*.yaml"))
+    workloads = _health_probe_workloads(root)
     packages = {
         ENDPOINT_DETECTOR_ID: (_endpoint_detector_source(), _endpoint_detector_test_source()),
         **{
             traffic_detector_id(name): (_traffic_detector_source(name), _traffic_detector_test_source(name))
-            for name in mix_names
+            for name in workloads
         },
     }
     for stale in health.glob(f"{TRAFFIC_DETECTOR_PREFIX}*"):
@@ -1324,7 +1358,7 @@ def _ensure_generic_health_detectors(root: Path) -> None:
     if ENDPOINT_DETECTOR_ID not in unmarked:
         endpoint_watches = [("v1", "Service"), ("v1", "Endpoints"), ("v1", "Pod"), ("apps/v1", "Deployment")]
         blocks.append(_generic_registration(ENDPOINT_DETECTOR_ID, ENDPOINT_DETECTOR_ID, endpoint_watches, "15s"))
-    for name in mix_names:
+    for name in workloads:
         detector_id = traffic_detector_id(name)
         if detector_id not in unmarked:
             blocks.append(
@@ -1344,26 +1378,49 @@ def _ensure_generic_health_detectors(root: Path) -> None:
     manifest.write_text(head + separator + list_body + "".join(blocks) + rest, encoding="utf-8")
 
 
-def _traffic_mix_errors(mixes: list[AuthoredTrafficMix], deployer: DeployerAssessment) -> list[str]:
+_GENERATOR_TARGET_RE = re.compile(r'Service:\s*"([^"]+)"')
+
+
+def _traffic_errors(files: list[AuthoredTrafficFile], deployer: DeployerAssessment) -> list[str]:
+    """Check judge-authored traffic before the validator compiles and tests it."""
+
     services = {resource.name for resource in deployer.resources if resource.kind == "Service"}
-    names = [mix.name for mix in mixes]
+    paths = [authored.path for authored in files]
     errors = [
-        f"traffic mix name {duplicate!r} is used more than once"
-        for duplicate in sorted({name for name in names if names.count(name) > 1})
+        f"traffic file {duplicate!r} is authored more than once"
+        for duplicate in sorted({path for path in paths if paths.count(path) > 1})
     ]
-    for authored in mixes:
+    generators = [authored for authored in files if authored.path.startswith("generators/")]
+    workloads = [authored for authored in files if authored.path.startswith("workloads/")]
+    errors.extend(
+        f"traffic file {authored.path!r} must be generators/<file>.go or workloads/<name>.yaml "
+        f"(not an {TRAFFIC_INCIDENT_WORKLOAD_PREFIX}* workload)"
+        for authored in files
+        if not _JUDGE_TRAFFIC_FILE.fullmatch(authored.path)
+    )
+    if workloads and not generators:
+        errors.append("traffic workloads need a generators/ Go package providing their scenarios")
+    for authored in generators:
+        if not re.search(r"^package generators\s*$", authored.content, re.MULTILINE):
+            errors.append(f"traffic file {authored.path!r} must be in package generators")
+        errors.extend(
+            f"traffic file {authored.path!r} targets Service/{service}, which is not a source-backed Service "
+            "in the deployer handoff"
+            for service in sorted(set(_GENERATOR_TARGET_RE.findall(authored.content)) - services)
+        )
+    health_probes = 0
+    for authored in workloads:
+        name = Path(authored.path).stem
         try:
-            mix = TrafficMix.model_validate(yaml.safe_load(authored.document_yaml))
+            workload = TrafficWorkload.model_validate(yaml.safe_load(authored.content))
         except (yaml.YAMLError, ValueError) as exc:
-            errors.append(f"traffic mix {authored.name!r} is invalid: {exc}")
+            errors.append(f"traffic workload {authored.path!r} is invalid: {exc}")
             continue
-        if mix.name != authored.name:
-            errors.append(f"traffic mix {authored.name!r} declares name {mix.name!r}; the name must match its file")
-        if mix.target.service not in services:
-            errors.append(
-                f"traffic mix {authored.name!r} targets Service/{mix.target.service}, which is not a source-backed "
-                "Service in the deployer handoff"
-            )
+        if workload.name != name:
+            errors.append(f"traffic workload {authored.path!r} declares name {workload.name!r}; it must match its file")
+        health_probes += workload.purpose == "health-probe"
+    if generators and not health_probes:
+        errors.append("traffic generators need a health-probe workload that runs them continuously")
     return errors
 
 
