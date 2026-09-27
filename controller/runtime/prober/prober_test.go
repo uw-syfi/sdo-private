@@ -190,3 +190,53 @@ func TestNewRejectsWorkloadsNamingUnknownScenarios(t *testing.T) {
 		t.Fatalf("a workload's name must match its file")
 	}
 }
+
+// pathApp serves "fine" everywhere except on paths it was told to break.
+type pathApp struct{ broken map[string]*atomic.Bool }
+
+func (a *pathApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if flag, ok := a.broken[r.URL.Path]; ok && flag.Load() {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	_, _ = w.Write([]byte(`{"status": "fine"}`))
+}
+
+func TestVerifyBurstDoesNotBlockOnScenariosTheProbeNeverSawPass(t *testing.T) {
+	status := &atomic.Bool{}
+	status.Store(true)
+	home := &atomic.Bool{}
+	application := &pathApp{broken: map[string]*atomic.Bool{"/status": status, "/": home}}
+	p := newProber(t, application)
+	// The steady probe has only ever seen /status fail: its generator is
+	// wrong for this application, so it never qualified and cannot fire.
+	probeFor(t, p, 600*time.Millisecond)
+
+	result, err := p.Burst(context.Background(), prober.BurstRequest{Workload: "verify"})
+	if err != nil {
+		t.Fatalf("burst: %v", err)
+	}
+	verdicts := map[string]prober.ScenarioVerdict{}
+	for _, verdict := range result.Verdicts {
+		verdicts[verdict.Scenario] = verdict
+	}
+	if verdicts["status"].Qualified || verdicts["status"].Healthy {
+		t.Fatalf("a never-qualified scenario must be reported unqualified and failing: %+v", verdicts["status"])
+	}
+	if !verdicts["home"].Qualified || !verdicts["home"].Healthy {
+		t.Fatalf("a qualified healthy scenario: %+v", verdicts["home"])
+	}
+	if !result.Healthy {
+		t.Fatalf("an unqualified scenario must not block the burst, as it cannot block closure: %+v", result)
+	}
+
+	// A qualified scenario that fails still blocks.
+	home.Store(true)
+	result, err = p.Burst(context.Background(), prober.BurstRequest{Workload: "verify"})
+	if err != nil {
+		t.Fatalf("burst: %v", err)
+	}
+	if result.Healthy {
+		t.Fatalf("a failing qualified scenario must block the burst: %+v", result)
+	}
+}

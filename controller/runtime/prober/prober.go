@@ -238,8 +238,13 @@ type BurstRequest struct {
 
 // ScenarioVerdict is one scenario's judgement after a burst.
 type ScenarioVerdict struct {
-	Scenario   string         `json:"scenario"`
-	Healthy    bool           `json:"healthy"`
+	Scenario string `json:"scenario"`
+	Healthy  bool   `json:"healthy"`
+	// Qualified is false when the steady probe has observed the scenario
+	// but never seen it pass since the controller started: its generator
+	// does not fit this application, its health detector cannot fire, and
+	// so it does not block the burst either.
+	Qualified  bool           `json:"qualified"`
 	Evaluated  bool           `json:"evaluated"`
 	Samples    int            `json:"samples"`
 	ErrorRate  float64        `json:"errorRate"`
@@ -250,7 +255,7 @@ type ScenarioVerdict struct {
 }
 
 // BurstResult is the outcome of a verify burst. Healthy requires every
-// scenario to have been evaluated and to meet its SLO.
+// qualified scenario to have been evaluated and to meet its SLO.
 type BurstResult struct {
 	Workload  string            `json:"workload"`
 	Healthy   bool              `json:"healthy"`
@@ -291,6 +296,7 @@ func (p *Prober) Burst(ctx context.Context, request BurstRequest) (BurstResult, 
 	if ctx.Err() != nil {
 		return BurstResult{}, ctx.Err()
 	}
+	unqualified := p.unqualifiedScenarios()
 	result := BurstResult{Workload: workload.Name, Healthy: true, StartedAt: started.UTC(), Duration: p.config.Clock.Now().Sub(started)}
 	window := traffic.Window{Workload: workload, ObservedAt: p.config.Clock.Now().UTC()}
 	for _, id := range state.order {
@@ -305,17 +311,45 @@ func (p *Prober) Burst(ctx context.Context, request BurstRequest) (BurstResult, 
 		for _, sample := range verdict.RecentFailures {
 			failures = append(failures, fmt.Sprintf("iteration %d step %s %s: %s", sample.Iteration, sample.Step, sample.Request, sample.Error))
 		}
+		qualified := !unqualified[id]
 		result.Verdicts = append(result.Verdicts, ScenarioVerdict{
-			Scenario: id, Healthy: verdict.Evaluated && verdict.Healthy, Evaluated: verdict.Evaluated,
+			Scenario: id, Healthy: verdict.Evaluated && verdict.Healthy, Qualified: qualified, Evaluated: verdict.Evaluated,
 			Samples: verdict.Samples, ErrorRate: verdict.ErrorRate, LatencyMS: verdict.Latency.Milliseconds(),
 			Violations: verdict.Violations, Statuses: verdict.StatusCounts, Failures: failures,
 		})
-		if !verdict.Evaluated || !verdict.Healthy {
+		if qualified && (!verdict.Evaluated || !verdict.Healthy) {
 			result.Healthy = false
 		}
 	}
 	result.Window = window
 	return result, nil
+}
+
+// unqualifiedScenarios are the scenarios the steady probe has observed but
+// never seen pass. A scenario the probe has not observed at all, for example
+// before it starts or in a burst-only scenario, stays qualified.
+func (p *Prober) unqualifiedScenarios() map[string]bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	observed := map[string]bool{}
+	passed := map[string]bool{}
+	for _, state := range p.probes {
+		for id, scenario := range state.scenarios {
+			if len(scenario.samples) > 0 {
+				observed[id] = true
+			}
+			if scenario.qualified {
+				passed[id] = true
+			}
+		}
+	}
+	unqualified := map[string]bool{}
+	for id := range observed {
+		if !passed[id] {
+			unqualified[id] = true
+		}
+	}
+	return unqualified
 }
 
 func (p *Prober) burstWorkload(request BurstRequest) (traffic.Workload, error) {
