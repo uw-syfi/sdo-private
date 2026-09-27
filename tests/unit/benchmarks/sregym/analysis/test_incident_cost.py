@@ -246,3 +246,31 @@ def test_token_usage_validates_counts() -> None:
         TokenUsage(input_tokens=-1)
     with pytest.raises(TypeError):
         TokenUsage(output_tokens=1.5)  # type: ignore[arg-type]
+
+
+def test_reflection_turn_seconds_count_only_the_stage_incident_in_a_shared_usage_log(tmp_path: Path) -> None:
+    """A persistent controller's usage log accumulates every incident's reflection turns."""
+
+    from sdo.operational_memory.worktrees import incident_worktree_dirname
+
+    root = tmp_path / "20260927_000000_pipeline_sdo-codex-luna-persistent"
+    stage = _sdo_stage(
+        root, 0, "first", PROBLEM_A, responder=_usage(1, 0), reflection=_usage(1, 0), warm=False, incident_detectors=1
+    )
+    run = stage / "runs" / f"000000_{PROBLEM_A}" / "worker_0" / "results" / "sdo_codex" / PROBLEM_A / "run_1"
+    receipt_path = run / "sdo_production_receipt_strict.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["incident_id"] = "incident-2"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    records = [
+        {"cwd": f"/workspace/wt/{incident_worktree_dirname('incident-1')}", "duration_seconds": 240.0, "usage": {}},
+        {"cwd": f"/workspace/wt/{incident_worktree_dirname('incident-2')}", "duration_seconds": 30.0, "usage": {}},
+        {"cwd": f"/workspace/wt/{incident_worktree_dirname('incident-2')}", "duration_seconds": 12.0, "usage": {}},
+    ]
+    (run / "sdo_runtime" / "usage" / "controller-turns.jsonl").write_text(
+        "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+    )
+
+    (only,) = load_sdo_pipeline(root)
+
+    assert only.reflection_turn_seconds == 42.0

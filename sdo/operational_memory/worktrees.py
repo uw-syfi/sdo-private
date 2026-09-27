@@ -53,10 +53,7 @@ class WorktreeManager:
             shutil.rmtree(path)
 
     def path_for(self, incident_id: str) -> Path:
-        digest = hashlib.sha256(incident_id.encode()).hexdigest()[:12]
-        readable = "".join(character if character.isalnum() else "-" for character in incident_id.lower()).strip("-")
-        readable = readable[:32] or "incident"
-        path = (self.worktree_root / f"{readable}-{digest}").resolve()
+        path = (self.worktree_root / incident_worktree_dirname(incident_id)).resolve()
         try:
             path.relative_to(self.worktree_root)
         except ValueError as exc:
@@ -75,3 +72,12 @@ class WorktreeManager:
             details = completed.stderr.strip() or completed.stdout.strip()
             raise WorktreeError(f"git {' '.join(args)} failed: {details}")
         return completed.stdout.strip()
+
+
+def incident_worktree_dirname(incident_id: str) -> str:
+    """Directory name of an incident's worktree: a readable prefix plus a stable digest."""
+
+    digest = hashlib.sha256(incident_id.encode()).hexdigest()[:12]
+    readable = "".join(character if character.isalnum() else "-" for character in incident_id.lower()).strip("-")
+    readable = readable[:32] or "incident"
+    return f"{readable}-{digest}"

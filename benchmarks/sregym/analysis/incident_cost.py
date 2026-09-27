@@ -45,6 +45,8 @@ from typing import Any
 
 import yaml
 
+from sdo.operational_memory.worktrees import incident_worktree_dirname
+
 WARM_PROMPT_MARKER = "Warm path: validated incident memory matches this incident."
 RECEIPT_NAME = "sdo_production_receipt_strict.json"
 LIFECYCLE_USAGE_NAME = "sdo_turn_usage.jsonl"
@@ -231,7 +233,15 @@ def _problem_results_dirs(experiment_dir: Path) -> list[tuple[str, Path]]:
     ]
 
 
-def _sum_usage_jsonl(paths: list[Path]) -> tuple[TokenUsage, float | None]:
+def _sum_usage_jsonl(paths: list[Path], *, incident_id: str | None = None) -> tuple[TokenUsage, float | None]:
+    """Sum per-turn usage records, optionally only the turns run in one incident's worktree.
+
+    A persistent controller's usage log accumulates every incident it served,
+    so a stage filters by its receipt's incident; the broker runs reflection in
+    the incident worktree, whose directory name is derived from the incident ID.
+    """
+
+    worktree = incident_worktree_dirname(incident_id) if incident_id else None
     usage = TokenUsage()
     seconds: float | None = None
     for path in paths:
@@ -239,6 +249,8 @@ def _sum_usage_jsonl(paths: list[Path]) -> tuple[TokenUsage, float | None]:
             if not line.strip():
                 continue
             record = json.loads(line)
+            if worktree is not None and Path(str(record.get("cwd") or "")).name != worktree:
+                continue
             usage = usage + TokenUsage.from_mapping(record.get("usage"))
             duration = _float(record.get("duration_seconds"))
             if duration is not None:
@@ -320,7 +332,11 @@ def load_sdo_pipeline(pipeline_dir: Path) -> list[SdoStage]:
             receipt: dict[str, Any] = json.loads(receipts[-1].read_text(encoding="utf-8")) if receipts else {}
             reuse = receipt.get("memory_reuse") if isinstance(receipt.get("memory_reuse"), dict) else {}
             phases = receipt.get("phase_timings_seconds") or {}
-            _, reflection_seconds = _sum_usage_jsonl(sorted(results.rglob("sdo_runtime/usage/controller-turns.jsonl")))
+            incident_id = receipt.get("incident_id")
+            _, reflection_seconds = _sum_usage_jsonl(
+                sorted(results.rglob("sdo_runtime/usage/controller-turns.jsonl")),
+                incident_id=incident_id if isinstance(incident_id, str) and incident_id else None,
+            )
             lifecycle, _ = _sum_usage_jsonl(sorted(results.rglob(LIFECYCLE_USAGE_NAME)))
             session = receipt.get("responder_session_id")
             stages.append(
