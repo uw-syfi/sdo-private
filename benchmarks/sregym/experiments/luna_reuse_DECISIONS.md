@@ -861,3 +861,29 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
 - **Codex has no memory,** so the second pass is a fresh draw. It passed 1/4 in the first pass and 3/4 in the second, which is variance, not learning.
 - **Tokens use the old accounting.** Codex's accounting is unaffected by the reflection fix. The final tables come from the new `incident_cost`.
 - The comparison with SDO waits for `sdo_sequence` on w0.
+
+### sdo_sequence (luna-w0): stopped by the user, partial
+
+- **User-directed stop** at 21:55:45Z, during stage 2 (`r1-wrong-service-selector`, before a verdict).
+  - Only the lane's process group was terminated: the launcher shell and its remaining w0 harness processes. Every other lane had already finished.
+  - `hotel-reservation` and `hotel-reservation-sdo` were deleted on luna-w0. Its remaining namespaces (`observe`, `sregym`) match the idle w1 and w3.
+  - The run was renamed `stopped_userdirected_20260927_210146_pipeline_sdo-codex-luna-sequence`.
+  - **The queue is done. No more runs will start.**
+- **Completed stages** (pipeline started 21:01:46Z):
+
+| Stage | Problem | Oracles | TTD s | TTM s | raw incl. judge s | incident resolution s | reflection drain s |
+|---|---|---|---|---|---|---|---|
+| 0 | readiness_probe_misconfiguration | D+ M+ | 24.8 | 54.9 | 81.5 | 121.2 | 0.0 |
+| 1 | missing_configmap | D+ M+ | 35.0 | 176.6 | 197.5 | 262.7 | 140.2 |
+| 2 | wrong_service_selector | stopped | – | – | – | – | – |
+
+- **Tokens are unavailable** for this run. The strict receipts and exported rollouts are written at pipeline end, which the stop pre-empted, so there are no responder, reflection or warm-path figures and no `last_mut_s`. For the same reason, TTM here is the judge-excluded time without the last-mutation floor.
+- **Same positions in `codex_sequence`'s first pass:**
+  - readiness_probe: SDO 54.9 s vs Codex 117.3 s.
+  - missing_configmap: SDO passed in 176.6 s; Codex failed both oracles (the revoked-roles red herring).
+
+**Takeaways**
+- **What the data shows:** SDO passed both stages it finished. It was about 2× faster than Codex on readiness_probe and solved missing_configmap where Codex failed. Its missing_configmap TTM (176.6 s) is at the slow end of its cold range (72–177 s), because this was the first time it saw that fault in this sequence.
+- **Confidence:** very low. n=1 per stage, and only 2 of 8 stages ran. The sequence's real test, repeats in the second pass, never ran.
+- **Implications for SDO:** a cold SDO responder beats or matches cold Codex on the first stages. But the sequence claim (memory amortizes across a mixed stream) is **untested** in this queue.
+- **Next action:** rerun the full SDO and Codex sequences in the next round, when quota allows, as the priority experiment. Consider making strict-receipt and rollout export per stage rather than at pipeline end, so a stopped run keeps its token evidence.
