@@ -251,7 +251,7 @@ def test_token_usage_validates_counts() -> None:
 def test_reflection_turn_seconds_count_only_the_stage_incident_in_a_shared_usage_log(tmp_path: Path) -> None:
     """A persistent controller's usage log accumulates every incident's reflection turns."""
 
-    from sdo.operational_memory.worktrees import incident_worktree_dirname
+    from sdo.operational_memory import incident_worktree_dirname
 
     root = tmp_path / "20260927_000000_pipeline_sdo-codex-luna-persistent"
     stage = _sdo_stage(

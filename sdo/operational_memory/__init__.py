@@ -42,6 +42,7 @@ from sdo.operational_memory.validation import (
     MemoryValidator,
 )
 from sdo.operational_memory.warm_path import WarmPlaybookMatch, warm_playbook_matches
+from sdo.operational_memory.worktrees import incident_worktree_dirname
 
 __all__ = [
     "BROKER_AUTHOR_EMAIL",
@@ -77,5 +78,6 @@ __all__ = [
     "SandboxRunner",
     "TopologyReview",
     "WarmPlaybookMatch",
+    "incident_worktree_dirname",
     "warm_playbook_matches",
 ]

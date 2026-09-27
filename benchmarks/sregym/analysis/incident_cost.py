@@ -45,7 +45,7 @@ from typing import Any
 
 import yaml
 
-from sdo.operational_memory.worktrees import incident_worktree_dirname
+from sdo.operational_memory import incident_worktree_dirname
 
 WARM_PROMPT_MARKER = "Warm path: validated incident memory matches this incident."
 RECEIPT_NAME = "sdo_production_receipt_strict.json"
