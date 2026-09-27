@@ -22,12 +22,7 @@ class TestTokenUsage:
 
     def test_to_dict_round_trip(self):
         u = TokenUsage(input_tokens=10, output_tokens=5, cached_input_tokens=2)
-        assert u.to_dict() == {
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cached_input_tokens": 2,
-            "turns": 0,
-        }
+        assert u.to_dict() == TokenUsage(input_tokens=10, output_tokens=5, cached_input_tokens=2, turns=0).to_dict()
 
     def test_turns_field_defaults_zero(self):
         u = TokenUsage()
@@ -99,19 +94,17 @@ class TestUsageCollector:
         d = c.to_dict()
         assert d == {
             "by_agent": {},
-            "total": {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0, "turns": 0},
+            "total": TokenUsage(input_tokens=0, output_tokens=0, cached_input_tokens=0, turns=0).to_dict(),
         }
 
     def test_add_one_entry(self):
         c = UsageCollector()
         c.add("sre-diagnosis", TokenUsage(input_tokens=10, output_tokens=5))
         d = c.to_dict()
-        assert d["by_agent"]["sre-diagnosis"]["total"] == {
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cached_input_tokens": 0,
-            "turns": 0,
-        }
+        assert (
+            d["by_agent"]["sre-diagnosis"]["total"]
+            == TokenUsage(input_tokens=10, output_tokens=5, cached_input_tokens=0, turns=0).to_dict()
+        )
         assert len(d["by_agent"]["sre-diagnosis"]["iterations"]) == 1
         assert d["total"]["input_tokens"] == 10
 
@@ -138,12 +131,7 @@ class TestUsageCollector:
         c.add("b", TokenUsage(input_tokens=20, output_tokens=8, cached_input_tokens=1))
         c.add("c", TokenUsage(input_tokens=3))
         d = c.to_dict()
-        assert d["total"] == {
-            "input_tokens": 33,
-            "output_tokens": 13,
-            "cached_input_tokens": 1,
-            "turns": 0,
-        }
+        assert d["total"] == TokenUsage(input_tokens=33, output_tokens=13, cached_input_tokens=1, turns=0).to_dict()
 
     def test_total_matches_sum_of_per_agent_totals(self):
         c = UsageCollector()

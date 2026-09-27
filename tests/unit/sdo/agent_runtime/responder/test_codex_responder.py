@@ -34,7 +34,8 @@ def test_codex_responder_captures_resumable_session_id() -> None:
             stdout=[
                 '{"type":"thread.started","thread_id":"session-from-codex"}\n',
                 json.dumps({"type": "item.completed", "item": message}) + "\n",
-                '{"type":"turn.completed","usage":{"input_tokens":321,"cached_input_tokens":123,"output_tokens":45}}\n',
+                '{"type":"turn.completed","usage":{"input_tokens":321,"cached_input_tokens":123,'
+                '"cache_write_input_tokens":0,"output_tokens":45,"reasoning_output_tokens":12}}\n',
             ]
         )
     )
@@ -45,7 +46,10 @@ def test_codex_responder_captures_resumable_session_id() -> None:
     assert completed.usage.llm_calls == 1
     assert completed.usage.input_tokens == 321
     assert completed.usage.cached_input_tokens == 123
+    assert completed.usage.cache_read_input_tokens == 123
+    assert completed.usage.uncached_input_tokens == 198
     assert completed.usage.output_tokens == 45
+    assert completed.usage.reasoning_output_tokens == 12
     (argv,) = agent.argvs
     assert argv[argv.index("--model") + 1] == "gpt-5.5"
     assert parse_sandbox(argv) == CodexSandboxConfig(mode="danger-full-access")
@@ -79,8 +83,11 @@ def test_claude_responder_captures_resumable_session_id() -> None:
     assert completed.responder_session_id == "session-from-claude"
     assert completed.usage.llm_calls == 4
     assert completed.usage.input_tokens == 800
-    assert completed.usage.cached_input_tokens == 300
+    assert completed.usage.cached_input_tokens == 200
+    assert completed.usage.cache_read_input_tokens == 200
     assert completed.usage.cache_write_input_tokens == 100
+    assert completed.usage.uncached_input_tokens == 500
+    assert completed.usage.model_requests == 4
     assert completed.usage.output_tokens == 75
     assert completed.usage.total_cost_usd == 0.25
     (argv,) = agent.argvs

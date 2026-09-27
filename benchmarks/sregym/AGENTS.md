@@ -41,3 +41,20 @@ Report timing without judge time, the same way for every arm (`benchmarks.sregym
 - **Time to mitigation (TTM, the headline):** `mitigation_submitted_at - fault_injected_at`, minus the diagnosis-grading wait `fault_injected_at + TTL - diagnosis_submitted_at`, and never less than when the agent's last state-changing command before its mitigation POST completed, taken from the exported Codex rollout. The floor matters because an agent that keeps repairing while the judge grades its diagnosis would otherwise be undercounted. TTM is unknown when the CSV lacks `diagnosis_submitted_at` or `TTL`.
 - **Supplementary only:** the raw `mitigation_submitted_at - fault_injected_at` (`raw_incl_judge_s`, which includes diagnosis grading), and the CSV's `TTM` column (which also includes the mitigation oracle). Do not present either as a headline number.
 - None of these times includes SDO reflection, lifecycle or controller installation.
+
+## Token metrics
+
+Report tokens the same way for every arm (SDO responder, SDO reflection, one-time lifecycle, and the raw Codex or Claude Code baseline); `benchmarks.sregym.analysis.incident_cost` computes all of these:
+
+- **Breakdown (agentshim >= 0.7, identical for Codex and Claude):** uncached input, cache reads, cache writes (and the one-hour-TTL part), output, and reasoning. `input_tokens` includes cache reads and writes; `output_tokens` includes reasoning.
+- **Raw total:** `input_tokens + output_tokens`. Always keep it beside the weighted total.
+- **Cost-weighted total:** each token class times its weight, in base-input-token units, plus USD where the model is priced.
+  - The weights come from agentshim's static pricing table (`agentshim.default_pricing()`, sourced and dated per entry), keyed by the provider and model in the experiment's `experiment_config.toml`.
+  - gpt-6-luna: cache read 0.1x, cache write 1.25x, output 5x. Claude Haiku 4.5 / Sonnet 5 / Opus 5: read 0.1x, 5m write 1.25x, 1h write 2x, output 5x. Opus 5.5 reads at 0.05x and Fable 5.1 at 0.025x.
+  - State the table version and date (the report prints `prices: ... last updated ...`) and treat the weights as an assumption.
+  - Override with `--weight CLASS=MULTIPLE` or `--pricing-table`; USD always uses the table.
+- **Requests per incident:** model requests per responder and reflection session (Codex `token_count` events with usage in the rollout; Claude `num_turns`), and per baseline run.
+- **Sources:**
+  - Codex numbers come from the exported rollouts (per-request `last_token_usage`), which carry reasoning and request counts that receipts written before agentshim 0.7 lack. Receipts are the fallback.
+  - A Claude baseline is read from its `stream-json` result frames, because SREGym's own `usage_metrics` for Claude excludes cache reads from input and drops cache writes.
+  - Old SDO records whose `cached_input_tokens` counted Claude cache writes are split back into reads and writes by `agentshim.TokenUsage.from_dict`.

@@ -48,6 +48,7 @@ from agentshim import (
     TokenUsage,
     ToolCall,
     TurnRequest,
+    normalized_usage,
 )
 from agentshim.providers.codex import install_rules
 
@@ -134,7 +135,14 @@ class StructuredTurn:
 
 
 def turn_usage(turn: StructuredTurn) -> dict[str, int | float]:
-    """Flatten one turn's provider accounting into the SDO usage record shape."""
+    """Flatten one turn's provider accounting into the SDO usage record shape.
+
+    The token breakdown is agentshim's normalized one, the same for Codex and
+    Claude: ``input_tokens`` includes cache reads and writes, and
+    ``uncached_input_tokens`` is the rest; ``output_tokens`` includes
+    ``reasoning_output_tokens``. ``cached_input_tokens`` is the deprecated
+    alias of ``cache_read_input_tokens`` (cache reads only).
+    """
 
     tokens = turn.usage.tokens
     usage: dict[str, int | float] = {
@@ -142,7 +150,10 @@ def turn_usage(turn: StructuredTurn) -> dict[str, int | float]:
         "input_tokens": tokens.input_tokens,
         "output_tokens": tokens.output_tokens,
         "cached_input_tokens": tokens.cached_input_tokens,
+        "cache_read_input_tokens": tokens.cache_read_input_tokens,
         "cache_write_input_tokens": tokens.cache_write_input_tokens,
+        "cache_write_1h_input_tokens": tokens.cache_write_1h_input_tokens,
+        "uncached_input_tokens": tokens.uncached_input_tokens,
         "reasoning_output_tokens": tokens.reasoning_output_tokens,
     }
     if turn.usage.total_cost_usd is not None:
@@ -358,7 +369,14 @@ class _RolloutTotals:
         if self.totals is not None and known_before:
             delta = {key: self.totals[key] - (before or {}).get(key, 0) for key in _ROLLOUT_TOKEN_FIELDS}
             if all(value >= 0 for value in delta.values()):
-                tokens = TokenUsage(**delta, turns=1)
+                tokens = normalized_usage(
+                    input_tokens=delta["input_tokens"],
+                    output_tokens=delta["output_tokens"],
+                    cache_read_input_tokens=delta["cached_input_tokens"],
+                    cache_write_input_tokens=delta["cache_write_input_tokens"],
+                    reasoning_output_tokens=delta["reasoning_output_tokens"],
+                    turns=1,
+                )
         return _TurnTotals(requests=self.requests - before_requests, tokens=tokens)
 
 

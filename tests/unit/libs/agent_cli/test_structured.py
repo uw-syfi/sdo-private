@@ -563,6 +563,86 @@ def test_a_fresh_codex_turn_takes_reasoning_tokens_from_its_rollout(
     assert usage["reasoning_output_tokens"] == 5
 
 
+_BREAKDOWN_KEYS = {
+    "input_tokens",
+    "cache_read_input_tokens",
+    "cache_write_input_tokens",
+    "cache_write_1h_input_tokens",
+    "uncached_input_tokens",
+    "output_tokens",
+    "reasoning_output_tokens",
+}
+
+
+def test_a_resumed_codex_turn_records_its_own_cache_breakdown(tmp_path: Path, codex_login: FakeCodexLogin) -> None:
+    home = codex_login.auth.parent
+    _append_cumulative_rollout(home, "s-1", [_usage(100, 0, 10, 2)])
+
+    def respond(_request: CommandRequest) -> FakeRun:
+        _append_cumulative_rollout(home, "s-1", [_usage(300, 200, 40, 7)])
+        return scripted_turn(
+            "codex",
+            session_id="s-1",
+            structured_output={"answer": "ok"},
+            usage=TokenUsage(input_tokens=400, cache_read_input_tokens=200, output_tokens=50),
+        )
+
+    turn = run_structured_turn(
+        "codex",
+        "prompt",
+        output_schema=_SCHEMA,
+        cwd=tmp_path,
+        access="danger-full-access",
+        resume_session_id="s-1",
+        executor=ScriptedAgent(respond).executor,
+    )
+
+    usage = turn_usage(turn)
+    assert usage["cache_read_input_tokens"] == usage["cached_input_tokens"] == 200
+    assert usage["cache_write_input_tokens"] == 0
+    assert usage["uncached_input_tokens"] == 100
+
+
+def test_a_claude_turn_records_cache_reads_and_writes_apart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    log = tmp_path / "turns.jsonl"
+    monkeypatch.setenv(TURN_USAGE_LOG_ENV, str(log))
+    tokens = TokenUsage(
+        input_tokens=1_000,
+        cache_read_input_tokens=600,
+        cache_write_input_tokens=300,
+        cache_write_1h_input_tokens=100,
+        output_tokens=80,
+        turns=3,
+    )
+
+    def respond(_request: CommandRequest) -> FakeRun:
+        return scripted_turn("claude", session_id="s-1", structured_output={"answer": "ok"}, usage=tokens)
+
+    turn = run_structured_turn(
+        "claude",
+        "prompt",
+        output_schema=_SCHEMA,
+        cwd=tmp_path,
+        access="danger-full-access",
+        executor=ScriptedAgent(respond).executor,
+    )
+
+    usage = turn_usage(turn)
+    assert {key: usage[key] for key in _BREAKDOWN_KEYS} == {
+        "input_tokens": 1_000,
+        "cache_read_input_tokens": 600,
+        "cache_write_input_tokens": 300,
+        "cache_write_1h_input_tokens": 100,
+        "uncached_input_tokens": 100,
+        "output_tokens": 80,
+        "reasoning_output_tokens": 0,
+    }
+    # The deprecated key is cache reads only; before agentshim 0.7 it also counted writes.
+    assert usage["cached_input_tokens"] == 600
+    (record,) = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert set(record["usage"]) >= _BREAKDOWN_KEYS
+
+
 def test_codex_usage_log_records_an_unknown_request_count_without_a_rollout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

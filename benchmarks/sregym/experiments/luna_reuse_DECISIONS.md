@@ -834,7 +834,7 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - All five pipelines reuse it (`lifecycle_reused: true`), so `incident_cost` printed 0. Pass `--lifecycle-usage` with that file.
   - Diagnosis and mitigation submission, the controller and the detectors make no model calls. The responder's own submission commands are inside its session.
 - **Reasoning effort:** both arms actually ran at `medium`: the rollouts' `turn_context` shows `"effort":"medium"` for the Codex baseline and the SDO responder. Future queues should pin the Codex baseline's effort in its config rather than rely on the CLI default (see "Reasoning effort: both arms at `medium`" above).
-- **Headline decision:** report uncached input, cached input and output separately, plus a cost-weighted total (cached 0.1x, output 8x, i.e. GPT-5-family price ratios; state them).
+- **Headline decision (superseded, see "Cache-aware token accounting and pricing table" below):** report uncached input, cached input and output separately, plus a cost-weighted total (cached 0.1x, output 8x, i.e. GPT-5-family price ratios; state them). The ad-hoc 8x output weight is replaced by agentshim's sourced, dated pricing table, which gives gpt-6-luna output 5x.
   - Weighted means: warm 52.1K vs Codex 69.7K (0.75x; the raw ratio is 0.65x); cold responder 147.6K; reflection 177.8K; lifecycle 543K.
   - Report tokens per whole responder session, not "per TTM": warm sessions last 50–61 s over 9–10 requests, and 31–42% of their tokens come after the mitigation POST (Codex: 23–31%).
 
@@ -916,3 +916,70 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
 - **Confidence:** low on the absolute figures (integer-percent readings, shared account) and moderate on the 2× ratio, which comes from per-run token counts.
 - **Implications for SDO:** SDO's quota advantage only appears once repeats skip reflection. Break-even needs long runs of the same incident, which the stopped sequence was meant to test.
 - **Next action:** budget the next round from these figures, run it after the 2026-10-03 reset, and set `AGENT_REASONING_EFFORT=medium` explicitly for Codex.
+
+### Cache-aware token accounting and pricing table
+
+- **Shipped:**
+  - agentshim 0.7.0 (tag `v0.7.0`, `31e2a6b`, on PyPI). SDO pins `agentshim>=0.7.0,<0.8`.
+  - SDO receipts and usage logs record agentshim's normalized breakdown.
+  - `incident_cost` reports it for both arms.
+- **Field semantics (agentshim 0.7, identical on every provider):**
+  - `input_tokens` includes cache reads and cache writes.
+  - New fields: `cache_read_input_tokens`, `cache_write_1h_input_tokens` (Claude's one-hour-TTL writes), and a derived `uncached_input_tokens`. `cache_write_input_tokens` is unchanged.
+  - `output_tokens` includes `reasoning_output_tokens`.
+  - `cached_input_tokens` is now a deprecated alias of cache reads. On Claude, opencode and Copilot it used to be reads plus writes.
+  - Codex now keeps `cache_write_input_tokens` and `reasoning_output_tokens` from `turn.completed`; both used to be dropped.
+- **User-directed decision:** agentshim owns a static, versioned pricing table. This replaces the earlier plan of SDO-side weights with no prices in agentshim.
+  - Each entry records its official source URL and check date, and the table records `version` and `last_updated`, currently 2026-09-27. All are required and tested.
+  - `incident_cost` uses the table by default and prints `prices: agentshim pricing table 2026-09-27, last updated 2026-09-27` plus each arm's weights.
+  - `--weight CLASS=MULTIPLE` and `--pricing-table` override it; USD always uses the table.
+  - There is no separate SDO weight table.
+  - No entry is estimated. OpenAI's page lists gpt-6-luna at $0.10 input, $0.01 cached, $0.125 cache write and $0.50 output per MTok (short context).
+- **Supersedes the audit's headline weights (0.1x cached, 8x output):**
+  - gpt-6-luna's sourced ratios are cache read 0.1x, cache write 1.25x and output 5x.
+  - Claude: read 0.1x (Opus 5.5 0.05x, Fable 5.1 0.025x), 5m write 1.25x, 1h write 2x, output 5x.
+- **Premise corrections:**
+  - GPT-6 models do bill cache writes (1.25x); gpt-5.x does not. Codex reported 0 cache writes in every valid run.
+  - `tests/unit/test_usage_schema_parity.py` did not exist before this change; it now pins `libs/pydantic_agent/_usage.py` to agentshim's `to_dict()` keys.
+  - Crucible's `from_run_usage` had been reading a `cached_input_tokens` attribute that pydantic-ai's `RunUsage` does not have, so it always recorded 0 cached tokens. It now reads `cache_read_tokens`, `cache_write_tokens` and `details["reasoning_tokens"]`.
+- **Analysis sources:**
+  - Codex numbers (the SDO responder and reflections, fresh ones included, and the baseline) come from the exported rollouts. These carry reasoning and request counts that older receipts lack, and their totals equal every receipt and `usage_metrics` value exactly.
+  - A Claude baseline is read from its `stream-json` result frames. SREGym's Claude `usage_metrics` excludes cache reads from input and drops cache writes.
+- **Recomputed tokens:**
+  - Runs: pipelines `182519`, `184719`, `195104`, `195127`, `200727` and `205746` (stage 0 cold, stage 1 warm; all D+ M+) against `20260927_205946_codex`.
+  - Weighted is gpt-6-luna table weights, in base-input-token units.
+  - Cache writes are 0 everywhere.
+
+  | Pipeline | Stage | Part | Uncached in | Cache read | Output | Reasoning | Raw | Weighted | Requests |
+  |---|---|---|---|---|---|---|---|---|---|
+  | 182519 | 0 | responder | 33,468 | 555,264 | 5,014 | 1,442 | 593,746 | 114,064 | 23 |
+  | 182519 | 0 | reflection (resume) | 56,377 | 741,632 | 11,265 | 4,662 | 809,274 | 186,865 | 15 |
+  | 182519 | 1 | responder | 25,832 | 162,560 | 2,305 | 426 | 190,697 | 53,613 | 10 |
+  | 184719 | 0 | responder | 53,287 | 770,048 | 5,523 | 1,523 | 828,858 | 157,907 | 25 |
+  | 184719 | 0 | reflection (fresh) | 56,813 | 693,248 | 7,310 | 1,133 | 757,371 | 162,688 | 21 |
+  | 184719 | 1 | responder | 25,287 | 160,512 | 1,563 | 245 | 187,362 | 49,153 | 10 |
+  | 195104 | 0 | responder | 43,215 | 480,768 | 4,958 | 1,139 | 528,941 | 116,082 | 19 |
+  | 195104 | 0 | reflection (resume) | 65,955 | 510,464 | 9,572 | 2,940 | 585,991 | 164,861 | 11 |
+  | 195104 | 1 | responder | 25,396 | 164,608 | 1,923 | 231 | 191,927 | 51,472 | 10 |
+  | 195127 | 0 | responder | 47,145 | 591,616 | 4,744 | 849 | 643,505 | 130,027 | 22 |
+  | 195127 | 0 | reflection (fresh) | 30,410 | 209,152 | 5,015 | 864 | 244,577 | 76,400 | 7 |
+  | 195127 | 1 | responder | 13,382 | 155,392 | 1,973 | 308 | 170,747 | 38,786 | 9 |
+  | 200727 | 0 | responder | 40,481 | 687,360 | 6,256 | 1,672 | 734,097 | 140,497 | 23 |
+  | 200727 | 0 | reflection (resume) | 69,423 | 596,224 | 8,726 | 2,833 | 674,373 | 172,675 | 12 |
+  | 200727 | 1 | responder | 11,997 | 159,488 | 2,030 | 315 | 173,515 | 38,096 | 9 |
+  | 205746 | 0 | responder | 41,461 | 358,656 | 4,137 | 818 | 404,254 | 98,012 | 16 |
+  | 205746 | 0 | reflection (fresh) | 53,456 | 595,712 | 7,231 | 1,367 | 656,399 | 149,182 | 18 |
+  | 205746 | 1 | responder | 19,079 | 265,984 | 2,179 | 414 | 287,242 | 56,572 | 13 |
+  | Codex 205946 | mean of 5 | run | 35,616 | 295,578 | 2,137 | 600 | 333,331 | 75,861 | 10.2 |
+
+- **Means:**
+  - Cold responder: 622K raw, 126.1K weighted, 21.3 requests.
+  - Warm responder: 200K raw, 47.9K weighted, 10.2 requests.
+  - Reflection: 621K raw, 152.1K weighted, 14 requests.
+  - Codex: 333K raw, 75.9K weighted, 10.2 requests.
+  - Warm vs Codex: 0.60x raw, 0.63x weighted.
+  - With the old 8x output weight: warm 53.9K vs Codex 82.3K.
+  - In USD at gpt-6-luna list prices: warm $0.0048, Codex $0.0076, cold responder $0.0126, reflection $0.0152 per incident.
+  - The one-time lifecycle, from the audit's breakdown, is about 482K weighted ($0.048).
+- **Not verified live:** no Codex or Claude run was spent (weekly quota at about 90%). agentshim's e2e suite was skipped for 0.7.0, and recorded-stream fixtures cover the parsing instead.
+

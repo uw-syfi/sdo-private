@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import replace
 from pathlib import Path  # noqa: TC003 -- fixtures build real paths at runtime
 
 import pytest
@@ -622,8 +623,9 @@ def test_resumed_reflection_counts_only_its_own_turn_not_the_responder_before_it
 
     (only,) = load_sdo_pipeline(root)
 
-    assert only.responder == TokenUsage.from_mapping(responder)
-    assert only.reflection == TokenUsage.from_mapping(reflection)
+    # The rollout also counts each turn's model requests.
+    assert only.responder == replace(TokenUsage.from_mapping(responder), requests=2)
+    assert only.reflection == replace(TokenUsage.from_mapping(reflection), requests=1)
 
 
 def test_fresh_session_reflection_keeps_the_receipt_usage(tmp_path: Path) -> None:
@@ -641,3 +643,267 @@ def test_fresh_session_reflection_keeps_the_receipt_usage(tmp_path: Path) -> Non
     (only,) = load_sdo_pipeline(root)
 
     assert only.reflection == TokenUsage.from_mapping(reflection)
+
+
+# --------------------------------------------------------------------------- cache breakdown and pricing
+
+LUNA = {"cache_read": 0.1, "cache_write": 1.25, "output": 5.0}  # gpt-6-luna in agentshim's table
+
+
+def _token_count_line(last: dict[str, int], total: dict[str, int]) -> str:
+    info = {"total_token_usage": total, "last_token_usage": last}
+    return json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": info}}) + "\n"
+
+
+def _write_rollout_turns(path: Path, turns: list[list[dict[str, int]]]) -> None:
+    """A Codex rollout whose turns each make the given model requests."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    total: dict[str, int] = {}
+    lines = [json.dumps({"type": "session_meta", "payload": {"id": "s"}}) + "\n"]
+    for requests in turns:
+        lines.append(json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}) + "\n")
+        for last in requests:
+            total = {key: total.get(key, 0) + last.get(key, 0) for key in {*total, *last}}
+            lines.append(_token_count_line(last, dict(total)))
+    path.write_text("".join(lines), encoding="utf-8")
+
+
+def _request(input_tokens: int, cached: int, output: int, reasoning: int = 0) -> dict[str, int]:
+    return {
+        "input_tokens": input_tokens,
+        "cached_input_tokens": cached,
+        "cache_write_input_tokens": 0,
+        "output_tokens": output,
+        "reasoning_output_tokens": reasoning,
+    }
+
+
+def _config(experiment: Path, agent: str, model: str, provider: str | None = None) -> None:
+    lines = ["[runner]", f'agent = "{agent}"', f'model = "{model}"']
+    if provider is not None:
+        lines += ["", f"[agent.{agent}]", f'provider = "{provider}"', f'model = "{model}"']
+    experiment.mkdir(parents=True, exist_ok=True)
+    (experiment / "experiment_config.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+class TestTokenBreakdown:
+    def test_a_pre_split_record_had_cache_writes_inside_cached(self) -> None:
+        usage = TokenUsage.from_mapping(
+            {"input_tokens": 150, "cached_input_tokens": 50, "cache_write_input_tokens": 30, "output_tokens": 40}
+        )
+        assert (usage.cached_input_tokens, usage.cache_write_input_tokens, usage.uncached_input_tokens) == (20, 30, 100)
+
+    def test_a_split_record_reads_every_class_and_the_request_count(self) -> None:
+        usage = TokenUsage.from_mapping(
+            {
+                "input_tokens": 1_000,
+                "cached_input_tokens": 600,
+                "cache_read_input_tokens": 600,
+                "cache_write_input_tokens": 300,
+                "cache_write_1h_input_tokens": 100,
+                "uncached_input_tokens": 100,
+                "output_tokens": 80,
+                "reasoning_output_tokens": 20,
+                "model_requests": 7,
+            }
+        )
+        assert usage.cache_write_1h_input_tokens == 100
+        assert usage.reasoning_output_tokens == 20
+        assert usage.requests == 7
+        assert usage.total() == 1_080
+
+    def test_impossible_counts_are_rejected(self) -> None:
+        with pytest.raises(ValueError, match="exceed"):
+            TokenUsage(input_tokens=10, cached_input_tokens=8, cache_write_input_tokens=5)
+
+    def test_the_responder_breakdown_and_requests_come_from_its_rollout(self, tmp_path: Path) -> None:
+        root = tmp_path / "pipeline"
+        stage = _sdo_stage(
+            root, 0, "first", PROBLEM_A, responder=_usage(300, 30, cached=200), reflection={}, warm=True,
+            incident_detectors=0,
+        )  # fmt: skip
+        run = stage / "runs" / f"000000_{PROBLEM_A}" / "worker_0" / "results" / "sdo_codex" / PROBLEM_A / "run_1"
+        rollout = run / "sdo_runtime" / "codex" / "sessions" / "2026" / "09" / "27" / "rollout-x-session-0.jsonl"
+        _write_rollout_turns(rollout, [[_request(100, 50, 10, 4), _request(200, 150, 20, 6)]])
+
+        (only,) = load_sdo_pipeline(root)
+
+        assert only.responder == TokenUsage(
+            input_tokens=300, cached_input_tokens=200, output_tokens=30, reasoning_output_tokens=10, requests=2
+        )
+
+    def test_codex_runs_take_reasoning_and_requests_from_their_rollout(self, tmp_path: Path) -> None:
+        root = _codex_experiment(tmp_path / "codex", [(PROBLEM_A, True, 300)])
+        run = root / "runs" / f"000000_{PROBLEM_A}" / "worker_0" / "results" / "codex" / PROBLEM_A / "run_1"
+        _write_rollout_turns(
+            run / "sessions" / "2026" / "09" / "27" / "rollout-x-y.jsonl",
+            [[_request(100, 50, 10, 4), _request(200, 100, 20, 6)]],
+        )
+
+        (codex_run,) = load_codex_runs(root)
+
+        assert codex_run.tokens == TokenUsage(
+            input_tokens=300, cached_input_tokens=150, output_tokens=30, reasoning_output_tokens=10, requests=2
+        )
+
+
+class TestPricing:
+    def _report(self, tmp_path: Path, *argv: str) -> tuple[str, dict]:
+        root = tmp_path / "pipeline"
+        stage = _sdo_stage(
+            root, 0, "first", PROBLEM_A, responder=_usage(1_000, 100, cached=900), reflection={}, warm=True,
+            incident_detectors=0,
+        )  # fmt: skip
+        _config(stage, "sdo_codex", "gpt-6-luna", provider="codex")
+        codex = _codex_experiment(tmp_path / "codex", [(PROBLEM_A, True, 2_000)])
+        _config(codex, "codex", "gpt-6-luna")
+        out = tmp_path / "report.json"
+        assert main([str(root), "--codex", str(codex), "--json", str(out), *argv]) == 0
+        return out.name, json.loads(out.read_text(encoding="utf-8"))
+
+    def test_weights_and_usd_come_from_agentshims_table(self, tmp_path: Path, capsys) -> None:
+        _, document = self._report(tmp_path)
+        printed = capsys.readouterr().out
+
+        stage = document["stages"][0]["responder_summary"]
+        # 100 uncached x 1 + 900 cache reads x 0.1 + 100 output x 5
+        assert stage["weighted_tokens"] == pytest.approx(100 + 90 + 500)
+        assert stage["usd"] == pytest.approx((100 * 0.10 + 900 * 0.01 + 100 * 0.50) / 1e6)
+        codex = document["codex"][PROBLEM_A]["mean_summary"]
+        # 1,000 cached of 2,000 input, no output
+        assert codex["weighted_tokens"] == pytest.approx(1_000 + 1_000 * 0.1)
+        assert document["pricing"]["table_version"]
+        assert "prices: agentshim pricing table" in printed
+        assert "last updated" in printed
+        assert "gpt-6-luna" in printed
+
+    def test_cli_weights_override_the_table(self, tmp_path: Path, capsys) -> None:
+        _, document = self._report(tmp_path, "--weight", "output=8", "--weight", "cache_read=0.25")
+        printed = capsys.readouterr().out
+
+        stage = document["stages"][0]["responder_summary"]
+        assert stage["weighted_tokens"] == pytest.approx(100 + 900 * 0.25 + 100 * 8)
+        # USD always uses the table's prices.
+        assert stage["usd"] == pytest.approx((100 * 0.10 + 900 * 0.01 + 100 * 0.50) / 1e6)
+        assert "override" in printed
+
+    def test_an_unpriced_model_reports_raw_tokens_only(self, tmp_path: Path, capsys) -> None:
+        _, document = self._report(tmp_path, "--sdo-model", "codex:gpt-99-imaginary", "--codex-model", "codex:x")
+        printed = capsys.readouterr().out
+
+        stage = document["stages"][0]["responder_summary"]
+        assert stage["weighted_tokens"] is None
+        assert stage["usd"] is None
+        assert stage["raw_tokens"] == 1_100
+        assert "no price for codex/gpt-99-imaginary" in printed
+
+    def test_complete_cli_weights_price_an_unknown_model(self, tmp_path: Path) -> None:
+        _, document = self._report(
+            tmp_path,
+            "--sdo-model",
+            "codex:gpt-99-imaginary",
+            "--weight",
+            "cache_read=0.1",
+            "--weight",
+            "cache_write=1",
+            "--weight",
+            "output=8",
+        )
+        stage = document["stages"][0]["responder_summary"]
+        assert stage["weighted_tokens"] == pytest.approx(100 + 90 + 800)
+        assert stage["usd"] is None
+
+    def test_a_custom_pricing_table_is_used_and_named(self, tmp_path: Path, capsys) -> None:
+        table = {
+            "version": "pinned-1",
+            "last_updated": "2026-09-01",
+            "entries": [
+                {
+                    "vendor": "openai",
+                    "model": "gpt-6-luna",
+                    "input_usd": 1.0,
+                    "cache_read_usd": 0.5,
+                    "cache_write_usd": 1.0,
+                    "output_usd": 2.0,
+                    "source": "https://example.com/pricing",
+                    "checked": "2026-09-01",
+                }
+            ],
+        }
+        path = tmp_path / "table.json"
+        path.write_text(json.dumps(table), encoding="utf-8")
+        _, document = self._report(tmp_path, "--pricing-table", str(path))
+        printed = capsys.readouterr().out
+
+        assert document["stages"][0]["responder_summary"]["weighted_tokens"] == pytest.approx(100 + 450 + 200)
+        assert "pinned-1, last updated 2026-09-01" in printed
+
+    def test_requests_per_incident_are_reported(self, tmp_path: Path) -> None:
+        _, document = self._report(tmp_path)
+        assert "requests" in document["stages"][0]["responder_summary"]
+
+
+def test_a_claude_baseline_is_read_from_its_stream(tmp_path: Path) -> None:
+    root = tmp_path / "claude"
+    results = _results_dir(root, 0, PROBLEM_A, "claudecode")
+    _write_csv(results, "claudecode", diagnosis=True, mitigation=True, injected=0.0, submitted=100.0)
+    run = results / "claudecode" / PROBLEM_A / "run_1"
+    # SREGym's own metrics drop cache writes and exclude cache reads from input.
+    (run / f"claudecode_results_{PROBLEM_A}_1.json").write_text(
+        json.dumps({"usage_metrics": {"input_tokens": 9, "cached_input_tokens": 400, "output_tokens": 50}}),
+        encoding="utf-8",
+    )
+    result = {
+        "type": "result",
+        "subtype": "success",
+        "num_turns": 6,
+        "result": "done",
+        "usage": {
+            "input_tokens": 9,
+            "cache_creation_input_tokens": 300,
+            "cache_read_input_tokens": 400,
+            "output_tokens": 50,
+            "cache_creation": {"ephemeral_5m_input_tokens": 100, "ephemeral_1h_input_tokens": 200},
+        },
+    }
+    (run / "claudecode.txt").write_text(json.dumps(result) + "\n", encoding="utf-8")
+    _config(root, "claudecode", "claude-haiku-4-5")
+
+    (claude_run,) = load_codex_runs(root)
+
+    assert claude_run.tokens == TokenUsage(
+        input_tokens=709,
+        cached_input_tokens=400,
+        cache_write_input_tokens=300,
+        cache_write_1h_input_tokens=200,
+        output_tokens=50,
+        requests=6,
+    )
+    assert (claude_run.provider, claude_run.model) == ("claude", "claude-haiku-4-5")
+
+
+def test_a_fresh_reflection_takes_its_breakdown_from_its_own_rollout(tmp_path: Path) -> None:
+    """A fresh reflection runs in its own session; its rollout has the reasoning and requests receipts lacked."""
+    root = tmp_path / "20260927_000000_pipeline_sdo-codex-luna-persistent-fresh"
+    stage = _sdo_stage(
+        root, 0, "first", PROBLEM_A, responder=_usage(500, 10), reflection=_usage(300, 30, cached=200), warm=False,
+        incident_detectors=1,
+    )  # fmt: skip
+    run = stage / "runs" / f"000000_{PROBLEM_A}" / "worker_0" / "results" / "sdo_codex" / PROBLEM_A / "run_1"
+    receipt_path = run / "sdo_production_receipt_strict.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["reflection_session_mode"] = "fresh"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    turns = run / "sdo_runtime" / "usage" / "controller-turns.jsonl"
+    turns.write_text(
+        json.dumps({"duration_seconds": 240.0, "session_id": "refl-1", "usage": _usage(300, 30, cached=200)}) + "\n",
+        encoding="utf-8",
+    )
+    sessions = run / "sdo_runtime" / "codex" / "sessions" / "2026" / "09" / "27"
+    _write_rollout_turns(sessions / "rollout-y-refl-1.jsonl", [[_request(100, 50, 10, 3), _request(200, 150, 20, 5)]])
+
+    (only,) = load_sdo_pipeline(root)
+
+    assert only.reflection == TokenUsage(
+        input_tokens=300, cached_input_tokens=200, output_tokens=30, reasoning_output_tokens=8, requests=2
+    )

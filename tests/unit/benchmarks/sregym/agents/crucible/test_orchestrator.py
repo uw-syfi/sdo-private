@@ -36,24 +36,17 @@ class TestBuildUsageMetrics:
 
         result = _build_usage_metrics(primary, recovery)
 
-        assert result["primary"]["total"] == {
-            "input_tokens": 30,
-            "output_tokens": 13,
-            "cached_input_tokens": 1,
-            "turns": 0,
-        }
-        assert result["recovery"]["total"] == {
-            "input_tokens": 7,
-            "output_tokens": 2,
-            "cached_input_tokens": 3,
-            "turns": 0,
-        }
-        assert result["total"] == {
-            "input_tokens": 37,
-            "output_tokens": 15,
-            "cached_input_tokens": 4,
-            "turns": 0,
-        }
+        assert (
+            result["primary"]["total"]
+            == TokenUsage(input_tokens=30, output_tokens=13, cached_input_tokens=1, turns=0).to_dict()
+        )
+        assert (
+            result["recovery"]["total"]
+            == TokenUsage(input_tokens=7, output_tokens=2, cached_input_tokens=3, turns=0).to_dict()
+        )
+        assert (
+            result["total"] == TokenUsage(input_tokens=37, output_tokens=15, cached_input_tokens=4, turns=0).to_dict()
+        )
 
     def test_keys_kept_separate_between_primary_and_recovery(self):
         primary = UsageCollector()
@@ -70,7 +63,7 @@ class TestBuildUsageMetrics:
         result = _build_usage_metrics(UsageCollector(), UsageCollector())
         assert result["primary"]["by_agent"] == {}
         assert result["recovery"]["by_agent"] == {}
-        assert result["total"] == {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0, "turns": 0}
+        assert result["total"] == TokenUsage(input_tokens=0, output_tokens=0, cached_input_tokens=0, turns=0).to_dict()
 
 
 # ---------------------------------------------------------------------------
