@@ -23,7 +23,7 @@ RUN apt-get update \
 RUN npm install --global "@openai/codex@${CODEX_VERSION}" "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && npm cache clean --force
 RUN python3 -m pip install --break-system-packages --no-cache-dir \
-      agentshim==0.6.6 \
+      agentshim==0.6.7 \
       loguru==0.7.3 \
       pydantic==2.12.5 \
       pyyaml==6.0.3
