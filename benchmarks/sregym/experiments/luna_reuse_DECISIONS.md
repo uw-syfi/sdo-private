@@ -760,3 +760,55 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - The harness ran normally: no errors, and fault recovery restored both ConfigMaps.
 - **How the failed row is reported:** the TTM of a failed mitigation is shown in parentheses and excluded from the TTM means.
 - **Rate limits:** no errors, weekly window at 88%.
+
+### Ownership change: token breakdown and cost weighting
+
+- **Coordinator-directed:** a new agent owns the token breakdown end to end: agentshim normalization of cache read/write and reasoning tokens for Codex and Claude, then SDO receipts, then `incident_cost` with a configurable weight table.
+- I do not implement it in `incident_cost.py`. Step 3's token tables wait for that work to land on `origin/main` and are then produced with it, together with the reuse-reflection accounting fix and the lifecycle-usage file.
+- Everything else in Step 3 goes ahead now: the TTD/TTM tables, the fairness and load check, `sdo-memory-check`, and the quota estimate.
+
+### Memory check: fresh vs reuse (Step 3)
+
+- **Baseline:** each pipeline's own last `sdo-lifecycle` commit, not `64b3ac2`.
+  - `64b3ac2` precedes the lifecycle's attestation commit, which rewrites `.sdo/lifecycle-provenance.yaml`. Every workspace therefore "fails" against `64b3ac2` on a file the lifecycle owns.
+  - `--actor responder` over the whole diff also "fails" on `.sdo/outcomes.jsonl`, which the controller owns.
+- **Method:** each broker commit is replayed in a scratch clone (parent checked out, commit applied as uncommitted edits) and checked with `sdo-memory-check --actor <SDO-Actor trailer> --baseline <parent>`. This is what the broker validates. The run logs are untouched.
+- **Result: every commit in all six counted pipelines passes, for both arms.**
+  - The sequence is: responder source repair → controller outcome → responder memory (7 `.sdo` paths: detector, detector test, manifest, playbook index, playbook README, `repair.sh`, `verify.sh`) → controller outcome → an empty responder closure on the warm repeat.
+  - Exception: fresh1 has no source-repair commit, because its stage 0 responder repaired the cluster only.
+
+| Run | Arm | Incident detectors | Playbook | Playbook lines | exec/port-forward/attach/cp | urllib |
+|---|---|---|---|---|---|---|
+| reuse1 `182519` | reuse | 1 | missing-geo-mongo-configmap | 92 | 0 | yes |
+| reuse2 `195104` | reuse | 1 | geo-mongo-init-configmap-missing | 97 | 0 | yes |
+| reuse3 `200727` | reuse | 1 | missing-required-configmap-mount | 93 | 0 | yes |
+| fresh1 `184719` | fresh | 1 | missing-geo-init-configmap | 59 | 0 | yes |
+| fresh2 `195127` | fresh | 1 | geo-mongo-init-configmap-missing | 72 | 0 | yes |
+| fresh3 `205746` | fresh | 1 | missing-geo-bootstrap | 83 | 0 | yes |
+
+- **Fresh vs reuse memory:** structurally the same, one incident detector and one playbook each.
+  - Reuse-arm playbooks are longer (92–97 lines against 59–83).
+  - No playbook needs a verb the responder RBAC does not grant. The Step 0 rule held in all six runs, and requests are probed with python3 urllib.
+
+### sdo_variants (luna-w1): 3/3 pass
+
+- **Run:** `20260927_211548_pipeline_sdo-codex-luna-variants`, 21:15–21:38Z, load 17–43.
+
+| Stage | Problem | Oracles | TTD s | TTM s | raw incl. judge s | last_mut s | responder tok (old accounting) | warm path | reflection | drain s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | missing_configmap | D+ M+ | 20.6 | 77.4 | 102.3 | 50.5 | 711,894 | no | ran | 0.0 |
+| 1 | missing_configmap_mongodb_rate (variant) | D+ M+ | 22.6 | 75.4 | 101.5 | 41.1 | 591,346 | yes | ran | 113.1 |
+| 2 | missing_configmap_mongodb_geo_rate (variant) | D+ M+ | 12.2 | 33.9 | 48.2 | 33.9 | 215,683 | yes | skipped (exact-match success) | 18.5 |
+
+- **Against Codex on the same problems** (`20260927_210409_codex`), SDO wins on the third variant:
+
+  | Problem | SDO | Codex |
+  |---|---|---|
+  | missing_configmap | TTM 77.4 s | TTM 84.1 s |
+  | mongodb_rate | TTM 75.4 s | TTM 71.4 s |
+  | mongodb_geo_rate | pass, TTM 33.9 s | mitigation failed |
+
+- **Stage 1 (first variant):** the warm path fired on a generalizing prior, but it was not exact, so reflection ran and TTM stayed near cold.
+- **Stage 2:** it matched stage 1's learned playbook `required-mongodb-init-configmap-missing` by exact fingerprint, repaired both databases in 33.9 s, and skipped reflection.
+- **Tokens:** the counts above use the old accounting. The final token tables come from the new `incident_cost` once it lands.
+- **Rate limits:** none. Weekly window at 89% at 21:37Z.
