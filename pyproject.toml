@@ -33,6 +33,7 @@ test = [
 [project.scripts]
 sdo = "sdo.__main__:main"
 sdo-detector-check = "controller.builder.check_cli:main"
+sdo-memory-check = "sdo.operational_memory.memory_check:main"
 
 [build-system]
 requires = ["hatchling"]
