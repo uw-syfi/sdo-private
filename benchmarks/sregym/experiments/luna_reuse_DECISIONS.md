@@ -837,3 +837,27 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
 - **Headline decision:** report uncached input, cached input and output separately, plus a cost-weighted total (cached 0.1x, output 8x, i.e. GPT-5-family price ratios; state them).
   - Weighted means: warm 52.1K vs Codex 69.7K (0.75x; the raw ratio is 0.65x); cold responder 147.6K; reflection 177.8K; lifecycle 543K.
   - Report tokens per whole responder session, not "per TTM": warm sessions last 50–61 s over 9–10 requests, and 31–42% of their tokens come after the mitigation POST (Codex: 23–31%).
+
+### codex_sequence (luna-w3, moved from w1): 4/8 pass
+
+- **Run:** `20260927_210239_codex`, 21:02–21:46Z. Two passes through four problems.
+
+| # | Problem | Oracles | TTD s | TTM s | raw incl. judge s | input / cached / output tokens |
+|---|---|---|---|---|---|---|
+| 0 | readiness_probe_misconfiguration | D+ M+ | 35.3 | 117.3 | 125.1 | 301,556 / 273,408 / 1,568 |
+| 1 | missing_configmap | D− M− | 57.3 | (190.4) | 197.2 | 731,547 / 680,704 / 3,746 |
+| 2 | wrong_service_selector | D− M− | 111.3 | (133.3) | 143.4 | 891,204 / 838,400 / 4,326 |
+| 3 | network_policy_block | D− M− | 38.2 | (60.4) | 85.4 | 508,627 / 462,592 / 2,491 |
+| 4 | readiness_probe_misconfiguration | D+ M+ | 50.9 | 130.0 | 141.0 | 292,414 / 271,360 / 1,899 |
+| 5 | missing_configmap | D+ M+ | 32.6 | 58.9 | 87.2 | 410,714 / 371,456 / 2,398 |
+| 6 | wrong_service_selector | D− M− | 61.6 | (102.1) | 104.8 | 560,525 / 516,352 / 3,107 |
+| 7 | network_policy_block | D+ M+ | 52.2 | 77.6 | 98.6 | 429,774 / 397,056 / 2,066 |
+
+- **All four failures are counted as genuine agent failures.** The harness ran normally: no errors, and rate limits were fine.
+  - **A recurring red herring.** The rollouts show MongoDB `Authentication succeeded` and no "not authorized" errors in any of the eight problems. Codex nevertheless read the app's own shipped fault-script ConfigMaps (for example the drop-admin-user script) as injected state, diagnosed "revoked `readWrite` roles on geo-db/rate-db", and ran role-restoring pods.
+    - On #1 it left `restore-mongo-roles-*` in phase Succeeded, which fails the all-pods-Running mitigation oracle. This is the same pattern as its codex_variants failure.
+    - On #2, #3 and #6 it blamed the MongoDB backends instead of the frontend Service selector or the blocked recommendation service. The judge scored localization 0.00.
+  - **No cross-problem contamination:** Mongo authentication succeeded throughout, the PVCs are freshly bound (for example 72 s old at #2), and fault recovery ran between problems.
+- **Codex has no memory,** so the second pass is a fresh draw. It passed 1/4 in the first pass and 3/4 in the second, which is variance, not learning.
+- **Tokens use the old accounting.** Codex's accounting is unaffected by the reflection fix. The final tables come from the new `incident_cost`.
+- The comparison with SDO waits for `sdo_sequence` on w0.
