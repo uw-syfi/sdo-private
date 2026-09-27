@@ -821,3 +821,43 @@ def test_session_backend_attaches_provider_usage_to_reflection_turn(monkeypatch:
     assert turn.usage["input_tokens"] == 10
     assert turn.usage["cached_input_tokens"] == 4
     assert turn.usage["llm_calls"] == 1
+
+
+def test_reflection_output_schema_is_strict_structured_output_compatible() -> None:
+    """OpenAI strict schemas reject optional properties: every key must be required."""
+    from sdo.agent_runtime.responder.reflection import reflection_output_schema
+
+    schema = reflection_output_schema()
+
+    assert sorted(schema["required"]) == sorted(schema["properties"])
+    assert schema["additionalProperties"] is False
+    assert all("default" not in prop for prop in schema["properties"].values())
+    updated = ReflectionTurn.model_validate(
+        {"summary": "s", "learning_decision": "updated", "no_change_reason": None, "proposed_changes": ["p"]}
+    )
+    assert updated.no_change_reason is None
+
+
+def test_session_backend_requests_the_strict_reflection_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentshim import ProviderUsage
+
+    from libs.agent_cli.structured import StructuredTurn
+    from sdo.agent_runtime.responder import reflection
+
+    seen: dict[str, object] = {}
+
+    def fake_turn(*_args: object, **kwargs: object) -> StructuredTurn:
+        seen["schema"] = kwargs["output_schema"]
+        return StructuredTurn(
+            output_json='{"summary": "s", "learning_decision": "no_change", "no_change_reason": "r", '
+            '"proposed_changes": []}',
+            session_id="session",
+            usage=ProviderUsage(),
+        )
+
+    monkeypatch.setattr(reflection, "run_structured_turn", fake_turn)
+    reflection.CodexSessionBackend(model="m").resume(
+        session_id="session", worktree=Path("."), prompt="p", idempotency_key="k"
+    )
+
+    assert seen["schema"] == reflection.reflection_output_schema()

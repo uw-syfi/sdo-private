@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
+from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -50,6 +50,22 @@ class ReflectionTurn(BaseModel):
                 raise ValueError("no_change reflection cannot propose changes")
             if self.no_change_reason is None:
                 raise ValueError("no_change reflection requires no_change_reason")
+
+
+def reflection_output_schema() -> dict[str, object]:
+    """ReflectionTurn as a strict structured-output schema.
+
+    Strict provider schemas (Codex/OpenAI) require every property to be listed
+    in ``required``; optional fields are expressed as nullable instead.
+    """
+
+    schema = ReflectionTurn.model_json_schema()
+    properties = cast("dict[str, dict[str, object]]", schema["properties"])
+    for prop in properties.values():
+        prop.pop("default", None)
+    schema["required"] = list(properties)
+    schema["additionalProperties"] = False
+    return schema
 
 
 class StatefulResponderBackend(Protocol):
@@ -163,7 +179,7 @@ class CodexSessionBackend:
             turn = run_structured_turn(
                 self.provider,
                 f"Idempotency key: {idempotency_key}\n\n{prompt}",
-                output_schema=ReflectionTurn.model_json_schema(),
+                output_schema=reflection_output_schema(),
                 cwd=worktree,
                 access="danger-full-access",
                 model=self.model,
