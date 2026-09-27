@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/util/homedir"
 
 	"sdo.dev/controller/sdk"
+	"sdo.dev/controller/sdk/traffic"
 )
 
 type KubernetesSnapshotProvider struct {
@@ -128,6 +129,14 @@ type DetectionSnapshot struct {
 	EndpointSliceList []discoveryv1.EndpointSlice
 	NetworkPolicyList []networkingv1.NetworkPolicy
 	EventList         []corev1.Event
+	// TrafficWindows holds synthetic-traffic observations by mix name.
+	TrafficWindows map[string]traffic.Window
+}
+
+// TrafficWindow implements traffic.Source.
+func (s DetectionSnapshot) TrafficWindow(mix string) (traffic.Window, bool) {
+	window, ok := s.TrafficWindows[mix]
+	return window, ok
 }
 
 func (s DetectionSnapshot) Namespace() string {
