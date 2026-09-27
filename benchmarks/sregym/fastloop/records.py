@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import statistics
 from datetime import datetime  # noqa: TC003 - Pydantic resolves this annotation at runtime.
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, computed_field, model_validator
 
@@ -180,7 +180,9 @@ def _median(values: list[float | None]) -> float | None:
 
 def summarize(records: list[IncidentRecord]) -> list[AgentSummary]:
     rows: list[AgentSummary] = []
-    for agent in sorted({record.agent for record in records}):
+    present = {record.agent for record in records}
+    agents: list[AgentName] = [agent for agent in get_args(AgentName) if agent in present]
+    for agent in sorted(agents):
         selected = [record for record in records if record.agent == agent]
         rows.append(
             AgentSummary(

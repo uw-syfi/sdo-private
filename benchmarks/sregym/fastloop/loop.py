@@ -16,7 +16,7 @@ import logging
 import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from benchmarks.sregym.fastloop.records import (
     AgentName,
@@ -89,8 +89,11 @@ class FaultDriver(Protocol):
 
 
 class IncidentAgent(Protocol):
-    name: AgentName
-    model: str
+    @property
+    def name(self) -> AgentName: ...
+
+    @property
+    def model(self) -> str: ...
 
     def resolve(self, index: int, problem_id: str, inject: Callable[[], InjectionWindow]) -> AgentOutcome: ...
 
@@ -222,7 +225,7 @@ def _run_one(
     return record, recovered
 
 
-def _outcome_fields(outcome: AgentOutcome) -> dict[str, object]:
+def _outcome_fields(outcome: AgentOutcome) -> dict[str, Any]:
     return {
         "detected_at": outcome.detected_at,
         "mitigation_applied_at": outcome.mitigation_applied_at,
