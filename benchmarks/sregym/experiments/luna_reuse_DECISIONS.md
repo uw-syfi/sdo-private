@@ -475,3 +475,105 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
 - **Decision: match a kubectl invocation whose subcommand, after at most four flag or value tokens on the same command, is one of the four verbs.** A verb directly followed by a backtick is prose (`` `kubectl exec` ``), so a playbook may still say what not to do. `kubectl debug` (ephemeral containers, also not granted) is not included: the task named four verbs, and no run has produced it.
   - Alternative rejected: a plain substring match. It rejects prose and names such as `deployment/exec-proxy`.
 - **The verb list is one constant** (`RESPONDER_FORBIDDEN_KUBECTL_VERBS`) that feeds both the prompt and the validator. A contract test asserts that the responder Role in `controller/runtime/deploy/rbac.yaml` grants none of `pods/exec`, `pods/portforward` or `pods/attach`. `sdo-memory-check` prints the fix.
+
+### Step 1: push, CI, images
+
+- The full unit suite passed (1552 passed, 2 skipped), as did Go `controller/sdk`, `core` and `runtime`, format, and lint.
+- Pushed submodule branches `vic/exp/variants`, `vic/feat/persistent-controller` and `vic/exp/program-integration` to the fork before the superproject.
+- `origin/main` (`54c59e3`) was an ancestor of the integration head, so `main` fast-forwarded to `8c83a04`. No merge commit was needed, because `origin/main` had not moved. Pushed `vic/feat/persistent-controller` as well.
+- CI run 36340022014 on `main` passed all 8 jobs.
+- Main checkout switched to `main`, submodule at `38cbf4c7`. Images were rebuilt with `BUILDX_BUILDER=sdo-example`, and the fix was verified in the controller and sregym-responder images:
+  - `sdo-controller` `8173e51e7c3a`
+  - `sdo-sregym-responder` `efeea534d8c2`
+  - `sdo-responder` `0c0946f1c335`
+  - `sdo-detector-validator` `bb1ff6241ceb`
+- Images reach kind the same way as in earlier runs: the `run.sh` wrapper sets `SREGYM_KIND_REQUIRED_IMAGES`, and SREGym `ensure_kind_images` compares digests and `kind load`s any image that changed.
+
+### Step 2 run protocol
+
+- **Decision: seed every SDO pipeline's stage 0 with the lifecycle seed `64b3ac2`** (`SREGYM_APP_WORKSPACE_SEED_DIR=<scratch>/seed/lifecycle_workspace`; lifecycle commit only, no incident memory). The v2, v3 and persistent live runs used this seed.
+  - Without it, each replicate runs a cold lifecycle (about 24 min and 1.7M tokens) and gets its own health detector, which adds variance unrelated to the incident.
+  - Consequence: lifecycle tokens per replicate are ~0. The one-time lifecycle cost stays the measured 1.75M input / 20k output tokens (attempt 2, above). Stage 0 still pays lifecycle revalidation, the controller install and the baseline gate. All of these are pre-injection costs.
+  - Codex runs have no lifecycle and get no seed.
+- **The first launch was aborted and is not counted.** The first `ab_reuse1` launch (`aborted_20260927_182310_pipeline_noseed`) was started without the seed and killed about 90 s in, during stage 0's lifecycle, before any fault.
+- **Run order.** A queue runs the six A/B pipelines strictly one at a time, in the order reuse1, fresh1, reuse2, fresh2, reuse3, fresh3, and stops at the first nonzero exit. Load is sampled every 30 s by `run.sh`.
+
+### Parallel runs across three clusters (coordinator change of plan)
+
+- **Decision: run up to three pipelines at once, one per kind cluster (`luna-w0`, `luna-w1`, `luna-w2`).** The machine has 64 cores and 251 GB, and its load average was about 5, so running strictly one at a time wasted it. reuse1 ran alone. fresh1 was already running on `luna-w0` and finished alone, undisturbed. The sequential queue loop was killed by PID, which left its child alone.
+- **The harness could not run concurrent single-worker experiments safely, so I made it able to** (SREGym `e9631233`, test-first). Every `parallel = 1` experiment is worker 0, so two concurrent ones would have shared:
+  - the cluster `luna-w0`;
+  - the conductor port 8000 and the MCP port 9954;
+  - the filtering proxy's fixed `127.0.0.1:16443`, which is what Codex's kubeconfig points at;
+  - the host-global `~/cache_dir/cluster_baseline_state.json`. Reconciling against another cluster's baseline deletes that cluster's observe PVs and ClusterRoles.
+
+  The fix:
+  - `SREGYM_WORKER_ID_OFFSET` shifts the host-wide worker ID. That ID gives the cluster name (`luna-w<id>`), `API_PORT` 8000+id, MCP 9954+id and `SREGYM_WORKER_ID`.
+  - The proxy listens on 16443+`SREGYM_WORKER_ID`.
+  - The baseline file is keyed by `SREGYM_KIND_CLUSTER_NAME`.
+  - Results stay under `worker_0`, and everything is unchanged when the offset is unset.
+  - The SDO bridge already follows `API_PORT`: its relay forwards to the node's default gateway on the same port. Its hostNetwork port 18000 is inside each cluster's own node network namespace.
+  - Source-deploy image tags are already keyed by cluster name.
+- **The existing baseline file becomes luna-w0's.** It lists node names `luna-w0-*`, so it was copied to `cluster_baseline_state.luna-w0.json`.
+- **Decision: create fresh `luna-w1` and `luna-w2` instead of reusing `sregym-w0` or `sregym-w1`.** The harness builds them with luna-w0's bootstrap (same `run.sh` env: Calico with enforced NetworkPolicy and a canary check, the same preloaded SDO images). They also get the same TOML settings (`worker_cpu_limit = 3`, `preserve_infrastructure`, `reuse_cluster`). The first run on each deploys the shared infrastructure and captures that cluster's own baseline before the problem starts, so the cost is pre-injection only.
+  - Rejected: reusing `sregym-w*`. They were built for other experiments with unknown CNI and images, and proving an exact match would take longer than building new ones.
+- **Lane assignment** (each lane runs its items sequentially and stops at its first failure; starts are staggered so the second-resolution run directories cannot collide):
+  - `luna-w0`: codex_x5, then sdo_sequence.
+  - `luna-w1`: reuse2, then fresh3, then codex_sequence.
+  - `luna-w2`: fresh2, then reuse3, then sdo_variants, then codex_variants.
+
+  Across the replication this puts reuse on w0/w1/w2 (r1/r2/r3) and fresh on w0/w2/w1. The Codex baselines land on w0 (x5), w2 (variants) and w1 (sequence). The cluster and load average at each run's start and end are in `run_index.txt` and `queue.events` in the scratch notes, and `run.sh` samples load every 30 s.
+- **Guard:** if the load average goes above about 24, or the same arm's timings differ a lot between clusters, drop to two lanes and log it.
+
+### Judge-excluded and mitigation-applied times (coordinator analysis addition)
+
+- **The premise needed a correction.** In `20260927_174023` stage 0, the conductor log's `Go to stage mitigation` line has no timestamp of its own. Rich logging leaves the time column blank when it equals the previous line's, so the line belongs to 17:48:48, not 17:49:47. Diagnosis grading took 17 s (POST 17:48:31, verdict 17:48:48), and the mitigation POST came 59 s after the stage opened. The measurement is still worth reporting for both arms, because the mitigation POST can never land before the grading wait ends.
+- **Decision: take the stage-open time from structured results, not logs.** The conductor records `TTL` when the diagnosis verdict completes, immediately before it opens the mitigation stage. TTL's clock is reset right after fault injection (`execution_start_time`, also for deferred injection). So:
+  - mitigation stage opened = `fault_injected_at + TTL`;
+  - `grading_wait = that − diagnosis_submitted_at`, floored at 0;
+  - `judge_excluded = primary − grading_wait`.
+
+  Every results CSV of both arms has these columns, so no log parsing is needed. The error is milliseconds (logging between injection and the clock reset). When a column is missing, the value is `None`.
+- **Decision: "mitigation applied" is the first state-changing tool call in the agent's own Codex rollout at or after injection.** That is a kubectl `apply/create/patch/replace/delete/rollout/set/scale/edit/label/annotate`, or a playbook `scripts/repair*` run; `bash -n` and reads do not count.
+  - SDO uses only the rollout whose name contains the receipt's `responder_session_id`, since persistent stages also carry earlier incidents' and reflection's rollouts. Codex uses its run's `sessions/` rollout.
+  - The timestamp is when the call was issued, so it is an upper bound on "decided to repair" and a lower bound on "repair took effect".
+  - Rejected: the responder's own `repair_actions[].started_at/completed_at`. They are written by the model and are visibly rounded (`18:34:00Z`).
+- `incident_cost.py` prints `no_judge_s` and `applied_s` per SDO stage, and `mean_no_judge_s` and `mean_applied_s` per Codex problem. The JSON carries `grading_wait_seconds`, `judge_excluded_seconds` and `mitigation_applied_seconds`.
+- **First reading.**
+  - reuse1: stage 0 has primary 130.7 s, no-judge 106.8 s, applied 38.0 s; stage 1 has 37.5 / 21.3 / 18.0 s.
+  - The two earlier Codex runs average 216.1 / 191.9 / 69.2 s.
+  - Grading is about 16 to 24 s per stage. The large gap in SDO stage 0 is between applying the repair and POSTing mitigation: the responder verifies health before submitting.
+
+### Invalid runs: shared agent kubeconfig across clusters (SREGym `dcbd087f`, `b4275585`)
+
+- **Found in the Codex x5 run on luna-w0.** Attempt 1 reported an empty `hotel-reservation` namespace. Its own kubectl output showed pods on `luna-w1-worker3` and then namespaces about 3 minutes old, which was luna-w2.
+  - Cause: every conductor wrote its agent kubeconfig (which points at its filtering proxy) to the one fixed path `/tmp/sregym-agent-kubeconfig`. The file is bind-mounted into agent containers, and it is `KUBECONFIG` for host-side agents, including the SDO driver's lifecycle-context and revalidation reads. The last conductor to start won, and every problem process rewrote it.
+  - The SDO incident path (controller install, stage, receipts) uses `SREGYM_BASE_KUBECONFIG` and was not directly affected. But a misdirected Codex agent could mutate another lane's cluster mid-incident, and SDO lifecycle reads could see another cluster's fault.
+- **Decision: every run in the parallel window before the fix is invalid** (infrastructure contamination) and is excluded from all analysis. The directories were renamed with an `invalid_` prefix:
+  - `20260927_190901_codex` (codex_x5, w0);
+  - `20260927_190922_pipeline_sdo-codex-luna-persistent` (reuse2, w1; passed, still invalid);
+  - `20260927_190945_pipeline_sdo-codex-luna-persistent-fresh` (fresh2, w2; stopped in stage 1);
+  - `20260927_193254_pipeline_sdo-codex-luna-persistent-fresh` (fresh3, w1; stopped);
+  - `20260927_193303_pipeline_sdo-codex-luna-sequence` (sdo_sequence, w0; stopped).
+
+  Only reuse1 (`20260927_182519`) and fresh1 (`20260927_184719`) stay valid. They ran alone on luna-w0, one at a time. All lanes were stopped by process group as soon as the cause was confirmed.
+- **Fixes, test-first, pushed before any relaunch:**
+  - `dcbd087f`: the agent kubeconfig path is keyed by the proxy port.
+  - `b4275585`, the loud guard:
+    - `verify_agent_kubeconfig`: the agent kubeconfig must name only this conductor's proxy port, and `kubectl get nodes` through it must return only `<cluster>-*` nodes. It runs when the kubeconfig is generated (lane start) and again immediately before `inject_fault`, and a mismatch aborts the problem. Host-side reading of the file is the same view the container sees, since it is a bind mount of that file.
+    - `cluster_lock`: an exclusive host-wide lock per cluster, held for the worker's lifetime. Ports, proxy, agent kubeconfig path and fault scratch directory all derive from the same worker ID, so no two lanes can resolve to the same kubeconfig, socket or temp path without the second failing at start.
+    - Fault-injector backups move from fixed `/tmp/<service>_modified.yaml` paths to `/tmp/sregym-<cluster>/`. Two clusters injecting the readiness-probe fault at once could otherwise apply each other's original manifest, and the fault would silently not happen.
+- **Next: a two-lane Codex smoke run checks isolation before going back to three lanes.** Smoke runs are isolation checks only and are not counted as baseline samples, which keeps the planned 5-attempt design.
+
+### Isolation smoke run and relaunch (code `91b0080`, SREGym `b4275585`)
+
+- **Cleanup first.** The stopped SDO pipelines left controllers running in the preserved `hotel-reservation-sdo` namespaces on luna-w0 and luna-w2. A leftover controller would repair a Codex run's injected fault, so both namespaces were deleted before any relaunch.
+- **Smoke run: two Codex single attempts (`codex_luna_baseline.toml`) ran concurrently on luna-w1 (`20260927_194247_codex`) and luna-w2 (`20260927_194253_codex`).**
+  - Each conductor's guard logged `…-p16444 verified: port 16444 reaches only luna-w1` and `…-p16445 … luna-w2`, both at lane start and immediately before fault injection.
+  - Every node name in each agent's own command output belongs to its own cluster: luna-w1-worker2/3 only, and luna-w2-worker/worker2/worker3 only.
+  - Isolation confirmed. These two runs are not counted as baseline samples.
+- **Relaunched three lanes with the same assignment:**
+  - w0: codex_x5, then sdo_sequence.
+  - w1: reuse2, then fresh3, then codex_sequence.
+  - w2: fresh2, then reuse3, then sdo_variants, then codex_variants.
+- **Every valid run from here on uses the main checkout at `91b0080` with SREGym `b4275585`.** reuse1 and fresh1 ran at `8c83a04` with SREGym `38cbf4c7`. The only differences are harness isolation and analysis code, which do not affect a single-cluster run, and the images are unchanged.

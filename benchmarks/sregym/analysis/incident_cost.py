@@ -6,6 +6,11 @@ every SDO stage:
 
 - the primary resolution time ``mitigation_submitted_at - fault_injected_at`` and
   the receipt's ``incident_resolution_seconds`` (neither includes reflection);
+- the judge-excluded time: the primary time minus the conductor's diagnosis
+  grading wait (``fault_injected_at + TTL - diagnosis_submitted_at``, when the
+  mitigation stage opened), because a mitigation POST cannot land before the
+  mitigation stage opens; and when the agent issued its first state-changing
+  command (``applied_s``, from the exported Codex rollout), for both arms;
 - oracle verdicts (diagnosis and mitigation);
 - responder ("incident") tokens, reflection tokens and reflection wall time in
   separate columns (asynchronous learning is not resolution time);
@@ -39,7 +44,8 @@ import json
 import math
 import re
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -101,10 +107,22 @@ class Verdict:
     diagnosis: bool | None
     mitigation: bool | None
     primary_seconds: float | None
+    #: Diagnosis POST until the conductor opened the mitigation stage (judge grading).
+    grading_wait_seconds: float | None = None
+    #: Injection until the agent issued its first state-changing command.
+    mitigation_applied_seconds: float | None = None
 
     @property
     def passed(self) -> bool:
         return self.diagnosis is True and self.mitigation is True
+
+    @property
+    def judge_excluded_seconds(self) -> float | None:
+        """Primary time without the diagnosis grading wait the mitigation POST sat behind."""
+
+        if self.primary_seconds is None or self.grading_wait_seconds is None:
+            return None
+        return self.primary_seconds - self.grading_wait_seconds
 
 
 @dataclass(frozen=True)
@@ -149,6 +167,8 @@ class CodexProblemCost:
     passed: int
     mean_tokens: float
     mean_primary_seconds: float | None
+    mean_judge_excluded_seconds: float | None = None
+    mean_mitigation_applied_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -215,12 +235,122 @@ def read_verdict(results_dir: Path) -> Verdict | None:
         injected = _float(row.get("fault_injected_at"))
         submitted = _float(row.get("mitigation_submitted_at"))
         primary = submitted - injected if injected is not None and submitted is not None else None
+        # The conductor records TTL when the diagnosis verdict completes, right before it opens the
+        # mitigation stage, on a clock that starts when the fault is injected.
+        diagnosed = _float(row.get("diagnosis_submitted_at"))
+        ttl = _float(row.get("TTL"))
+        grading_wait = (
+            max(0.0, injected + ttl - diagnosed)
+            if injected is not None and diagnosed is not None and ttl is not None
+            else None
+        )
         return Verdict(
             diagnosis=_truthy(row.get("Diagnosis.success")),
             mitigation=_truthy(row.get("Mitigation.success")),
             primary_seconds=primary,
+            grading_wait_seconds=grading_wait,
         )
     return None
+
+
+_KUBECTL_WRITES = frozenset(
+    {"apply", "create", "patch", "replace", "delete", "rollout", "set", "scale", "edit", "label", "annotate"}
+)
+_KUBECTL_VALUE_FLAGS = frozenset({"-n", "--namespace", "--context", "--kubeconfig", "-l", "--selector"})
+_CODE_MODE_CMD = re.compile(r'\bcmd\s*:\s*("(?:[^"\\]|\\.)*")')
+_COMMAND_SPLIT = re.compile(r"&&|\|\||[;|\n]")
+
+
+def _rollout_commands(payload: dict[str, Any]) -> list[str]:
+    """Shell commands of one Codex tool call (plain ``exec_command`` or code-mode ``exec``)."""
+
+    if payload.get("type") == "function_call":
+        try:
+            arguments = json.loads(str(payload.get("arguments") or "{}"))
+        except json.JSONDecodeError:
+            return []
+        command = arguments.get("cmd") or arguments.get("command") if isinstance(arguments, dict) else None
+        if isinstance(command, list):
+            command = " ".join(str(part) for part in command)
+        return [command] if isinstance(command, str) else []
+    if payload.get("type") == "custom_tool_call":
+        commands = []
+        for literal in _CODE_MODE_CMD.findall(str(payload.get("input") or "")):
+            try:
+                commands.append(json.loads(literal))
+            except json.JSONDecodeError:
+                continue
+        return commands
+    return []
+
+
+def _is_state_change(command: str) -> bool:
+    """Whether one shell command changes cluster state: a kubectl write or a playbook repair script."""
+
+    for segment in _COMMAND_SPLIT.split(command):
+        tokens = segment.split()
+        while tokens and ("=" in tokens[0] and not tokens[0].startswith("-") or tokens[0] in {"env", "sudo"}):
+            tokens = tokens[1:]
+        if not tokens:
+            continue
+        program = tokens[0]
+        if Path(program).name == "kubectl":
+            rest = iter(tokens[1:])
+            for token in rest:
+                if token in _KUBECTL_VALUE_FLAGS:
+                    next(rest, None)
+                elif not token.startswith("-"):
+                    if token in _KUBECTL_WRITES:
+                        return True
+                    break
+            continue
+        if program in {"bash", "sh"}:
+            arguments = [token for token in tokens[1:] if not token.startswith("-")]
+            if any(token.startswith("-n") for token in tokens[1:2]):
+                continue  # ``bash -n`` only checks syntax
+            program = arguments[0] if arguments else ""
+        if Path(program).parent.name == "scripts" and Path(program).name.startswith("repair"):
+            return True
+    return False
+
+
+def _timestamp(value: object) -> float | None:
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def first_mutation_at(rollouts: list[Path], *, after: float) -> float | None:
+    """Epoch of the first state-changing tool call issued at or after *after* in Codex rollouts."""
+
+    first: float | None = None
+    for path in rollouts:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if '"function_call"' not in line and '"custom_tool_call"' not in line:
+                continue
+            record = json.loads(line)
+            payload = record.get("payload")
+            issued = _timestamp(record.get("timestamp"))
+            if not isinstance(payload, dict) or issued is None or issued < after:
+                continue
+            if (first is None or issued < first) and any(_is_state_change(c) for c in _rollout_commands(payload)):
+                first = issued
+    return first
+
+
+def _with_mitigation_applied(verdict: Verdict, results_dir: Path, rollouts: list[Path]) -> Verdict:
+    injected = None
+    for path in sorted(results_dir.glob("*_ALL_results.csv")) or sorted(results_dir.rglob("*_results.csv")):
+        with path.open(encoding="utf-8", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+        if rows:
+            injected = _float(rows[-1].get("fault_injected_at"))
+            break
+    if injected is None or not rollouts:
+        return verdict
+    applied = first_mutation_at(rollouts, after=injected)
+    return replace(verdict, mitigation_applied_seconds=applied - injected if applied is not None else None)
 
 
 def _problem_results_dirs(experiment_dir: Path) -> list[tuple[str, Path]]:
@@ -339,12 +469,20 @@ def load_sdo_pipeline(pipeline_dir: Path) -> list[SdoStage]:
             )
             lifecycle, _ = _sum_usage_jsonl(sorted(results.rglob(LIFECYCLE_USAGE_NAME)))
             session = receipt.get("responder_session_id")
+            responder_rollouts = [
+                path
+                for path in sorted(results.rglob("sdo_runtime/codex/sessions/**/rollout-*.jsonl"))
+                if isinstance(session, str) and session and session in path.name
+            ]
+            verdict = _with_mitigation_applied(
+                read_verdict(results) or Verdict(None, None, None), results, responder_rollouts
+            )
             stages.append(
                 SdoStage(
                     index=index,
                     name=name,
                     problem_id=problem_id,
-                    verdict=read_verdict(results) or Verdict(None, None, None),
+                    verdict=verdict,
                     incident_resolution_seconds=_float(receipt.get("incident_resolution_seconds")),
                     responder=TokenUsage.from_mapping(receipt.get("usage")),
                     reflection=TokenUsage.from_mapping(receipt.get("reflection_usage")),
@@ -390,11 +528,18 @@ def load_codex_runs(directory: Path) -> list[CodexRun]:
             verdict = read_verdict(results)
             if verdict is None:
                 continue
+            rollouts = sorted(results.rglob("sessions/**/rollout-*.jsonl"))
+            verdict = _with_mitigation_applied(verdict, results, rollouts)
             runs.append(CodexRun(problem_id, verdict, _codex_tokens(results), str(results)))
     return runs
 
 
 # --------------------------------------------------------------------------- analysis
+
+
+def _mean(values: list[float | None]) -> float | None:
+    known = [value for value in values if value is not None]
+    return sum(known) / len(known) if known else None
 
 
 def codex_costs(runs: list[CodexRun], *, uncached: bool) -> dict[str, CodexProblemCost]:
@@ -410,6 +555,8 @@ def codex_costs(runs: list[CodexRun], *, uncached: bool) -> dict[str, CodexProbl
             passed=sum(run.verdict.passed for run in group),
             mean_tokens=sum(run.tokens.total(uncached=uncached) for run in group) / len(group),
             mean_primary_seconds=sum(times) / len(times) if times else None,
+            mean_judge_excluded_seconds=_mean([run.verdict.judge_excluded_seconds for run in group]),
+            mean_mitigation_applied_seconds=_mean([run.verdict.mitigation_applied_seconds for run in group]),
         )
     return costs
 
@@ -544,6 +691,8 @@ def render(report: Report) -> str:
                 stage.problem_id,
                 _fmt_verdict(stage.verdict),
                 _fmt_num(stage.verdict.primary_seconds, 1),
+                _fmt_num(stage.verdict.judge_excluded_seconds, 1),
+                _fmt_num(stage.verdict.mitigation_applied_seconds, 1),
                 _fmt_num(stage.incident_resolution_seconds, 1),
                 _fmt_num(stage.responder.total(uncached=uncached)),
                 _fmt_num(stage.reflection.total(uncached=uncached)),
@@ -564,6 +713,8 @@ def render(report: Report) -> str:
                 "problem",
                 "oracles",
                 "primary_s",
+                "no_judge_s",
+                "applied_s",
                 "resolution_s",
                 "responder_tok",
                 "reflection_tok",
@@ -579,7 +730,7 @@ def render(report: Report) -> str:
         "",
         "Codex baseline (mean per problem)",
         _table(
-            ["problem", "runs", "passed", "mean_tok", "mean_primary_s"],
+            ["problem", "runs", "passed", "mean_tok", "mean_primary_s", "mean_no_judge_s", "mean_applied_s"],
             [
                 [
                     cost.problem_id,
@@ -587,6 +738,8 @@ def render(report: Report) -> str:
                     str(cost.passed),
                     _fmt_num(cost.mean_tokens),
                     _fmt_num(cost.mean_primary_seconds, 1),
+                    _fmt_num(cost.mean_judge_excluded_seconds, 1),
+                    _fmt_num(cost.mean_mitigation_applied_seconds, 1),
                 ]
                 for cost in sorted(report.codex.values(), key=lambda item: item.problem_id)
             ],
@@ -625,7 +778,10 @@ def render(report: Report) -> str:
 
 
 def _report_json(report: Report) -> dict[str, Any]:
-    return asdict(report)
+    document = asdict(report)
+    for stage, row in zip(report.stages, document["stages"], strict=True):
+        row["verdict"]["judge_excluded_seconds"] = stage.verdict.judge_excluded_seconds
+    return document
 
 
 def main(argv: list[str] | None = None) -> int:
