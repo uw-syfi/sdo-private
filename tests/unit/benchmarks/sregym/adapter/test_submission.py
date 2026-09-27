@@ -54,7 +54,8 @@ def test_submission_bridge_records_mitigation_then_completes_autonomous_run(term
             return Response({"status": "200", "message": "Submission received"})
         assert request.full_url.endswith("/status")
         assert request.data is None
-        return Response({"stage": terminal_stage})
+        submitted = any(item.full_url.endswith("/submit") for item in requests)
+        return Response({"stage": terminal_stage if submitted else "mitigation"})
 
     result = submit_solution(
         "policy deleted",
@@ -68,9 +69,29 @@ def test_submission_bridge_records_mitigation_then_completes_autonomous_run(term
         "done": {"status": terminal_stage},
     }
     assert [request.full_url for request in requests] == [
+        "http://conductor:8123/status",
         "http://conductor:8123/submit",
         "http://conductor:8123/status",
     ]
+
+
+def test_mitigation_waits_for_diagnosis_grading_before_submitting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The conductor drops a submit that arrives while diagnosis is still being graded."""
+
+    monkeypatch.setattr("benchmarks.sregym.adapter.submission.time.sleep", lambda _seconds: None)
+    stages = iter(["diagnosis", "diagnosis", "mitigation", "done"])
+    requests = []
+
+    def opener(request, timeout: int):
+        requests.append(request.full_url.rsplit("/", 1)[-1])
+        if request.full_url.endswith("/submit"):
+            return Response({"status": "200", "message": "Submission received"})
+        return Response({"stage": next(stages)})
+
+    result = submit_solution("configmap restored", phase="mitigation", api_base="http://conductor:8123", opener=opener)
+
+    assert requests == ["status", "status", "status", "submit", "status"]
+    assert result["done"] == {"status": "done"}
 
 
 def test_submission_bridge_rejects_unacknowledged_autonomous_diagnosis() -> None:
