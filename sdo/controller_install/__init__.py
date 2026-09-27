@@ -1,8 +1,13 @@
 """Install the deterministic SDO controller into Kubernetes."""
 
 from sdo.controller_install.kubernetes import (
+    APPLICATION_NAMESPACE_LABEL,
     CLAUDE_CONFIG_PATH,
     CODEX_HOME_PATH,
+    CONTROLLER_JOB_NAME,
+    CONTROLLER_NAMESPACE_LABEL,
+    MAINTENANCE_CONFIGMAP,
+    REPOSITORY_SYNC_POD,
     RUNTIME_STATE_ROOT,
     RUNTIME_USAGE_ROOT,
     ControllerInstallConfig,
@@ -13,11 +18,20 @@ from sdo.controller_install.kubernetes import (
     controller_security_contexts,
     install_controller,
     kubectl,
+    set_controller_maintenance,
+    start_repository_sync,
+    stop_repository_sync,
+    sync_repository_from_controller,
 )
 
 __all__ = [
+    "APPLICATION_NAMESPACE_LABEL",
     "CLAUDE_CONFIG_PATH",
     "CODEX_HOME_PATH",
+    "CONTROLLER_JOB_NAME",
+    "CONTROLLER_NAMESPACE_LABEL",
+    "MAINTENANCE_CONFIGMAP",
+    "REPOSITORY_SYNC_POD",
     "RUNTIME_STATE_ROOT",
     "RUNTIME_USAGE_ROOT",
     "ControllerInstallConfig",
@@ -28,4 +42,8 @@ __all__ = [
     "controller_security_contexts",
     "install_controller",
     "kubectl",
+    "set_controller_maintenance",
+    "start_repository_sync",
+    "stop_repository_sync",
+    "sync_repository_from_controller",
 ]
