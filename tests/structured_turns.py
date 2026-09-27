@@ -8,15 +8,21 @@ the real parser, and the test sees the exact argv, prompt and cwd.
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentshim.testing import FakeExecutor, FakeRun, scripted_turn
 
-if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+from libs.agent_cli.structured import CODEX_HOME_ROOT_ENV
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator, Mapping, Sequence
+
+    import pytest
     from agentshim import CommandRequest
 
 
@@ -77,3 +83,32 @@ class ScriptedAgent:
     @property
     def prompts(self) -> list[str]:
         return [request.stdin or "" for request in self.executor.requests]
+
+
+@contextmanager
+def fake_codex_login(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeCodexLogin]:
+    """Give Codex workspace-write turns a login and a home root outside ``/tmp``.
+
+    SDO copies the login into a per-turn ``CODEX_HOME``, which Codex and
+    agentshim refuse under the system temp dir, where pytest's ``tmp_path``
+    lives, so the roots go under the user's cache dir instead.
+    """
+    cache = Path.home() / ".cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    base = Path(tempfile.mkdtemp(prefix="sdo-test-codex-", dir=cache))
+    try:
+        login_home = base / "login"
+        login_home.mkdir()
+        (login_home / "auth.json").write_text('{"tokens": "fake"}', encoding="utf-8")
+        homes_root = base / "homes"
+        monkeypatch.setenv("CODEX_HOME", str(login_home))
+        monkeypatch.setenv(CODEX_HOME_ROOT_ENV, str(homes_root))
+        yield FakeCodexLogin(auth=login_home / "auth.json", homes_root=homes_root)
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+@dataclass(frozen=True)
+class FakeCodexLogin:
+    auth: Path
+    homes_root: Path

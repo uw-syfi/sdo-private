@@ -9,8 +9,11 @@ Access levels:
 
 - ``read-only``: the agent may read the repository but not write it.
 - ``workspace-write``: it may write the repository only; SDO's detector
-  gateway (``sdo detector check``) is the one sanctioned way to compile, so
-  direct ``go`` is refused where the provider can express that.
+  gateway (``sdo detector check``) is the one sanctioned way to compile and
+  runs outside the sandbox, so direct ``go`` is refused where the provider can
+  express that. Codex reads that exemption only from ``$CODEX_HOME/rules``, so
+  each such Codex turn runs in a private Codex home that is deleted afterwards
+  and cannot be resumed.
 - ``danger-full-access``: no confinement, for sessions that must operate the
   cluster.
 """
@@ -19,9 +22,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -40,6 +45,7 @@ from agentshim import (
     ToolCall,
     TurnRequest,
 )
+from agentshim.providers.codex import install_rules
 
 if TYPE_CHECKING:
     from agentshim import AgentEvent, CommandExecutor, Provider, ProviderUsage
@@ -50,9 +56,17 @@ AccessMode = Literal["read-only", "workspace-write", "danger-full-access"]
 AGENT_PROVIDERS: tuple[AgentProvider, ...] = ("codex", "claude")
 ACCESS_MODES: tuple[AccessMode, ...] = ("read-only", "workspace-write", "danger-full-access")
 
-#: The command that stays outside Claude's shell sandbox in workspace-write:
-#: it starts the no-network validator container and needs the container runtime.
+#: The command that stays outside the shell sandbox in workspace-write: it
+#: starts the no-network validator container and needs the container runtime.
 DETECTOR_GATEWAY_COMMAND = "sdo detector check"
+
+#: Overrides the directory per-turn Codex homes are created in. The default is
+#: ``$XDG_CACHE_HOME/sdo/codex-homes`` (``~/.cache/sdo/codex-homes``). It must
+#: be outside the workspace and the system temp dir.
+CODEX_HOME_ROOT_ENV = "SDO_CODEX_HOME_ROOT"
+
+#: Environment variables that authenticate Codex without an ``auth.json``.
+_CODEX_API_KEY_ENV = ("CODEX_API_KEY", "OPENAI_API_KEY")
 
 #: Refuses direct execution of the executables named on its argv.
 DENY_EXECUTABLES_HOOK = str(Path(__file__).absolute().parent / "hooks" / "deny_bash_executables.py")
@@ -140,22 +154,26 @@ def run_structured_turn(
     if resume_session_id is not None and not resume_session_id.strip():
         raise ValueError("resume_session_id must not be empty")
 
+    if resume_session_id is not None and provider == "codex" and access == "workspace-write":
+        raise ValueError("a Codex workspace-write turn cannot be resumed: its session lives in a per-turn CODEX_HOME")
+
     workspace = Path(cwd).resolve()
-    selected, extra_args, extra_env = _provider_for(provider, access, workspace)
     recorder = _ShellCommandRecorder()
     try:
-        agent = CliAgent(
-            selected,
-            model=model,
-            executor=executor,
-            env={**os.environ, **extra_env},
-            event_handler=recorder,
-            check_timeout=_CLI_CHECK_TIMEOUT_S,
-        )
-        session = agent.start_session(cwd=str(workspace), timeout=timeout_seconds)
-        if resume_session_id is not None and not session.adopt(resume_session_id):
-            raise StructuredTurnError(f"{provider} cannot resume session {resume_session_id!r}")
-        with tempfile.TemporaryDirectory(prefix="sdo-structured-turn-") as schema_dir:
+        with ExitStack() as turn_scope:
+            selected, extra_args, extra_env = _provider_for(provider, access, workspace, turn_scope)
+            agent = CliAgent(
+                selected,
+                model=model,
+                executor=executor,
+                env={**os.environ, **extra_env},
+                event_handler=recorder,
+                check_timeout=_CLI_CHECK_TIMEOUT_S,
+            )
+            session = agent.start_session(cwd=str(workspace), timeout=timeout_seconds)
+            if resume_session_id is not None and not session.adopt(resume_session_id):
+                raise StructuredTurnError(f"{provider} cannot resume session {resume_session_id!r}")
+            schema_dir = turn_scope.enter_context(tempfile.TemporaryDirectory(prefix="sdo-structured-turn-"))
             result = session.turn(
                 TurnRequest(
                     prompt=prompt,
@@ -189,11 +207,19 @@ def run_structured_turn(
 
 
 def _provider_for(
-    provider: AgentProvider, access: AccessMode, workspace: Path
+    provider: AgentProvider, access: AccessMode, workspace: Path, turn_scope: ExitStack
 ) -> tuple[Provider, Sequence[str], dict[str, str]]:
-    """Build the agentshim provider, extra CLI arguments and env for *access*."""
+    """Build the agentshim provider, extra CLI arguments and env for *access*.
+
+    Anything the turn needs on disk is registered on *turn_scope*, which
+    removes it when the turn ends, however it ends.
+    """
     if provider == "codex":
-        return CodexProvider(sandbox=CodexSandboxConfig(mode=access)), (), {}
+        if access != "workspace-write":
+            return CodexProvider(sandbox=CodexSandboxConfig(mode=access)), (), {}
+        sandbox = CodexSandboxConfig(mode="workspace-write", excluded_commands=[DETECTOR_GATEWAY_COMMAND])
+        home = turn_scope.enter_context(_codex_turn_home(sandbox))
+        return CodexProvider(sandbox=sandbox), (), {"CODEX_HOME": str(home)}
     if access == "danger-full-access":
         return ClaudeProvider(), (), {}
     root = str(workspace)
@@ -214,3 +240,64 @@ def _provider_for(
         ],
     )
     return claude, (), claude.sandbox_env
+
+
+@contextmanager
+def _codex_turn_home(sandbox: CodexSandboxConfig) -> Iterator[Path]:
+    """Yield a private ``CODEX_HOME`` holding *sandbox*'s exemptions, then delete it.
+
+    Codex reads ``excluded_commands`` from ``$CODEX_HOME/rules``, so the home
+    must lie outside everything the sandbox lets commands write, or a command
+    could exempt itself; agentshim refuses the turn otherwise. It must also
+    avoid the system temp dir, where Codex will not start its sandbox helper.
+    Only ``auth.json`` is copied in: the user's ``config.toml`` and rules
+    could widen the sandbox or trust the workspace's own rules.
+    """
+    auth = _codex_auth_file()
+    root = _codex_home_root()
+    try:
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        home = Path(tempfile.mkdtemp(prefix="turn-", dir=root))
+    except OSError as exc:
+        raise StructuredTurnError(
+            f"cannot create a Codex home under {root} (set {CODEX_HOME_ROOT_ENV}): {exc}"
+        ) from exc
+    try:
+        if auth is not None:
+            _copy_private(auth, home / "auth.json")
+        install_rules(home, sandbox)
+    except OSError as exc:
+        shutil.rmtree(home, ignore_errors=True)
+        raise StructuredTurnError(f"cannot prepare the Codex home {home}: {exc}") from exc
+    try:
+        yield home
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def _codex_home_root() -> Path:
+    configured = os.environ.get(CODEX_HOME_ROOT_ENV)
+    if configured:
+        return Path(configured).expanduser().resolve()
+    cache = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return (Path(cache).expanduser() / "sdo" / "codex-homes").resolve()
+
+
+def _codex_auth_file() -> Path | None:
+    """The user's Codex login, or ``None`` when an API key in the env replaces it."""
+    source_home = os.environ.get("CODEX_HOME") or str(Path.home() / ".codex")
+    auth = Path(source_home).expanduser() / "auth.json"
+    if auth.is_file():
+        return auth
+    if any(os.environ.get(name) for name in _CODEX_API_KEY_ENV):
+        return None
+    raise StructuredTurnError(
+        f"Codex workspace-write turns need credentials in a private CODEX_HOME, but {auth} does not exist "
+        f"and none of {', '.join(_CODEX_API_KEY_ENV)} is set; run `codex login` or export an API key"
+    )
+
+
+def _copy_private(source: Path, target: Path) -> None:
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(source.read_bytes())

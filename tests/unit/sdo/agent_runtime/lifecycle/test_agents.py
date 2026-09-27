@@ -39,11 +39,20 @@ from sdo.agent_runtime.lifecycle.operational_memory import (
     run_initial_lifecycle,
 )
 from sdo.operational_memory.sandbox import LocalSandboxRunner, SandboxResult
-from tests.structured_turns import ScriptedAgent, failure, reply, turn_schema
+from tests.structured_turns import ScriptedAgent, failure, fake_codex_login, reply, turn_schema
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from agentshim import CommandRequest
     from agentshim.testing import FakeRun
+
+
+@pytest.fixture(autouse=True)
+def _codex_login(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The Codex health judge's workspace-write turns copy a Codex login."""
+    with fake_codex_login(monkeypatch):
+        yield
 
 
 def _git(repository: Path, *args: str) -> str:

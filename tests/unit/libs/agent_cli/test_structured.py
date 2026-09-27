@@ -7,12 +7,14 @@ each combination actually asks the CLI for, and how failures surface.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from agentshim.providers.codex import BYPASS_FLAG, CodexSandboxConfig, parse_sandbox
+from agentshim.providers.codex import BYPASS_FLAG, RULES_FILENAME, CodexSandboxConfig, parse_rules, parse_sandbox
 from agentshim.testing import FakeRun, scripted_turn
 
 from libs.agent_cli.structured import (
@@ -23,10 +25,12 @@ from libs.agent_cli.structured import (
     StructuredTurnTimeout,
     run_structured_turn,
 )
-from tests.structured_turns import ScriptedAgent, failure, reply
+from tests.structured_turns import FakeCodexLogin, ScriptedAgent, failure, fake_codex_login, reply
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Iterator
+
+    from agentshim import CommandRequest
 
 _SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -34,6 +38,12 @@ _SCHEMA: dict[str, Any] = {
     "required": ["answer"],
     "additionalProperties": False,
 }
+
+
+@pytest.fixture(autouse=True)
+def codex_login(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeCodexLogin]:
+    with fake_codex_login(monkeypatch) as login:
+        yield login
 
 
 def _run(
@@ -83,6 +93,130 @@ class TestCodexAccess:
         (argv,) = agent.argvs
         assert BYPASS_FLAG not in argv
         assert parse_sandbox(argv) == CodexSandboxConfig(mode=access)  # type: ignore[arg-type]
+
+
+class TestCodexGatewayHome:
+    """Codex reads the detector-gateway exemption only from ``$CODEX_HOME/rules``."""
+
+    @staticmethod
+    def _snapshot(request: CommandRequest) -> dict[str, Any]:
+        """What the per-turn home holds while the CLI runs; it is gone afterwards."""
+        home = Path(request.env["CODEX_HOME"])
+        rules = home / "rules" / RULES_FILENAME
+        auth = home / "auth.json"
+        return {
+            "home": home,
+            "rules": parse_rules(rules.read_text(encoding="utf-8")) if rules.is_file() else None,
+            "auth": auth.read_text(encoding="utf-8") if auth.is_file() else None,
+            "auth_mode": auth.stat().st_mode & 0o777 if auth.is_file() else None,
+            "entries": sorted(path.name for path in home.iterdir()),
+        }
+
+    def _run_capturing(self, tmp_path: Path, run: Any, **options: Any) -> tuple[list[dict[str, Any]], Any]:
+        seen: list[dict[str, Any]] = []
+
+        def respond(request: CommandRequest) -> Any:
+            seen.append(self._snapshot(request))
+            return run
+
+        agent = ScriptedAgent(respond)
+        try:
+            turn = run_structured_turn(
+                "codex",
+                "prompt",
+                output_schema=_SCHEMA,
+                cwd=tmp_path,
+                access="workspace-write",
+                executor=agent.executor,
+                **options,
+            )
+        except StructuredTurnError as exc:
+            return seen, exc
+        return seen, turn
+
+    def test_workspace_write_exempts_the_gateway_through_a_private_home(
+        self, tmp_path: Path, codex_login: FakeCodexLogin
+    ) -> None:
+        (seen,), turn = self._run_capturing(tmp_path, reply("codex", {"answer": "ok"}, session_id="s-1"))
+
+        assert json.loads(turn.output_json) == {"answer": "ok"}
+        assert seen["rules"] == [DETECTOR_GATEWAY_COMMAND.split()]
+        assert seen["auth"] == codex_login.auth.read_text(encoding="utf-8")
+        assert seen["auth_mode"] == 0o600
+        assert seen["entries"] == ["auth.json", "rules"]
+        home = seen["home"]
+        assert home.is_absolute()
+        assert home.parent == codex_login.homes_root
+        assert home != codex_login.auth.parent
+
+    def test_the_private_home_is_outside_the_workspace_and_tmp(
+        self, tmp_path: Path, codex_login: FakeCodexLogin
+    ) -> None:
+        (seen,), _ = self._run_capturing(tmp_path, reply("codex", {"answer": "ok"}, session_id="s-1"))
+
+        home = os.path.realpath(seen["home"])
+        for writable in (str(tmp_path), "/tmp"):
+            parent = os.path.realpath(writable)
+            assert os.path.commonpath([home, parent]) != parent
+
+    @pytest.mark.parametrize(
+        "run",
+        [
+            pytest.param(reply("codex", {"answer": "ok"}, session_id="s-1"), id="success"),
+            pytest.param(failure(stderr="boom\n"), id="cli-failure"),
+            pytest.param(reply("codex", {"answer": "ok"}, session_id=None), id="no-session"),
+        ],
+    )
+    def test_the_private_home_is_removed_after_the_turn(
+        self, tmp_path: Path, codex_login: FakeCodexLogin, run: Any
+    ) -> None:
+        (seen,), _ = self._run_capturing(tmp_path, run)
+
+        assert not seen["home"].exists()
+        assert list(codex_login.homes_root.iterdir()) == []
+
+    def test_a_missing_login_is_reported_without_an_api_key(
+        self, tmp_path: Path, codex_login: FakeCodexLogin, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        codex_login.auth.unlink()
+        monkeypatch.delenv("CODEX_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        seen, error = self._run_capturing(tmp_path, reply("codex", {"answer": "ok"}, session_id="s-1"))
+
+        assert seen == []
+        assert isinstance(error, StructuredTurnError)
+        assert "auth.json" in str(error)
+        assert "codex login" in str(error)
+
+    @pytest.mark.parametrize("variable", ["CODEX_API_KEY", "OPENAI_API_KEY"])
+    def test_an_api_key_replaces_the_login(
+        self, tmp_path: Path, codex_login: FakeCodexLogin, monkeypatch: pytest.MonkeyPatch, variable: str
+    ) -> None:
+        codex_login.auth.unlink()
+        monkeypatch.delenv("CODEX_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv(variable, "sk-test")
+
+        (seen,), turn = self._run_capturing(tmp_path, reply("codex", {"answer": "ok"}, session_id="s-1"))
+
+        assert json.loads(turn.output_json) == {"answer": "ok"}
+        assert seen["entries"] == ["rules"]
+        assert seen["rules"] == [DETECTOR_GATEWAY_COMMAND.split()]
+
+    @pytest.mark.parametrize("access", ["read-only", "danger-full-access"])
+    def test_other_levels_keep_the_launching_codex_home(
+        self, access: str, tmp_path: Path, codex_login: FakeCodexLogin
+    ) -> None:
+        _, agent = _run("codex", tmp_path, access=access)
+
+        (request,) = agent.requests
+        assert request.env["CODEX_HOME"] == str(codex_login.auth.parent)
+        assert not codex_login.homes_root.exists()
+
+    def test_a_workspace_write_turn_cannot_be_resumed(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="cannot be resumed"):
+            _run("codex", tmp_path, access="workspace-write", resume_session_id="earlier")
 
 
 class TestClaudeAccess:

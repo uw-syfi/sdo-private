@@ -39,11 +39,7 @@ wheels = [
 [[package]]
 name = "agentshim"
 version = "0.6.6"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/2b/44/96092dfcac1d1a496a00bc14e2e7ef35af27e0c70da9761220e2dc614cc8/agentshim-0.6.6.tar.gz", hash = "sha256:0f134be4f3a338cf976f14a4865f0b7236cf2501a5417182cde573e02b6ba687", size = 86024, upload-time = "2026-09-27T04:53:53.168Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/32/fc/423f4adafa1c76268eb5288dfdf0d20d2c5a0ef36584704ceefe60a2fa30/agentshim-0.6.6-py3-none-any.whl", hash = "sha256:21fe2aadb84093ad06e3d87d4a8d405d7deb0a9afa5471e1b6533095f2f0a5f0", size = 109790, upload-time = "2026-09-27T04:53:51.701Z" },
-]
+source = { git = "https://github.com/vic-lsh/agentshim?branch=vic%2Ffeat%2Fcodex-sandbox-exemptions#98006bc2be93b7631d70d6c418aea3d68856b220" }
 
 [[package]]
 name = "aiofile"
@@ -3448,7 +3444,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.6.6,<0.7" },
+    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim?branch=vic%2Ffeat%2Fcodex-sandbox-exemptions" },
     { name = "litellm", specifier = ">=1.0.0" },
     { name = "loguru", specifier = ">=0.7.2" },
 ]

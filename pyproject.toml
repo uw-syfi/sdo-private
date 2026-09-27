@@ -43,6 +43,9 @@ prerelease = "if-necessary-or-explicit"
 
 [tool.uv.sources]
 sdo-agent-cli = { workspace = true }
+# Temporary: Codex excluded_commands ships in agentshim 0.6.7, not yet on PyPI.
+# Once released, drop this source and require agentshim>=0.6.7 in libs/agent_cli.
+agentshim = { git = "https://github.com/vic-lsh/agentshim", branch = "vic/feat/codex-sandbox-exemptions" }
 
 [tool.uv.workspace]
 members = [
