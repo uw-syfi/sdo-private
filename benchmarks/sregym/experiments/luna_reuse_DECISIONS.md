@@ -280,3 +280,39 @@ Goal: in a repeated incident, make the warm fast mode and the deterministic no-o
   - `uv run pytest -q tests/unit/sdo tests/unit/libs/agent_cli tests/unit/benchmarks/sregym/adapter tests/unit/controller`: 354 passed, 2 skipped (after both merges).
   - `GOMAXPROCS=8 go test ./...` passes in `controller/runtime`, `controller/core` and `controller/sdk`.
 - **Images rebuilt** at f68a717 with `BUILDX_BUILDER=sdo-example bash scripts/build_sdo_images.sh` (exit 0, smoke imports passed): `sdo-detector-validator:v0.1.0` 57b8a3289b53, `sdo-controller:v0.1.0` 05b293361ecb, `sdo-responder:v0.1.0` a4ca9282709f, `sdo-sregym-responder:v0.1.0` 03c6691fb16d.
+
+### v3 SDO pipeline run (`20260927_133809_pipeline_sdo-codex-luna-reuse`)
+
+- **Setup.** Code head `495c1db`; images built at `f68a717`, which is code-identical to head (docs-only diff). Image IDs were verified before launch: controller `05b293361ecb`, sregym-responder `03c6691fb16d`, responder `a4ca9282709f`, validator `57b8a3289b53`.
+  - Same TOML, wrapper `run.sh`, cluster `luna-w0`, judge `codex-gpt-6-astra`/xhigh, and seed workspace (`<scratch>/seed/lifecycle_workspace`) as v2.
+- **R1 (cold): pass/pass.**
+  - Primary 91.4s. Diagnosis POST at +21.3s, TTL 42.4s, TTM 91.7s.
+  - Gate: 121.8s plus a 6.5s injection request. Load 6.9 at injection, 6.3 at mitigation.
+  - Lifecycle: reused with 0 tokens; revalidation took 213s.
+  - Responder: 684,276 input (633,088 cached), 6,916 output, 24 requests, 159s.
+  - Reflection: first attempt accepted with no retries. 1,594,697 input (1,466,112 cached), 18,869 output, 15 requests, 242s. Post-recovery 398s; stage wall 1,098s.
+  - Learned detector (`missing-geo-init-configmap`): `Firing: 1`, watches Deployment, ConfigMap, Pod and Event.
+  - Learned playbook: indexed, uses `<UPPER_CASE>` placeholders, and ships `scripts/repair.sh` and `scripts/verify.sh`.
+- **R2, first attempt (kept as `stage_1_reused-incident.20260927_141722`): pass/pass, but primary 345.9s.**
+  - Warm prompt confirmed from the rollout ("Warm path: validated incident memory matches...").
+  - The incident detector fired at 14:06:03.6, 0.7s after the health detector, and was part of the dispatch (controller log iteration 5).
+  - Reflection was the deterministic no-op: `reflection_skipped_reason` set, 0 attempts, 0 tokens. Responder: 448,173 input (413,440 cached), 3,099 output, 22 requests.
+  - The responder finished the repair and verification and ran the mitigation submit at 14:06:46 (+37s). At that moment the conductor was still grading the diagnosis (xhigh judge, 14:06:26–14:06:46).
+  - `Conductor.submit` answers a submit made during an evaluation with 200 "Submission already accepted" and **drops it**. `adapter/submission.py` then polled 300s for a terminal stage, exited 1 with "SREGym did not reach ... after submission", and the responder resubmitted at 14:11:54.
+  - This is an adapter bug, introduced by making diagnosis non-blocking (`9d0e1d9`). The old comment said the conductor "queues a later mitigation submit", which is false. v1 and v2 never hit it because their repair took longer than the judge.
+- **Fix `8e9b717`: mitigation waits for the conductor's `mitigation` stage before posting.**
+  - Diagnosis still returns on acknowledgement, so repair keeps overlapping diagnosis grading.
+  - Test-first: `test_mitigation_waits_for_diagnosis_grading_before_submitting`. The existing mitigation test was updated for the extra `/status` poll. Adapter tests pass (79); ruff and tach are clean.
+  - Alternative rejected: patching SREGym's conductor to queue submits. That would change the harness the Codex baselines ran under.
+  - Effect on the metric: the SDO mitigation timestamp can now include up to one diagnosis-judge duration (about 20s at xhigh) of waiting. That is a benchmark-imposed wait, the same one Codex would face.
+- **Rebuild and relaunch.** `BUILDX_BUILDER=sdo-example bash scripts/build_sdo_images.sh` at `8e9b717`: sregym-responder `97de0407e563` (verified to contain the fix) and validator `26dad4eadc97`. Controller and responder IDs were unchanged.
+  - R1 was kept: it was unaffected, because its mitigation POST came after diagnosis grading. Only R2 was rerun, via `run_sregym.sh <pipeline> --stage 1`, which re-chains R1's workspace.
+  - The new validator identity triggered a pre-fault lifecycle revalidation (199s, 0 tokens), outside the primary metric.
+- **R2 rerun (the reported R2): pass/pass.**
+  - Primary 43.6s. Diagnosis POST at +21.0s, TTL 43.5s, TTM 43.8s.
+  - Gate: 108.3s plus 6.4s. Load 6.8 at injection, 7.0 at mitigation.
+  - Warm prompt confirmed from the rollout. The incident detector fired at 14:24:44.96 (controller log iteration 7) and was part of the dispatch.
+  - Responder: 246,943 input (216,320 cached), 2,473 output, 12 requests, 77s. It was mitigation-ready at 14:25:26 (+36s); the adapter held the POST until the diagnosis verdict at 14:25:33.
+  - Reflection: deterministic no-op (`reflection_skipped_reason` set), 0 tokens, `validator_skipped_reason=unchanged-diagnostics`, no controller update. Post-recovery 8.4s. Stage wall 567s.
+  - Targets met: total R2 incident tokens 247K, below the Codex median (861K) and A2 (438K). Primary 43.6s, below v2's 51.7s.
+  - Minor detour: after a successful mitigation the responder ran `submission --help` and listed tools before returning. About 20s, after the metric.
