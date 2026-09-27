@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Protocol
 
 from sdo.agent_runtime.lifecycle import (
+    ClaudeDeploymentBackend,
+    ClaudeLifecycleBackend,
     CodexDeploymentBackend,
     CodexLifecycleBackend,
     DeploymentAttempt,
@@ -20,9 +22,14 @@ from sdo.agent_runtime.lifecycle import (
     DeploymentVerifier,
     LifecycleAgentBackend,
     LifecycleError,
+    SandboxResult,
+    SandboxRunner,
     deploy_from_source,
     reuse_initial_lifecycle_if_valid,
     run_initial_lifecycle,
+)
+from sdo.agent_runtime.lifecycle import (
+    check_detector_workspace as _check_detector_workspace,
 )
 from sdo.controller_install import (
     ControllerInstallConfig,
@@ -34,6 +41,12 @@ from sdo.controller_install import (
 
 class OperationError(RuntimeError):
     """Raised when the production operation path cannot be started."""
+
+
+def check_detector_workspace(app_root: Path, *, validator: SandboxRunner | None = None) -> SandboxResult:
+    """Expose the lifecycle's isolated authoring check through the public command layer."""
+
+    return _check_detector_workspace(app_root, validator=validator)
 
 
 @dataclass(frozen=True)
@@ -50,6 +63,8 @@ class OperationConfig:
     credentials_secret: str = "sdo-codex-credentials"
     max_attempts: int = 3
     timeout_seconds: int = 1800
+    repair_policy: str = "commit"
+    agent_provider: str = "codex"
 
     def __post_init__(self) -> None:
         if not isinstance(self.repository, Path):
@@ -65,12 +80,18 @@ class OperationConfig:
             "validator_image",
             "repository_pvc",
             "credentials_secret",
+            "repair_policy",
+            "agent_provider",
         ):
             value = getattr(self, name)
             if not isinstance(value, str):
                 raise TypeError(f"{name} must be a string")
             if not value.strip():
                 raise ValueError(f"{name} must not be empty")
+        if self.repair_policy not in ("commit", "recorded-actions"):
+            raise ValueError("repair_policy must be 'commit' or 'recorded-actions'")
+        if self.agent_provider not in ("codex", "claude"):
+            raise ValueError("agent_provider must be 'codex' or 'claude'")
         if not isinstance(self.max_attempts, int):
             raise TypeError("max_attempts must be an integer")
         if self.max_attempts < 1:
@@ -237,12 +258,11 @@ def operate(
 ) -> OperationResult:
     """Deploy, independently verify, then start the continuous controller runtime."""
 
-    selected_backend = deployment_backend or CodexDeploymentBackend(
-        model=config.model,
-        timeout_seconds=config.timeout_seconds,
-    )
+    backend_type = ClaudeDeploymentBackend if config.agent_provider == "claude" else CodexDeploymentBackend
+    lifecycle_type = ClaudeLifecycleBackend if config.agent_provider == "claude" else CodexLifecycleBackend
+    selected_backend = deployment_backend or backend_type(model=config.model, timeout_seconds=config.timeout_seconds)
     selected_verifier = verifier or ControllerDeploymentVerifier(
-        model=config.model,
+        lifecycle_backend=lifecycle_type(model=config.model, timeout_seconds=config.timeout_seconds),
         timeout_seconds=config.timeout_seconds,
     )
     try:
@@ -267,6 +287,8 @@ def operate(
                 credentials_secret=config.credentials_secret,
                 model=config.model,
                 timeout_seconds=config.timeout_seconds,
+                repair_policy=config.repair_policy,
+                agent_provider=config.agent_provider,
                 wait_for_completion=False,
             )
         )

@@ -333,6 +333,30 @@ def test_validator_rejects_symlinks_and_invalid_shell(tmp_path: Path) -> None:
         )
 
 
+def test_outcome_only_validation_does_not_recompile_unchanged_detectors(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_memory(baseline)
+    shutil.copytree(baseline, candidate)
+    MemoryRepository(candidate).append_outcome(_outcome(), actor=ArtifactOwner.CONTROLLER)
+
+    class FailingIfCalledSandbox:
+        def run(self, _app_root: Path) -> None:
+            raise AssertionError("unchanged diagnostics must not enter executable validation")
+
+    validator = MemoryValidator(sandbox_runner=FailingIfCalledSandbox())  # type: ignore[arg-type]
+
+    assert (
+        validator.validate(
+            candidate,
+            actor=ArtifactOwner.CONTROLLER,
+            changed_paths=[".sdo/outcomes.jsonl"],
+            baseline_root=baseline,
+        )
+        == ()
+    )
+
+
 def test_validator_runs_generated_detector_test_and_build_gate(tmp_path: Path) -> None:
     _write_memory(tmp_path)
 
@@ -439,10 +463,11 @@ def test_kubernetes_validator_job_isolated_from_cluster_credentials_network_and_
     assert pod["volumes"][1]["emptyDir"] == {"sizeLimit": "3Gi"}
     assert container["securityContext"]["readOnlyRootFilesystem"] is True
     assert container["securityContext"]["capabilities"] == {"drop": ["ALL"]}
-    assert container["resources"]["limits"]["cpu"] == "500m"
+    assert container["resources"]["limits"]["cpu"] == "2"
     environment = {item["name"]: item["value"] for item in container["env"]}
-    assert environment["GOMAXPROCS"] == "1"
-    assert environment["GOFLAGS"] == "-p=1"
+    assert environment["GOMAXPROCS"] == "2"
+    assert environment["GOFLAGS"] == "-p=2"
+    assert environment["SDO_GO_CACHE_SEED"] == "/opt/sdo/go-build-cache"
     assert job["spec"]["activeDeadlineSeconds"] == 600  # type: ignore[index]
     assert any("delete" in command for command in commands)
 

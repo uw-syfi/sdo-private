@@ -25,6 +25,7 @@ Expected sections:
 - `active_topology` (when supplied by the deployment adapter): sorted kind/name references for the deployed source variant and required non-optional ConfigMap dependencies.
 - `health_judge`: the accepted final detector artifact.
 - `health_judge_rounds`: ordered structured attempts with distinct session IDs, round numbers, objective digest, covered resources, source, and tests.
+- `validation` (when the validator exposes an immutable identity): the diagnostics-tree digest, immutable validator identity, and `sdo.lifecycle-validation/v1` attestation schema. An exact match permits validation reuse without recompilation; a missing or mismatched field requires fresh isolated validation.
 
 Correlate the deployer source commit with Git and `arch.md`. Correlate the objective digest with the exact text in `goal.md`. When `active_topology` is present, verify that `covered_resources` contains no inactive source variants. A reused lifecycle is credible only when current source topology, active topology, and detector validation still match.
 
@@ -39,8 +40,8 @@ Each line is one controller-owned record. Important fields include:
 - surfaced, inspected, confirmed, rejected, and applied playbooks;
 - confirmed root causes;
 - `classification`;
-- repair and memory commits;
-- responder backend/model and usage;
+- repair and memory commits, plus structured live repair-action receipts;
+- responder backend/model and transport-reported usage, including cached input tokens and provider cost when available;
 - detected, dispatched, mitigated, verified, and completed timestamps.
 
 The controller runtime ConfigMap can also contain `detector_review_required`, `detector_review_required_at`, and `detector_review_reason`. These fields mean a responder completed but independent health findings did not clear within the bounded verification window; do not interpret that state as a verified incident closure.
@@ -49,7 +50,7 @@ Useful queries:
 
 ```bash
 jq -s 'length' .sdo/outcomes.jsonl
-jq -s 'map({incident_id, classification, repair_commit, memory_commit, timestamps})' .sdo/outcomes.jsonl
+jq -s 'map({incident_id, classification, repair_commit, repair_actions, memory_commit, timestamps})' .sdo/outcomes.jsonl
 jq -s 'group_by(.classification) | map({classification: .[0].classification, count: length})' .sdo/outcomes.jsonl
 ```
 
@@ -61,7 +62,7 @@ Broker state is stored under the repository's Git common directory, normally in 
 git -C <application-worktree> rev-parse --git-common-dir
 ```
 
-Ledger fields can include proposal, outcome, reflection, and validator-evidence commits; responder session ID; accepted detector paths; closure and acknowledgement state; network-policy canaries; topology fingerprints; and controller-update rollout records. Require incident IDs and commit hashes to agree with the receipt and outcome.
+Ledger fields can include proposal processing state; optional proposal commit; mandatory outcome, reflection, and validator-evidence commits; responder session ID; accepted detector paths; closure and acknowledgement state; network-policy canaries; topology fingerprints; and controller-update rollout records. Under `recorded-actions`, a missing proposal commit is valid only when the result and outcome contain a successful structured repair action. Require incident IDs and commit hashes to agree with the receipt and outcome.
 
 ## Strict production receipt
 
@@ -71,7 +72,12 @@ The current receipt schema is `sdo.production-receipt/v1`. It summarizes durable
 
 - incident, namespace, controller/responder/validator images;
 - production job dispatch and responder-job correlation;
-- proposal, outcome, reflection, and validator-evidence commits;
+- repair policy and structured repair actions; either a proposal commit or, under `recorded-actions`, at least one successful action;
+- outcome, reflection, and validator-evidence commits;
+- responder usage plus phase timings that separate operational recovery from post-recovery learning and receipt work;
+- compact memory-reuse evidence: candidate count, match reasons, applied-playbook count, and warm-path status;
+- driver timings for conductor readiness, inventory/lifecycle work, production runtime, and benchmark submission, plus whether lifecycle memory was reused; `incident_resolution_seconds` is strictly detection through independently verified health, while the receipt lists pre-incident lifecycle and post-recovery learning as excluded time;
+- whether executable detector validation ran; unchanged diagnostics may skip the Kubernetes validator and carry `validator_skipped_reason=unchanged-diagnostics` with no fresh canaries;
 - same-session reflection and independent verification;
 - final detector clearing and network-policy canaries;
 - acknowledgement, cleanup, and remaining worktrees;

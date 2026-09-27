@@ -10,6 +10,7 @@ from sdo.contracts import (
     ConfirmedRootCause,
     DetectorEvaluation,
     Finding,
+    RepairActionReceipt,
     UsageMetrics,
 )
 
@@ -173,6 +174,7 @@ class OutcomeRecord(MemoryModel):
     final_health_detector_state: list[DetectorEvaluation] = Field(default_factory=list)
     classification: OutcomeClassification
     repair_commit: str | None = None
+    repair_actions: list[RepairActionReceipt] = Field(default_factory=list)
     memory_commit: str | None = None
     responder_backend: str = Field(min_length=1)
     responder_model: str = Field(min_length=1)

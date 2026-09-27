@@ -40,7 +40,7 @@ Compare trajectory actions with findings, surfaced playbooks, architecture, and 
 
 **Signature:** a repair appears plausible but the broker rejects it.
 
-Check edits to human goals, architecture, health detectors, prior outcomes, or paths outside the allowed worktree; missing provenance; dirty or uncommitted state; detector validation; and stale branch heads.
+Check edits to human goals, architecture, health detectors, prior outcomes, or paths outside the allowed worktree; missing provenance; dirty or uncommitted source changes; detector validation; and stale branch heads. Under `recorded-actions`, distinguish a legitimate live-only repair with a successful action receipt from an unrecorded mutation; source changes still require a proposal commit.
 
 ## Reflection without learning
 

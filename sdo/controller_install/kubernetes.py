@@ -18,6 +18,7 @@ class ControllerInstallError(RuntimeError):
 
 
 CODEX_HOME_PATH = "/workspace/.sdo-runtime/codex"
+CLAUDE_CONFIG_PATH = "/workspace/.sdo-runtime/claude"
 RUNTIME_BUILD_ROOT = "/workspace/.sdo-runtime/build"
 RUNTIME_TMPDIR = f"{RUNTIME_BUILD_ROOT}/tmp"
 RUNTIME_GO_TMPDIR = f"{RUNTIME_BUILD_ROOT}/go-tmp"
@@ -38,6 +39,14 @@ class ControllerInstallConfig:
     validator_image: str = "sdo-detector-validator:v0.1.0"
     verification_timeout_seconds: int = 120
     wait_for_completion: bool = False
+    repair_policy: str = "commit"
+    agent_provider: str = "codex"
+
+    def __post_init__(self) -> None:
+        if self.repair_policy not in ("commit", "recorded-actions"):
+            raise ValueError("repair_policy must be 'commit' or 'recorded-actions'")
+        if self.agent_provider not in ("codex", "claude"):
+            raise ValueError("agent_provider must be 'codex' or 'claude'")
 
 
 @dataclass(frozen=True)
@@ -112,8 +121,12 @@ def controller_resources(
         f"{config.timeout_seconds}s",
         "--verification-timeout",
         f"{config.verification_timeout_seconds}s",
+        "--repair-policy",
+        config.repair_policy,
         f"--responder-env=CODEX_HOME={CODEX_HOME_PATH}",
+        f"--responder-env=CLAUDE_CONFIG_DIR={CLAUDE_CONFIG_PATH}",
         f"--responder-env=SDO_RESPONDER_MODEL={config.model}",
+        f"--responder-env=SDO_AGENT_PROVIDER={config.agent_provider}",
         "--broker-arg=-m",
         "--broker-arg=sdo.agent_runtime.responder.broker_cli",
         "--broker-arg=--proposal-command",
@@ -130,6 +143,8 @@ def controller_resources(
         "--broker-arg=/workspace",
         "--broker-arg=--responder-model",
         f"--broker-arg={config.model}",
+        "--broker-arg=--agent-provider",
+        f"--broker-arg={config.agent_provider}",
         "--broker-arg=--reflection-model",
         f"--broker-arg={config.model}",
     ]
@@ -226,6 +241,7 @@ def controller_resources(
                                 "envFrom": [{"secretRef": {"name": config.credentials_secret}}],
                                 "env": [
                                     {"name": "CODEX_HOME", "value": CODEX_HOME_PATH},
+                                    {"name": "CLAUDE_CONFIG_DIR", "value": CLAUDE_CONFIG_PATH},
                                     {"name": "TMPDIR", "value": RUNTIME_TMPDIR},
                                     {"name": "GOTMPDIR", "value": RUNTIME_GO_TMPDIR},
                                     {"name": "GOCACHE", "value": RUNTIME_GO_CACHE},
@@ -448,9 +464,15 @@ def _ensure_credentials_secret(config: ControllerInstallConfig) -> None:
     auth_file = codex_home / "auth.json"
     if auth_file.is_file():
         secret_data["auth.json"] = auth_file.read_text(encoding="utf-8")
+    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if anthropic_api_key:
+        secret_data["ANTHROPIC_API_KEY"] = anthropic_api_key
+    claude_credentials = Path.home() / ".claude" / ".credentials.json"
+    if claude_credentials.is_file():
+        secret_data[".credentials.json"] = claude_credentials.read_text(encoding="utf-8")
     if not secret_data:
         raise ControllerInstallError(
-            f"Secret {config.credentials_secret!r} does not exist and no Codex credentials are available"
+            f"Secret {config.credentials_secret!r} does not exist and no agent credentials are available"
         )
     secret = {
         "apiVersion": "v1",

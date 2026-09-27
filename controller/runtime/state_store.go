@@ -200,6 +200,9 @@ func cloneIncidentResult(result *IncidentResult) *IncidentResult {
 		}
 	}
 	copy.RepairChanges = append(make([]string, 0, len(result.RepairChanges)), result.RepairChanges...)
+	copy.RepairActions = append(
+		make([]RepairActionReceipt, 0, len(result.RepairActions)), result.RepairActions...,
+	)
 	copy.FinalDetectorStates = append(
 		make([]DetectorEvaluation, 0, len(result.FinalDetectorStates)), result.FinalDetectorStates...,
 	)

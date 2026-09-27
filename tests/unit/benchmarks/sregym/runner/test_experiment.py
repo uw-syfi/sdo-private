@@ -107,6 +107,15 @@ def test_config_to_main_args_no_problem_spec_when_empty(tmp_path: Path) -> None:
     assert "--problem-spec" not in args
 
 
+def test_config_to_main_args_emits_agent_timeout(tmp_path: Path) -> None:
+    config = ExperimentConfig(agent_timeout=3600)
+
+    args = config_to_main_args(config, exp_dir=tmp_path, tasklist_path=None)
+
+    index = args.index("--agent-timeout")
+    assert args[index + 1] == "3600"
+
+
 def test_config_to_main_args_emits_explicit_judge_model(tmp_path: Path) -> None:
     config = ExperimentConfig(env=RunnerEnv(judge_model_id="vertex-ai-gemini-2.5-pro"))
 
@@ -481,6 +490,7 @@ def test_reuse_cluster_defaults_to_false() -> None:
     config = ExperimentConfig()
     assert config.env.reuse_cluster is False
     assert config.env.force_recreate_cluster is False
+    assert config.env.preserve_infrastructure is False
     assert config.env.submit_done_returns_feedback is False
 
 
@@ -497,12 +507,14 @@ def test_reuse_cluster_loaded_from_toml(tmp_path: Path) -> None:
         [runner.env]
         reuse_cluster = true
         force_recreate_cluster = false
+        preserve_infrastructure = true
         submit_done_returns_feedback = true
     """,
     )
     config = load_experiment_config(toml)
     assert config.env.reuse_cluster is True
     assert config.env.force_recreate_cluster is False
+    assert config.env.preserve_infrastructure is True
     assert config.env.submit_done_returns_feedback is True
 
 
@@ -572,6 +584,14 @@ def test_config_to_env_emits_cleanup_deferral_timeout(tmp_path: Path) -> None:
     env = config_to_env(config, project_root=tmp_path)
 
     assert env["SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS"] == "1800"
+
+
+def test_config_to_env_emits_source_docker_builder(tmp_path: Path) -> None:
+    config = ExperimentConfig(env=RunnerEnv(docker_builder="sdo-example"))
+
+    env = config_to_env(config, tmp_path)
+
+    assert env["SREGYM_DOCKER_BUILDER"] == "sdo-example"
 
 
 def test_config_to_env_omits_reuse_flags_when_false(tmp_path: Path) -> None:

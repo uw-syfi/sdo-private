@@ -12,6 +12,7 @@ calico_url="https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manif
 calico_sha256="a1df919d9721cf667accdc3e72848911b0cb25cfab7d2478ad0c996302c95744"
 inject_controller_failures="${SDO_SMOKE_INJECT_CONTROLLER_FAILURES:-0}"
 real_lifecycle="${SDO_SMOKE_REAL_LIFECYCLE:-0}"
+agent_provider="${SDO_SMOKE_AGENT_PROVIDER:-codex}"
 runtime_pid=""
 main_bash_pid="${BASHPID}"
 
@@ -100,19 +101,21 @@ git -C "${application}" add deploy/application.yaml
 git -C "${application}" commit -qm "deploy smoke application"
 
 cd "${repo_root}"
-APP_ROOT="${application}" REAL_LIFECYCLE="${real_lifecycle}" uv run python - <<'PY'
+APP_ROOT="${application}" REAL_LIFECYCLE="${real_lifecycle}" AGENT_PROVIDER="${agent_provider}" MODEL="${SDO_SMOKE_MODEL:-gpt-5.4}" uv run python - <<'PY'
 import os
 from pathlib import Path
 
-from sdo.agent_runtime.lifecycle import ensure_operational_memory, run_initial_lifecycle
+from sdo.agent_runtime.lifecycle import ClaudeLifecycleBackend, CodexLifecycleBackend, ensure_operational_memory, run_initial_lifecycle
 
 root = Path(os.environ["APP_ROOT"])
 objective = "The smoke-api Deployment is available and its Service has a ready endpoint."
 if os.environ["REAL_LIFECYCLE"] == "1":
+    backend_type = ClaudeLifecycleBackend if os.environ["AGENT_PROVIDER"] == "claude" else CodexLifecycleBackend
     run_initial_lifecycle(
         root,
         application="sdo-runtime-smoke",
         health_objective=objective,
+        backend=backend_type(model=os.environ["MODEL"]),
     )
 else:
     # The crash-recovery smoke isolates the production controller/broker
@@ -139,6 +142,7 @@ func TestValidatorSandboxIsolation(t *testing.T) {
 	for _, forbidden := range []string{
 		"/var/run/secrets/kubernetes.io/serviceaccount/token",
 		"/sdo/credentials/auth.json",
+		"/sdo/credentials/.credentials.json",
 		"/workspace/application",
 	} {
 		if _, err := os.Stat(forbidden); !os.IsNotExist(err) {
@@ -250,6 +254,7 @@ fi
 APP_ROOT="${application}" \
 NAMESPACE="${namespace}" \
 MODEL="${SDO_SMOKE_MODEL:-gpt-5.4}" \
+AGENT_PROVIDER="${agent_provider}" \
 REAL_LIFECYCLE="${real_lifecycle}" \
 uv run python - <<'PY' &
 import os
@@ -265,9 +270,11 @@ run_production_runtime(
         controller_image="sdo-controller:v0.1.0",
         responder_image="sdo-responder:v0.1.0",
         repository_pvc="sdo-application-repository",
-        credentials_secret="sdo-codex-credentials",
+        credentials_secret="sdo-agent-credentials",
         model=os.environ["MODEL"],
-        timeout_seconds=1800,
+        timeout_seconds=3600,
+        repair_policy="recorded-actions",
+        agent_provider=os.environ["AGENT_PROVIDER"],
         allow_test_lifecycle=os.environ["REAL_LIFECYCLE"] != "1",
     )
 )
@@ -305,7 +312,10 @@ runtime_pid=""
 kubectl --namespace "${namespace}" wait --for=condition=available deployment/smoke-api --timeout=180s
 test -s "${application}/.sdo/outcomes.jsonl"
 commit_messages="$(git -C "${application}" log --format=%B)"
-grep -q "SDO-Phase: proposal" <<<"${commit_messages}"
+if ! grep -q "SDO-Phase: proposal" <<<"${commit_messages}"; then
+  jq -e '.[-1].repair_actions | any(.success == true)' \
+    < <(jq -s . "${application}/.sdo/outcomes.jsonl") >/dev/null
+fi
 grep -q "SDO-Phase: outcome" <<<"${commit_messages}"
 grep -q "SDO-Phase: reflection" <<<"${commit_messages}"
 if [[ "${inject_controller_failures}" == "1" ]]; then

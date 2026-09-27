@@ -182,6 +182,7 @@ def merge_stage_config(
         agent=agent,
         model=merged.get("model", "google-vertex:gemini-2.5-flash"),
         parallel=merged.get("parallel", 4),
+        agent_timeout=merged.get("agent_timeout", 1800),
         app_filter=merged.get("app_filter", ""),
         deploy_from_source=merged.get("deploy_from_source", False),
         application_workspace=merged.get("application_workspace", False),
@@ -201,8 +202,10 @@ def merge_stage_config(
             worker_cpu_limit=str(env_raw.get("worker_cpu_limit", "")),
             reuse_cluster=bool(env_raw.get("reuse_cluster", False)),
             force_recreate_cluster=bool(env_raw.get("force_recreate_cluster", False)),
+            preserve_infrastructure=bool(env_raw.get("preserve_infrastructure", False)),
             submit_done_returns_feedback=bool(env_raw.get("submit_done_returns_feedback", False)),
             cleanup_defer_timeout_seconds=int(env_raw.get("cleanup_defer_timeout_seconds", 0)),
+            docker_builder=str(env_raw.get("docker_builder", "")),
         ),
         agent_config=agent_config,
     )

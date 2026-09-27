@@ -13,6 +13,7 @@ from benchmarks.sregym.adapter.submission_relay import (
     _default_gateway,
     _target_candidates,
     forward_request,
+    forward_status,
 )
 
 if TYPE_CHECKING:
@@ -35,7 +36,7 @@ class FakeResponse:
         return json.dumps(self.payload).encode()
 
 
-def test_relay_forwards_only_autonomous_submission_endpoints() -> None:
+def test_relay_forwards_only_sregym_submission_endpoint() -> None:
     calls: list[tuple[urllib.request.Request, int]] = []
 
     def opener(request: urllib.request.Request, timeout: int) -> FakeResponse:
@@ -43,14 +44,14 @@ def test_relay_forwards_only_autonomous_submission_endpoints() -> None:
         return FakeResponse({"status": "acknowledged"})
 
     response = forward_request(
-        "/submit_diagnosis",
+        "/submit",
         b'{"solution":"network policy blocks frontend"}',
         target_base="http://host.docker.internal:8000",
         opener=opener,
     )
 
     request, timeout = calls[0]
-    assert request.full_url == "http://host.docker.internal:8000/submit_diagnosis"
+    assert request.full_url == "http://host.docker.internal:8000/submit"
     assert request.get_method() == "POST"
     assert request.data == b'{"solution":"network policy blocks frontend"}'
     assert timeout == 300
@@ -58,7 +59,7 @@ def test_relay_forwards_only_autonomous_submission_endpoints() -> None:
     assert json.loads(response.body) == {"status": "acknowledged"}
 
 
-@pytest.mark.parametrize("path", ["/submit", "/cleanup", "/anything"])
+@pytest.mark.parametrize("path", ["/submit_diagnosis", "/submit_done", "/cleanup", "/anything"])
 def test_relay_rejects_non_autonomous_paths(path: str) -> None:
     with pytest.raises(RelayRequestError, match="not allowed"):
         forward_request(path, b"{}", target_base="http://host.docker.internal:8000")
@@ -98,12 +99,26 @@ def test_target_resolver_probes_with_get_then_caches_one_post_target() -> None:
     )
 
     selected = resolver.resolve()
-    response = forward_request("/submit_done", b"{}", target_base=resolver.resolve(), opener=opener)
+    response = forward_request("/submit", b"{}", target_base=resolver.resolve(), opener=opener)
 
     assert selected == "http://172.19.0.1:8000"
     assert calls == [
         ("GET", "http://host.docker.internal:8000/status"),
         ("GET", "http://172.19.0.1:8000/status"),
-        ("POST", "http://172.19.0.1:8000/submit_done"),
+        ("POST", "http://172.19.0.1:8000/submit"),
     ]
     assert response.status == 200
+
+
+def test_relay_forwards_read_only_status() -> None:
+    calls: list[tuple[str, str]] = []
+
+    def opener(request: urllib.request.Request, timeout: int) -> FakeResponse:
+        assert timeout == 5
+        calls.append((request.get_method(), request.full_url))
+        return FakeResponse({"stage": "mitigation"})
+
+    response = forward_status(target_base="http://host.docker.internal:8000", opener=opener)
+
+    assert calls == [("GET", "http://host.docker.internal:8000/status")]
+    assert json.loads(response.body) == {"stage": "mitigation"}

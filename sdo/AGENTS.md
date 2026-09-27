@@ -10,7 +10,7 @@ This package implements the paper-facing lifecycle around the Go controller.
 sdo operate REPOSITORY --namespace NAMESPACE (--goal TEXT | --goal-file PATH)
 ```
 
-Optional flags select the application name, model, controller/responder/validator images, repository PVC, credentials Secret, bounded deployment attempts, and runtime timeout. Its orchestration:
+Optional flags select the application name, agent provider (`codex` or `claude`), model, controller/responder/validator images, repository PVC, credentials Secret, repair-evidence policy (`commit` or `recorded-actions`), bounded deployment attempts, and runtime timeout. Its orchestration:
 
 1. accept a human health objective;
 2. deploy the application source to Kubernetes with a fresh coding-agent session;

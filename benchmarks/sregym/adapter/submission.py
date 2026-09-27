@@ -10,10 +10,13 @@ import argparse
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from typing import Any, Literal
+
+from benchmarks.sregym.protocol.schema import TERMINAL_STAGES
 
 
 class SubmissionBridgeError(RuntimeError):
@@ -21,9 +24,28 @@ class SubmissionBridgeError(RuntimeError):
 
 
 SUBMISSION_TIMEOUT_SECONDS = 300
+STAGE_POLL_INTERVAL_SECONDS = 1.0
 
 
 Opener = Callable[..., Any]
+
+
+def _wait_for_stage(
+    api_base: str,
+    expected: set[str],
+    *,
+    opener: Opener,
+) -> str:
+    deadline = time.monotonic() + SUBMISSION_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        request = urllib.request.Request(f"{api_base.rstrip('/')}/status", method="GET")
+        with opener(request, timeout=SUBMISSION_TIMEOUT_SECONDS) as response:
+            payload = json.loads(response.read())
+        stage = payload.get("stage") if isinstance(payload, dict) else None
+        if stage in expected:
+            return str(stage)
+        time.sleep(STAGE_POLL_INTERVAL_SECONDS)
+    raise SubmissionBridgeError(f"SREGym did not reach one of {sorted(expected)} after submission")
 
 
 def submit_solution(
@@ -36,35 +58,25 @@ def submit_solution(
     base = api_base.rstrip("/")
     payload = json.dumps({"solution": solution}).encode()
     phase_request = urllib.request.Request(
-        f"{base}/submit_{phase}",
+        f"{base}/submit",
         data=payload,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    try:
-        with opener(phase_request, timeout=SUBMISSION_TIMEOUT_SECONDS) as response:
-            result = json.loads(response.read())
-    except urllib.error.HTTPError as exc:
-        if phase != "mitigation" or exc.code != 409:
-            raise
-        # A lost submit_done response can make a retry observe the already-done
-        # guard.  submit_done itself is idempotent, so continue to it and recover
-        # the cached completion payload instead of duplicating mitigation.
-        result = {"status": "already_done"}
+    with opener(phase_request, timeout=SUBMISSION_TIMEOUT_SECONDS) as response:
+        result = json.loads(response.read())
     if not isinstance(result, dict):
         raise SubmissionBridgeError("SREGym submission response is not a JSON object")
-    if phase == "diagnosis":
-        if result.get("status") != "acknowledged":
-            raise SubmissionBridgeError("SREGym diagnosis was not acknowledged")
+    status = result.get("status")
+    if status == "done":
         return result
-    if result.get("status") not in {"acknowledged", "already_done"}:
-        raise SubmissionBridgeError("SREGym mitigation was not acknowledged")
-
-    done_request = urllib.request.Request(f"{base}/submit_done", method="POST")
-    with opener(done_request, timeout=SUBMISSION_TIMEOUT_SECONDS) as response:
-        done = json.loads(response.read())
-    if not isinstance(done, dict) or done.get("status") != "done":
-        raise SubmissionBridgeError("SREGym autonomous run did not report done")
+    if status not in {"200", "ok", "acknowledged"}:
+        raise SubmissionBridgeError(f"SREGym {phase} submission was not acknowledged")
+    if phase == "diagnosis":
+        _wait_for_stage(base, {"mitigation", "done"}, opener=opener)
+        return result
+    terminal_stage = _wait_for_stage(base, set(TERMINAL_STAGES), opener=opener)
+    done = {"status": terminal_stage}
     return {"mitigation": result, "done": done}
 
 

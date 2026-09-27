@@ -331,6 +331,7 @@ def _strict_receipt_error(receipt_path: Path) -> str | None:
 def _stage_results_error(stage_exp_dir: Path, *, require_strict_receipt: bool = False) -> str | None:
     """Reject benchmark-zero stages without complete, valid per-problem evidence."""
     results = sorted((stage_exp_dir / "problem_runs").glob("*/results_*.csv"))
+    results.extend(sorted((stage_exp_dir / "runs").glob("*/worker_*/results/*/*/run_*/*_results.csv")))
     if not results:
         return "no per-problem result CSV was produced"
     for result in results:
@@ -347,8 +348,9 @@ def _stage_results_error(stage_exp_dir: Path, *, require_strict_receipt: bool = 
                     problem = row.get("problem_id") or result.parent.name
                     return f"problem {problem} requires {stage}.success=true"
         if require_strict_receipt:
-            receipts = sorted((result.parent / "agent").glob("sdo_production_receipt_*.json"))
-            expected = result.parent / "agent" / "sdo_production_receipt_strict.json"
+            receipt_dir = result.parent if result.parent.name.startswith("run_") else result.parent / "agent"
+            receipts = sorted(receipt_dir.glob("sdo_production_receipt_*.json"))
+            expected = receipt_dir / "sdo_production_receipt_strict.json"
             if receipts != [expected]:
                 return f"problem {result.parent.name} must produce exactly one standalone strict receipt"
             receipt_error = _strict_receipt_error(expected)
@@ -554,6 +556,7 @@ def run_pipeline(
                     return 1
 
             stage_state.status = "completed"
+            stage_state.error = ""
             write_pipeline_state(state, pipeline_dir)
             prev_kb_dir = str(stage_exp_dir / "kb")
             print(f"\nStage {i} completed.\n")

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from sdo.agent_runtime.responder.codex import ResponderExecutionError, execute_incident
-from sdo.agent_runtime.responder.credentials import prepare_codex_home
+from sdo.agent_runtime.responder.credentials import prepare_claude_home, prepare_codex_home
 from sdo.contracts import IncidentRequest, IncidentResult
 
 if TYPE_CHECKING:
@@ -89,6 +89,7 @@ def main() -> int:
         return 2
     try:
         prepare_codex_home()
+        prepare_claude_home()
         run_job(
             request_path=Path(os.environ.get("SDO_REQUEST_PATH", str(DEFAULT_REQUEST_PATH))),
             result_name=result_name,

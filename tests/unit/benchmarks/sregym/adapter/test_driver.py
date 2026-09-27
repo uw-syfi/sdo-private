@@ -4,6 +4,7 @@ import importlib
 import json
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,8 @@ from benchmarks.sregym.adapter.driver import (
     _in_cluster_api_base,
     _receipt_directory,
     _relay_target_api_base,
+    _remove_sdo_jobs_before_benchmark_grading,
+    _submit_recorded_result,
     persist_lifecycle_seed,
     persist_production_receipt,
 )
@@ -23,6 +26,8 @@ from benchmarks.sregym.adapter.runtime import (
     RuntimeConfig,
     _controller_update_rollout_succeeded,
     _load_incident_ledger,
+    _memory_reuse_summary,
+    _phase_timings,
     _resolve_responder_dispatch,
     _validated_controller_rollout_record,
     run_production_runtime,
@@ -292,6 +297,36 @@ def test_adapter_persists_standalone_strict_receipt_beside_run_artifacts(tmp_pat
     assert list(tmp_path.glob("*.tmp")) == []
 
 
+def test_adapter_removes_sdo_jobs_before_benchmark_grades_application_pods() -> None:
+    calls: list[list[str]] = []
+
+    def fake_runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "deleted", "")
+
+    _remove_sdo_jobs_before_benchmark_grading(
+        {
+            "controller_workload": "batch/v1 Job/sdo-controller-run",
+            "responder_jobs": ["sdo-incident-deadbeef"],
+        },
+        "demo",
+        command_runner=fake_runner,
+    )
+
+    assert calls == [
+        [
+            "kubectl",
+            "--namespace",
+            "demo",
+            "delete",
+            "job/sdo-controller-run",
+            "job/sdo-incident-deadbeef",
+            "--ignore-not-found=true",
+            "--wait=true",
+        ]
+    ]
+
+
 def test_adapter_persists_validated_lifecycle_seed_outside_resettable_stage(tmp_path: Path) -> None:
     repository = tmp_path / "pipeline" / "stage_1_missing-configmap" / "application_workspace"
     repository.mkdir(parents=True)
@@ -324,6 +359,7 @@ def test_sregym_adapter_passes_configured_model_to_initial_lifecycle(
     import benchmarks.sregym.adapter.driver as driver
 
     captured: list[str | None] = []
+    runtime_configs: list[RuntimeConfig] = []
     monkeypatch.setenv("SREGYM_DEFER_CLEANUP", "1")
     monkeypatch.setattr(driver, "get_api_base", lambda: "http://localhost:8000")
     monkeypatch.setattr(driver, "poll_stage_sync", lambda *_args, **_kwargs: None)
@@ -345,10 +381,74 @@ def test_sregym_adapter_passes_configured_model_to_initial_lifecycle(
         return "commit"
 
     monkeypatch.setattr(driver, "run_initial_lifecycle", fake_lifecycle)
-    monkeypatch.setattr(driver, "run_production_runtime", lambda *_args, **_kwargs: {"completed": True})
 
-    assert driver._run(driver._parse_args(["--model", "gpt-5.5"])) == {"completed": True}
+    def fake_runtime(config: RuntimeConfig) -> dict[str, bool]:
+        runtime_configs.append(config)
+        return {
+            "completed": True,
+            "phase_timings_seconds": {
+                "operational_recovery": 12.5,
+                "post_recovery_learning_and_receipt": 4.0,
+            },
+        }
+
+    monkeypatch.setattr(driver, "run_production_runtime", fake_runtime)
+
+    result = driver._run(driver._parse_args(["--model", "gpt-5.5"]))
+    assert result["completed"] is True
+    assert result["lifecycle_reused"] is False
+    assert set(result["driver_phase_timings_seconds"]) == {
+        "conductor_wait",
+        "inventory_and_lifecycle",
+        "production_runtime",
+        "driver_total_before_submission",
+    }
     assert captured == ["gpt-5.5"]
+    assert runtime_configs[0].repair_policy == "recorded-actions"
+    assert result["incident_resolution_seconds"] == 12.5
+    assert result["incident_resolution_scope"] == "detected_to_independently_verified_health"
+    assert result["excluded_from_incident_resolution_seconds"] == {
+        "pre_incident_inventory_and_lifecycle": pytest.approx(
+            result["driver_phase_timings_seconds"]["inventory_and_lifecycle"]
+        ),
+        "post_recovery_learning_and_receipt": 4.0,
+    }
+
+
+def test_sregym_adapter_uses_trusted_worker_kubeconfig_for_controller_install(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    trusted_kubeconfig = tmp_path / "worker.kubeconfig"
+    monkeypatch.setenv("KUBECONFIG", "/tmp/sregym-agent-kubeconfig")
+    monkeypatch.setenv("SREGYM_BASE_KUBECONFIG", str(trusted_kubeconfig))
+    monkeypatch.setenv("SREGYM_DEFER_CLEANUP", "1")
+    monkeypatch.setattr(driver, "get_api_base", lambda: "http://localhost:8000")
+    monkeypatch.setattr(driver, "poll_stage_sync", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        driver,
+        "get_app_info",
+        lambda *_args, **_kwargs: {"app_name": "demo", "namespace": "demo"},
+    )
+    monkeypatch.setattr(driver, "_application_repository", lambda: tmp_path)
+    monkeypatch.setattr(
+        driver,
+        "_deployed_lifecycle_context",
+        lambda *_args, **_kwargs: driver.DeployedLifecycleContext(health_objective="healthy", active_resources=[]),
+    )
+    monkeypatch.setattr(driver, "reuse_initial_lifecycle_if_valid", lambda *_args, **_kwargs: True)
+
+    def fake_runtime(_config: RuntimeConfig) -> dict[str, bool]:
+        assert os.environ["KUBECONFIG"] == str(trusted_kubeconfig)
+        return {"completed": True}
+
+    monkeypatch.setattr(driver, "run_production_runtime", fake_runtime)
+
+    result = driver._run(driver._parse_args([]))
+    assert result["completed"] is True
+    assert result["lifecycle_reused"] is True
 
 
 def test_receipt_falls_back_to_experiment_directory_for_registry_agents(tmp_path: Path) -> None:
@@ -356,6 +456,78 @@ def test_receipt_falls_back_to_experiment_directory_for_registry_agents(tmp_path
 
     assert _receipt_directory(None, repository) == tmp_path / "experiment"
     assert _receipt_directory("/logs/problem-run/agent", repository) == Path("/logs/problem-run/agent")
+
+
+def test_receipt_telemetry_separates_recovery_from_post_recovery_learning() -> None:
+    closure = {
+        "detected_at": "2026-09-13T21:51:04+00:00",
+        "dispatched_at": "2026-09-13T21:51:05+00:00",
+        "responder_completed_at": "2026-09-13T21:55:13+00:00",
+        "verified_at": "2026-09-13T21:55:43+00:00",
+    }
+
+    timings = _phase_timings(closure, datetime.fromisoformat("2026-09-13T22:01:18+00:00"))
+
+    assert timings == {
+        "detection_to_dispatch": 1.0,
+        "responder": 248.0,
+        "verification": 30.0,
+        "operational_recovery": 279.0,
+        "post_recovery_learning_and_receipt": 335.0,
+        "total": 614.0,
+    }
+
+
+def test_receipt_telemetry_identifies_deterministically_retrieved_warm_path() -> None:
+    closure = {
+        "request": {
+            "relevant_outcomes": [
+                {"match_reason": "exact-fingerprint"},
+                {"match_reason": "detector-rule-resource-kind"},
+            ]
+        }
+    }
+    result = {"applied_playbooks": [{"path": ".sdo/playbooks/missing.md"}]}
+
+    assert _memory_reuse_summary(closure, result) == {
+        "candidate_count": 2,
+        "match_reasons": ["detector-rule-resource-kind", "exact-fingerprint"],
+        "applied_playbook_count": 1,
+        "warm_path": True,
+    }
+
+
+def test_submit_recorded_result_finishes_benchmark_when_responder_omitted_transport() -> None:
+    submissions: list[tuple[str, str]] = []
+    receipt = {
+        "confirmed_root_causes": [{"summary": "required ConfigMap was missing"}],
+        "repair_actions": [{"summary": "created the missing ConfigMap"}],
+    }
+
+    _submit_recorded_result(
+        receipt,
+        "http://localhost:8000",
+        current_stage=lambda _api_base: "diagnosis",
+        submitter=lambda solution, *, phase, api_base: submissions.append((phase, solution)) or {},
+    )
+
+    assert submissions == [
+        ("diagnosis", "required ConfigMap was missing"),
+        ("mitigation", "created the missing ConfigMap"),
+    ]
+
+
+def test_submit_recorded_result_does_not_duplicate_completed_transport() -> None:
+    submissions: list[tuple[str, str]] = []
+
+    _submit_recorded_result(
+        {},
+        "http://localhost:8000",
+        current_stage=lambda _api_base: "awaiting_cleanup",
+        submitter=lambda solution, *, phase, api_base: submissions.append((phase, solution)) or {},
+    )
+
+    assert submissions == []
 
 
 def test_runtime_job_state_fails_fast() -> None:
@@ -520,6 +692,8 @@ def test_strict_production_receipt_requires_job_route_reflection_clear_ack_and_c
         "lifecycle_provenance": True,
         "production_job_dispatch": True,
         "completed": True,
+        "repair_policy": "commit",
+        "repair_actions": [],
         "proposal_commit": "proposal",
         "outcome_commit": "outcome",
         "reflection_commit": "reflection",
@@ -588,6 +762,63 @@ def test_strict_production_receipt_requires_job_route_reflection_clear_ack_and_c
     validate_production_receipt(test_double_receipt, allow_test_lifecycle=True)
 
 
+def test_recorded_actions_receipt_accepts_actions_without_proposal_commit() -> None:
+    receipt = {
+        "schema_version": "sdo.production-receipt/v1",
+        "pre_cutover": False,
+        "validator_mode": "kubernetes-job",
+        "lifecycle_provenance": True,
+        "production_job_dispatch": True,
+        "completed": True,
+        "repair_policy": "recorded-actions",
+        "proposal_commit": None,
+        "repair_actions": [
+            {
+                "action_id": "action-1",
+                "kind": "kubernetes_patch",
+                "target": "Deployment/frontend",
+                "summary": "Restored service availability",
+                "details": "Patched the live deployment",
+                "started_at": "2026-07-10T12:00:00+00:00",
+                "completed_at": "2026-07-10T12:00:01+00:00",
+                "success": True,
+                "reversible": True,
+            }
+        ],
+        "outcome_commit": "outcome",
+        "reflection_commit": "reflection",
+        "validator_evidence_commit": "reflection",
+        "same_session_reflection": True,
+        "detector_clear": [{"status": "clear", "fingerprints": []}],
+        "independent_verification": [{"passed": True}],
+        "validator_network_policy_canaries": [
+            {
+                "mode": "allow",
+                "passed": True,
+                "job_name": "allow-job",
+                "observed_at": "2026-07-10T12:00:00+00:00",
+                "details": "positive control passed",
+            },
+            {
+                "mode": "deny",
+                "passed": True,
+                "job_name": "deny-job",
+                "observed_at": "2026-07-10T12:00:01+00:00",
+                "details": "isolation control passed",
+            },
+        ],
+        "acknowledged": True,
+        "cleaned": True,
+        "remaining_worktrees": [],
+        "responder_jobs": ["sdo-incident-job"],
+        "controller_update_required": False,
+    }
+
+    validate_production_receipt(receipt)
+    with pytest.raises(ControllerInstallError, match="repair_actions"):
+        validate_production_receipt({**receipt, "repair_actions": []})
+
+
 def test_strict_production_receipt_rejects_missing_false_or_duplicate_network_policy_canaries() -> None:
     valid_canary = {
         "mode": "allow",
@@ -603,6 +834,8 @@ def test_strict_production_receipt_rejects_missing_false_or_duplicate_network_po
         "lifecycle_provenance": True,
         "production_job_dispatch": True,
         "completed": True,
+        "repair_policy": "commit",
+        "repair_actions": [],
         "proposal_commit": "proposal",
         "outcome_commit": "outcome",
         "reflection_commit": "reflection",
@@ -643,6 +876,36 @@ def test_strict_production_receipt_rejects_missing_false_or_duplicate_network_po
                 "validator_network_policy_canaries": [valid_canary, {**valid_canary, "job_name": "allow-job-2"}],
             }
         )
+
+
+def test_strict_receipt_accepts_skipped_executable_validation_for_unchanged_diagnostics() -> None:
+    receipt = {
+        "schema_version": "sdo.production-receipt/v1",
+        "pre_cutover": False,
+        "validator_mode": "kubernetes-job",
+        "validator_execution_required": False,
+        "validator_skipped_reason": "unchanged-diagnostics",
+        "lifecycle_provenance": True,
+        "production_job_dispatch": True,
+        "completed": True,
+        "repair_policy": "commit",
+        "repair_actions": [],
+        "proposal_commit": "proposal",
+        "outcome_commit": "outcome",
+        "reflection_commit": "reflection",
+        "validator_evidence_commit": "reflection",
+        "same_session_reflection": True,
+        "detector_clear": [{"status": "clear", "fingerprints": []}],
+        "independent_verification": [{"passed": True}],
+        "validator_network_policy_canaries": [],
+        "acknowledged": True,
+        "cleaned": True,
+        "remaining_worktrees": [],
+        "responder_jobs": ["sdo-incident-job"],
+        "controller_update_required": False,
+    }
+
+    validate_production_receipt(receipt)
 
 
 def test_controller_update_rollout_receipt_requires_successful_structured_record() -> None:

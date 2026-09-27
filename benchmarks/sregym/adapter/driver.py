@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,10 +18,18 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from benchmarks.sregym.adapter.runtime import RuntimeConfig, run_production_runtime
-from benchmarks.sregym.protocol.conductor import get_api_base, get_app_info, poll_stage_sync, signal_cleanup
-from benchmarks.sregym.protocol.schema import READY_STAGES
+from benchmarks.sregym.adapter.submission import submit_solution
+from benchmarks.sregym.protocol.conductor import (
+    get_api_base,
+    get_app_info,
+    get_current_stage_sync,
+    poll_stage_sync,
+    signal_cleanup,
+)
+from benchmarks.sregym.protocol.schema import READY_STAGES, TERMINAL_STAGES
 from sdo.agent_runtime.lifecycle import (
     ActiveTopologyResourceDTO,
+    ClaudeLifecycleBackend,
     CodexLifecycleBackend,
     reuse_initial_lifecycle_if_valid,
     run_initial_lifecycle,
@@ -72,6 +81,73 @@ def persist_production_receipt(receipt: dict[str, Any], receipt_dir: Path) -> Pa
     return path
 
 
+def _remove_sdo_jobs_before_benchmark_grading(
+    receipt: dict[str, Any],
+    namespace: str,
+    *,
+    command_runner: CommandRunner = subprocess.run,
+) -> None:
+    """Keep completed SDO infrastructure out of application-pod grading."""
+
+    responder_jobs = receipt.get("responder_jobs", [])
+    names = ["sdo-controller-run"]
+    if isinstance(responder_jobs, list):
+        names.extend(name for name in responder_jobs if isinstance(name, str) and name.startswith("sdo-"))
+    completed = command_runner(
+        [
+            "kubectl",
+            "--namespace",
+            namespace,
+            "delete",
+            *(f"job/{name}" for name in dict.fromkeys(names)),
+            "--ignore-not-found=true",
+            "--wait=true",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        details = completed.stderr.strip() or completed.stdout.strip() or "kubectl delete failed"
+        raise RuntimeError(f"remove SDO jobs before benchmark grading failed: {details}")
+
+
+def _submit_recorded_result(
+    receipt: dict[str, Any],
+    api_base: str,
+    *,
+    current_stage: Callable[[str], str | None] = get_current_stage_sync,
+    submitter: Callable[..., dict[str, Any]] = submit_solution,
+) -> None:
+    """Publish the responder-authored result when it omitted benchmark transport."""
+
+    stage = current_stage(api_base)
+    if stage in TERMINAL_STAGES:
+        return
+    if stage not in READY_STAGES:
+        raise RuntimeError(f"cannot publish SDO result while SREGym is at stage {stage!r}")
+
+    root_causes = receipt.get("confirmed_root_causes", [])
+    diagnosis = "; ".join(
+        str(item.get("summary", "")).strip()
+        for item in root_causes
+        if isinstance(item, dict) and str(item.get("summary", "")).strip()
+    )
+    repair_actions = receipt.get("repair_actions", [])
+    mitigation = "; ".join(
+        str(item.get("summary", "")).strip()
+        for item in repair_actions
+        if isinstance(item, dict) and str(item.get("summary", "")).strip()
+    )
+    if stage == "diagnosis":
+        if not diagnosis:
+            raise RuntimeError("SDO result has no confirmed root cause to submit")
+        submitter(diagnosis, phase="diagnosis", api_base=api_base)
+    if not mitigation:
+        raise RuntimeError("SDO result has no successful repair action to submit")
+    submitter(mitigation, phase="mitigation", api_base=api_base)
+
+
 def _receipt_directory(logs_dir: str | None, repository: Path) -> Path:
     """Resolve durable receipt storage for both CLI and registry-launched agents."""
 
@@ -92,7 +168,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     config = _configuration()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", choices=("agent-cli",), default=config.get("backend", "agent-cli"))
-    parser.add_argument("--provider", choices=("codex",), default=config.get("provider", "codex"))
+    parser.add_argument("--provider", choices=("codex", "claude"), default=config.get("provider", "codex"))
     parser.add_argument("--model", default=config.get("model", os.getenv("MODEL_ID", "gpt-5.4")))
     parser.add_argument("--timeout-sec", type=int, default=int(config.get("timeout_sec", 1800)))
     parser.add_argument("--controller-image", default=config.get("controller_image", "sdo-controller:v0.1.0"))
@@ -233,33 +309,41 @@ def _deployed_health_objective(
 
 
 def _run(args: argparse.Namespace) -> dict[str, Any]:
+    started = time.monotonic()
     if os.getenv("SREGYM_DEFER_CLEANUP", "").strip() != "1":
         raise RuntimeError("sdo_codex requires defer_cleanup: true in the SREGym agent registry")
     api_base = get_api_base()
     logger.info("SDO agent backend: %s/%s", args.backend, args.provider)
     poll_stage_sync(api_base, wait_for=READY_STAGES, timeout=300, on_timeout="raise")
+    conductor_ready = time.monotonic()
     app_info = get_app_info(api_base)
     repository = _application_repository()
     application = str(app_info.get("app_name") or repository.name)
     namespace = str(app_info.get("namespace") or "default")
     lifecycle_context = _deployed_lifecycle_context(namespace)
     health_objective = lifecycle_context.health_objective
-    if not reuse_initial_lifecycle_if_valid(
+    lifecycle_reused = reuse_initial_lifecycle_if_valid(
         repository,
         application=application,
         health_objective=health_objective,
         active_resources=lifecycle_context.active_resources,
-    ):
+    )
+    if not lifecycle_reused:
+        lifecycle_type = ClaudeLifecycleBackend if args.provider == "claude" else CodexLifecycleBackend
         run_initial_lifecycle(
             repository,
             application=application,
             health_objective=health_objective,
             active_resources=lifecycle_context.active_resources,
-            backend=CodexLifecycleBackend(model=args.model),
+            backend=lifecycle_type(model=args.model),
         )
+    lifecycle_ready = time.monotonic()
     if args.logs_dir:
         persist_lifecycle_seed(repository, Path(args.logs_dir))
-    return run_production_runtime(
+    trusted_kubeconfig = os.getenv("SREGYM_BASE_KUBECONFIG", "").strip()
+    if trusted_kubeconfig:
+        os.environ["KUBECONFIG"] = trusted_kubeconfig
+    receipt = run_production_runtime(
         RuntimeConfig(
             repository=repository,
             namespace=namespace,
@@ -271,10 +355,34 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             credentials_secret=args.credentials_secret,
             model=args.model,
             timeout_seconds=args.timeout_sec,
+            repair_policy="recorded-actions",
+            agent_provider=args.provider,
             submission_api_base=_in_cluster_api_base(api_base),
             submission_relay_target_base=_relay_target_api_base(api_base),
         )
     )
+    runtime_ready = time.monotonic()
+    receipt["lifecycle_reused"] = lifecycle_reused
+    receipt["driver_phase_timings_seconds"] = {
+        "conductor_wait": conductor_ready - started,
+        "inventory_and_lifecycle": lifecycle_ready - conductor_ready,
+        "production_runtime": runtime_ready - lifecycle_ready,
+        "driver_total_before_submission": runtime_ready - started,
+    }
+    runtime_timings = receipt.get("phase_timings_seconds")
+    if isinstance(runtime_timings, dict):
+        operational_recovery = runtime_timings.get("operational_recovery")
+        post_recovery = runtime_timings.get("post_recovery_learning_and_receipt")
+        if isinstance(operational_recovery, (int, float)):
+            receipt["incident_resolution_seconds"] = float(operational_recovery)
+            receipt["incident_resolution_scope"] = "detected_to_independently_verified_health"
+            excluded: dict[str, float] = {
+                "pre_incident_inventory_and_lifecycle": lifecycle_ready - conductor_ready,
+            }
+            if isinstance(post_recovery, (int, float)):
+                excluded["post_recovery_learning_and_receipt"] = float(post_recovery)
+            receipt["excluded_from_incident_resolution_seconds"] = excluded
+    return receipt
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -287,7 +395,18 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         logger.exception("production SDO incident lifecycle failed")
         return 1
-    persist_production_receipt(receipt, _receipt_directory(args.logs_dir, _application_repository()))
+    receipt_dir = _receipt_directory(args.logs_dir, _application_repository())
+    # Persist the SDO-authoritative recovery before optional benchmark transport
+    # so a scoring failure cannot erase evidence of a completed incident.
+    persist_production_receipt(receipt, receipt_dir)
+    _remove_sdo_jobs_before_benchmark_grading(receipt, str(receipt["namespace"]))
+    submission_started = time.monotonic()
+    _submit_recorded_result(receipt, api_base)
+    receipt.setdefault("driver_phase_timings_seconds", {})["benchmark_submission"] = (
+        time.monotonic() - submission_started
+    )
+    persist_production_receipt(receipt, receipt_dir)
+    print(f"SDO_RUN_TELEMETRY={json.dumps(receipt, sort_keys=True)}")
     signal_cleanup(api_base)
     return 0
 

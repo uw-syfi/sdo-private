@@ -1,32 +1,38 @@
 from __future__ import annotations
 
-import json
-import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from sdo.agent_runtime.responder.reflection import CodexSessionBackend
+from agentshim.providers.codex import CodexSandboxConfig, parse_sandbox
+
+from sdo.agent_runtime.responder.reflection import ClaudeSessionBackend, CodexSessionBackend
+from tests.structured_turns import ScriptedAgent, reply, turn_schema
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from agentshim import CommandRequest
+    from agentshim.testing import FakeRun
 
 
 def test_codex_reflection_resumes_structured_session_in_incident_worktree(tmp_path: Path) -> None:
-    captured: dict[str, object] = {}
-
-    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        captured.update(command=command, kwargs=kwargs)
-        schema_path = Path(command[command.index("--output-schema") + 1])
-        assert "proposed_changes" in json.loads(schema_path.read_text(encoding="utf-8"))["properties"]
-        output_path = Path(command[command.index("--output-last-message") + 1])
-        output_path.write_text(
-            json.dumps({"summary": "captured signature", "proposed_changes": [".sdo/playbooks/example.md"]}),
-            encoding="utf-8",
+    def respond(request: CommandRequest) -> FakeRun:
+        assert "proposed_changes" in turn_schema(request)["properties"]
+        return reply(
+            "codex",
+            {
+                "summary": "captured signature",
+                "learning_decision": "updated",
+                "proposed_changes": [".sdo/playbooks/example.md"],
+            },
+            session_id="session-1",
         )
-        return subprocess.CompletedProcess(command, 0, '{"type":"thread.started","thread_id":"session-1"}\n', "")
 
+    agent = ScriptedAgent(respond)
     backend = CodexSessionBackend(
-        executable="codex-custom",
         model="gpt-test",
         reasoning_effort="high",
         timeout_seconds=456,
-        command_runner=runner,
+        executor=agent.executor,
     )
     result = backend.resume(
         session_id="session-1",
@@ -36,13 +42,39 @@ def test_codex_reflection_resumes_structured_session_in_incident_worktree(tmp_pa
     )
 
     assert result.summary == "captured signature"
-    command = captured["command"]
-    assert isinstance(command, list)
-    assert command[:3] == ["codex-custom", "exec", "resume"]
-    assert 'sandbox_mode="danger-full-access"' in command
-    assert command[-2:] == ["session-1", "-"]
-    kwargs = captured["kwargs"]
-    assert isinstance(kwargs, dict)
-    assert kwargs["cwd"] == tmp_path.resolve()
-    assert kwargs["timeout"] == 456
-    assert str(kwargs["input"]).startswith("Idempotency key: reflection:incident:commit")
+    (request,) = agent.requests
+    argv = list(request.argv)
+    assert argv[1:5] == ["exec", "resume", "session-1", "-"]
+    assert parse_sandbox(argv) == CodexSandboxConfig(mode="danger-full-access")
+    assert argv[argv.index("--model") + 1] == "gpt-test"
+    assert 'model_reasoning_effort="high"' in argv
+    assert request.cwd == str(tmp_path.resolve())
+    assert request.timeout == 456
+    assert (request.stdin or "").startswith("Idempotency key: reflection:incident:commit")
+
+
+def test_claude_reflection_resumes_structured_session(tmp_path: Path) -> None:
+    agent = ScriptedAgent(
+        lambda _request: reply(
+            "claude",
+            {
+                "summary": "existing memory covers the incident",
+                "learning_decision": "no_change",
+                "no_change_reason": "the existing playbook already captures this verified signature",
+                "proposed_changes": [],
+            },
+            session_id="session-1",
+        )
+    )
+
+    result = ClaudeSessionBackend(model="haiku", executor=agent.executor).resume(
+        session_id="session-1",
+        worktree=tmp_path,
+        prompt="reflect",
+        idempotency_key="reflection:incident:commit",
+    )
+
+    (command,) = agent.argvs
+    assert command[command.index("--resume") + 1] == "session-1"
+    assert command[command.index("--model") + 1] == "haiku"
+    assert result.learning_decision == "no_change"

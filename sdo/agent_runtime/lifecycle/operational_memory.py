@@ -19,12 +19,16 @@ from sdo.agent_runtime.lifecycle.agents import (
     CodexLifecycleBackend,
     DeployerAssessment,
     HealthJudgeArtifact,
+    HealthJudgeWorkspaceArtifact,
     LifecycleAgentBackend,
     LifecycleAgentError,
+    WorkspaceHealthJudgeBackend,
 )
 from sdo.operational_memory import ContainerSandboxRunner, SandboxResult, SandboxRunner
 
 logger = logging.getLogger(__name__)
+
+_VALIDATION_ATTESTATION_SCHEMA = "sdo.lifecycle-validation/v1"
 
 
 class LifecycleError(RuntimeError):
@@ -38,6 +42,96 @@ class TopologyResource:
     namespace: str
     source: str
     dependencies: tuple[str, ...]
+
+
+def check_detector_workspace(app_root: Path, *, validator: SandboxRunner | None = None) -> SandboxResult:
+    """Run the fixed isolated detector check used by authoring agents."""
+
+    root = app_root.resolve()
+    semantic_errors = _health_judge_authoring_errors(root)
+    if semantic_errors:
+        return SandboxResult(
+            returncode=1,
+            stderr="semantic detector checks failed:\n" + "\n".join(f"- {error}" for error in semantic_errors),
+        )
+    selected = validator or ContainerSandboxRunner(
+        detector_ids=("health-objective",),
+        authoring_check=True,
+    )
+    return selected.run(root)
+
+
+def _health_judge_authoring_errors(root: Path) -> list[str]:
+    context_path = root / ".sdo/session-scratch/health-judge-context.json"
+    if not context_path.is_file():
+        return []
+    try:
+        context = json.loads(context_path.read_text(encoding="utf-8"))
+        deployer = DeployerAssessment.model_validate(context["deployer"])
+        health_objective = str(context["health_objective"])
+        round_index = int(context["round_index"])
+        raw_active = context.get("active_resources")
+        active_resources = (
+            [ActiveTopologyResourceDTO.model_validate(resource) for resource in raw_active]
+            if isinstance(raw_active, list)
+            else None
+        )
+        detector = root / ".sdo/diagnostics/detectors/health/objective"
+        artifact = HealthJudgeArtifact(
+            session_id="authoring-self-check",
+            round=round_index,
+            objective_digest=hashlib.sha256(health_objective.strip().encode()).hexdigest(),
+            source_commit=deployer.source_commit,
+            covered_resources=deployer.resources,
+            failure_patterns=["authoring draft"],
+            detector_source=(detector / "detector.go").read_text(encoding="utf-8"),
+            detector_test_source=(detector / "detector_test.go").read_text(encoding="utf-8"),
+        )
+        artifact = _canonicalize_active_coverage(
+            artifact,
+            deployer=deployer,
+            health_objective=health_objective,
+            active_resources=active_resources,
+        )
+        return _validate_health_judge_artifact(
+            artifact,
+            deployer=deployer,
+            health_objective=health_objective,
+            expected_round=round_index,
+            active_resources=active_resources,
+        )
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        return [f"invalid controller-authored health-judge context: {exc}"]
+
+
+def _write_health_judge_authoring_context(
+    root: Path,
+    *,
+    deployer: DeployerAssessment,
+    health_objective: str,
+    round_index: int,
+    active_resources: list[ActiveTopologyResourceDTO] | None,
+) -> None:
+    scratch = root / ".sdo/session-scratch"
+    scratch.mkdir(parents=True, exist_ok=True)
+    (scratch / "health-judge-context.json").write_text(
+        json.dumps(
+            {
+                "deployer": deployer.model_dump(mode="json"),
+                "health_objective": health_objective,
+                "round_index": round_index,
+                "active_resources": (
+                    [resource.model_dump(mode="json") for resource in active_resources]
+                    if active_resources is not None
+                    else None
+                ),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def reuse_initial_lifecycle_if_valid(
@@ -100,7 +194,28 @@ def reuse_initial_lifecycle_if_valid(
         ):
             return False
         selected_validator = validator or ContainerSandboxRunner()
-        return selected_validator.run(root).returncode == 0
+        validation_identity = _validator_identity(selected_validator)
+        validation = provenance.get("validation")
+        if (
+            validation_identity is not None
+            and isinstance(validation, dict)
+            and validation.get("schema_version") == _VALIDATION_ATTESTATION_SCHEMA
+            and validation.get("validator_identity") == validation_identity
+            and validation.get("diagnostics_digest") == _diagnostics_digest(root)
+        ):
+            return True
+        result = selected_validator.run(root)
+        if result.returncode != 0:
+            return False
+        if validation_identity is not None:
+            provenance["validation"] = {
+                "schema_version": _VALIDATION_ATTESTATION_SCHEMA,
+                "diagnostics_digest": _diagnostics_digest(root),
+                "validator_identity": validation_identity,
+            }
+            provenance_path.write_text(yaml.safe_dump(provenance, sort_keys=True), encoding="utf-8")
+            _commit(root, "sdo: attest independently validated lifecycle memory")
+        return True
     except (LifecycleError, OSError, TypeError, ValueError, yaml.YAMLError):
         return False
 
@@ -170,22 +285,40 @@ def run_initial_lifecycle(
     previous: HealthJudgeArtifact | None = None
     used_sessions = {deployer.session_id}
     final_artifact: HealthJudgeArtifact | None = None
+    final_validation_digest: str | None = None
     last_errors: list[str] = []
     for round_index in range(1, judge_rounds + 1):
         round_passed = False
         for attempt_index in range(1, judge_corrections_per_round + 1):
             try:
-                artifact = selected_backend.run_health_judge(
-                    repository=root,
-                    application=application,
-                    health_objective=health_objective,
-                    deployer=deployer,
-                    active_resources=active_resources,
-                    round_index=round_index,
-                    previous=previous,
-                    correction_feedback=judge_feedback,
-                )
-            except (LifecycleAgentError, ValueError) as exc:
+                workspace_author = getattr(selected_backend, "run_health_judge_workspace", None)
+                if callable(workspace_author):
+                    artifact, workspace_validation, candidate_digest = _run_workspace_authored_candidate(
+                        root,
+                        application=application,
+                        health_objective=health_objective,
+                        deployer=deployer,
+                        active_resources=active_resources,
+                        round_index=round_index,
+                        previous=previous,
+                        correction_feedback=judge_feedback,
+                        backend=cast("WorkspaceHealthJudgeBackend", selected_backend),
+                        validator=selected_validator,
+                    )
+                else:
+                    artifact = selected_backend.run_health_judge(
+                        repository=root,
+                        application=application,
+                        health_objective=health_objective,
+                        deployer=deployer,
+                        active_resources=active_resources,
+                        round_index=round_index,
+                        previous=previous,
+                        correction_feedback=judge_feedback,
+                    )
+                    workspace_validation = None
+                    candidate_digest = None
+            except (LifecycleAgentError, LifecycleError, OSError, ValueError) as exc:
                 last_errors = [str(exc)]
                 logger.warning(
                     "health judge round %d attempt %d failed before validation: %s",
@@ -200,6 +333,7 @@ def run_initial_lifecycle(
             artifact = _canonicalize_active_coverage(
                 artifact,
                 deployer=deployer,
+                health_objective=health_objective,
                 active_resources=active_resources,
             )
             judge_attempts.append(artifact)
@@ -214,14 +348,16 @@ def run_initial_lifecycle(
                 errors.append(f"lifecycle session id {artifact.session_id!r} was reused instead of starting fresh")
             used_sessions.add(artifact.session_id)
             if not errors:
-                validation = _validate_authored_candidate(
-                    root,
-                    application=application,
-                    health_objective=health_objective,
-                    deployer=deployer,
-                    artifact=artifact,
-                    validator=selected_validator,
-                )
+                validation = workspace_validation
+                if validation is None:
+                    validation, candidate_digest = _validate_authored_candidate(
+                        root,
+                        application=application,
+                        health_objective=health_objective,
+                        deployer=deployer,
+                        artifact=artifact,
+                        validator=selected_validator,
+                    )
                 if validation.returncode != 0:
                     details = validation.stderr.strip() or validation.stdout.strip() or "detector validation failed"
                     errors.append(details)
@@ -239,6 +375,7 @@ def run_initial_lifecycle(
                 )
                 continue
             final_artifact = artifact
+            final_validation_digest = candidate_digest
             round_passed = True
             judge_feedback = (
                 "The prior artifact passed compilation and tests. Adversarially identify another objective-specific "
@@ -258,6 +395,13 @@ def run_initial_lifecycle(
         "health_judge": final_artifact.model_dump(mode="json"),
         "health_judge_rounds": [artifact.model_dump(mode="json") for artifact in judge_attempts],
     }
+    validation_identity = _validator_identity(selected_validator)
+    if validation_identity is not None and final_validation_digest is not None:
+        provenance["validation"] = {
+            "schema_version": _VALIDATION_ATTESTATION_SCHEMA,
+            "diagnostics_digest": final_validation_digest,
+            "validator_identity": validation_identity,
+        }
     if active_resources is not None:
         provenance["active_topology"] = [
             resource.model_dump(mode="json")
@@ -462,12 +606,15 @@ def _validate_health_judge_artifact(
         }
     )
     if global_objective and referenced_config_maps:
-        derives_config_maps = (
-            "ConfigMaps()" in source
+        reads_config_maps = "ConfigMaps()" in source
+        uses_sdk_reference_helper = "sdk.ConfigMapReferencesForDeployment(" in source
+        traverses_pod_spec = (
+            reads_config_maps
             and re.search(r"\.Spec\s*\.\s*Template\s*\.\s*Spec", source) is not None
             and re.search(r"\.\s*Volumes\b", source) is not None
             and re.search(r"\.\s*ConfigMap\b", source) is not None
         )
+        derives_config_maps = reads_config_maps and (uses_sdk_reference_helper or traverses_pod_spec)
         if not derives_config_maps:
             rendered = ", ".join(f"ConfigMap/{name}" for name in referenced_config_maps)
             errors.append(
@@ -521,18 +668,21 @@ def _canonicalize_active_coverage(
     artifact: HealthJudgeArtifact,
     *,
     deployer: DeployerAssessment,
+    health_objective: str,
     active_resources: list[ActiveTopologyResourceDTO] | None,
 ) -> HealthJudgeArtifact:
     """Make deployed-resource provenance a controller fact, not model output."""
 
-    if active_resources is None:
+    objective_lower = health_objective.lower()
+    global_objective = "all source-backed deployments" in objective_lower or "all selected services" in objective_lower
+    if active_resources is None and not global_objective:
         return artifact
-    active_keys = _active_resource_keys(active_resources)
+    active_keys = _active_resource_keys(active_resources) if active_resources is not None else None
     covered_resources = [
         resource
         for resource in deployer.resources
         if resource.kind in {"ConfigMap", "Deployment", "NetworkPolicy", "Service"}
-        and (resource.kind, resource.name) in active_keys
+        and (active_keys is None or (resource.kind, resource.name) in active_keys)
     ]
     return artifact.model_copy(update={"covered_resources": covered_resources})
 
@@ -545,7 +695,7 @@ def _validate_authored_candidate(
     deployer: DeployerAssessment,
     artifact: HealthJudgeArtifact,
     validator: SandboxRunner,
-) -> SandboxResult:
+) -> tuple[SandboxResult, str]:
     with tempfile.TemporaryDirectory(prefix="sdo-lifecycle-candidate-") as temp_dir:
         candidate = Path(temp_dir) / "application"
         cloned = subprocess.run(
@@ -564,7 +714,103 @@ def _validate_authored_candidate(
             health_judge_artifact=artifact,
             architecture_summary_markdown=deployer.architecture_summary_markdown,
         )
-        return validator.run(candidate)
+        return validator.run(candidate), _diagnostics_digest(candidate)
+
+
+def _run_workspace_authored_candidate(
+    root: Path,
+    *,
+    application: str,
+    health_objective: str,
+    deployer: DeployerAssessment,
+    active_resources: list[ActiveTopologyResourceDTO] | None,
+    round_index: int,
+    previous: HealthJudgeArtifact | None,
+    correction_feedback: str | None,
+    backend: WorkspaceHealthJudgeBackend,
+    validator: SandboxRunner,
+) -> tuple[HealthJudgeArtifact, SandboxResult, str]:
+    """Let a judge edit a disposable checkout, then validate it independently."""
+
+    with tempfile.TemporaryDirectory(prefix="sdo-lifecycle-authoring-") as temp_dir:
+        candidate = Path(temp_dir) / "application"
+        cloned = subprocess.run(
+            ["git", "clone", "--quiet", "--no-hardlinks", str(root), str(candidate)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if cloned.returncode != 0:
+            details = cloned.stderr.strip() or cloned.stdout.strip()
+            raise LifecycleError(f"create lifecycle authoring candidate failed: {details}")
+        ensure_operational_memory(
+            candidate,
+            application=application,
+            health_objective=health_objective,
+            health_judge_artifact=previous,
+            architecture_summary_markdown=deployer.architecture_summary_markdown,
+        )
+        _write_health_judge_authoring_context(
+            candidate,
+            deployer=deployer,
+            health_objective=health_objective,
+            round_index=round_index,
+            active_resources=active_resources,
+        )
+        _commit(candidate, "sdo: add controller-authored detector context")
+        baseline_commit = _git(candidate, "rev-parse", "HEAD")
+        metadata: HealthJudgeWorkspaceArtifact = backend.run_health_judge_workspace(
+            repository=candidate,
+            application=application,
+            health_objective=health_objective,
+            deployer=deployer,
+            active_resources=active_resources,
+            round_index=round_index,
+            previous=previous,
+            correction_feedback=correction_feedback,
+        )
+        allowed = {
+            ".sdo/diagnostics/detectors/health/objective/detector.go",
+            ".sdo/diagnostics/detectors/health/objective/detector_test.go",
+        }
+        changed = set(_git(candidate, "diff", "--name-only", baseline_commit).splitlines())
+        changed.update(_git(candidate, "ls-files", "--others", "--exclude-standard").splitlines())
+        unexpected = sorted(path for path in changed if path and path not in allowed)
+        if unexpected:
+            raise LifecycleError("health judge edited files outside its ownership: " + ", ".join(unexpected))
+        detector = candidate / ".sdo/diagnostics/detectors/health/objective/detector.go"
+        detector_test = candidate / ".sdo/diagnostics/detectors/health/objective/detector_test.go"
+        source = _canonicalize_health_registration(detector.read_text(encoding="utf-8"))
+        detector.write_text(source.rstrip() + "\n", encoding="utf-8")
+        artifact = HealthJudgeArtifact(
+            **metadata.model_dump(exclude={"session_id"}),
+            session_id=metadata.session_id,
+            detector_source=source,
+            detector_test_source=detector_test.read_text(encoding="utf-8"),
+        )
+        return artifact, validator.run(candidate), _diagnostics_digest(candidate)
+
+
+def _validator_identity(validator: SandboxRunner) -> str | None:
+    identity_method = getattr(validator, "validation_identity", None)
+    if not callable(identity_method):
+        return None
+    identity = identity_method()
+    return identity if isinstance(identity, str) and identity.strip() else None
+
+
+def _diagnostics_digest(root: Path) -> str:
+    diagnostics = root / ".sdo" / "diagnostics"
+    digest = hashlib.sha256()
+    for path in sorted(diagnostics.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        relative = path.relative_to(diagnostics).as_posix()
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def ensure_operational_memory(
@@ -836,33 +1082,66 @@ def _canonicalize_health_registration(source: str) -> str:
 		OriginatingCommit: "lifecycle-bootstrap",
 	}}
 }}"""
+    replaced_spec = source[match.start() : closing_brace + 1]
     replaced = source[: match.start()] + canonical + source[closing_brace + 1 :]
-    return _prune_unused_aliased_go_imports(replaced)
+    replaced_qualifiers = set(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\.", replaced_spec))
+    return _prune_unused_aliased_go_imports(replaced, replaced_qualifiers=replaced_qualifiers)
 
 
 _ALIASED_GO_IMPORT = re.compile(
     r'^(?P<indent>[ \t]*)(?P<alias>[A-Za-z_][A-Za-z0-9_]*)[ \t]+"(?P<path>[^"]+)"[ \t]*$',
     re.MULTILINE,
 )
+_DEFAULT_GO_IMPORT = re.compile(
+    r'^(?P<indent>[ \t]*)"(?P<path>[^"]+)"[ \t]*$',
+    re.MULTILINE,
+)
+_GO_IMPORT_BLOCK = re.compile(r"^import\s*\((?P<body>.*?)^\)", re.MULTILINE | re.DOTALL)
 
 
-def _prune_unused_aliased_go_imports(source: str) -> str:
+def _prune_unused_aliased_go_imports(source: str, *, replaced_qualifiers: set[str]) -> str:
     """Remove imports made unused when the controller replaces the authored Spec."""
 
-    import_ranges = [(match.start(), match.end()) for match in _ALIASED_GO_IMPORT.finditer(source)]
+    aliased_imports: list[tuple[int, int, str]] = []
+    default_imports: list[tuple[int, int, str]] = []
+    for block in _GO_IMPORT_BLOCK.finditer(source):
+        body_start = block.start("body")
+        aliased_imports.extend(
+            (body_start + match.start(), body_start + match.end(), match.group("alias"))
+            for match in _ALIASED_GO_IMPORT.finditer(block.group("body"))
+        )
+        default_imports.extend(
+            (
+                body_start + match.start(),
+                body_start + match.end(),
+                _default_go_package_name(match.group("path")),
+            )
+            for match in _DEFAULT_GO_IMPORT.finditer(block.group("body"))
+        )
+    import_ranges = [(start, end) for start, end, _name in [*aliased_imports, *default_imports]]
     body = source
-    for start, end in reversed(import_ranges):
+    for start, end in sorted(import_ranges, reverse=True):
         body = body[:start] + (" " * (end - start)) + body[end:]
 
-    unused_ranges = [
-        (match.start(), match.end())
-        for match in _ALIASED_GO_IMPORT.finditer(source)
-        if match.group("alias") not in {"_", "."}
-        and re.search(rf"\b{re.escape(match.group('alias'))}\s*\.", body) is None
+    unused_ranges: list[tuple[int, int]] = [
+        (start, end)
+        for start, end, alias in aliased_imports
+        if alias not in {"_", "."} and re.search(rf"\b{re.escape(alias)}\s*\.", body) is None
     ]
-    for start, end in reversed(unused_ranges):
+    unused_ranges.extend(
+        (start, end)
+        for start, end, package_name in default_imports
+        if package_name in replaced_qualifiers and re.search(rf"\b{re.escape(package_name)}\s*\.", body) is None
+    )
+    for start, end in sorted(unused_ranges, reverse=True):
         source = source[:start] + source[end:]
     return source
+
+
+def _default_go_package_name(import_path: str) -> str:
+    segment = import_path.rsplit("/", 1)[-1]
+    match = re.match(r"[A-Za-z_][A-Za-z0-9_]*", segment)
+    return match.group(0) if match is not None else segment
 
 
 def _matching_go_brace(source: str, opening_brace: int) -> int:

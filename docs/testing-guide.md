@@ -31,7 +31,14 @@ uv run pytest tests/ --cov=sdo --cov=controller
 (cd controller/runtime && go test ./...)
 ```
 
-Use `scripts/run_tests.sh` for the repository-wide suite. Live Codex or Kubernetes tests may require explicit markers, credentials, images, a cluster, and longer timeouts; do not infer production readiness from skipped external tests.
+Use `scripts/run_tests.sh` for the repository-wide suite.
+
+Agent turns are tested with agentshim's `FakeExecutor` through `tests/structured_turns.py`, which replays each provider's real stream format. Tests marked `live_agents` run the real Codex and Claude Code CLIs and are opt-in; cheap models keep them inexpensive:
+
+```bash
+SDO_RUN_LIVE_AGENTS=1 SDO_LIVE_CODEX_MODEL=gpt-6-luna SDO_LIVE_CLAUDE_MODEL=haiku \
+  uv run pytest -m live_agents tests/
+``` Live Codex or Kubernetes tests may require explicit markers, credentials, images, a cluster, and longer timeouts; do not infer production readiness from skipped external tests.
 
 ## Test the paper contracts
 
@@ -75,5 +82,13 @@ Tests for `benchmarks/sregym/adapter/` should prove that benchmark resources are
 ## Live validation
 
 Kubernetes smoke scripts validate a different layer from unit tests: image contents, RBAC, storage, network policy, repository synchronization, generated controller startup, responder jobs, and cleanup. Record the exact cluster, images, model, application commit, and command whenever reporting a live result.
+
+Run the reproducible Claude Haiku incident example with:
+
+```bash
+bash scripts/run_sdo_example_kind.sh
+```
+
+It requires Docker, Kind, `kubectl`, `uv`, and either `ANTHROPIC_API_KEY` or an authenticated Claude Code configuration. The default keeps lifecycle generation deterministic while using Haiku for the real response and same-session reflection. `SDO_SMOKE_REAL_LIFECYCLE=1` opts into model-generated initial memory and detectors as a less deterministic external integration check.
 
 A green unit suite establishes repository contracts. It does not establish that every target application deploys successfully or that an agent repairs every incident.

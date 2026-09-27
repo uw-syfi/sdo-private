@@ -4,17 +4,24 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+from agentshim.providers.codex import CodexSandboxConfig, parse_sandbox
 
 from sdo.agent_runtime.lifecycle.agents import (
     ActiveTopologyResourceDTO,
+    ClaudeLifecycleBackend,
     CodexLifecycleBackend,
     DeployerAssessment,
     HealthJudgeArtifact,
+    HealthJudgeWorkspaceArtifact,
+    LifecycleAgentError,
     TopologyResourceDTO,
+    _command_escapes_repository,
 )
 from sdo.agent_runtime.lifecycle.operational_memory import (
     _HEALTH_DETECTOR_TEST_SOURCE,
@@ -24,10 +31,18 @@ from sdo.agent_runtime.lifecycle.operational_memory import (
     _judge_assessment,
     _render_health_detector,
     _validate_health_judge_artifact,
+    _write_health_judge_authoring_context,
+    check_detector_workspace,
+    ensure_operational_memory,
     reuse_initial_lifecycle_if_valid,
     run_initial_lifecycle,
 )
 from sdo.operational_memory.sandbox import LocalSandboxRunner, SandboxResult
+from tests.structured_turns import ScriptedAgent, failure, reply, turn_schema
+
+if TYPE_CHECKING:
+    from agentshim import CommandRequest
+    from agentshim.testing import FakeRun
 
 
 def _git(repository: Path, *args: str) -> str:
@@ -153,6 +168,15 @@ class PassingValidator:
         return SandboxResult(returncode=0, stdout="compiled")
 
 
+class IdentifiedPassingValidator(PassingValidator):
+    def __init__(self, identity: str = "validator-image@sha256:trusted") -> None:
+        super().__init__()
+        self.identity = identity
+
+    def validation_identity(self) -> str:
+        return self.identity
+
+
 def test_initial_lifecycle_uses_fresh_structured_agents_and_three_bounded_judge_rounds(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     backend = RecordingBackend()
@@ -187,6 +211,96 @@ def test_initial_lifecycle_uses_fresh_structured_agents_and_three_bounded_judge_
         encoding="utf-8"
     )
     assert '{APIVersion: "v1", Kind: "ConfigMap"}' in detector_source
+
+
+def test_initial_lifecycle_allows_judge_to_edit_and_self_check_an_isolated_workspace(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    objective = "Deployment example and Service example must remain available."
+
+    class WorkspaceBackend(RecordingBackend):
+        def run_health_judge_workspace(
+            self,
+            *,
+            repository: Path,
+            application: str,
+            health_objective: str,
+            deployer: DeployerAssessment,
+            round_index: int,
+            previous: HealthJudgeArtifact | None,
+            correction_feedback: str | None,
+            active_resources: list[ActiveTopologyResourceDTO] | None = None,
+        ) -> HealthJudgeWorkspaceArtifact:
+            del application, health_objective, previous, correction_feedback, active_resources
+            assert (repository / ".sdo/diagnostics/manifest.yaml").is_file()
+            authored = _artifact(
+                repository,
+                session_id=f"workspace-{round_index}",
+                round_index=round_index,
+                deployer=deployer,
+            )
+            detector = repository / ".sdo/diagnostics/detectors/health/objective/detector.go"
+            detector.write_text(authored.detector_source + "\n// edited in workspace\n", encoding="utf-8")
+            test = repository / ".sdo/diagnostics/detectors/health/objective/detector_test.go"
+            test.write_text(authored.detector_test_source, encoding="utf-8")
+            return HealthJudgeWorkspaceArtifact(
+                session_id=authored.session_id,
+                round=round_index,
+                objective_digest=authored.objective_digest,
+                source_commit=deployer.source_commit,
+                covered_resources=authored.covered_resources,
+                failure_patterns=authored.failure_patterns,
+            )
+
+        def run_health_judge(self, **kwargs: object) -> HealthJudgeArtifact:
+            raise AssertionError("structured source fallback should not run")
+
+    validator = PassingValidator()
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective=objective,
+        backend=WorkspaceBackend(),
+        validator=validator,
+        judge_rounds=1,
+    )
+
+    assert len(validator.runs) == 1
+    assert "edited in workspace" in (repository / ".sdo/diagnostics/detectors/health/objective/detector.go").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_authoring_check_returns_semantic_feedback_before_starting_compiler(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    backend = RecordingBackend()
+    deployer = backend.run_deployer(repository=repository, application="example", correction_feedback=None)
+    artifact = _artifact(repository, session_id="judge", round_index=1, deployer=deployer)
+    objective = "Deployment example and Service example must remain available."
+    ensure_operational_memory(
+        repository,
+        application="example",
+        health_objective=objective,
+        health_judge_artifact=artifact,
+        architecture_summary_markdown=deployer.architecture_summary_markdown,
+    )
+    _write_health_judge_authoring_context(
+        repository,
+        deployer=deployer,
+        health_objective=objective,
+        round_index=1,
+        active_resources=None,
+    )
+    source = repository / ".sdo/diagnostics/detectors/health/objective/detector.go"
+    source.write_text(source.read_text(encoding="utf-8").replace(artifact.objective_digest, "0" * 64))
+
+    class CompilerMustNotRun:
+        def run(self, _app_root: Path) -> SandboxResult:
+            raise AssertionError("semantic failures should be returned before compilation")
+
+    result = check_detector_workspace(repository, validator=CompilerMustNotRun())
+
+    assert result.returncode == 1
+    assert "exact objective digest" in result.stderr
 
 
 def test_health_judge_rejects_source_variants_outside_active_topology(tmp_path: Path) -> None:
@@ -267,6 +381,41 @@ def test_lifecycle_canonicalizes_model_coverage_from_active_topology(tmp_path: P
     ]
 
 
+def test_lifecycle_canonicalizes_global_objective_coverage_without_active_topology(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+
+    class OmittedCoverageBackend(RecordingBackend):
+        def run_health_judge(self, **kwargs: object) -> HealthJudgeArtifact:
+            artifact = super().run_health_judge(**kwargs)  # type: ignore[arg-type]
+            objective = str(kwargs["health_objective"])
+            digest = hashlib.sha256(objective.encode()).hexdigest()
+            return artifact.model_copy(
+                update={
+                    "covered_resources": [],
+                    "objective_digest": digest,
+                    "detector_source": artifact.detector_source.replace(artifact.objective_digest, digest),
+                }
+            )
+
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective=(
+            "All source-backed Deployments remain available, all selected Services have ready endpoints, "
+            "and representative requests succeed."
+        ),
+        backend=OmittedCoverageBackend(),
+        validator=PassingValidator(),
+        judge_rounds=1,
+    )
+
+    provenance = __import__("yaml").safe_load((repository / ".sdo/lifecycle-provenance.yaml").read_text())
+    assert [(resource["kind"], resource["name"]) for resource in provenance["health_judge"]["covered_resources"]] == [
+        ("Deployment", "example"),
+        ("Service", "example"),
+    ]
+
+
 def test_existing_model_backed_lifecycle_is_reused_only_while_source_topology_matches(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     objective = "Deployment example and Service example must remain available."
@@ -298,6 +447,71 @@ def test_existing_model_backed_lifecycle_is_reused_only_while_source_topology_ma
         health_objective=objective,
         validator=PassingValidator(),
     )
+
+
+def test_lifecycle_reuse_skips_identical_independent_validation_with_attestation(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    objective = "Deployment example and Service example must remain available."
+    validator = IdentifiedPassingValidator()
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective=objective,
+        backend=RecordingBackend(),
+        validator=validator,
+        judge_rounds=3,
+    )
+    assert len(validator.runs) == 3
+
+    reuse_validator = IdentifiedPassingValidator()
+    assert reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=reuse_validator,
+    )
+    assert reuse_validator.runs == []
+
+
+def test_lifecycle_attestation_is_invalidated_by_validator_or_diagnostics_change(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    objective = "Deployment example and Service example must remain available."
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective=objective,
+        backend=RecordingBackend(),
+        validator=IdentifiedPassingValidator(),
+        judge_rounds=3,
+    )
+
+    changed_validator = IdentifiedPassingValidator("validator-image@sha256:new")
+    assert reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=changed_validator,
+    )
+    assert len(changed_validator.runs) == 1
+    repeated_changed_validator = IdentifiedPassingValidator("validator-image@sha256:new")
+    assert reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=repeated_changed_validator,
+    )
+    assert repeated_changed_validator.runs == []
+
+    detector = repository / ".sdo/diagnostics/detectors/health/objective/detector.go"
+    detector.write_text(detector.read_text(encoding="utf-8") + "\n// changed\n", encoding="utf-8")
+    changed_detector_validator = IdentifiedPassingValidator()
+    assert reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=changed_detector_validator,
+    )
+    assert len(changed_detector_validator.runs) == 1
 
 
 def test_lifecycle_reuse_requires_the_same_active_topology(tmp_path: Path) -> None:
@@ -485,6 +699,7 @@ import (
     \"time\"
     appsv1 \"k8s.io/api/apps/v1\"
     corev1 \"k8s.io/api/core/v1\"
+    \"k8s.io/apimachinery/pkg/runtime/schema\"
     \"sdo.dev/controller/sdk\"
 )
 
@@ -492,18 +707,28 @@ func New() sdk.Detector { return Detector{} }
 type Detector struct{}
 func (Detector) Spec() sdk.DetectorSpec {
     _ = appsv1.SchemeGroupVersion
+    _ = schema.GroupVersionKind{}
     return sdk.DetectorSpec{}
 }
 func (Detector) Detect(ctx context.Context, snap sdk.DetectionContext) ([]sdk.Finding, error) {
     _ = corev1.ConditionTrue
     return nil, nil
 }
+func apiVersionForKind(kind string) string {
+    if kind == "Deployment" {
+        return "apps/v1"
+    }
+    return "v1"
+}
 """
 
     canonical = _canonicalize_health_registration(source)
 
     assert 'appsv1 "k8s.io/api/apps/v1"' not in canonical
+    assert '"k8s.io/apimachinery/pkg/runtime/schema"' not in canonical
     assert 'corev1 "k8s.io/api/core/v1"' in canonical
+    assert 'return "apps/v1"' in canonical
+    assert 'return "v1"' in canonical
 
 
 def test_lifecycle_rejects_source_default_as_a_literal_runtime_namespace(tmp_path: Path) -> None:
@@ -541,15 +766,9 @@ def test_lifecycle_rejects_source_default_as_a_literal_runtime_namespace(tmp_pat
 def test_codex_backend_starts_independent_read_only_sessions_and_validates_structured_outputs(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     raw = _deployer_assessment({"repository": str(repository), "application": "example"})
-    calls: list[list[str]] = []
-    prompts: list[str] = []
 
-    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(command)
-        prompts.append(str(kwargs["input"]))
-        output_path = Path(command[command.index("--output-last-message") + 1])
-        schema_path = Path(command[command.index("--output-schema") + 1])
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    def respond(request: CommandRequest) -> FakeRun:
+        schema = turn_schema(request)
         if "architecture_summary_markdown" in schema["properties"]:
             output = {
                 "source_commit": raw["source_commit"],
@@ -567,11 +786,10 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
             )
             artifact = _artifact(repository, session_id="placeholder", round_index=1, deployer=deployer)
             output = artifact.model_dump(mode="json", exclude={"session_id"})
-        output_path.write_text(json.dumps(output), encoding="utf-8")
-        session = f"fresh-session-{len(calls)}"
-        return subprocess.CompletedProcess(command, 0, f'{{"type":"thread.started","thread_id":"{session}"}}\n', "")
+        return reply("codex", output, session_id=f"fresh-session-{len(agent.requests)}")
 
-    backend = CodexLifecycleBackend(command_runner=runner)
+    agent = ScriptedAgent(respond)
+    backend = CodexLifecycleBackend(executor=agent.executor)
     deployer = backend.run_deployer(
         repository=repository,
         application="example",
@@ -589,13 +807,85 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
 
     assert deployer.session_id == "fresh-session-1"
     assert judge.session_id == "fresh-session-2"
-    assert len(calls) == 2
-    assert all("resume" not in command for command in calls)
-    assert all(command[command.index("--sandbox") + 1] == "read-only" for command in calls)
-    assert all("--output-schema" in command and "--json" in command for command in calls)
+    prompts = agent.prompts
+    assert len(agent.argvs) == 2
+    assert all("resume" not in argv for argv in agent.argvs)
+    assert all(parse_sandbox(argv) == CodexSandboxConfig(mode="read-only") for argv in agent.argvs)
+    assert all("--output-schema" in argv and "--json" in argv for argv in agent.argvs)
     assert "copy every resource required by the objective exactly from the deployer handoff" in prompts[1]
+    assert "Trusted controller/sdk API reference" in prompts[1]
+    assert "Inspect only the current application checkout" in prompts[1]
+    assert "Do not create or execute helper scripts in temporary directories" in prompts[0]
+    assert "Do not use `$TMPDIR` or `/tmp`" in prompts[0]
+    assert (
+        "Authoritative objective SHA-256: 1e71839b3094cb9c80bc60d0fa0186c30746b677eb96b7cb094de4e1140401cb"
+    ) in prompts[1]
+    assert "last structured response is the only response the controller accepts" in prompts[1]
     assert "Every Go func declaration must be package-level" in prompts[1]
     assert "Mentally parse both complete files before returning them" in prompts[1].replace("\n", " ")
+
+
+@pytest.mark.parametrize(
+    "escaped_command",
+    [
+        "find ../older-run -name detector.go",
+        "sed -n 1,80p {outside}/detector.go",
+        "cat /proc/self/environ",
+    ],
+)
+def test_codex_backend_rejects_sessions_that_read_outside_application_repository(
+    tmp_path: Path,
+    escaped_command: str,
+) -> None:
+    repository = _repository(tmp_path)
+    raw = _deployer_assessment({"repository": str(repository), "application": "example"})
+    escaped_command = escaped_command.format(outside=tmp_path.parent / "older-run")
+
+    agent = ScriptedAgent(
+        lambda _request: reply(
+            "codex",
+            {
+                "source_commit": raw["source_commit"],
+                "topology_fingerprint": raw["topology_fingerprint"],
+                "resources": raw["resources"],
+                "architecture_summary_markdown": "# Architecture\n\nExample Deployment and Service.",
+            },
+            session_id="fresh-session",
+            commands=[escaped_command],
+        )
+    )
+    backend = CodexLifecycleBackend(executor=agent.executor)
+
+    with pytest.raises(LifecycleAgentError, match="outside the application repository"):
+        backend.run_deployer(
+            repository=repository,
+            application="example",
+            correction_feedback=None,
+        )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat > /tmp/objective.txt << 'EOF'\nobjective\nEOF",
+        "cat > \"$TMPDIR/covered_resources.json\" << 'EOF'\n[]\nEOF",
+        "git show ed44ea9:/.sdo/diagnostics/detectors/health/objective/detector_test.go | head -50",
+        'find . -name "*deployment*.yaml" -path "*/kubernetes/*"',
+    ],
+)
+def test_repository_audit_allows_safe_non_external_paths(tmp_path: Path, command: str) -> None:
+    repository = _repository(tmp_path)
+
+    assert not _command_escapes_repository(command, repository)
+
+
+def test_repository_audit_still_rejects_external_path_after_git_object_path(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+
+    assert _command_escapes_repository(
+        "git show ed44ea9:/.sdo/goal.md; cat /etc/passwd",
+        repository,
+    )
 
 
 def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_feedback(
@@ -604,15 +894,11 @@ def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_fee
 ) -> None:
     repository = _repository(tmp_path)
     raw = _deployer_assessment({"repository": str(repository), "application": "example"})
-    prompts: list[str] = []
     judge_calls = 0
 
-    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def respond(request: CommandRequest) -> FakeRun:
         nonlocal judge_calls
-        prompts.append(str(kwargs["input"]))
-        output_path = Path(command[command.index("--output-last-message") + 1])
-        schema_path = Path(command[command.index("--output-schema") + 1])
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema = turn_schema(request)
         if "architecture_summary_markdown" in schema["properties"]:
             output = {
                 "source_commit": raw["source_commit"],
@@ -623,11 +909,9 @@ def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_fee
         else:
             judge_calls += 1
             if judge_calls == 1:
-                return subprocess.CompletedProcess(
-                    command,
-                    1,
-                    '{"type":"error","message":"Go output was incomplete"}\n',
-                    "unexpected end of file before func TestDetector\n",
+                return failure(
+                    stdout='{"type":"error","message":"Go output was incomplete"}\n',
+                    stderr="unexpected end of file before func TestDetector\n",
                 )
             deployer = DeployerAssessment(
                 session_id="deployer-session",
@@ -642,21 +926,31 @@ def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_fee
                 round_index=judge_calls - 1,
                 deployer=deployer,
             )
-            output = artifact.model_dump(mode="json", exclude={"session_id"})
-        output_path.write_text(json.dumps(output), encoding="utf-8")
-        session = f"fresh-session-{len(prompts)}"
-        return subprocess.CompletedProcess(command, 0, f'{{"type":"thread.started","thread_id":"{session}"}}\n', "")
+            if "detector_source" in schema["properties"]:
+                output = artifact.model_dump(mode="json", exclude={"session_id"})
+            else:
+                detector = Path(request.cwd or "") / ".sdo/diagnostics/detectors/health/objective"
+                (detector / "detector.go").write_text(artifact.detector_source, encoding="utf-8")
+                (detector / "detector_test.go").write_text(artifact.detector_test_source, encoding="utf-8")
+                output = artifact.model_dump(
+                    mode="json",
+                    exclude={"session_id", "detector_source", "detector_test_source"},
+                )
+        return reply("codex", output, session_id=f"fresh-session-{len(agent.requests)}")
+
+    agent = ScriptedAgent(respond)
 
     with caplog.at_level(logging.WARNING, logger="sdo.agent_runtime.lifecycle.operational_memory"):
         run_initial_lifecycle(
             repository,
             application="example",
             health_objective="Deployment example and Service example must remain available.",
-            backend=CodexLifecycleBackend(command_runner=runner),
+            backend=CodexLifecycleBackend(executor=agent.executor),
             validator=PassingValidator(),
             judge_rounds=3,
         )
 
+    prompts = agent.prompts
     combined_failure = (
         'unexpected end of file before func TestDetector\n{"type":"error","message":"Go output was incomplete"}'
     )
@@ -791,16 +1085,47 @@ def test_global_health_objective_requires_dynamic_missing_configmap_dependency_d
     assert any("derive missing ConfigMap dependencies from Deployment pod specs" in error for error in errors)
     assert any("ConfigMap/runtime-script" in error for error in errors)
 
+    helper_artifact = artifact.model_copy(
+        update={
+            "detector_source": artifact.detector_source
+            + "\n// uses sdk.ConfigMapReferencesForDeployment(deployment) with snapshot.ConfigMaps()\n"
+        }
+    )
+    helper_errors = _validate_health_judge_artifact(
+        helper_artifact,
+        deployer=deployer,
+        health_objective=(
+            "All source-backed Deployments remain available, all selected Services have ready endpoints, "
+            "and representative requests succeed."
+        ),
+        expected_round=1,
+    )
 
-@pytest.mark.live_codex
+    assert not any(
+        "derive missing ConfigMap dependencies from Deployment pod specs" in error for error in helper_errors
+    )
+
+
+@pytest.mark.live_agents
 @pytest.mark.skipif(
-    os.getenv("SDO_RUN_LIVE_CODEX", "").strip() != "1",
-    reason="set SDO_RUN_LIVE_CODEX=1 to spend model tokens on the real three-round lifecycle",
+    os.getenv("SDO_RUN_LIVE_AGENTS", "").strip() != "1",
+    reason="set SDO_RUN_LIVE_AGENTS=1 to spend model tokens on the real three-round lifecycle",
 )
-def test_real_codex_three_round_health_judge_authors_compiling_detector(
+@pytest.mark.parametrize(
+    ("backend_type", "model_variable"),
+    [
+        pytest.param(CodexLifecycleBackend, "SDO_LIVE_CODEX_MODEL", id="codex"),
+        pytest.param(ClaudeLifecycleBackend, "SDO_LIVE_CLAUDE_MODEL", id="claude"),
+    ],
+)
+def test_real_three_round_health_judge_authors_compiling_detector(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    backend_type: type[CodexLifecycleBackend],
+    model_variable: str,
 ) -> None:
+    if shutil.which(backend_type.provider) is None:
+        pytest.skip(f"{backend_type.provider} is not installed")
     repository = _repository(tmp_path)
     # This opt-in integration uses the explicit development-only validator.
     # Reuse the host module cache across all three candidates so the test
@@ -817,12 +1142,15 @@ def test_real_codex_three_round_health_judge_authors_compiling_detector(
         repository,
         application="example",
         health_objective="Deployment example and Service example must remain available.",
-        backend=CodexLifecycleBackend(timeout_seconds=900),
+        backend=backend_type(model=os.getenv(model_variable) or None, timeout_seconds=900),
         validator=LocalSandboxRunner(timeout_seconds=300),
         judge_rounds=3,
     )
 
     provenance = __import__("yaml").safe_load((repository / ".sdo/lifecycle-provenance.yaml").read_text())
-    assert len(provenance["health_judge_rounds"]) == 3
-    assert len({item["session_id"] for item in provenance["health_judge_rounds"]}) == 3
+    # Provenance records every attempt, so a corrected round appears more than once.
+    attempts = provenance["health_judge_rounds"]
+    assert {item["round"] for item in attempts} == {1, 2, 3}
+    assert len({item["session_id"] for item in attempts}) == len(attempts)
+    assert provenance["health_judge"]["round"] == 3
     assert LocalSandboxRunner(timeout_seconds=300).run(repository).returncode == 0

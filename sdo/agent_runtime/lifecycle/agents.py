@@ -2,22 +2,26 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
-import subprocess
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from libs.agent_cli.codex import (
-    CodexSessionIdError,
-    CodexStructuredExecutionError,
-    CodexStructuredOutputError,
-    run_codex_structured,
+from libs.agent_cli.structured import (
+    AccessMode,
+    AgentProvider,
+    StructuredTurnError,
+    StructuredTurnTimeout,
+    run_structured_turn,
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Sequence
+
+    from agentshim import CommandExecutor
 
 
 class LifecycleAgentError(RuntimeError):
@@ -72,6 +76,22 @@ class HealthJudgeArtifact(HealthJudgeDraft):
     session_id: str = Field(min_length=1)
 
 
+class HealthJudgeWorkspaceDraft(BaseModel):
+    """Metadata handoff from a judge that authored source directly in a workspace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    round: int = Field(ge=1)
+    objective_digest: str = Field(min_length=64, max_length=64)
+    source_commit: str = Field(min_length=1)
+    covered_resources: list[TopologyResourceDTO]
+    failure_patterns: list[str] = Field(min_length=1)
+
+
+class HealthJudgeWorkspaceArtifact(HealthJudgeWorkspaceDraft):
+    session_id: str = Field(min_length=1)
+
+
 class LifecycleAgentBackend(Protocol):
     def run_deployer(
         self,
@@ -95,28 +115,72 @@ class LifecycleAgentBackend(Protocol):
     ) -> HealthJudgeArtifact: ...
 
 
-CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
+class WorkspaceHealthJudgeBackend(Protocol):
+    def run_health_judge_workspace(
+        self,
+        *,
+        repository: Path,
+        application: str,
+        health_objective: str,
+        deployer: DeployerAssessment,
+        round_index: int,
+        previous: HealthJudgeArtifact | None,
+        correction_feedback: str | None,
+        active_resources: list[ActiveTopologyResourceDTO] | None = None,
+    ) -> HealthJudgeWorkspaceArtifact: ...
+
+
+_DETECTOR_SDK_REFERENCE = """Trusted controller/sdk API reference (do not search outside the application checkout):
+
+- import path `sdo.dev/controller/sdk`; test helper import path `sdo.dev/controller/sdk/sdktest`.
+- `type Detector interface { Spec() DetectorSpec; Detect(context.Context, DetectionContext) ([]Finding, error) }`.
+- `DetectionContext` exposes `Namespace() string`, `ConfigMaps() []corev1.ConfigMap`,
+  `Services() []corev1.Service`, `Pods() []corev1.Pod`, `Deployments() []appsv1.Deployment`,
+  `ReplicaSets() []appsv1.ReplicaSet`, `Endpoints() []corev1.Endpoints`,
+  `EndpointSlices() []discoveryv1.EndpointSlice`, `NetworkPolicies() []networkingv1.NetworkPolicy`,
+  `Events() []corev1.Event`, `ReadyEndpointCountForService(namespace, service string) int`,
+  `PodsForService(namespace, service string) []corev1.Pod`, and
+  `RecentEventsFor(namespace, kind, name string) []corev1.Event`.
+- `sdk.ConfigMapReferencesForDeployment(appsv1.Deployment) []sdk.ConfigMapReference` returns sorted,
+  deduplicated volume, projected-volume, envFrom, and env ConfigMap references; each reference has `Name string`
+  and `Optional bool`.
+- `sdk.Finding` has string fields `RuleID`, `Summary`, `Evidence`, and `Fingerprint`; enum fields `Status` and
+  `Severity`; `PrimaryResource sdk.ObjectRef`; `RelatedResources []sdk.ObjectRef`; `Playbooks []string`;
+  `ParameterBindings map[string]sdk.ObjectRef`; and `Metadata map[string]any`. Use `sdk.FindingActive`,
+  `sdk.SeverityCritical`, and stable fingerprints. In particular, never use `map[string]string` for Metadata.
+- `sdk.ObjectRef` fields are `APIVersion`, `Kind`, `Namespace`, and `Name`.
+- `sdktest.Snapshot` implements DetectionContext. Its fields are `NamespaceName`, `ConfigMapList`, `ServiceList`,
+  `PodList`, `DeploymentList`, `ReplicaSetList`, `EndpointList`, `EndpointSliceList`, `NetworkPolicyList`, and
+  `EventList`.
+"""
+
+
+_ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9_.$~*?{}-])(/[A-Za-z0-9_./*?{}$@%+=:,~-]+)")
+_PARENT_PATH = re.compile(r"(?:^|[\s'\"=;(])\.\.(?:/[^\s'\";|&)]*)?(?=$|[\s'\";|&)])")
+_WRITE_REDIRECT_ABSOLUTE_PATH = re.compile(r"(?:^|[ \t])(?:\d*>>?|&>)\s*['\"]?(/[A-Za-z0-9_./*?{}$@%+=:,~-]+)")
+_GIT_OBJECT_PATH = re.compile(r"\b[0-9a-fA-F]{7,64}:(/[A-Za-z0-9_./*?{}$@%+=,~-]+)")
+_SYSTEM_COMMAND_ROOTS = tuple(Path(path) for path in ("/bin", "/usr/bin", "/usr/local/bin"))
 
 
 class CodexLifecycleBackend:
-    """Run each lifecycle handoff as a new read-only Codex CLI session."""
+    """Run each lifecycle handoff as a new confined Codex CLI session."""
+
+    provider: ClassVar[AgentProvider] = "codex"
 
     def __init__(
         self,
         *,
-        executable: str = "codex",
         model: str | None = None,
         reasoning_effort: str = "medium",
         timeout_seconds: int = 900,
-        command_runner: CommandRunner = subprocess.run,
+        executor: CommandExecutor | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("lifecycle agent timeout must be positive")
-        self.executable = executable
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.timeout_seconds = timeout_seconds
-        self.command_runner = command_runner
+        self.executor = executor
 
     def run_deployer(
         self,
@@ -137,6 +201,15 @@ file and do not infer resources absent from tracked source. The controller will 
 commit, topology fingerprint, complete resource inventory, and summary coverage with deterministic repository
 inspection.
 
+Repository isolation is part of the evidence contract. Inspect only the current application checkout. Never use
+`..`, an absolute path outside this checkout, a sibling experiment, a package cache, or another SDO source tree.
+The controller audits command events and rejects the entire fresh session if any command escapes this checkout.
+Do not create or execute helper scripts in temporary directories. Do not use `$TMPDIR` or `/tmp`, even for files
+you create yourself: the audit treats a compound command that later reads or executes such a file as an escape.
+Use the built-in Read, Glob, and Grep tools for inspection and perform small calculations directly. If shell scratch
+space is essential, keep it under `.sdo/session-scratch/` in the current checkout; the session remains read-only, so
+prefer not to create scratch files at all.
+
 Correction feedback from the prior fresh attempt:
 {feedback}
 """
@@ -155,6 +228,7 @@ Correction feedback from the prior fresh attempt:
         correction_feedback: str | None,
         active_resources: list[ActiveTopologyResourceDTO] | None = None,
     ) -> HealthJudgeArtifact:
+        objective_digest = hashlib.sha256(health_objective.strip().encode()).hexdigest()
         previous_payload = previous.model_dump_json(indent=2) if previous else "null"
         active_payload = (
             json.dumps([resource.model_dump(mode="json") for resource in active_resources], indent=2)
@@ -169,6 +243,9 @@ conversation state. Continuity comes only from the structured deployer handoff a
 Human-owned health objective:
 {health_objective}
 
+Authoritative objective SHA-256: {objective_digest}
+Copy this exact value into objective_digest and the detector's healthObjectiveDigest constant; do not recompute it.
+
 Published deployer assessment:
 {deployer.model_dump_json(indent=2)}
 
@@ -182,8 +259,16 @@ Validation feedback:
 {feedback}
 
 Author deterministic Go detector code and deterministic Go tests using only sdo.dev/controller/sdk's
-DetectionContext snapshot methods and Kubernetes API types already available to SDO diagnostics. Inspect the
-SDK in this repository before writing. The detector must compile as package objective, export New() sdk.Detector,
+DetectionContext snapshot methods and Kubernetes API types already available to SDO diagnostics. Use the trusted
+SDK reference below; the application checkout is intentionally not expected to contain the controller SDK.
+
+{_DETECTOR_SDK_REFERENCE}
+
+Repository isolation is part of the evidence contract. Inspect only the current application checkout. Never use
+`..`, an absolute path outside this checkout, a sibling experiment, a package cache, or another SDO source tree.
+The controller audits command events and rejects the entire fresh session if any command escapes this checkout.
+
+The detector must compile as package objective, export New() sdk.Detector,
 encode the SHA-256 digest of the exact human objective in a healthObjectiveDigest constant, and detect only
 objective-specific observable failure conditions. Its tests must include matching and near-miss cases. On later
 rounds, identify failure patterns missed by the prior code and revise it rather than merely describing them.
@@ -201,7 +286,9 @@ and OriginatingCommit "lifecycle-bootstrap". Do not substitute incident/responde
 Never read environment variables, benchmark results, SREGym data, verdict files, hidden fault labels, or any external
 oracle. Never call an LLM at detector runtime. Return source text in the structured fields; do not edit repository
 files. Set round exactly to {round_index}; set source_commit to the deployer's commit; cover only resources present
-in the deployer handoff; and set objective_digest to the exact objective SHA-256.
+in the deployer handoff; and copy the authoritative objective SHA-256 above exactly.
+The last structured response is the only response the controller accepts. It must repeat both complete Go files;
+never return a placeholder such as "pending", "superseded", or a reference to an earlier commentary payload.
 For covered_resources, copy every resource required by the objective exactly from the deployer handoff. Never invent
 a covered ConfigMap object for a dependency that has no standalone object in the handoff. When the
 controller-observed active topology is non-null, the controller will canonicalize this provenance to exact matching
@@ -229,34 +316,152 @@ checking for a required resource that is absent, and use each observed object's 
         draft, session_id = self._execute(repository, prompt, HealthJudgeDraft)
         return HealthJudgeArtifact(**draft.model_dump(), session_id=session_id)
 
+    def run_health_judge_workspace(
+        self,
+        *,
+        repository: Path,
+        application: str,
+        health_objective: str,
+        deployer: DeployerAssessment,
+        round_index: int,
+        previous: HealthJudgeArtifact | None,
+        correction_feedback: str | None,
+        active_resources: list[ActiveTopologyResourceDTO] | None = None,
+    ) -> HealthJudgeWorkspaceArtifact:
+        objective_digest = hashlib.sha256(health_objective.strip().encode()).hexdigest()
+        previous_payload = (
+            previous.model_dump_json(indent=2, exclude={"detector_source", "detector_test_source"})
+            if previous
+            else "null"
+        )
+        active_payload = (
+            json.dumps([resource.model_dump(mode="json") for resource in active_resources], indent=2)
+            if active_resources is not None
+            else "null"
+        )
+        feedback = correction_feedback or "No validator feedback is available for the first round."
+        prompt = f"""You are the independent SDO health judge for application {application!r}, authoring round
+{round_index} of bounded adversarial refinement. You have an isolated, writable copy of the application repository.
+
+Human-owned health objective:
+{health_objective}
+
+Authoritative objective SHA-256: {objective_digest}
+Published deployer assessment:
+{deployer.model_dump_json(indent=2)}
+Controller-observed active topology:
+{active_payload}
+Prior judge metadata (the current source files contain the prior implementation):
+{previous_payload}
+Validation feedback:
+{feedback}
+
+Edit these files directly:
+- .sdo/diagnostics/detectors/health/objective/detector.go
+- .sdo/diagnostics/detectors/health/objective/detector_test.go
+
+Inspect the application source and existing detector, implement deterministic objective-specific checks, and add
+matching plus near-miss tests. Use `sdo detector check` to compile and run the detector tests in the isolated
+no-network validator. Read its diagnostics, revise the files, and repeat until it exits successfully. Do not run Go
+source or tests by any other route. Do not edit the manifest or any application file. The controller will independently
+validate the resulting files after your session ends; your self-check is not acceptance evidence.
+The deployer assessment above is trusted and complete. Do not rediscover topology with repository-wide `find` or
+`grep`; inspect the current detector files first and open only source manifests named in that assessment when needed.
+
+{_DETECTOR_SDK_REFERENCE}
+
+The detector must remain package objective, export New() sdk.Detector, and copy the exact objective digest above into
+healthObjectiveDigest. Its Spec is controller-owned and already present in detector.go; preserve it. Never read
+environment variables, benchmark results, SREGym data, verdict files, hidden fault labels, or an external oracle.
+Inspect only this checkout; never use `..` or paths outside it.
+
+All named helper functions must be package-level. Derive required ConfigMaps from every observed Deployment pod
+template, including volume, projected-volume, envFrom, and env references, and compare them with the snapshot rather
+than relying only on hard-coded names. Use DetectionContext.Namespace() for absent runtime objects and each observed
+object's namespace for objects that exist; never embed "default" as a runtime namespace. When active topology is
+provided, cover the matching Deployment, Service, ConfigMap, and NetworkPolicy resources required by the objective,
+including low-level dependencies rather than only user-facing workloads. Do not invent resource objects absent from
+the deployer handoff.
+
+Return only metadata in the final structured response. Set round to {round_index}, source_commit to
+{deployer.source_commit!r}, copy the objective digest exactly, list objective-relevant failure patterns, and use only
+covered resources from the deployer handoff. For a global all-Deployments/all-Services objective, return an empty
+covered_resources list: the controller deterministically fills it from trusted topology, avoiding a large duplicated
+handoff. Do not include source code in the response because the files are the authoritative draft.
+"""
+        draft, session_id = self._execute(
+            repository,
+            prompt,
+            HealthJudgeWorkspaceDraft,
+            sandbox="workspace-write",
+        )
+        return HealthJudgeWorkspaceArtifact(**draft.model_dump(), session_id=session_id)
+
     def _execute(
         self,
         repository: Path,
         prompt: str,
-        output_type: type[DeployerDraft] | type[HealthJudgeDraft],
-    ) -> tuple[DeployerDraft | HealthJudgeDraft, str]:
+        output_type: type[DeployerDraft] | type[HealthJudgeDraft] | type[HealthJudgeWorkspaceDraft],
+        *,
+        sandbox: AccessMode = "read-only",
+    ) -> tuple[DeployerDraft | HealthJudgeDraft | HealthJudgeWorkspaceDraft, str]:
+        role = f"{self.provider.capitalize()} lifecycle session"
         try:
-            completed = run_codex_structured(
+            turn = run_structured_turn(
+                self.provider,
                 prompt,
                 output_schema=output_type.model_json_schema(),
                 cwd=repository,
-                executable=self.executable,
+                access=sandbox,
                 model=self.model,
                 reasoning_effort=self.reasoning_effort,
                 timeout_seconds=self.timeout_seconds,
-                sandbox="read-only",
-                runner=self.command_runner,
+                executor=self.executor,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise LifecycleAgentError(f"Codex lifecycle session timed out after {self.timeout_seconds}s") from exc
-        except CodexStructuredExecutionError as exc:
-            raise LifecycleAgentError(str(exc) or "Codex lifecycle session failed") from exc
-        except CodexSessionIdError as exc:
-            raise LifecycleAgentError("Codex lifecycle session did not report a fresh thread id") from exc
-        except CodexStructuredOutputError as exc:
-            raise LifecycleAgentError(f"invalid structured Codex lifecycle output: {exc}") from exc
+        except StructuredTurnTimeout as exc:
+            raise LifecycleAgentError(f"{role} timed out after {self.timeout_seconds}s") from exc
+        except StructuredTurnError as exc:
+            raise LifecycleAgentError(f"{role} failed: {exc}") from exc
+        escaped_command = _first_repository_escape(turn.shell_commands, repository.resolve())
+        if escaped_command is not None:
+            raise LifecycleAgentError(
+                f"{role} read outside the application repository; discarding its output: {escaped_command[:300]}"
+            )
         try:
-            output = output_type.model_validate_json(completed.output_json)
-        except (OSError, ValueError) as exc:
-            raise LifecycleAgentError(f"invalid structured Codex lifecycle output: {exc}") from exc
-        return output, completed.session_id
+            output = output_type.model_validate_json(turn.output_json)
+        except ValueError as exc:
+            raise LifecycleAgentError(f"invalid structured {role} output: {exc}") from exc
+        return output, turn.session_id
+
+
+class ClaudeLifecycleBackend(CodexLifecycleBackend):
+    """Run lifecycle handoffs as fresh structured Claude Code sessions."""
+
+    provider: ClassVar[AgentProvider] = "claude"
+
+
+def _first_repository_escape(commands: Sequence[str], repository: Path) -> str | None:
+    """Return the first shell command that reaches outside *repository*, if any."""
+    return next((command for command in commands if _command_escapes_repository(command, repository)), None)
+
+
+def _command_escapes_repository(command: str, repository: Path) -> bool:
+    if _PARENT_PATH.search(command):
+        return True
+    # ``git show <object>:/path`` addresses a path inside this repository's object
+    # database. Mask only the path portion so unrelated absolute paths in the same
+    # compound command remain subject to the confinement audit.
+    audited_command = _GIT_OBJECT_PATH.sub(
+        lambda match: match.group(0).replace(match.group(1), ".git-object-path"), command
+    )
+    write_only_paths = {match.group(1) for match in _WRITE_REDIRECT_ABSOLUTE_PATH.finditer(audited_command)}
+    for raw_path in _ABSOLUTE_PATH.findall(audited_command):
+        if raw_path in write_only_paths:
+            continue
+        candidate = Path(raw_path)
+        if candidate == repository or repository in candidate.parents:
+            continue
+        if any(candidate == root or root in candidate.parents for root in _SYSTEM_COMMAND_ROOTS):
+            continue
+        return True
+    return False

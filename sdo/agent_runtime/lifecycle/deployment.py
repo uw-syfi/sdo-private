@@ -4,20 +4,21 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from libs.agent_cli.codex import (
-    CodexSessionIdError,
-    CodexStructuredExecutionError,
-    CodexStructuredOutputError,
-    run_codex_structured,
+from libs.agent_cli.structured import (
+    AgentProvider,
+    StructuredTurnError,
+    StructuredTurnTimeout,
+    run_structured_turn,
 )
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from agentshim import CommandExecutor
 
 _DEPLOYMENT_ROLE_TRAILER = "SDO-Role: source-deployer"
 
@@ -78,9 +79,6 @@ class DeploymentVerifier(Protocol):
     ) -> DeploymentVerification: ...
 
 
-CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
-
-
 class _DeploymentAttemptDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -90,24 +88,24 @@ class _DeploymentAttemptDraft(BaseModel):
 
 
 class CodexDeploymentBackend:
-    """Use a writable Codex CLI session to deploy an application to Kubernetes."""
+    """Use an unconfined Codex CLI session to deploy an application to Kubernetes."""
+
+    provider: ClassVar[AgentProvider] = "codex"
 
     def __init__(
         self,
         *,
-        executable: str = "codex",
         model: str | None = None,
         reasoning_effort: str = "high",
         timeout_seconds: int = 1800,
-        command_runner: CommandRunner = subprocess.run,
+        executor: CommandExecutor | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("deployment agent timeout must be positive")
-        self.executable = executable
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.timeout_seconds = timeout_seconds
-        self.command_runner = command_runner
+        self.executor = executor
 
     def deploy(
         self,
@@ -145,31 +143,34 @@ failure in summary, and do not claim an uncommitted revision. Return only the re
         )
 
     def _execute(self, repository: Path, prompt: str) -> tuple[_DeploymentAttemptDraft, str]:
+        role = f"{self.provider.capitalize()} deployment session"
         try:
-            completed = run_codex_structured(
+            turn = run_structured_turn(
+                self.provider,
                 prompt,
                 output_schema=_DeploymentAttemptDraft.model_json_schema(),
                 cwd=repository,
-                executable=self.executable,
+                access="danger-full-access",
                 model=self.model,
                 reasoning_effort=self.reasoning_effort,
                 timeout_seconds=self.timeout_seconds,
-                sandbox="danger-full-access",
-                runner=self.command_runner,
+                executor=self.executor,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise DeploymentAgentError(f"Codex deployment session timed out after {self.timeout_seconds}s") from exc
-        except CodexStructuredExecutionError as exc:
-            raise DeploymentAgentError(str(exc) or "Codex deployment session failed") from exc
-        except CodexSessionIdError as exc:
-            raise DeploymentAgentError("Codex deployment session did not report a fresh thread id") from exc
-        except CodexStructuredOutputError as exc:
-            raise DeploymentAgentError(f"invalid structured Codex deployment output: {exc}") from exc
+        except StructuredTurnTimeout as exc:
+            raise DeploymentAgentError(f"{role} timed out after {self.timeout_seconds}s") from exc
+        except StructuredTurnError as exc:
+            raise DeploymentAgentError(f"{role} failed: {exc}") from exc
         try:
-            draft = _DeploymentAttemptDraft.model_validate_json(completed.output_json)
-        except (OSError, ValueError) as exc:
-            raise DeploymentAgentError(f"invalid structured Codex deployment output: {exc}") from exc
-        return draft, completed.session_id
+            draft = _DeploymentAttemptDraft.model_validate_json(turn.output_json)
+        except ValueError as exc:
+            raise DeploymentAgentError(f"invalid structured {role} output: {exc}") from exc
+        return draft, turn.session_id
+
+
+class ClaudeDeploymentBackend(CodexDeploymentBackend):
+    """Use an unconfined Claude Code session to deploy an application."""
+
+    provider: ClassVar[AgentProvider] = "claude"
 
 
 def deploy_from_source(

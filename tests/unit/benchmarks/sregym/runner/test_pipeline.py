@@ -106,6 +106,8 @@ def _valid_strict_receipt() -> dict[str, object]:
         "lifecycle_provenance": True,
         "production_job_dispatch": True,
         "completed": True,
+        "repair_policy": "commit",
+        "repair_actions": [],
         "proposal_commit": "proposal",
         "outcome_commit": "outcome",
         "reflection_commit": "reflection",
@@ -135,6 +137,21 @@ def test_stage_results_error_accepts_completed_semantic_result(tmp_path: Path) -
     )
 
     assert _stage_results_error(tmp_path) is None
+
+
+def test_stage_results_error_accepts_current_parallel_runner_layout_with_strict_receipt(tmp_path: Path) -> None:
+    run = tmp_path / "runs" / "000000_problem" / "worker_0" / "results" / "sdo_codex" / "problem" / "run_1"
+    run.mkdir(parents=True)
+    (run / "problem_results.csv").write_text(
+        '"Diagnosis.success","Mitigation.success","problem_id"\nTrue,True,"problem"\n',
+        encoding="utf-8",
+    )
+    (run / "sdo_production_receipt_strict.json").write_text(
+        json.dumps(_valid_strict_receipt()) + "\n",
+        encoding="utf-8",
+    )
+
+    assert _stage_results_error(tmp_path, require_strict_receipt=True) is None
 
 
 @pytest.mark.parametrize(
@@ -290,6 +307,14 @@ class TestLoadPipelineConfig:
         assert config.defaults["app_filter"] == "hotel_reservation"
         assert config.defaults["env"]["judge_model_id"] == "judge-model"
 
+    def test_merge_stage_preserves_source_docker_builder(self) -> None:
+        config = merge_stage_config(
+            {"env": {"docker_builder": "sdo-example"}},
+            {},
+        )
+
+        assert config.env.docker_builder == "sdo-example"
+
     def test_no_stages_raises(self) -> None:
         with pytest.raises(ValueError, match="at least one stage"):
             PipelineConfig(name="empty", stages=[])
@@ -331,17 +356,24 @@ class TestMergeStageConfig:
             "agent": "crucible",
             "model": "gemini-flash",
             "parallel": 1,
+            "agent_timeout": 3600,
             "app_filter": "hotel_reservation",
             "deploy_from_source": True,
             "application_workspace": True,
             "spec_names": ["wrong_service_selector"],
             "variants": {"seed": 99},
-            "env": {"judge_model_id": "judge", "reuse_cluster": True, "force_recreate_cluster": False},
+            "env": {
+                "judge_model_id": "judge",
+                "reuse_cluster": True,
+                "force_recreate_cluster": False,
+                "preserve_infrastructure": True,
+            },
         }
         config = merge_stage_config(defaults, {})
         assert config.agent == "crucible"
         assert config.model == "gemini-flash"
         assert config.parallel == 1
+        assert config.agent_timeout == 3600
         assert config.app_filter == "hotel_reservation"
         assert config.deploy_from_source is True
         assert config.application_workspace is True
@@ -350,6 +382,7 @@ class TestMergeStageConfig:
         assert config.env.judge_model_id == "judge"
         assert config.env.reuse_cluster is True
         assert config.env.force_recreate_cluster is False
+        assert config.env.preserve_infrastructure is True
         assert config.env.submit_done_returns_feedback is False
 
     def test_defaults_env_preserves_submit_done_feedback(self) -> None:

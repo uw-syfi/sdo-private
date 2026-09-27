@@ -33,6 +33,15 @@ def test_production_runtime_resources_have_no_benchmark_transport() -> None:
     assert args[args.index("--response-timeout") + 1] == "60s"
     assert args[args.index("--verification-timeout") + 1] == "120s"
     assert "--responder-env=SDO_RESPONDER_MODEL=gpt-test" in args
+    assert args[args.index("--repair-policy") + 1] == "commit"
+
+
+def test_recorded_actions_policy_is_passed_to_controller() -> None:
+    config = ControllerInstallConfig(**{**_config().__dict__, "repair_policy": "recorded-actions"})
+    controller = next(resource for resource in controller_resources(config) if resource["kind"] == "Job")
+    args = controller["spec"]["template"]["spec"]["containers"][0]["args"]
+
+    assert args[args.index("--repair-policy") + 1] == "recorded-actions"
 
 
 def test_production_runtime_module_has_no_benchmark_dependency() -> None:

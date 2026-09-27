@@ -28,6 +28,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _check(args)
         if args.command == "test":
             return _test(args)
+        if args.command == "draft-test":
+            return _draft_test(args)
         if args.command == "run-once":
             return _run_once(args)
         if args.command == "evaluate-once":
@@ -59,6 +61,13 @@ def _build_parser() -> argparse.ArgumentParser:
     test = subparsers.add_parser("test", help="validate, generate a temp workspace, and run go test/go build")
     _add_common_args(test)
     test.add_argument("--keep-workdir", action="store_true", help=argparse.SUPPRESS)
+
+    draft_test = subparsers.add_parser(
+        "draft-test",
+        help="compile and test selected detector drafts without building a controller",
+    )
+    _add_common_args(draft_test)
+    draft_test.add_argument("--detector-id", action="append", required=True)
 
     run_once = subparsers.add_parser("run-once", help="build and run detectors once against a Kubernetes namespace")
     _add_common_args(run_once)
@@ -126,6 +135,7 @@ def _build_parser() -> argparse.ArgumentParser:
     controller.add_argument("--broker-arg", action="append", default=[])
     controller.add_argument("--response-timeout", default="30m")
     controller.add_argument("--verification-timeout", default="2m")
+    controller.add_argument("--repair-policy", choices=("commit", "recorded-actions"), default="commit")
     controller.add_argument("--duration", default="")
     controller.add_argument("--lease-name", default="sdo-controller")
     controller.add_argument("--exit-after-closure", action="store_true")
@@ -177,6 +187,27 @@ def _test(args: argparse.Namespace) -> int:
                 return exit_code
         if args.keep_workdir:
             print(f"kept controller build workspace: {workspace.path}")
+    return 0
+
+
+def _draft_test(args: argparse.Namespace) -> int:
+    app_root = _app_root(args)
+    tool_paths = find_tool_paths()
+    runner = GoRunner.from_environment()
+    with BuildWorkspace.create(
+        BuildWorkspaceConfig(
+            app_root=app_root,
+            sdk_dir=tool_paths.sdk_dir,
+            core_dir=tool_paths.core_dir,
+            runtime_dir=tool_paths.runtime_dir,
+            detector_ids=tuple(args.detector_id),
+        )
+    ) as workspace:
+        packages = ["./" + detector.package.removeprefix("./") for detector in workspace.manifest.detectors]
+        for command in [["mod", "tidy"], ["test", *packages, "./generated"]]:
+            exit_code = runner.run(command, cwd=workspace.path)
+            if exit_code != 0:
+                return exit_code
     return 0
 
 
@@ -390,6 +421,8 @@ def _controller(args: argparse.Namespace) -> int:
                 args.response_timeout,
                 "--verification-timeout",
                 args.verification_timeout,
+                "--repair-policy",
+                args.repair_policy,
                 "--lease-name",
                 args.lease_name,
             ]

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+from agentshim.providers.codex import CodexSandboxConfig, parse_sandbox
 
 from sdo.agent_runtime.lifecycle.deployment import (
     CodexDeploymentBackend,
@@ -13,6 +13,10 @@ from sdo.agent_runtime.lifecycle.deployment import (
     DeploymentVerification,
     deploy_from_source,
 )
+from tests.structured_turns import ScriptedAgent, reply
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _git(repository: Path, *args: str) -> str:
@@ -200,30 +204,15 @@ def test_deployment_models_validate_structured_boundaries() -> None:
 
 def test_codex_backend_runs_writable_kubernetes_session_with_structured_output(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
-    captured: dict[str, object] = {}
-
-    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        captured["command"] = command
-        captured["prompt"] = kwargs["input"]
-        output_path = Path(command[command.index("--output-last-message") + 1])
-        output_path.write_text(
-            json.dumps(
-                {
-                    "deployed": True,
-                    "source_commit": "a" * 40,
-                    "summary": "rollout complete",
-                }
-            ),
-            encoding="utf-8",
+    agent = ScriptedAgent(
+        lambda _request: reply(
+            "codex",
+            {"deployed": True, "source_commit": "a" * 40, "summary": "rollout complete"},
+            session_id="codex-session",
         )
-        return subprocess.CompletedProcess(
-            command,
-            0,
-            stdout=json.dumps({"type": "thread.started", "thread_id": "codex-session"}),
-            stderr="",
-        )
+    )
 
-    attempt = CodexDeploymentBackend(command_runner=runner).deploy(
+    attempt = CodexDeploymentBackend(executor=agent.executor).deploy(
         repository=repository,
         namespace="demo",
         application="example",
@@ -233,8 +222,11 @@ def test_codex_backend_runs_writable_kubernetes_session_with_structured_output(t
 
     assert attempt.agent_session_id == "codex-session"
     assert attempt.source_commit == "a" * 40
-    assert captured["command"][0:4] == ["codex", "exec", "--sandbox", "danger-full-access"]
-    prompt = str(captured["prompt"])
+    (argv,) = agent.argvs
+    assert argv[1] == "exec"
+    assert parse_sandbox(argv) == CodexSandboxConfig(mode="danger-full-access")
+    assert agent.requests[0].cwd == str(repository.resolve())
+    (prompt,) = agent.prompts
     assert "Kubernetes" in prompt
     assert "deploy/, k8s/, or manifests/" in prompt
     assert "Reserve .sdo for the SDO goal, architecture, outcomes, diagnostics, and playbooks" in prompt

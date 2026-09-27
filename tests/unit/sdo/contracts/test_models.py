@@ -34,3 +34,16 @@ def test_contract_models_reject_unknown_fields() -> None:
 
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         IncidentRequest.model_validate(payload)
+
+
+def test_incident_result_rejects_duplicate_or_non_chronological_repair_actions() -> None:
+    payload = json.loads((FIXTURE_DIR / "incident_result.json").read_text(encoding="utf-8"))
+    payload["repair_actions"].append(dict(payload["repair_actions"][0]))
+
+    with pytest.raises(ValueError, match="repair action IDs must be unique"):
+        IncidentResult.model_validate(payload)
+
+    payload["repair_actions"] = [payload["repair_actions"][0]]
+    payload["repair_actions"][0]["completed_at"] = "2026-07-09T17:59:00Z"
+    with pytest.raises(ValueError, match="completed_at must not be before started_at"):
+        IncidentResult.model_validate(payload)

@@ -272,9 +272,10 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
     accepted_detector_paths = ledger.get("accepted_detector_paths", [])
     rollout_record = _validated_controller_rollout_record(ledger)
     controller_update_rollout = rollout_record is not None
+    recorded_at = datetime.now(timezone.utc)
     receipt: dict[str, Any] = {
         "schema_version": "sdo.production-receipt/v1",
-        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "recorded_at": recorded_at.isoformat(),
         "pre_cutover": False,
         "incident_id": incident_id,
         "namespace": config.namespace,
@@ -283,10 +284,15 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         "responder_image": config.responder_image,
         "validator_image": config.validator_image,
         "validator_mode": "kubernetes-job",
+        "validator_execution_required": bool(accepted_detector_paths),
+        "validator_skipped_reason": None if accepted_detector_paths else "unchanged-diagnostics",
         "production_job_dispatch": len(responder_jobs) == 1,
         "responder_jobs": responder_jobs,
         "responder_job_evidence": responder_job_evidence,
         "completed": result.get("status") == "completed",
+        "confirmed_root_causes": result.get("confirmed_root_causes", []),
+        "repair_policy": config.repair_policy,
+        "repair_actions": result.get("repair_actions", []),
         "proposal_commit": ledger.get("proposal_commit"),
         "outcome_commit": ledger.get("outcome_commit"),
         "reflection_commit": ledger.get("reflection_commit"),
@@ -295,6 +301,9 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         "same_session_reflection": bool(ledger.get("responder_session_id") and ledger.get("reflection_commit")),
         "detector_clear": detector_clear,
         "independent_verification": result.get("verification_evidence", []),
+        "usage": result.get("usage", {}),
+        "phase_timings_seconds": _phase_timings(closure, recorded_at),
+        "memory_reuse": _memory_reuse_summary(closure, result),
         "validator_network_policy_canaries": ledger.get("validator_network_policy_canaries", []),
         "acknowledged": ledger.get("acknowledged") is True,
         "cleaned": ledger.get("cleaned") is True,
@@ -311,6 +320,43 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
     if receipt["controller_update_required"] and not controller_update_rollout:
         raise ControllerInstallError("accepted detector update was not rolled out by the controller supervisor")
     return receipt
+
+
+def _phase_timings(closure: dict[str, Any], recorded_at: datetime) -> dict[str, float]:
+    def timestamp(name: str) -> datetime:
+        value = closure.get(name)
+        if not isinstance(value, str):
+            raise ControllerInstallError(f"broker closure has no {name} timestamp")
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    detected = timestamp("detected_at")
+    dispatched = timestamp("dispatched_at")
+    responder_completed = timestamp("responder_completed_at")
+    verified = timestamp("verified_at")
+    return {
+        "detection_to_dispatch": (dispatched - detected).total_seconds(),
+        "responder": (responder_completed - dispatched).total_seconds(),
+        "verification": (verified - responder_completed).total_seconds(),
+        "operational_recovery": (verified - detected).total_seconds(),
+        "post_recovery_learning_and_receipt": (recorded_at - verified).total_seconds(),
+        "total": (recorded_at - detected).total_seconds(),
+    }
+
+
+def _memory_reuse_summary(closure: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    request = closure.get("request") if isinstance(closure.get("request"), dict) else {}
+    relevant = request.get("relevant_outcomes", []) if isinstance(request, dict) else []
+    relevant = relevant if isinstance(relevant, list) else []
+    applied = result.get("applied_playbooks", [])
+    applied = applied if isinstance(applied, list) else []
+    return {
+        "candidate_count": len(relevant),
+        "match_reasons": sorted(
+            {str(item.get("match_reason")) for item in relevant if isinstance(item, dict) and item.get("match_reason")}
+        ),
+        "applied_playbook_count": len(applied),
+        "warm_path": bool(relevant),
+    }
 
 
 def _resolve_responder_dispatch(

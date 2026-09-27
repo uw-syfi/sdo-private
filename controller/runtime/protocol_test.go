@@ -21,6 +21,9 @@ func TestIncidentRequestGoldenFixtureRoundTrip(t *testing.T) {
 	if got := payload["cancellation_token"]; got != "cancel-inc-20260709-0001" {
 		t.Fatalf("unexpected cancellation token %#v", got)
 	}
+	if request.RepairPolicy != "commit" {
+		t.Fatalf("unexpected repair policy %q", request.RepairPolicy)
+	}
 }
 
 func TestIncidentResultGoldenFixtureRoundTrip(t *testing.T) {
@@ -32,6 +35,9 @@ func TestIncidentResultGoldenFixtureRoundTrip(t *testing.T) {
 	}
 	if len(result.VerificationEvidence) != 1 || !result.VerificationEvidence[0].Passed {
 		t.Fatalf("unexpected verification evidence %#v", result.VerificationEvidence)
+	}
+	if len(result.RepairActions) != 1 || !result.RepairActions[0].Success {
+		t.Fatalf("unexpected repair actions %#v", result.RepairActions)
 	}
 }
 

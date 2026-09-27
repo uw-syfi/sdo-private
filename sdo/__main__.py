@@ -8,21 +8,30 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from sdo.operation import OperationConfig, OperationError, operate
+from sdo.operation import OperationConfig, OperationError, check_detector_workspace, operate
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from sdo.operational_memory.sandbox import SandboxRunner
 
 
 class OperationRunner(Protocol):
     def __call__(self, config: OperationConfig) -> object: ...
 
 
-def main(argv: Sequence[str] | None = None, *, operation_runner: OperationRunner = operate) -> int:
-    """Run the sole public SDO command."""
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    operation_runner: OperationRunner = operate,
+    detector_check_runner: SandboxRunner | None = None,
+) -> int:
+    """Run a public SDO operation or isolated detector authoring check."""
 
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.command == "detector":
+        return _check_detector(detector_check_runner)
     try:
         config = _operation_config(args)
         operation_runner(config)
@@ -56,7 +65,27 @@ def _build_parser() -> argparse.ArgumentParser:
     operate_parser.add_argument("--credentials-secret", default="sdo-codex-credentials")
     operate_parser.add_argument("--attempts", type=int, default=3)
     operate_parser.add_argument("--timeout-seconds", type=int, default=1800)
+    operate_parser.add_argument("--repair-policy", choices=("commit", "recorded-actions"), default="commit")
+    operate_parser.add_argument("--agent-provider", choices=("codex", "claude"), default="codex")
+    detector_parser = subparsers.add_parser(
+        "detector",
+        help="work with detector drafts in the current isolated checkout",
+    )
+    detector_commands = detector_parser.add_subparsers(dest="detector_command", required=True)
+    detector_commands.add_parser(
+        "check",
+        help="compile and test this checkout using the locked-down validator",
+    )
     return parser
+
+
+def _check_detector(runner: SandboxRunner | None) -> int:
+    result = check_detector_workspace(Path.cwd().resolve(), validator=runner)
+    if result.stdout:
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+    if result.stderr:
+        print(result.stderr, end="" if result.stderr.endswith("\n") else "\n", file=sys.stderr)
+    return result.returncode
 
 
 def _operation_config(args: argparse.Namespace) -> OperationConfig:
@@ -78,6 +107,8 @@ def _operation_config(args: argparse.Namespace) -> OperationConfig:
         credentials_secret=args.credentials_secret,
         max_attempts=args.attempts,
         timeout_seconds=args.timeout_seconds,
+        repair_policy=args.repair_policy,
+        agent_provider=args.agent_provider,
     )
 
 

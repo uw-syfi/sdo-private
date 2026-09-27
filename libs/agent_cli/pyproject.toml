@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "AI provider CLI integrations for SDO agents"
 requires-python = ">=3.10"
 dependencies = [
+    "agentshim>=0.6.6,<0.7",
     "litellm>=1.0.0",
     "loguru>=0.7.2",
 ]

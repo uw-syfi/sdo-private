@@ -27,8 +27,10 @@ def test_submission_bridge_records_diagnosis_through_autonomous_endpoint() -> No
     def opener(request, timeout: int):
         assert timeout == 300
         requests.append(request)
+        if request.full_url.endswith("/status"):
+            return Response({"stage": "mitigation"})
         assert json.loads(request.data) == {"solution": "payment pods are fully isolated"}
-        return Response({"status": "acknowledged", "message": "Diagnosis recorded."})
+        return Response({"status": "200", "message": "Submission received"})
 
     result = submit_solution(
         "payment pods are fully isolated",
@@ -37,22 +39,26 @@ def test_submission_bridge_records_diagnosis_through_autonomous_endpoint() -> No
         opener=opener,
     )
 
-    assert result == {"status": "acknowledged", "message": "Diagnosis recorded."}
-    assert [request.full_url for request in requests] == ["http://conductor:8123/submit_diagnosis"]
+    assert result == {"status": "200", "message": "Submission received"}
+    assert [request.full_url for request in requests] == [
+        "http://conductor:8123/submit",
+        "http://conductor:8123/status",
+    ]
 
 
-def test_submission_bridge_records_mitigation_then_completes_autonomous_run() -> None:
+@pytest.mark.parametrize("terminal_stage", ["done", "awaiting_cleanup"])
+def test_submission_bridge_records_mitigation_then_completes_autonomous_run(terminal_stage: str) -> None:
     requests = []
 
     def opener(request, timeout: int):
         assert timeout == 300
         requests.append(request)
-        if request.full_url.endswith("/submit_mitigation"):
+        if request.full_url.endswith("/submit"):
             assert json.loads(request.data) == {"solution": "policy deleted"}
-            return Response({"status": "acknowledged", "message": "Mitigation recorded."})
-        assert request.full_url.endswith("/submit_done")
+            return Response({"status": "200", "message": "Submission received"})
+        assert request.full_url.endswith("/status")
         assert request.data is None
-        return Response({"status": "done", "num_diagnosis_submissions": 1})
+        return Response({"stage": terminal_stage})
 
     result = submit_solution(
         "policy deleted",
@@ -62,12 +68,12 @@ def test_submission_bridge_records_mitigation_then_completes_autonomous_run() ->
     )
 
     assert result == {
-        "mitigation": {"status": "acknowledged", "message": "Mitigation recorded."},
-        "done": {"status": "done", "num_diagnosis_submissions": 1},
+        "mitigation": {"status": "200", "message": "Submission received"},
+        "done": {"status": terminal_stage},
     }
     assert [request.full_url for request in requests] == [
-        "http://conductor:8123/submit_mitigation",
-        "http://conductor:8123/submit_done",
+        "http://conductor:8123/submit",
+        "http://conductor:8123/status",
     ]
 
 

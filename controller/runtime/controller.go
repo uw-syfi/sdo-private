@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +33,7 @@ type ControllerConfig struct {
 	FiringThreshold         int
 	ClearThreshold          int
 	BatchDebounce           time.Duration
+	RepairPolicy            string
 }
 
 type dispatchCompletion struct {
@@ -110,6 +112,12 @@ func NewController(
 	if config.VerificationTimeout == 0 {
 		config.VerificationTimeout = config.ResponseTimeout
 	}
+	if config.RepairPolicy == "" {
+		config.RepairPolicy = "commit"
+	}
+	if config.RepairPolicy != "commit" && config.RepairPolicy != "recorded-actions" {
+		return nil, fmt.Errorf("unsupported repair policy %q", config.RepairPolicy)
+	}
 	if err := core.ValidateDetectors(detectors); err != nil {
 		return nil, err
 	}
@@ -164,6 +172,9 @@ func (c *Controller) Step(ctx context.Context, now time.Time, event *sdk.WatchKi
 		for _, finding := range findings {
 			if finding.DetectorID == "" {
 				finding.DetectorID = spec.ID
+			}
+			if len(finding.Playbooks) == 0 && len(spec.Playbooks) > 0 {
+				finding.Playbooks = append([]string(nil), spec.Playbooks...)
 			}
 			finding.Fingerprint = FindingFingerprint(finding)
 			if validationErr := core.ValidateFinding(spec, finding); validationErr != nil {
@@ -328,13 +339,35 @@ func (c *Controller) incidentRequest(now time.Time, findings []sdk.Finding) Inci
 	return IncidentRequest{
 		SchemaVersion: ProtocolSchemaVersion, Application: c.config.Application, Namespace: c.config.Namespace,
 		IncidentID: incidentID, Findings: findings,
-		DetectorHistory: append([]DetectorEvaluation(nil), c.history...), SurfacedPlaybooks: surfacedPlaybooks(findings),
-		SourceCommit: c.config.SourceCommit, DeployedCommit: c.config.DeployedCommit,
+		DetectorHistory: compactDetectorHistory(c.history), SurfacedPlaybooks: surfacedPlaybooks(findings),
+		RelevantOutcomes: relevantOutcomeEvidence(c.config.RepositoryWorktree, findings, c.config.SourceCommit),
+		SourceCommit:     c.config.SourceCommit, DeployedCommit: c.config.DeployedCommit,
 		ArchitectureSummaryPath: c.config.ArchitectureSummaryPath, HealthObjectivePath: c.config.HealthObjectivePath,
 		RepositoryWorktree: c.config.RepositoryWorktree, RepositoryBaseCommit: c.config.SourceCommit,
 		ResponseDeadline:  now.Add(c.config.ResponseTimeout).UTC(),
 		CancellationToken: "cancel-" + incidentID,
+		RepairPolicy:      c.config.RepairPolicy,
 	}
+}
+
+func compactDetectorHistory(history []DetectorEvaluation) []DetectorEvaluation {
+	compacted := make([]DetectorEvaluation, 0, len(history))
+	keys := make([]string, 0, len(history))
+	for _, evaluation := range history {
+		key := evaluation.DetectorID + "\x00" + string(evaluation.Status) + "\x00" +
+			strings.Join(evaluation.Fingerprints, "\x00") + "\x00" + evaluation.Error
+		if len(keys) >= 2 && key == keys[len(keys)-1] && key == keys[len(keys)-2] {
+			compacted[len(compacted)-1] = evaluation
+			continue
+		}
+		compacted = append(compacted, evaluation)
+		keys = append(keys, key)
+	}
+	const limit = 12
+	if len(compacted) > limit {
+		compacted = compacted[len(compacted)-limit:]
+	}
+	return append([]DetectorEvaluation(nil), compacted...)
 }
 
 func surfacedPlaybooks(findings []sdk.Finding) []SurfacedPlaybook {

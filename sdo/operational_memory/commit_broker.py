@@ -108,7 +108,7 @@ class CommitBroker:
             if self._git(self.target_repository, "status", "--porcelain").strip():
                 raise CommitBrokerError("target repository must be clean")
             changed_paths = self._changed_paths(worktree)
-            if changed_paths or not allow_empty:
+            if changed_paths:
                 self._ensure_safe_proposal_paths(changed_paths)
             self._rebase_onto_target(worktree, changed_paths)
             changed_paths = self._changed_paths(worktree)
@@ -243,6 +243,23 @@ class CommitBroker:
 
     def changed_paths(self, incident_worktree: Path) -> list[str]:
         return self._changed_paths(incident_worktree.resolve())
+
+    def has_committed_changes(self, incident_worktree: Path) -> bool:
+        """Return whether the incident branch contains commits absent from the target."""
+        worktree = incident_worktree.resolve()
+        target_head = self._git(self.target_repository, "rev-parse", "HEAD").strip()
+        count = self._git(worktree, "rev-list", "--count", f"{target_head}..HEAD").strip()
+        return int(count) > 0
+
+    def proposal_changed_paths(self, incident_worktree: Path) -> list[str]:
+        """Return dirty and incident-committed paths absent from the target."""
+        worktree = incident_worktree.resolve()
+        paths = set(self._changed_paths(worktree))
+        target_head = self._git(self.target_repository, "rev-parse", "HEAD").strip()
+        if self.has_committed_changes(worktree):
+            committed = self._git(worktree, "diff", "--name-only", "-z", f"{target_head}...HEAD")
+            paths.update(path for path in committed.split("\0") if path)
+        return sorted(paths)
 
     def _rebase_onto_target(self, worktree: Path, changed_paths: list[str]) -> None:
         del changed_paths  # Recompute the dirty subset; callers may also include committed divergence.

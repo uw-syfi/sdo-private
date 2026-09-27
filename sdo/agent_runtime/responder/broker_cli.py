@@ -8,7 +8,13 @@ import shlex
 import sys
 from pathlib import Path
 
-from sdo.agent_runtime.responder import CodexSessionBackend, SessionReflector, prepare_codex_home
+from sdo.agent_runtime.responder import (
+    ClaudeSessionBackend,
+    CodexSessionBackend,
+    SessionReflector,
+    prepare_claude_home,
+    prepare_codex_home,
+)
 from sdo.operational_memory import (
     BrokerClosure,
     BrokerService,
@@ -24,14 +30,14 @@ from sdo.operational_memory import (
 
 def _production_reflector(
     *,
-    executable: str,
+    provider: str = "codex",
     model: str | None,
     reasoning_effort: str,
     timeout_seconds: int,
 ) -> SessionReflector:
+    backend_type = ClaudeSessionBackend if provider == "claude" else CodexSessionBackend
     return SessionReflector(
-        CodexSessionBackend(
-            executable=executable,
+        backend_type(
             model=model,
             reasoning_effort=reasoning_effort,
             timeout_seconds=timeout_seconds,
@@ -65,13 +71,15 @@ def _memory_validator(
 
 def main(argv: list[str] | None = None) -> int:
     prepare_codex_home()
+    prepare_claude_home()
     parser = argparse.ArgumentParser(prog="sdo-broker-service")
     parser.add_argument("--repository", type=Path, required=True)
     parser.add_argument("--worktree-root", type=Path, required=True)
     parser.add_argument("--proposal-command", action="append", default=[])
     parser.add_argument("--responder-backend", default="codex")
     parser.add_argument("--responder-model", default="unknown")
-    parser.add_argument("--reflection-executable", default="codex")
+    parser.add_argument("--agent-provider", choices=("codex", "claude"), default="codex")
+    parser.add_argument("--repair-policy", choices=("commit", "recorded-actions"), default="commit")
     parser.add_argument("--reflection-model")
     parser.add_argument("--reflection-reasoning-effort", default="medium")
     parser.add_argument("--reflection-timeout-seconds", type=int, default=900)
@@ -99,8 +107,9 @@ def main(argv: list[str] | None = None) -> int:
         broker=broker,
         responder_backend=args.responder_backend,
         responder_model=args.responder_model,
+        repair_policy=args.repair_policy,
         reflector=_production_reflector(
-            executable=args.reflection_executable,
+            provider=args.agent_provider,
             model=args.reflection_model,
             reasoning_effort=args.reflection_reasoning_effort,
             timeout_seconds=args.reflection_timeout_seconds,

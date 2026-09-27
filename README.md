@@ -68,15 +68,24 @@ The complete interface is:
 
 ```text
 sdo operate REPOSITORY --namespace NAMESPACE (--goal TEXT | --goal-file PATH)
-  [--application NAME] [--model MODEL]
+  [--application NAME] [--agent-provider {codex,claude}] [--model MODEL]
   [--controller-image IMAGE] [--responder-image IMAGE] [--validator-image IMAGE]
   [--repository-pvc PVC] [--credentials-secret SECRET]
+  [--repair-policy {commit,recorded-actions}]
   [--attempts N] [--timeout-seconds N]
 ```
 
 The application name defaults to the repository directory name. The model defaults to `SDO_MODEL`, or `gpt-5.4` when unset; deployment attempts default to 3 and the timeout to 1800 seconds. Default images are `sdo-controller:v0.1.0`, `sdo-responder:v0.1.0`, and `sdo-detector-validator:v0.1.0`. The default PVC is `sdo-application-repository` and the default credentials Secret is `sdo-codex-credentials`.
 
 The production path requires a Git worktree, Kubernetes access, those images, and model credentials. The health objective is human-supplied rather than inferred from benchmark verdicts.
+
+To exercise one complete incident in a disposable Kind cluster with Claude Haiku:
+
+```bash
+bash scripts/run_sdo_example_kind.sh
+```
+
+The example creates an application with a missing ConfigMap, runs the real Go controller and a real Haiku responder, verifies recovery independently, brokers the source repair, records the outcome, and resumes the same Haiku session for reflection. It uses deterministic prebuilt lifecycle artifacts so the example isolates the incident path. Set `SDO_SMOKE_REAL_LIFECYCLE=1` to also ask fresh Haiku sessions to generate the initial architecture and health detector.
 
 For local validation without a live cluster:
 

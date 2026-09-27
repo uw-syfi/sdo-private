@@ -4,10 +4,12 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -33,6 +35,34 @@ class SandboxRunner(Protocol):
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
+_CONTAINER_CLEANUP_WATCHDOG = r"""
+import os
+import subprocess
+import sys
+import time
+
+parent_pid = int(sys.argv[1])
+runtime = sys.argv[2]
+container_name = sys.argv[3]
+while True:
+    try:
+        os.kill(parent_pid, 0)
+    except ProcessLookupError:
+        break
+    time.sleep(0.25)
+for _attempt in range(20):
+    completed = subprocess.run(
+        [runtime, "rm", "--force", container_name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if completed.returncode == 0:
+        break
+    time.sleep(0.25)
+"""
+
+
 class ContainerSandboxRunner:
     """Run untrusted detector compilation in a locked-down OCI container."""
 
@@ -44,21 +74,59 @@ class ContainerSandboxRunner:
         timeout_seconds: int = 600,
         cpu_limit: str = "1",
         memory_limit: str = "3g",
-        command_runner: CommandRunner = subprocess.run,
+        detector_ids: tuple[str, ...] = (),
+        authoring_check: bool = False,
+        command_runner: CommandRunner | None = None,
     ) -> None:
         self.image = image
         self.runtime = runtime or shutil.which("docker") or shutil.which("podman") or "docker"
         self.timeout_seconds = timeout_seconds
         self.cpu_limit = cpu_limit
         self.memory_limit = memory_limit
+        self.detector_ids = detector_ids
+        self.authoring_check = authoring_check
         self.command_runner = command_runner
+        self._resolved_image_id: str | None = None
+
+    def validation_identity(self) -> str | None:
+        """Return the immutable validator identity used by ``run`` when available."""
+
+        image_id = self._resolved_image()
+        if image_id is None:
+            return None
+        return f"container-sandbox/v1:{image_id}:controller.builder.check_cli-test/v1"
+
+    def _resolved_image(self) -> str | None:
+        if self._resolved_image_id is not None:
+            return self._resolved_image_id
+        # Injected runners are generally test doubles.  More importantly, they
+        # cannot guarantee that an image-inspect result and the subsequent run
+        # refer to the same local runtime state, so do not attest them.
+        if self.command_runner is not None:
+            return None
+        completed = subprocess.run(
+            [self.runtime, "image", "inspect", "--format={{.Id}}", self.image],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env={"PATH": os.environ.get("PATH", "")},
+        )
+        image_id = completed.stdout.strip()
+        if completed.returncode != 0 or not image_id.startswith("sha256:"):
+            return None
+        self._resolved_image_id = image_id
+        return image_id
 
     def run(self, app_root: Path) -> SandboxResult:
         root = app_root.resolve()
+        container_name = f"sdo-detector-validator-{os.getpid()}-{uuid.uuid4().hex[:12]}"
         command = [
             self.runtime,
             "run",
             "--rm",
+            "--name",
+            container_name,
             "--network",
             "none",
             "--read-only",
@@ -78,12 +146,13 @@ class ContainerSandboxRunner:
             f"{root}:/workspace:ro",
             "--tmpfs",
             "/tmp:rw,exec,nosuid,nodev,size=3g",
-            self.image,
+            self._resolved_image() or self.image,
             "env",
             "-i",
             "PATH=/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
             "HOME=/tmp",
             "GOCACHE=/tmp/go-cache",
+            "SDO_GO_CACHE_SEED=/opt/sdo/go-build-cache",
             "GOMODCACHE=/go/pkg/mod",
             "GOPROXY=off",
             "GOSUMDB=off",
@@ -93,19 +162,24 @@ class ContainerSandboxRunner:
             "python",
             "-m",
             "controller.builder.check_cli",
-            "test",
+            "draft-test" if self.authoring_check else "test",
             "--app",
             "/workspace",
         ]
+        for detector_id in self.detector_ids:
+            command.extend(["--detector-id", detector_id])
         try:
-            completed = self.command_runner(
-                command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
-                env={"PATH": os.environ.get("PATH", "")},
-            )
+            if self.command_runner is None:
+                completed = self._run_managed_container(command, container_name)
+            else:
+                completed = self.command_runner(
+                    command,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout_seconds,
+                    env={"PATH": os.environ.get("PATH", "")},
+                )
         except subprocess.TimeoutExpired as exc:
             return SandboxResult(
                 returncode=124,
@@ -117,6 +191,87 @@ class ContainerSandboxRunner:
             returncode=completed.returncode,
             stdout=completed.stdout,
             stderr=completed.stderr,
+        )
+
+    def _run_managed_container(
+        self,
+        command: list[str],
+        container_name: str,
+    ) -> subprocess.CompletedProcess[str]:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={"PATH": os.environ.get("PATH", "")},
+            start_new_session=True,
+        )
+        watchdog = self._start_cleanup_watchdog(container_name)
+        previous_sigterm: signal.Handlers | None = None
+        sigterm_handler_installed = False
+
+        def terminate_after_cleanup(signum: int, _frame: object) -> None:
+            raise SystemExit(128 + signum)
+
+        try:
+            previous_sigterm = signal.signal(signal.SIGTERM, terminate_after_cleanup)
+            sigterm_handler_installed = True
+        except ValueError:
+            # Signal handlers can only be installed by the main thread. The
+            # process-group timeout cleanup still applies in worker threads.
+            pass
+        try:
+            try:
+                stdout, stderr = process.communicate(timeout=self.timeout_seconds)
+            except subprocess.TimeoutExpired:
+                self._kill_container_process(process, container_name)
+                stdout, stderr = process.communicate()
+                raise subprocess.TimeoutExpired(
+                    command,
+                    self.timeout_seconds,
+                    output=stdout,
+                    stderr=stderr,
+                ) from None
+            except BaseException:
+                self._kill_container_process(process, container_name)
+                raise
+        finally:
+            if sigterm_handler_installed and previous_sigterm is not None:
+                signal.signal(signal.SIGTERM, previous_sigterm)
+            self._stop_cleanup_watchdog(watchdog)
+        return subprocess.CompletedProcess(command, process.returncode, stdout=stdout, stderr=stderr)
+
+    def _start_cleanup_watchdog(self, container_name: str) -> subprocess.Popen[str]:
+        return subprocess.Popen(
+            [sys.executable, "-c", _CONTAINER_CLEANUP_WATCHDOG, str(os.getpid()), self.runtime, container_name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            env={"PATH": os.environ.get("PATH", "")},
+            start_new_session=True,
+        )
+
+    @staticmethod
+    def _stop_cleanup_watchdog(watchdog: subprocess.Popen[str]) -> None:
+        watchdog.terminate()
+        try:
+            watchdog.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            watchdog.kill()
+            watchdog.wait(timeout=5)
+
+    def _kill_container_process(self, process: subprocess.Popen[str], container_name: str) -> None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        subprocess.run(
+            [self.runtime, "rm", "--force", container_name],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env={"PATH": os.environ.get("PATH", "")},
         )
 
 
@@ -441,11 +596,12 @@ class KubernetesJobSandboxRunner:
                                 "env": [
                                     {"name": "HOME", "value": "/tmp"},
                                     {"name": "GOCACHE", "value": "/tmp/go-cache"},
+                                    {"name": "SDO_GO_CACHE_SEED", "value": "/opt/sdo/go-build-cache"},
                                     {"name": "GOMODCACHE", "value": "/go/pkg/mod"},
                                     {"name": "GOPROXY", "value": "off"},
                                     {"name": "GOSUMDB", "value": "off"},
-                                    {"name": "GOMAXPROCS", "value": "1"},
-                                    {"name": "GOFLAGS", "value": "-p=1"},
+                                    {"name": "GOMAXPROCS", "value": "2"},
+                                    {"name": "GOFLAGS", "value": "-p=2"},
                                     {"name": "PYTHONDONTWRITEBYTECODE", "value": "1"},
                                 ],
                                 "securityContext": {
@@ -454,9 +610,9 @@ class KubernetesJobSandboxRunner:
                                     "capabilities": {"drop": ["ALL"]},
                                 },
                                 "resources": {
-                                    "requests": {"cpu": "250m", "memory": "512Mi"},
+                                    "requests": {"cpu": "500m", "memory": "512Mi"},
                                     "limits": {
-                                        "cpu": "500m",
+                                        "cpu": "2",
                                         "memory": "3Gi",
                                         "ephemeral-storage": "4Gi",
                                     },
