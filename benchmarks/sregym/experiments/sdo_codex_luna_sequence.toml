@@ -1,0 +1,108 @@
+# Cost over a sequence of incidents: four distinct Hotel Reservation faults, then
+# each again (A B C D A B C D), answered by SDO with Codex gpt-6-luna. Stage 0
+# starts cold from a fresh application workspace; every later stage chains the
+# workspace, so round 2 sees the detectors, playbooks, and outcomes learned in
+# round 1. Env and agent settings are copied from sdo_codex_luna_reuse.toml.
+# Baseline: codex_luna_sequence_baseline.toml (run it twice).
+#
+# The faults are those of sdo_codex_four_e2e.toml; all four are registered
+# SREGym problems bound to HotelReservation, so they source-deploy.
+
+[pipeline]
+name = "sdo-codex-luna-sequence"
+
+[defaults]
+agent = "sdo_codex"
+model = "gpt-6-luna"
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+application_workspace = "persistent"
+require_strict_receipt = true
+
+[defaults.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+cleanup_defer_timeout_seconds = 4200
+docker_builder = "sdo-example"
+
+[defaults.variants]
+enabled = false
+
+[defaults.agent_config.sdo_codex]
+backend = "agent-cli"
+provider = "codex"
+model = "gpt-6-luna"
+timeout_sec = 3600
+controller_image = "sdo-controller:v0.1.0"
+responder_image = "sdo-sregym-responder:v0.1.0"
+validator_image = "sdo-detector-validator:v0.1.0"
+credentials_secret = "sdo-agent-credentials"
+
+[[stages]]
+name = "r1-readiness-probe"
+chain_kb = false
+chain_application_workspace = false
+
+[stages.runner]
+problems = ["readiness_probe_misconfiguration_hotel_reservation"]
+
+[[stages]]
+name = "r1-missing-configmap"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["missing_configmap_hotel_reservation"]
+
+[[stages]]
+name = "r1-wrong-service-selector"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["wrong_service_selector_hotel_reservation"]
+
+[[stages]]
+name = "r1-network-policy-block"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["network_policy_block"]
+
+[[stages]]
+name = "r2-readiness-probe"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["readiness_probe_misconfiguration_hotel_reservation"]
+
+[[stages]]
+name = "r2-missing-configmap"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["missing_configmap_hotel_reservation"]
+
+[[stages]]
+name = "r2-wrong-service-selector"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["wrong_service_selector_hotel_reservation"]
+
+[[stages]]
+name = "r2-network-policy-block"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["network_policy_block"]

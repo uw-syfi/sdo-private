@@ -120,6 +120,8 @@ Every structured agent turn appends one JSONL record to the file named by `SDO_T
 
 Result CSVs may flatten stage results into fields such as `Diagnosis.success` and `Mitigation.success`. They also carry conductor wall-clock epochs `fault_injected_at`, `diagnosis_submitted_at`, and `mitigation_submitted_at` (recorded when the agent's `/submit` request arrives, before API retries or oracles) and, for agents with `defer_fault_injection`, `fault_injection_deferred_seconds`. `mitigation_submitted_at - fault_injected_at` is the agent-neutral incident time; `TTM` additionally includes diagnosis judging and the mitigation oracle. Require explicit true values and inspect `agent_error`; missing or malformed values are not success.
 
+For multi-stage SDO pipelines compared against stock Codex, `uv run python -m benchmarks.sregym.analysis.incident_cost <sdo-pipeline-dir> --codex <codex-dir>...` prints per-stage and cumulative primary time, `incident_resolution_seconds`, oracle verdicts, responder and reflection tokens (reflection kept out of resolution time), receipt `memory_reuse.warm_path` beside whether the responder rollout's user prompt carried the warm-path instructions, `.sdo/` detector and playbook counts, and token break-even against the per-problem Codex mean with and without the one-time lifecycle (`sdo_turn_usage.jsonl`, or `--lifecycle-usage` for a seeded lifecycle).
+
 ## Agent trajectories
 
 Crucible and generic CLI benchmark agents may emit JSON or JSONL trajectories under run-specific `agent/` or `trajectories/` directories. Their schema is agent-specific. Start by inspecting keys and timestamps rather than applying a historical fixed schema.

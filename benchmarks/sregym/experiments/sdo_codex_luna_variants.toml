@@ -1,0 +1,69 @@
+# Generalisation: similar faults, not exact repeats, answered by SDO with Codex
+# gpt-6-luna. Stage 0 starts cold on the original missing-ConfigMap incident
+# (mongodb-geo loses mongo-geo-script), so SDO learns an incident detector and a
+# playbook. Later stages chain the application workspace and inject the same
+# root-cause class with different parameters:
+#   stage 1: mongodb-rate loses mongo-rate-script (different workload/ConfigMap);
+#   stage 2: mongodb-geo and mongodb-rate both lose their init-script ConfigMaps.
+# Question: does SDO's warm path fire for a similar-but-not-identical incident,
+# and is the response still correct? Env and agent settings are copied from
+# sdo_codex_luna_reuse.toml. Baseline: codex_luna_variants_baseline.toml.
+
+[pipeline]
+name = "sdo-codex-luna-variants"
+
+[defaults]
+agent = "sdo_codex"
+model = "gpt-6-luna"
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+application_workspace = "persistent"
+require_strict_receipt = true
+
+[defaults.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+cleanup_defer_timeout_seconds = 4200
+docker_builder = "sdo-example"
+
+[defaults.variants]
+enabled = false
+
+[defaults.agent_config.sdo_codex]
+backend = "agent-cli"
+provider = "codex"
+model = "gpt-6-luna"
+timeout_sec = 3600
+controller_image = "sdo-controller:v0.1.0"
+responder_image = "sdo-sregym-responder:v0.1.0"
+validator_image = "sdo-detector-validator:v0.1.0"
+credentials_secret = "sdo-agent-credentials"
+
+[[stages]]
+name = "original-geo"
+chain_kb = false
+chain_application_workspace = false
+
+[stages.runner]
+problems = ["missing_configmap_hotel_reservation"]
+
+[[stages]]
+name = "variant-rate"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["missing_configmap_mongodb_rate_hotel_reservation"]
+
+[[stages]]
+name = "variant-geo-rate"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["missing_configmap_mongodb_geo_rate_hotel_reservation"]
