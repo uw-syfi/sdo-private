@@ -13,7 +13,7 @@ from sdo.operation import OperationConfig, OperationError, check_detector_worksp
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from sdo.operational_memory.sandbox import SandboxRunner
+    from sdo.operational_memory import SandboxRunner
 
 
 class OperationRunner(Protocol):
