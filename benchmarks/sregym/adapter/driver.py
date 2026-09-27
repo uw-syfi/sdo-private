@@ -289,7 +289,9 @@ def _deployed_lifecycle_context(
         volumes = pod_spec.get("volumes", []) if isinstance(pod_spec, dict) else []
         for volume in volumes if isinstance(volumes, list) else []:
             config_map = volume.get("configMap") if isinstance(volume, dict) else None
-            name = config_map.get("name") if isinstance(config_map, dict) else None
+            if not isinstance(config_map, dict):
+                continue
+            name = config_map.get("name")
             if isinstance(name, str) and name and config_map.get("optional") is not True:
                 active_keys.add(("ConfigMap", name))
     return DeployedLifecycleContext(

@@ -14,9 +14,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from sdo.operational_memory.models import ValidatorNetworkPolicyCanary
+
+if TYPE_CHECKING:
+    from types import FrameType
 
 
 @dataclass(frozen=True)
@@ -207,7 +210,7 @@ class ContainerSandboxRunner:
             start_new_session=True,
         )
         watchdog = self._start_cleanup_watchdog(container_name)
-        previous_sigterm: signal.Handlers | None = None
+        previous_sigterm: Callable[[int, FrameType | None], object] | int | None = None
         sigterm_handler_installed = False
 
         def terminate_after_cleanup(signum: int, _frame: object) -> None:

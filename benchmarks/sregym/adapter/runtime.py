@@ -267,8 +267,9 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         ],
         namespace=config.namespace,
     )
-    closure = ledger.get("closure") if isinstance(ledger.get("closure"), dict) else {}
-    detector_clear = closure.get("final_detector_states", []) if isinstance(closure, dict) else []
+    raw_closure = ledger.get("closure")
+    closure: dict[str, Any] = raw_closure if isinstance(raw_closure, dict) else {}
+    detector_clear = closure.get("final_detector_states", [])
     accepted_detector_paths = ledger.get("accepted_detector_paths", [])
     rollout_record = _validated_controller_rollout_record(ledger)
     controller_update_rollout = rollout_record is not None

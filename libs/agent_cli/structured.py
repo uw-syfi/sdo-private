@@ -97,7 +97,7 @@ class StructuredTurn:
 
 @dataclass
 class _ShellCommandRecorder:
-    commands: list[str] = field(default_factory=list)
+    commands: list[str] = field(default_factory=list[str])
 
     def on_event(self, event: AgentEvent) -> None:
         if not isinstance(event, ToolCall) or event.tool not in _SHELL_TOOLS:
@@ -174,13 +174,14 @@ def run_structured_turn(
     except AgentShimError as exc:
         raise StructuredTurnError(f"{provider} turn failed: {exc}") from exc
 
-    if not isinstance(result.structured_output, dict):
+    structured_output: object = result.structured_output
+    if not isinstance(structured_output, dict):
         raise StructuredTurnError(f"{provider} turn returned no structured output")
     session_id = result.session_id or resume_session_id
     if not session_id:
         raise StructuredTurnError(f"{provider} turn did not report a session id")
     return StructuredTurn(
-        output_json=json.dumps(result.structured_output),
+        output_json=json.dumps(structured_output),
         session_id=session_id,
         usage=result.usage,
         shell_commands=tuple(recorder.commands),
