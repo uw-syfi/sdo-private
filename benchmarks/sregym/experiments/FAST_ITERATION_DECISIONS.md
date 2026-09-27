@@ -95,3 +95,53 @@ All incidents passed the deterministic mitigation oracle.
   - validator at 1 CPU: 152.1 s with `v0.1.0`, 12.8 s with the rebuilt `:fastloop` image.
 - App teardown (item 2), `HotelReservation.cleanup()`: 43.2 s normal, 17.9 s with fast namespace teardown.
 - App redeploy (item 5), `fastloop up --redeploy`: 114.2 s with a labelled rebuild, 79.1 s when the unchanged build context skips the build. The rebuild here hit a warm BuildKit layer cache. In pipelines, `.sdo` commits invalidate `COPY .`, so the network `go get` and `go mod vendor` steps also rerun, and the saving is larger.
+
+## Integration with `main` (`vic/feat/fastloop-integration`)
+
+Inputs:
+- Parent `vic/feat/fastloop` (`58c5b8a`, based on `8c83a04`) merged with GitHub `main` at `451c624`. That brings in `7c8ee0d`, `e949ca8`, `91b0080` and `451c624`.
+- SREGym `vic/feat/fastloop-harness` (`7c1d48d7`) merged with `b4275585`, the submodule commit `main` pins (`e9631233` plus `dcbd087f` and `b4275585`).
+- No conductor fix for missing mitigation verdicts had landed on `main` or the fork when this was cut. It merges independently later.
+
+### Decisions
+
+- **Fetched `main` from GitHub, not from the main checkout.** The main checkout's local `main` was behind (`91b0080`), and `origin` of this clone is that checkout. A `github` remote was added here; the main checkout was only read.
+- **Textual conflicts: only the submodule pointer.** `main` changed only `incident_cost.py`, its test, `luna_reuse_DECISIONS.md` and the submodule; the fast loop touched none of the first three. The runner and adapter did not overlap: all of `main`'s concurrent-cluster isolation lives in the submodule.
+- **SREGym merge was clean, but the fast-loop worker needed three semantic fixes** (`c53d5712`, test-first):
+  - `main` replaced the conductor's `CLUSTER_BASELINE_STATE_FILE` constant with `cluster_baseline_state_file()`. The worker's per-run baseline override set the dead constant, so after the merge it would have silently used `~/cache_dir/cluster_baseline_state.fastloop-w0.json`. It now rebinds the function. Verified live: `up --redeploy` loaded `<run-dir>/cluster_baseline_state.json`, and no per-cluster file appeared in `~/cache_dir`.
+  - The crossover guard. The Codex baseline's filtered proxy kubeconfig now goes through `verify_agent_kubeconfig` (only this proxy port; `kubectl get nodes` returns only `fastloop-w0-*`), at proxy start and again before every injection, as the conductor does. A mismatch fails the request.
+  - `cluster_lock`. The worker holds the host-wide lock on `SREGYM_KIND_CLUSTER_NAME` for its lifetime, the same lock `parallel_runner` takes. A fast loop and an experiment, or two fast loops, can no longer drive one cluster at once.
+- **The per-port agent kubeconfig does not apply to the fast loop.** It always passes an explicit per-run path (`results/<run-id>/agent.kubeconfig`) and an OS-assigned free port, never the default `/tmp/sregym-agent-kubeconfig-p<port>` or `16443 + id`. The SDO path uses the cluster's own kind kubeconfig and never the agent kubeconfig, so it needs no guard.
+- **Private `/tmp` kept.** `main` moves fault-injector backups to `/tmp/sregym-<cluster>/`. Inside the worker's `bwrap` that resolves to `<run-dir>/tmp/sregym-fastloop-w0/`, which was confirmed live. The two layers compose; they do not conflict. The sandbox stays because other SREGym code still writes fixed `/tmp` names (TLS temp files, older injectors' legacy paths). The lock directory `~/.cache/sregym/locks` is outside `/tmp`, so the lock is host-wide inside the sandbox too.
+- **`incident_cost.py`: deferred grading means zero judge wait** (`5b8e657`). With `diagnosis_grading_deferred = true`, `main`'s formula `fault_injected_at + TTL - diagnosis_submitted_at` came out as about 0 only because the conductor resets its clock right after injection, and it was unknown for rows without TTL. The marker now sets the wait to 0 explicitly. The analyze-experiment reference documents the judge-excluded and `applied_s` columns, which `e949ca8` had not.
+- **Fixed pre-existing fast-loop check failures that `main` would have inherited:**
+  - pyright: 24 errors, all in `benchmarks/sregym/fastloop` (`ed01c3f`); `main` has 0.
+  - `test_architecture` facade violations (`029a421`). The adapter facade now lazily exports what the fast loop uses (PEP 562, as `libs/agent_cli` does), because adapter modules run as `python -m` entry points, one of them in the responder image. `python -W error -m benchmarks.sregym.adapter.persistent --help` stays clean.
+- **Fixed a fast-loop bug found by the smoke run** (`472790d`). `run --agent codex` with a new run id failed with `FileNotFoundError`, because the results directory was created after the worker was asked to write the agent kubeconfig into it.
+- **`SDO_GO_CACHE_SEED` stays unconditional, and images must be rebuilt at merge.** The controller Job now always sets it, and `go_runner` (already in `v0.1.0` images) raises if the directory is missing. `sdo-controller:v0.1.0` has no `/opt/sdo/go-build-cache` (checked with `docker history`), so merged host code with the current `v0.1.0` controller image fails at the in-pod detector build.
+  - Alternative: gate the env behind a flag. Rejected: it would make the 85 s -> 4 s gate saving opt-in forever. Images are already rebuilt by hand (`scripts/build_sdo_images.sh`) whenever in-pod code changes, and the failure is immediate and explicit.
+- **Pushed the submodule branch to the fork, and fetched it into the shared submodule object store** (refs and objects only; the main checkout's working tree and `third_party/sregym` checkout were not touched).
+
+### Checks (integration head)
+
+- `format_code.sh`, `check_errors.sh` (ruff, tach), pyright (0 errors) and `check_arch.sh` all pass.
+- Unit suite: 1614 passed, 2 skipped.
+- Go `controller/sdk`, `core` and `runtime`: ok.
+- SREGym:
+  - The fast-loop worker, deferred grading, fast teardown, source deploy, cluster isolation, proxy config and parallel runner tests: 49 passed.
+  - Full `tests/` (without `file_editing`, which fails to import on the base too): 681 passed and 5 failed. The same 5 fail without these changes; they need a live kubeconfig or cluster.
+
+### Smoke run on `fastloop-w0` (images rebuilt from the integration head with the `fastloop` builder)
+
+- Images: `sdo-controller:fastloop` `e3dc19ec442a` (3.27 GB; `v0.1.0` is 2.26 GB), `sdo-sregym-responder:fastloop` `559878fbe682`, `sdo-responder:fastloop` `8c5ff027e243`, `sdo-detector-validator:fastloop` `5176f1af3dbc` (cache hit). The `v0.1.0` tags are unchanged.
+- Sequence: `down` (drained the controller running the previous `:fastloop` image), then `up` (44 s, deploy skipped), then `up --redeploy` (91 s, deploy 50 s), then Codex, then SDO. Codex ran first, because a live SDO controller would repair the baseline's fault.
+
+| Run | Incident | Wall (s) | Injection to mitigation (s) | Injection to verified (s) | Gate (s) | Setup (s) | Reflection (s) | Responder tokens | Oracle |
+|---|---|---|---|---|---|---|---|---|---|
+| `integ-codex-1` | 0 | 85.3 | 80.7 | 83.0 (Codex exit) | - | - | - | 345,559 | pass |
+| `integ-sdo-2` (fresh install) | 0 | 94.8 | 38.5 | 63.5 | 5.1 | 15.0 | 6.7 | 192,455 | pass |
+| `integ-sdo-2` | 1 | 94.0 | 30.9* | 73.7* | 1.1 | 0.9 | 3.5 | 168,504 | pass |
+
+- Both SDO incidents took the warm path (exact fingerprint) with zero reflection tokens. The lifecycle was satisfied by `workspace-attestation`, since the workspace already carried the attestation from `sdo-cachehit-1`.
+- The Codex guard logged `verified: port 39327 reaches only fastloop-w0` twice, at proxy start and before injection.
+- \* Incident 1's `incidents.jsonl` row has no detection, mitigation or verification timestamps. Its reflection finished within one poll of verification, so `_wait_for_verified_incident` took its existing "reflection finished between polls" branch (`closure=None`). The times above come from the receipt (repair `completed_at`, driver `injection_to_verified_recovery`; `incident_resolution_seconds` 78.3). This adapter behavior predates the merge and is on `main` too; it is now likelier because warm-path reflection is short. Left as a known gap: fixing it means reading the closure back from the ledger, which is outside this integration.
