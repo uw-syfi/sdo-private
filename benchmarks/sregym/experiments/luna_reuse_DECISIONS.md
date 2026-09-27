@@ -743,3 +743,20 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - The extra time is agent behaviour: a second repair round (ConfigMap recreated, then pod delete or rollout with about 30 s waits), with 11–12 tool calls against 7–8.
   - These are genuine agent-variance results and count as they are.
 - **Rate limits:** no error events and no limit-reached flags. The weekly window was at 88% at 21:21Z.
+
+### codex_variants (luna-w4, moved from w2): 2/3 pass
+
+- **Run:** `20260927_210409_codex`, 21:04–21:27Z.
+
+| Problem | Oracles | TTD s | TTM s | raw incl. judge s | no_judge s | last_mut s | input / cached / output tokens |
+|---|---|---|---|---|---|---|---|
+| missing_configmap_hotel_reservation | D+ M+ | 42.0 | 84.1 | 101.6 | 71.8 | 84.1 | 293,498 / 262,656 / 2,573 |
+| missing_configmap_mongodb_rate_hotel_reservation | D+ M+ | 39.4 | 71.4 | 107.5 | 66.2 | 71.4 | 410,700 / 376,832 / 2,225 |
+| missing_configmap_mongodb_geo_rate_hotel_reservation | D+ **M−** | 88.8 | (281.4) | 305.4 | 281.4 | 129.1 | 540,543 / 505,344 / 3,068 |
+
+- **The failure is counted as a genuine agent failure, not infrastructure.**
+  - The mitigation oracle requires every pod in the namespace to be Running. Codex left its own completed helper pod, `mongo-repair-geo`, behind (phase Succeeded, "❌ Pod mongo-repair-geo is in phase: Succeeded").
+  - Its diagnosis passed (composite 0.89), but the judge marked the fault characterization down: Codex also blamed revoked `readWrite` privileges, which had nothing to do with the deleted ConfigMaps.
+  - The harness ran normally: no errors, and fault recovery restored both ConfigMaps.
+- **How the failed row is reported:** the TTM of a failed mitigation is shown in parentheses and excluded from the TTM means.
+- **Rate limits:** no errors, weekly window at 88%.
