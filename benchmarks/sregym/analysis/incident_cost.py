@@ -475,6 +475,48 @@ def _sum_usage_jsonl(paths: list[Path], *, incident_id: str | None = None) -> tu
     return usage, seconds
 
 
+def rollout_turn_usages(rollouts: list[Path]) -> list[TokenUsage]:
+    """Per-turn token usage of Codex session rollouts, in turn order.
+
+    Each model response writes a ``token_count`` event whose ``last_token_usage``
+    is that response's own usage; a ``task_started`` event opens each turn.
+    """
+
+    turns: list[TokenUsage] = []
+    for path in rollouts:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if '"task_started"' not in line and '"token_count"' not in line:
+                continue
+            payload = json.loads(line).get("payload")
+            if not isinstance(payload, dict):
+                continue
+            if payload.get("type") == "task_started":
+                turns.append(TokenUsage())
+            elif payload.get("type") == "token_count" and isinstance(payload.get("info"), dict) and turns:
+                turns[-1] = turns[-1] + TokenUsage.from_mapping(payload["info"].get("last_token_usage"))
+    return turns
+
+
+def _reflection_usage(receipt: dict[str, Any], responder_rollouts: list[Path]) -> TokenUsage:
+    """The reflection's own tokens.
+
+    A reflection that resumed the responder's session was recorded with
+    ``codex exec resume``'s session-cumulative usage, which includes the
+    responder turn; its own turns are read back from the shared rollout.
+    """
+
+    recorded = TokenUsage.from_mapping(receipt.get("reflection_usage"))
+    if receipt.get("reflection_session_mode") != "resume":
+        return recorded
+    turns = rollout_turn_usages(responder_rollouts)
+    if len(turns) < 2:
+        return recorded
+    own = TokenUsage()
+    for turn in turns[1:]:
+        own = own + turn
+    return own
+
+
 def warm_prompt_fired(results_dir: Path, responder_session_id: str | None) -> bool | None:
     """Whether a responder rollout's user prompt carried the warm-path instructions.
 
@@ -572,7 +614,7 @@ def load_sdo_pipeline(pipeline_dir: Path) -> list[SdoStage]:
                     verdict=verdict,
                     incident_resolution_seconds=_float(receipt.get("incident_resolution_seconds")),
                     responder=TokenUsage.from_mapping(receipt.get("usage")),
-                    reflection=TokenUsage.from_mapping(receipt.get("reflection_usage")),
+                    reflection=_reflection_usage(receipt, responder_rollouts),
                     reflection_attempts=receipt.get("reflection_attempts"),
                     reflection_skipped_reason=receipt.get("reflection_skipped_reason"),
                     learning_seconds=_float(phases.get("post_recovery_learning_and_receipt")),

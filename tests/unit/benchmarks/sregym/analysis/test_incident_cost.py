@@ -588,3 +588,56 @@ def test_read_only_kubectl_forms_are_not_mutations(tmp_path: Path, command: str)
     _tool_rollout(rollout, [("2026-09-27T12:00:30.000Z", _code_mode(command))])
 
     assert first_mutation_at([rollout], after=1790510410.0) is None
+
+
+def _token_turns(path: Path, turns: list[list[dict[str, int]]]) -> None:
+    """Append Codex turns (``task_started`` then one ``token_count`` per model response) to a rollout."""
+
+    total = {"input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0}
+    with path.open("a", encoding="utf-8") as stream:
+        for requests in turns:
+            stream.write(json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}) + "\n")
+            for last in requests:
+                total = {key: total[key] + last[key] for key in total}
+                info = {"total_token_usage": dict(total), "last_token_usage": last}
+                stream.write(json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": info}}) + "\n")
+
+
+def test_resumed_reflection_counts_only_its_own_turn_not_the_responder_before_it(tmp_path: Path) -> None:
+    """Receipts recorded ``codex exec resume``'s session-cumulative usage as the reflection's."""
+
+    root = tmp_path / "20260927_000000_pipeline_sdo-codex-luna-persistent"
+    responder, reflection = _usage(500, 10, cached=400), _usage(300, 20, cached=250)
+    session_total = _usage(800, 30, cached=650)
+    stage = _sdo_stage(
+        root, 0, "first", PROBLEM_A, responder=responder, reflection=session_total, warm=False, incident_detectors=1
+    )
+    run = stage / "runs" / f"000000_{PROBLEM_A}" / "worker_0" / "results" / "sdo_codex" / PROBLEM_A / "run_1"
+    receipt_path = run / "sdo_production_receipt_strict.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["reflection_session_mode"] = "resume"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    rollout = run / "sdo_runtime" / "codex" / "sessions" / "2026" / "09" / "27" / "rollout-x-session-0.jsonl"
+    _token_turns(rollout, [[_usage(200, 4, cached=150), _usage(300, 6, cached=250)], [reflection]])
+
+    (only,) = load_sdo_pipeline(root)
+
+    assert only.responder == TokenUsage.from_mapping(responder)
+    assert only.reflection == TokenUsage.from_mapping(reflection)
+
+
+def test_fresh_session_reflection_keeps_the_receipt_usage(tmp_path: Path) -> None:
+    root = tmp_path / "20260927_000000_pipeline_sdo-codex-luna-persistent-fresh"
+    reflection = _usage(300, 20, cached=250)
+    stage = _sdo_stage(
+        root, 0, "first", PROBLEM_A, responder=_usage(500, 10), reflection=reflection, warm=False, incident_detectors=1
+    )
+    run = stage / "runs" / f"000000_{PROBLEM_A}" / "worker_0" / "results" / "sdo_codex" / PROBLEM_A / "run_1"
+    receipt_path = run / "sdo_production_receipt_strict.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["reflection_session_mode"] = "fresh"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    (only,) = load_sdo_pipeline(root)
+
+    assert only.reflection == TokenUsage.from_mapping(reflection)

@@ -29,7 +29,7 @@ import tempfile
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
@@ -45,6 +45,7 @@ from agentshim import (
     CodexSandboxConfig,
     OutputSchema,
     SandboxConfig,
+    TokenUsage,
     ToolCall,
     TurnRequest,
 )
@@ -221,7 +222,7 @@ def run_structured_turn(
             if resume_session_id is not None and not session.adopt(resume_session_id):
                 raise StructuredTurnError(f"{provider} cannot resume session {resume_session_id!r}")
             codex_home = _codex_session_home(extra_env) if provider == "codex" else None
-            requests_before = _codex_model_requests(codex_home, resume_session_id)
+            rollout_before = _codex_rollout_totals(codex_home, resume_session_id)
             schema_dir = turn_scope.enter_context(tempfile.TemporaryDirectory(prefix="sdo-structured-turn-"))
             result = session.turn(
                 TurnRequest(
@@ -233,7 +234,7 @@ def run_structured_turn(
             )
             # Read the rollout now: a workspace-write Codex home is deleted
             # when the turn scope closes.
-            requests_after = _codex_model_requests(codex_home, result.session_id or resume_session_id)
+            rollout_after = _codex_rollout_totals(codex_home, result.session_id or resume_session_id)
     except CliTimeoutError as exc:
         raise StructuredTurnTimeout(exc.timeout) from exc
     except CliExitError as exc:
@@ -252,15 +253,23 @@ def run_structured_turn(
         raise StructuredTurnError(f"{provider} turn did not report a session id")
     model_requests: int | None = None
     model_requests_source: str | None = None
+    usage = result.usage
     if provider == "claude" and result.usage.tokens.turns > 0:
         model_requests, model_requests_source = result.usage.tokens.turns, CLAUDE_TURNS_REQUEST_SOURCE
-    elif requests_after is not None and requests_after >= (requests_before or 0):
-        model_requests = requests_after - (requests_before or 0)
-        model_requests_source = CODEX_ROLLOUT_REQUEST_SOURCE
+    elif rollout_after is not None:
+        turn_totals = rollout_after.since(rollout_before)
+        if turn_totals is not None:
+            model_requests, model_requests_source = turn_totals.requests, CODEX_ROLLOUT_REQUEST_SOURCE
+            # ``codex exec resume`` reports the whole session's usage at turn
+            # end, so a resumed turn would inherit every earlier turn; the
+            # rollout's cumulative counters give this turn's own delta (and
+            # the reasoning tokens the stream omits).
+            if turn_totals.tokens is not None:
+                usage = replace(result.usage, tokens=turn_totals.tokens)
     turn = StructuredTurn(
         output_json=json.dumps(structured_output),
         session_id=session_id,
-        usage=result.usage,
+        usage=usage,
         shell_commands=tuple(recorder.commands),
         tool_calls=recorder.tool_calls,
         model_requests=model_requests,
@@ -317,12 +326,56 @@ def _codex_session_home(extra_env: Mapping[str, str]) -> Path:
     return Path(home).expanduser()
 
 
-def _codex_model_requests(home: Path | None, session_id: str | None) -> int | None:
-    """Count model responses recorded in a Codex session's rollout files.
+_ROLLOUT_TOKEN_FIELDS = (
+    "input_tokens",
+    "cached_input_tokens",
+    "cache_write_input_tokens",
+    "output_tokens",
+    "reasoning_output_tokens",
+)
+
+
+@dataclass(frozen=True)
+class _RolloutTotals:
+    """Model responses and cumulative token usage recorded in one Codex session rollout.
+
+    ``totals`` is the last ``total_token_usage`` Codex wrote, a running total
+    over the whole session; ``None`` when the rollout carries no totals.
+    """
+
+    requests: int
+    totals: Mapping[str, int] | None
+
+    def since(self, earlier: _RolloutTotals | None) -> _TurnTotals | None:
+        """What this session recorded after *earlier* (a fresh session when ``None``)."""
+
+        before_requests = earlier.requests if earlier is not None else 0
+        if self.requests < before_requests:
+            return None
+        before = earlier.totals if earlier is not None else None
+        known_before = before is not None or before_requests == 0
+        tokens: TokenUsage | None = None
+        if self.totals is not None and known_before:
+            delta = {key: self.totals[key] - (before or {}).get(key, 0) for key in _ROLLOUT_TOKEN_FIELDS}
+            if all(value >= 0 for value in delta.values()):
+                tokens = TokenUsage(**delta, turns=1)
+        return _TurnTotals(requests=self.requests - before_requests, tokens=tokens)
+
+
+@dataclass(frozen=True)
+class _TurnTotals:
+    requests: int
+    tokens: TokenUsage | None
+
+
+def _codex_rollout_totals(home: Path | None, session_id: str | None) -> _RolloutTotals | None:
+    """Count model responses and read cumulative usage from a Codex session's rollout files.
 
     Codex writes one ``token_count`` event carrying usage after every model
     response; events without usage (rate-limit updates) are not requests.
-    Returns ``None`` when the rollout cannot be found or read.
+    Each carries ``total_token_usage``, the session's running total, and
+    ``last_token_usage``, that one response's usage. Returns ``None`` when
+    the rollout cannot be found or read.
     """
 
     if home is None or not session_id:
@@ -333,28 +386,42 @@ def _codex_model_requests(home: Path | None, session_id: str | None) -> int | No
         if not rollouts:
             return None
         count = 0
+        totals: Mapping[str, int] | None = None
         for rollout in rollouts:
             with rollout.open(encoding="utf-8", errors="replace") as handle:
                 for line in handle:
-                    if '"token_count"' in line and _is_model_response_token_count(line):
-                        count += 1
+                    if '"token_count"' not in line:
+                        continue
+                    info = _model_response_usage(line)
+                    if info is None:
+                        continue
+                    count += 1
+                    total = info.get("total_token_usage")
+                    if isinstance(total, dict):
+                        counters = cast("dict[str, int | None]", total)
+                        totals = {key: int(counters.get(key) or 0) for key in _ROLLOUT_TOKEN_FIELDS}
     except OSError:
         return None
-    return count
+    return _RolloutTotals(requests=count, totals=totals)
 
 
-def _is_model_response_token_count(line: str) -> bool:
+def _model_response_usage(line: str) -> dict[str, object] | None:
+    """The usage ``info`` of a ``token_count`` event, or ``None`` for other lines."""
+
     try:
         record = json.loads(line)
     except json.JSONDecodeError:
-        return False
+        return None
     if not isinstance(record, dict):
-        return False
+        return None
     payload = cast("dict[str, object]", record).get("payload")
     if not isinstance(payload, dict):
-        return False
+        return None
     fields = cast("dict[str, object]", payload)
-    return fields.get("type") == "token_count" and fields.get("info") is not None
+    info = fields.get("info")
+    if fields.get("type") != "token_count" or not isinstance(info, dict):
+        return None
+    return cast("dict[str, object]", info)
 
 
 def _provider_for(

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from agentshim import TokenUsage
 from agentshim.providers.codex import BYPASS_FLAG, RULES_FILENAME, CodexSandboxConfig, parse_rules, parse_sandbox
 from agentshim.testing import FakeRun, scripted_turn
 
@@ -468,6 +469,98 @@ def test_codex_usage_log_counts_model_requests_added_by_this_turn(
     assert record["model_requests_source"] == "codex-rollout-token-count"
     assert record["tool_calls"] == 2
     assert record["usage"]["model_requests"] == 2
+
+
+def _usage(input_tokens: int, cached: int, output: int, reasoning: int) -> dict[str, int]:
+    return {
+        "input_tokens": input_tokens,
+        "cached_input_tokens": cached,
+        "output_tokens": output,
+        "reasoning_output_tokens": reasoning,
+        "total_tokens": input_tokens + output,
+    }
+
+
+def _append_cumulative_rollout(home: Path, session_id: str, per_request: list[dict[str, int]]) -> None:
+    """Append model responses whose ``total_token_usage`` accumulates over the whole session."""
+    rollout = home / "sessions" / "2026" / "09" / "27" / f"rollout-2026-09-27T00-00-00-{session_id}.jsonl"
+    rollout.parent.mkdir(parents=True, exist_ok=True)
+    total = _usage(0, 0, 0, 0)
+    for line in rollout.read_text(encoding="utf-8").splitlines() if rollout.is_file() else []:
+        info = json.loads(line).get("payload", {}).get("info")
+        if info:
+            total = info["total_token_usage"]
+    with rollout.open("a", encoding="utf-8") as handle:
+        handle.write(_token_count(None))
+        for last in per_request:
+            total = {key: total[key] + last[key] for key in total}
+            handle.write(_token_count({"total_token_usage": total, "last_token_usage": last}))
+
+
+def test_a_resumed_codex_turn_accounts_only_its_own_tokens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex_login: FakeCodexLogin
+) -> None:
+    """``codex exec resume`` reports the session's cumulative usage; the turn must not inherit earlier turns."""
+    log = tmp_path / "turns.jsonl"
+    monkeypatch.setenv(TURN_USAGE_LOG_ENV, str(log))
+    home = codex_login.auth.parent
+    _append_cumulative_rollout(home, "s-1", [_usage(100, 0, 10, 2), _usage(150, 100, 20, 3)])
+
+    def respond(_request: CommandRequest) -> FakeRun:
+        _append_cumulative_rollout(home, "s-1", [_usage(300, 200, 40, 7)])
+        # Codex's own turn-end usage for a resumed session is the thread total.
+        return scripted_turn(
+            "codex",
+            session_id="s-1",
+            structured_output={"answer": "ok"},
+            usage=TokenUsage(input_tokens=550, cached_input_tokens=300, output_tokens=70),
+        )
+
+    turn = run_structured_turn(
+        "codex",
+        "prompt",
+        output_schema=_SCHEMA,
+        cwd=tmp_path,
+        access="danger-full-access",
+        resume_session_id="s-1",
+        executor=ScriptedAgent(respond).executor,
+    )
+
+    usage = turn_usage(turn)
+    assert (usage["input_tokens"], usage["cached_input_tokens"], usage["output_tokens"]) == (300, 200, 40)
+    assert usage["reasoning_output_tokens"] == 7
+    assert usage["llm_calls"] == 1
+    assert usage["model_requests"] == 1
+    (record,) = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert record["usage"]["input_tokens"] == 300
+
+
+def test_a_fresh_codex_turn_takes_reasoning_tokens_from_its_rollout(
+    tmp_path: Path, codex_login: FakeCodexLogin
+) -> None:
+    home = codex_login.auth.parent
+
+    def respond(_request: CommandRequest) -> FakeRun:
+        _append_cumulative_rollout(home, "s-1", [_usage(100, 0, 10, 2), _usage(150, 100, 20, 3)])
+        return scripted_turn(
+            "codex",
+            session_id="s-1",
+            structured_output={"answer": "ok"},
+            usage=TokenUsage(input_tokens=250, cached_input_tokens=100, output_tokens=30),
+        )
+
+    turn = run_structured_turn(
+        "codex",
+        "prompt",
+        output_schema=_SCHEMA,
+        cwd=tmp_path,
+        access="danger-full-access",
+        executor=ScriptedAgent(respond).executor,
+    )
+
+    usage = turn_usage(turn)
+    assert (usage["input_tokens"], usage["cached_input_tokens"], usage["output_tokens"]) == (250, 100, 30)
+    assert usage["reasoning_output_tokens"] == 5
 
 
 def test_codex_usage_log_records_an_unknown_request_count_without_a_rollout(
