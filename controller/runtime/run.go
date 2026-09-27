@@ -113,12 +113,17 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		"resume-sync-timeout", time.Minute, "maximum wait for a fresh application cache when maintenance ends",
 	)
 	syntheticTraffic := flags.Bool(
-		"synthetic-traffic", true, "send the health judge's synthetic traffic mixes to the application's Services",
+		"synthetic-traffic", true, "run the health judge's synthetic-traffic workloads in an isolated prober",
 	)
 	syntheticWarmup := flags.Duration(
 		"synthetic-traffic-warmup", 5*time.Second,
-		"maximum wait for a first sample of every synthetic route before the first evaluation after start or resume",
+		"maximum wait for a first sample of every synthetic scenario before the first evaluation after start or resume",
 	)
+	proberBinary := flags.String(
+		"prober-binary", "", "compiled traffic prober on the shared repository volume; the controller runs it as an isolated pod",
+	)
+	proberImage := flags.String("prober-image", "", "image that runs the prober binary; defaults to --responder-image")
+	proberURL := flags.String("prober-url", "", "use an already running prober at this URL instead of starting one")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -208,18 +213,29 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err != nil {
 		return fmt.Errorf("create Kubernetes informer cache: %w", err)
 	}
-	prober, trafficFailures, err := NewSyntheticTraffic(
-		resolvedRoot, *namespace, detectors, *syntheticTraffic, func() { kubernetesCache.Notify(traffic.Watch) },
-	)
-	if err != nil {
-		return fmt.Errorf("create synthetic traffic prober: %w", err)
+	trafficWorkloads := TrafficWorkloadNames(detectors)
+	var proberAPI ProberAPI
+	switch {
+	case !*syntheticTraffic || len(trafficWorkloads) == 0:
+	case *proberURL != "":
+		proberAPI = HTTPProberClient{BaseURL: StaticProberURL(*proberURL)}
+	case *proberBinary != "":
+		image := *proberImage
+		if image == "" {
+			image = *responderImage
+		}
+		pod := &ProberPod{
+			Client: bootstrapProvider.Client, Namespace: *controlNamespace, AppNamespace: *namespace, Image: image,
+			RepositoryPVC: *repositoryPVC, RepositoryMountPath: *repositoryMountPath,
+			RepositoryPVCSubPath: *repositoryPVCSubPath, Binary: *proberBinary,
+		}
+		proberAPI = HTTPProberClient{BaseURL: pod.Address}
 	}
+	trafficObserver := NewTrafficObserver(proberAPI, trafficWorkloads, func() { kubernetesCache.Notify(traffic.Watch) }, 0)
 	var snapshotProvider SnapshotProvider = kubernetesCache
-	if prober != nil || len(trafficFailures) > 0 {
-		snapshotProvider = TrafficSnapshotProvider{Base: kubernetesCache, Prober: prober, Failures: trafficFailures}
-	}
-	if prober != nil {
-		defer prober.Stop()
+	if trafficObserver != nil {
+		snapshotProvider = TrafficSnapshotProvider{Base: kubernetesCache, Observer: trafficObserver}
+		defer trafficObserver.Stop()
 	}
 	argv := append([]string{*dispatcherCommand}, dispatcherArgs...)
 	jobEnvironment, err := parseResponderEnvironment(responderEnvironment)
@@ -323,32 +339,39 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err := encoder.Encode(desired.Record()); err != nil {
 		fmt.Fprintln(stderr, err)
 	}
-	// startTraffic begins synthetic traffic from empty windows and waits
-	// briefly for a first sample of every route, so the next evaluation, which
-	// may be the all-clear that precedes a fault, judges observed traffic.
+	// startTraffic makes sure the prober runs, clears its observations, and
+	// waits briefly for a first sample of every scenario, so the next
+	// evaluation, which may be the all-clear that precedes a fault, judges
+	// observed traffic.
 	startTraffic := func() {
-		if prober == nil {
-			if len(trafficFailures) > 0 {
-				if err := encoder.Encode(map[string]any{"synthetic_traffic_load_failures": trafficFailures}); err != nil {
+		if trafficObserver == nil {
+			if len(trafficWorkloads) > 0 {
+				if err := encoder.Encode(map[string]any{
+					"synthetic_traffic": "disabled", "synthetic_traffic_workloads": trafficWorkloads,
+				}); err != nil {
 					fmt.Fprintln(stderr, err)
 				}
 			}
 			return
 		}
-		prober.Reset()
-		prober.Start(runCtx)
-		warm := prober.WaitWarm(runCtx, *syntheticWarmup)
-		if err := encoder.Encode(map[string]any{
-			"synthetic_traffic": prober.Summary(), "synthetic_traffic_warm": warm,
-			"synthetic_traffic_load_failures": trafficFailures,
-		}); err != nil {
+		started := time.Now()
+		resetErr := trafficObserver.Reset(runCtx)
+		trafficObserver.Start(runCtx)
+		warm := trafficObserver.WaitWarm(runCtx, *syntheticWarmup)
+		record := map[string]any{
+			"synthetic_traffic": trafficObserver.Summary(), "synthetic_traffic_warm": warm,
+			"synthetic_traffic_startup_ms": time.Since(started).Milliseconds(),
+		}
+		if resetErr != nil {
+			record["synthetic_traffic_error"] = resetErr.Error()
+		}
+		if err := encoder.Encode(record); err != nil {
 			fmt.Fprintln(stderr, err)
 		}
 	}
 	stopTraffic := func() {
-		if prober != nil {
-			prober.Stop()
-			prober.Reset()
+		if trafficObserver != nil {
+			trafficObserver.Stop()
 		}
 	}
 	if !desired.Paused {
