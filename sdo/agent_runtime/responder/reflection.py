@@ -140,6 +140,20 @@ _SELF_CHECK_RULES = (
 )
 
 
+_PLAYBOOK_RULES = (
+    "Playbook rules: a fault-specific playbook is surfaced when its incident detector fires, and that detector's "
+    "evidence already establishes the playbook's preconditions, so do not prescribe re-diagnosis the detector "
+    "establishes; keep at most one combined sanity check. Give concrete repair commands and copy-pasteable "
+    "verification commands with role placeholders (never prose such as 'check every Deployment'), including a concrete "
+    "representative request command (for example a `kubectl exec` or `curl` against the entrypoint with its "
+    "expected status and body) when the health objective needs one. Put multi-step repair and verification "
+    "commands in executable scripts under `.sdo/playbooks/<playbook>/scripts/` (`.sh`, parameters as positional "
+    "arguments, `set -eu`) and reference them from the README. After restoring a missing mount source (a "
+    "ConfigMap or Secret), delete the pods stuck on it or rollout-restart their workload instead of waiting for "
+    "the kubelet mount backoff. "
+)
+
+
 def _learning_request(
     *,
     outcome: OutcomeRecord,
@@ -156,8 +170,10 @@ def _learning_request(
         "the corresponding responder-owned detector entries in `.sdo/diagnostics/manifest.yaml`; "
         "never edit goal.md, health detectors, or outcomes.jsonl. "
         "Generalize roles with placeholders and ground structural changes in the supplied history. Create a "
-        "sharp fault-specific playbook for the confirmed cause, with deterministic diagnosis, repair, and "
-        "independent verification steps. When the confirmed cause exposes a stable low-noise Kubernetes "
+        "sharp fault-specific playbook for the confirmed cause, with deterministic repair and independent "
+        "verification steps. "
+        f"{_PLAYBOOK_RULES}"
+        "When the confirmed cause exposes a stable low-noise Kubernetes "
         "signature, add a fault-specific incident detector immediately and include both a matching test and a "
         "near-miss test. Register it with owner responder, class incident, originatingIncident set to this "
         "incident, and originatingCommit set to the authoritative outcome commit. Preserve every existing health "

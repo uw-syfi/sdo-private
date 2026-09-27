@@ -250,3 +250,33 @@ def test_codex_fresh_reflection_starts_a_new_session_with_full_access(tmp_path: 
     assert parse_sandbox(argv) == CodexSandboxConfig(mode="danger-full-access")
     assert request.cwd == str(tmp_path.resolve())
     assert result.learning_decision == "no_change"
+
+
+def _first_reflection_prompt(tmp_path: Path) -> str:
+    backend = _CapturingBackend()
+    outcome = _outcome()
+    SessionReflector(backend).resume(
+        session_id="session-1",
+        incident_id="inc-1",
+        worktree=tmp_path,
+        outcome=outcome,
+        history=[outcome],
+        outcome_commit="outcome-sha",
+        topology_review=_REVIEW,
+    )
+    return str(backend.calls[0]["prompt"])
+
+
+def test_reflection_requires_executable_playbooks_that_trust_the_incident_detector(tmp_path: Path) -> None:
+    prompt = _first_reflection_prompt(tmp_path)
+
+    # Verification must be concrete and copy-pasteable, preferably as a script.
+    assert "copy-pasteable verification commands" in prompt
+    assert "representative request" in prompt
+    assert ".sdo/playbooks/<playbook>/scripts/" in prompt
+    # Restored mount sources must not wait on the kubelet backoff.
+    assert "ConfigMap or Secret" in prompt
+    assert "rollout-restart" in prompt
+    assert "kubelet" in prompt
+    # The incident detector already establishes the playbook's preconditions.
+    assert "do not prescribe re-diagnosis" in prompt
