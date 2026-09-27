@@ -77,6 +77,15 @@ class DeployerAssessment(DeployerHandoff):
     resources: list[TopologyResourceDTO]
 
 
+class AuthoredTrafficMix(BaseModel):
+    """One judge-authored traffic mix, stored at ``.sdo/diagnostics/traffic/<name>.yaml``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    document_yaml: str = Field(min_length=1)
+
+
 class HealthJudgeDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -87,10 +96,15 @@ class HealthJudgeDraft(BaseModel):
     failure_patterns: list[str] = Field(min_length=1)
     detector_source: str = Field(min_length=40)
     detector_test_source: str = Field(min_length=40)
+    # Required in the structured-output schema (strict turns require every
+    # property); an application with no HTTP entrypoint returns an empty list.
+    traffic_mixes: list[AuthoredTrafficMix]
 
 
 class HealthJudgeArtifact(HealthJudgeDraft):
     session_id: str = Field(min_length=1)
+    # Provenance recorded before traffic mixes existed has none.
+    traffic_mixes: list[AuthoredTrafficMix] = Field(default_factory=list)
 
 
 class HealthJudgeWorkspaceDraft(BaseModel):
@@ -107,6 +121,27 @@ class HealthJudgeWorkspaceDraft(BaseModel):
 
 class HealthJudgeWorkspaceArtifact(HealthJudgeWorkspaceDraft):
     session_id: str = Field(min_length=1)
+
+
+#: Health-judge instructions for synthetic-traffic mixes, shared by both judge sessions.
+TRAFFIC_MIX_AUTHORING = """Synthetic traffic (health-judge owned). Also author one traffic mix per user-facing HTTP
+entrypoint, stored at .sdo/diagnostics/traffic/<name>.yaml. Ground it in the application source and the deployer's
+architecture summary (which becomes .sdo/arch.md): open the entrypoint's route handlers (its HTTP mux or router) and
+derive paths it really serves, their methods, and parameter values its handlers accept. Cover the main user paths,
+read and write paths both when the application has write paths. The controller sends a few requests per second
+through every mix; its health detector opens an incident when a route violates its SLO, and a responder's repair is
+accepted only when those same routes recover. Every route must therefore succeed against the healthy application.
+
+Format (YAML): apiVersion sdo.dev/v1alpha1; kind TrafficMix; name, a lowercase DNS label equal to the file name;
+target {service, port, scheme} naming a source-backed Service and a port it exposes; ratePerSecond (default 4, at
+most 20: keep the total at a few requests per second); timeout (default 2s); optional slo {window, minSamples, maxAge,
+maxErrorRate, maxTimeoutRate, latencyPercentile, maxLatency}; routes, each {id, method, path (no host, query, or
+fragment), query, headers, body, weight, expect {status, bodyContains}}. Use expect.bodyContains when the application
+reports failures inside a successful HTTP status. A route that writes state sets mutates: true, a dataPolicy of
+idempotent (repeating it has no cumulative effect, for example a zero-quantity or far-future booking) or self-cleaning
+(with a cleanup request), and a syntheticMarker string that appears in the request and names dedicated synthetic
+users or data. Never read or modify real users' data beyond the fixtures the application's own source seeds. Omit
+mixes only for an application that serves no HTTP."""
 
 
 class LifecycleAgentBackend(Protocol):
@@ -353,6 +388,10 @@ The controller evaluates one configured runtime namespace. A source manifest nam
 resource will be applied into that configured namespace; it is not a literal runtime namespace. Never embed the
 literal string "default" in detector source. Use DetectionContext.Namespace() whenever synthesizing an ObjectRef or
 checking for a required resource that is absent, and use each observed object's Namespace for resources that exist.
+
+{TRAFFIC_MIX_AUTHORING}
+Return each mix in traffic_mixes as {{name, document_yaml}}; the controller writes the files and installs the
+generic detector that judges each mix. Repeat every mix in full on later rounds.
 """
         draft, session_id = self._execute(repository, prompt, HealthJudgeDraft)
         return HealthJudgeArtifact(**draft.model_dump(), session_id=session_id)
@@ -400,6 +439,7 @@ Validation feedback:
 Edit these files directly:
 - .sdo/diagnostics/detectors/health/objective/detector.go
 - .sdo/diagnostics/detectors/health/objective/detector_test.go
+- .sdo/diagnostics/traffic/<name>.yaml (one traffic mix per HTTP entrypoint; see below)
 
 Inspect the application source and existing detector, implement deterministic objective-specific checks, and add
 matching plus near-miss tests. Use `sdo detector check` to compile and run the detector tests in the isolated
@@ -423,6 +463,10 @@ object's namespace for objects that exist; never embed "default" as a runtime na
 provided, cover the matching Deployment, Service, ConfigMap, and NetworkPolicy resources required by the objective,
 including low-level dependencies rather than only user-facing workloads. Do not invent resource objects absent from
 the deployer handoff.
+
+{TRAFFIC_MIX_AUTHORING}
+`sdo detector check` also validates the traffic mixes. The controller installs the generic detector that judges each
+mix; do not write that detector or edit the manifest.
 
 Return only metadata in the final structured response. Set round to {round_index}, source_commit to
 {deployer.source_commit!r}, copy the objective digest exactly, list objective-relevant failure patterns, and use only

@@ -1224,7 +1224,7 @@ def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_fee
                 (detector / "detector_test.go").write_text(artifact.detector_test_source, encoding="utf-8")
                 output = artifact.model_dump(
                     mode="json",
-                    exclude={"session_id", "detector_source", "detector_test_source"},
+                    exclude={"session_id", "detector_source", "detector_test_source", "traffic_mixes"},
                 )
         return reply("codex", output, session_id=f"fresh-session-{len(agent.requests)}")
 

@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ import yaml
 
 from sdo.agent_runtime.lifecycle.agents import (
     ActiveTopologyResourceDTO,
+    AuthoredTrafficMix,
     CodexLifecycleBackend,
     DeployerAssessment,
     DeployerHandoff,
@@ -33,6 +35,7 @@ from sdo.operational_memory import (
     SandboxResult,
     SandboxRunner,
 )
+from sdo.operational_memory.models import TRAFFIC_MIX_DIRECTORY, TrafficMix
 
 if TYPE_CHECKING:
     from sdo.agent_runtime.lifecycle.validation_cache import LifecycleValidationCache
@@ -97,6 +100,7 @@ def _health_judge_authoring_errors(root: Path) -> list[str]:
             failure_patterns=["authoring draft"],
             detector_source=(detector / "detector.go").read_text(encoding="utf-8"),
             detector_test_source=(detector / "detector_test.go").read_text(encoding="utf-8"),
+            traffic_mixes=_authored_traffic_mixes(root),
         )
         artifact = _canonicalize_active_coverage(
             artifact,
@@ -762,6 +766,7 @@ def _validate_health_judge_artifact(
         _canonicalize_health_registration(source)
     except LifecycleError as exc:
         errors.append(str(exc))
+    errors.extend(_traffic_mix_errors(artifact.traffic_mixes, deployer))
     return errors
 
 
@@ -884,7 +889,9 @@ def _run_workspace_authored_candidate(
         }
         changed = set(_git(candidate, "diff", "--name-only", baseline_commit).splitlines())
         changed.update(_git(candidate, "ls-files", "--others", "--exclude-standard").splitlines())
-        unexpected = sorted(path for path in changed if path and path not in allowed)
+        unexpected = sorted(
+            path for path in changed if path and path not in allowed and not _TRAFFIC_MIX_PATH.fullmatch(path)
+        )
         if unexpected:
             raise LifecycleError("health judge edited files outside its ownership: " + ", ".join(unexpected))
         detector = candidate / ".sdo/diagnostics/detectors/health/objective/detector.go"
@@ -896,7 +903,10 @@ def _run_workspace_authored_candidate(
             session_id=metadata.session_id,
             detector_source=source,
             detector_test_source=detector_test.read_text(encoding="utf-8"),
+            traffic_mixes=_authored_traffic_mixes(candidate),
         )
+        # The judge authors mixes; the lifecycle installs the detectors that judge them.
+        _ensure_generic_health_detectors(candidate)
         return artifact, validator.run(candidate), _diagnostics_digest(candidate)
 
 
@@ -958,6 +968,10 @@ def ensure_operational_memory(
             return _git(root, "rev-parse", "HEAD")
         _refresh_architecture_if_needed(root, application, fingerprint, source_commit)
         _upgrade_health_detector_if_needed(root, plan)
+        _ensure_health_configmap_watch(root)
+        _ensure_generic_health_detectors(root)
+        if _git(root, "status", "--porcelain", "--", ".sdo"):
+            _commit(root, "sdo: install generic symptom health detectors")
         return _git(root, "rev-parse", "HEAD")
 
     detector = memory / "diagnostics" / "detectors" / "health" / "objective"
@@ -1056,6 +1070,8 @@ detectors:
         _write_health_detector(detector, plan)
     else:
         _write_authored_health_detector(detector, health_judge_artifact)
+        _write_traffic_mixes(root, health_judge_artifact.traffic_mixes)
+    _ensure_generic_health_detectors(root)
     _commit(root, "sdo: capture goal, architecture, and independent health judge")
     return _git(root, "rev-parse", "HEAD")
 
@@ -1085,7 +1101,9 @@ def _refresh_model_backed_operational_memory(
     if health_judge_artifact is not None:
         detector = memory / "diagnostics" / "detectors" / "health" / "objective"
         _write_authored_health_detector(detector, health_judge_artifact)
+        _write_traffic_mixes(root, health_judge_artifact.traffic_mixes)
     _ensure_health_configmap_watch(root)
+    _ensure_generic_health_detectors(root)
     if lifecycle_provenance is not None:
         (memory / "lifecycle-provenance.yaml").write_text(
             yaml.safe_dump(lifecycle_provenance, sort_keys=True),
@@ -1105,6 +1123,248 @@ def _refresh_architecture_if_needed(root: Path, application: str, fingerprint: s
         encoding="utf-8",
     )
     _commit(root, "sdo: refresh commit-aware architecture summary")
+
+
+#: Lifecycle-installed, app-agnostic health detectors built on controller/sdk.
+ENDPOINT_DETECTOR_ID = "service-endpoints"
+TRAFFIC_DETECTOR_PREFIX = "traffic-"
+_HEALTH_PLAYBOOK = ".sdo/playbooks/health-objective/README.md"
+_GENERIC_BLOCK_RE = re.compile(
+    r"^  # BEGIN lifecycle-installed health detector (?P<id>\S+)\n.*?"
+    r"^  # END lifecycle-installed health detector (?P=id)\n",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+_TRAFFIC_MIX_PATH = re.compile(rf"{re.escape(TRAFFIC_MIX_DIRECTORY)}/[a-z0-9]([-a-z0-9]{{0,61}}[a-z0-9])?\.yaml")
+
+
+def traffic_detector_id(mix_name: str) -> str:
+    return f"{TRAFFIC_DETECTOR_PREFIX}{mix_name}"
+
+
+def _write_traffic_mixes(root: Path, mixes: list[AuthoredTrafficMix]) -> None:
+    """Make the judge's mixes the complete set under ``.sdo/diagnostics/traffic/``."""
+
+    directory = root / TRAFFIC_MIX_DIRECTORY
+    if directory.is_dir():
+        for stale in directory.glob("*.yaml"):
+            stale.unlink()
+    if not mixes:
+        return
+    directory.mkdir(parents=True, exist_ok=True)
+    for mix in mixes:
+        (directory / f"{mix.name}.yaml").write_text(mix.document_yaml.rstrip() + "\n", encoding="utf-8")
+
+
+def _authored_traffic_mixes(root: Path) -> list[AuthoredTrafficMix]:
+    directory = root / TRAFFIC_MIX_DIRECTORY
+    if not directory.is_dir():
+        return []
+    return [
+        AuthoredTrafficMix(name=path.stem, document_yaml=path.read_text(encoding="utf-8"))
+        for path in sorted(directory.glob("*.yaml"))
+    ]
+
+
+def _generic_registration(detector_id: str, package: str, watches: list[tuple[str, str]], interval: str) -> str:
+    rendered_watches = "".join(
+        f"      - apiVersion: {api_version}\n        kind: {kind}\n" for api_version, kind in watches
+    )
+    return (
+        f"  # BEGIN lifecycle-installed health detector {detector_id}\n"
+        f"  - id: {detector_id}\n"
+        f"    package: ./detectors/health/{package}\n"
+        "    constructor: New\n"
+        "    class: health\n"
+        "    owner: health_judge\n"
+        "    watches:\n"
+        f"{rendered_watches}"
+        f"    interval: {interval}\n"
+        "    persistence:\n"
+        "      firing: 2\n"
+        "      clearing: 2\n"
+        "    batching:\n"
+        "      severity: critical\n"
+        "      debounce: 500ms\n"
+        "    possiblePlaybooks:\n"
+        f"      - {_HEALTH_PLAYBOOK}\n"
+        "    originatingCommit: lifecycle-bootstrap\n"
+        f"  # END lifecycle-installed health detector {detector_id}\n"
+    )
+
+
+_GENERIC_SPEC_FIELDS = """		Class:       sdk.DetectorClassHealth,
+		Owner:       sdk.DetectorOwnerHealthJudge,
+		Persistence: sdk.PersistencePolicy{Firing: 2, Clearing: 2},
+		Batching:    sdk.BatchingPolicy{Severity: sdk.SeverityCritical, Debounce: 500 * time.Millisecond},
+		Playbooks:   []string{".sdo/playbooks/health-objective/README.md"},
+		OriginatingCommit: "lifecycle-bootstrap","""
+
+
+def _endpoint_detector_source() -> str:
+    return f"""// Code generated by the SDO lifecycle. DO NOT EDIT.
+
+// Package serviceendpoints installs SDO's generic ready-endpoint health check
+// (controller/sdk/servicehealth) for this application.
+package serviceendpoints
+
+import (
+	"time"
+
+	"sdo.dev/controller/sdk"
+	"sdo.dev/controller/sdk/servicehealth"
+)
+
+func New() sdk.Detector {{
+	return servicehealth.NewReadyEndpointsDetector(sdk.DetectorSpec{{
+		ID:          "{ENDPOINT_DETECTOR_ID}",
+{_GENERIC_SPEC_FIELDS}
+		Watches:     servicehealth.EndpointWatches(),
+		Interval:    15 * time.Second,
+	}})
+}}
+"""
+
+
+def _endpoint_detector_test_source() -> str:
+    return f"""// Code generated by the SDO lifecycle. DO NOT EDIT.
+
+package serviceendpoints
+
+import "testing"
+
+func TestRegistration(t *testing.T) {{
+	if New().Spec().ID != "{ENDPOINT_DETECTOR_ID}" {{
+		t.Fatalf("unexpected detector id %q", New().Spec().ID)
+	}}
+}}
+"""
+
+
+def _traffic_detector_source(mix_name: str) -> str:
+    return f"""// Code generated by the SDO lifecycle. DO NOT EDIT.
+
+// Package synthetic judges the health judge's traffic mix
+// .sdo/diagnostics/traffic/{mix_name}.yaml with controller/sdk/traffic.
+package synthetic
+
+import (
+	"time"
+
+	"sdo.dev/controller/sdk"
+	"sdo.dev/controller/sdk/traffic"
+)
+
+func New() sdk.Detector {{
+	return traffic.NewDetector(sdk.DetectorSpec{{
+		ID:          "{traffic_detector_id(mix_name)}",
+{_GENERIC_SPEC_FIELDS}
+		Watches:     []sdk.WatchKind{{traffic.Watch}},
+		Interval:    10 * time.Second,
+	}}, "{mix_name}")
+}}
+"""
+
+
+def _traffic_detector_test_source(mix_name: str) -> str:
+    return f"""// Code generated by the SDO lifecycle. DO NOT EDIT.
+
+package synthetic
+
+import (
+	"testing"
+
+	"sdo.dev/controller/sdk/traffic"
+)
+
+func TestRegistration(t *testing.T) {{
+	consumer, ok := New().(traffic.Consumer)
+	if !ok || len(consumer.TrafficMixes()) != 1 || consumer.TrafficMixes()[0] != "{mix_name}" {{
+		t.Fatalf("detector must judge traffic mix {mix_name}")
+	}}
+}}
+"""
+
+
+def _ensure_generic_health_detectors(root: Path) -> None:
+    """Install the endpoint check and one traffic detector per stored mix, idempotently.
+
+    Their registrations sit in marked blocks at the end of the detector list so a
+    refresh replaces exactly them and never touches responder-owned entries.
+    """
+
+    diagnostics = root / ".sdo" / "diagnostics"
+    health = diagnostics / "detectors" / "health"
+    mix_names = sorted(path.stem for path in (root / TRAFFIC_MIX_DIRECTORY).glob("*.yaml"))
+    packages = {
+        ENDPOINT_DETECTOR_ID: (_endpoint_detector_source(), _endpoint_detector_test_source()),
+        **{
+            traffic_detector_id(name): (_traffic_detector_source(name), _traffic_detector_test_source(name))
+            for name in mix_names
+        },
+    }
+    for stale in health.glob(f"{TRAFFIC_DETECTOR_PREFIX}*"):
+        if stale.is_dir() and stale.name not in packages:
+            shutil.rmtree(stale)
+    for package, (source, test_source) in packages.items():
+        directory = health / package
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "detector.go").write_text(source, encoding="utf-8")
+        (directory / "detector_test.go").write_text(test_source, encoding="utf-8")
+
+    manifest = diagnostics / "manifest.yaml"
+    text = _GENERIC_BLOCK_RE.sub("", manifest.read_text(encoding="utf-8"))
+    unmarked = {
+        str(detector.get("id"))
+        for detector in (yaml.safe_load(text) or {}).get("detectors", [])
+        if isinstance(detector, dict)
+    }
+    blocks = []
+    if ENDPOINT_DETECTOR_ID not in unmarked:
+        endpoint_watches = [("v1", "Service"), ("v1", "Endpoints"), ("v1", "Pod"), ("apps/v1", "Deployment")]
+        blocks.append(_generic_registration(ENDPOINT_DETECTOR_ID, ENDPOINT_DETECTOR_ID, endpoint_watches, "15s"))
+    for name in mix_names:
+        detector_id = traffic_detector_id(name)
+        if detector_id not in unmarked:
+            blocks.append(
+                _generic_registration(detector_id, detector_id, [("sdo.dev/v1alpha1", "SyntheticTraffic")], "10s")
+            )
+    head, separator, tail = text.partition("detectors:\n")
+    if not separator:
+        raise LifecycleError("diagnostics manifest has no detectors list")
+    lines = tail.splitlines(keepends=True)
+    end = next(
+        (index for index, line in enumerate(lines) if line.strip() and not line[0].isspace() and line[0] != "-"),
+        len(lines),
+    )
+    list_body, rest = "".join(lines[:end]), "".join(lines[end:])
+    if list_body and not list_body.endswith("\n"):
+        list_body += "\n"
+    manifest.write_text(head + separator + list_body + "".join(blocks) + rest, encoding="utf-8")
+
+
+def _traffic_mix_errors(mixes: list[AuthoredTrafficMix], deployer: DeployerAssessment) -> list[str]:
+    services = {resource.name for resource in deployer.resources if resource.kind == "Service"}
+    names = [mix.name for mix in mixes]
+    errors = [
+        f"traffic mix name {duplicate!r} is used more than once"
+        for duplicate in sorted({name for name in names if names.count(name) > 1})
+    ]
+    for authored in mixes:
+        try:
+            mix = TrafficMix.model_validate(yaml.safe_load(authored.document_yaml))
+        except (yaml.YAMLError, ValueError) as exc:
+            errors.append(f"traffic mix {authored.name!r} is invalid: {exc}")
+            continue
+        if mix.name != authored.name:
+            errors.append(f"traffic mix {authored.name!r} declares name {mix.name!r}; the name must match its file")
+        if mix.target.service not in services:
+            errors.append(
+                f"traffic mix {authored.name!r} targets Service/{mix.target.service}, which is not a source-backed "
+                "Service in the deployer handoff"
+            )
+    return errors
 
 
 def _ensure_health_configmap_watch(root: Path) -> None:
