@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,5 +157,25 @@ func TestParseResponderEnvironmentRejectsReservedAndMalformedValues(t *testing.T
 		if _, err := parseResponderEnvironment(invalid); err == nil {
 			t.Fatalf("accepted invalid responder environment %#v", invalid)
 		}
+	}
+}
+
+func TestRunRejectsExitAndRestartAfterClosureTogether(t *testing.T) {
+	err := RunWithOptions(context.Background(), nil, RuntimeOptions{Args: []string{
+		"--namespace", "demo", "--app-root", t.TempDir(), "--dispatcher", "responder", "--dispatcher-mode", "local",
+		"--exit-after-closure", "--restart-after-closure",
+	}, Stderr: &bytes.Buffer{}})
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected mutually exclusive closure modes, got %v", err)
+	}
+}
+
+func TestRunRejectsInvalidControlNamespace(t *testing.T) {
+	err := RunWithOptions(context.Background(), nil, RuntimeOptions{Args: []string{
+		"--namespace", "demo", "--control-namespace", "Not_Valid", "--app-root", t.TempDir(),
+		"--dispatcher", "responder", "--dispatcher-mode", "local",
+	}, Stderr: &bytes.Buffer{}})
+	if err == nil || !strings.Contains(err.Error(), "invalid control namespace") {
+		t.Fatalf("expected invalid control namespace error, got %v", err)
 	}
 }

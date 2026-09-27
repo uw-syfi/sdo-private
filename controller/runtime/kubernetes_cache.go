@@ -32,10 +32,17 @@ type KubernetesCacheConfig struct {
 // would either drop kinds on overflow or delay a ConfigMap delete behind a
 // backlog of unrelated Pod events.
 type KubernetesCache struct {
-	config    KubernetesCacheConfig
-	factory   informers.SharedInformerFactory
-	informers map[string]cache.SharedIndexInformer
-	startOnce sync.Once
+	config   KubernetesCacheConfig
+	declared map[string]sdk.WatchKind
+
+	// informerMu guards the live informer generation. Stop and Resync replace
+	// it so a redeployed application namespace is observed through a fresh
+	// list rather than a store that missed events while access was revoked.
+	informerMu sync.RWMutex
+	factory    informers.SharedInformerFactory
+	informers  map[string]cache.SharedIndexInformer
+	parent     context.Context
+	cancel     context.CancelFunc
 
 	mu      sync.Mutex
 	pending map[string]sdk.WatchKind
@@ -50,10 +57,8 @@ func NewKubernetesCache(config KubernetesCacheConfig, detectors []sdk.Detector) 
 	if config.Client == nil {
 		return nil, fmt.Errorf("Kubernetes client is required")
 	}
-	factory := informers.NewSharedInformerFactoryWithOptions(config.Client, 0, informers.WithNamespace(config.Namespace))
 	result := &KubernetesCache{
-		config: config, factory: factory, informers: make(map[string]cache.SharedIndexInformer),
-		pending: make(map[string]sdk.WatchKind), notify: make(chan struct{}, 1),
+		config: config, pending: make(map[string]sdk.WatchKind), notify: make(chan struct{}, 1),
 	}
 	declared := make(map[string]sdk.WatchKind)
 	for _, detector := range detectors {
@@ -65,30 +70,87 @@ func NewKubernetesCache(config KubernetesCacheConfig, detectors []sdk.Detector) 
 			declared[watch.APIVersion+"/"+watch.Kind] = watch
 		}
 	}
-	for key, watch := range declared {
-		informer, err := informerFor(factory, key)
-		if err != nil {
-			return nil, err
-		}
-		result.informers[key] = informer
-		if _, err := informer.AddEventHandler(result.eventHandler(watch)); err != nil {
-			return nil, fmt.Errorf("register %s informer handler: %w", key, err)
-		}
+	result.declared = declared
+	factory, built, err := result.build()
+	if err != nil {
+		return nil, err
 	}
+	result.factory, result.informers = factory, built
 	return result, nil
 }
 
+func (c *KubernetesCache) build() (informers.SharedInformerFactory, map[string]cache.SharedIndexInformer, error) {
+	factory := informers.NewSharedInformerFactoryWithOptions(c.config.Client, 0, informers.WithNamespace(c.config.Namespace))
+	built := make(map[string]cache.SharedIndexInformer, len(c.declared))
+	for key, watch := range c.declared {
+		informer, err := informerFor(factory, key)
+		if err != nil {
+			return nil, nil, err
+		}
+		built[key] = informer
+		if _, err := informer.AddEventHandler(c.eventHandler(watch)); err != nil {
+			return nil, nil, fmt.Errorf("register %s informer handler: %w", key, err)
+		}
+	}
+	return factory, built, nil
+}
+
+// Start begins observing the namespace. Calling it on a running cache is a no-op.
 func (c *KubernetesCache) Start(ctx context.Context) {
-	c.startOnce.Do(func() { c.factory.Start(ctx.Done()) })
+	c.informerMu.Lock()
+	defer c.informerMu.Unlock()
+	if c.cancel != nil {
+		return
+	}
+	c.parent = ctx
+	running, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
+	c.factory.Start(running.Done())
+}
+
+// Stop ends observation, for example while the application is intentionally
+// absent, without discarding pending watch events.
+func (c *KubernetesCache) Stop() {
+	c.informerMu.Lock()
+	defer c.informerMu.Unlock()
+	if c.cancel != nil {
+		c.cancel()
+		c.cancel = nil
+	}
+}
+
+// Resync replaces the informers with a fresh generation, starts it, and waits
+// for its initial list. Stale objects from before a Stop are never served.
+func (c *KubernetesCache) Resync(ctx context.Context) error {
+	factory, built, err := c.build()
+	if err != nil {
+		return err
+	}
+	c.informerMu.Lock()
+	if c.cancel != nil {
+		c.cancel()
+	}
+	parent := c.parent
+	if parent == nil {
+		parent = ctx
+	}
+	running, cancel := context.WithCancel(parent)
+	c.parent, c.cancel = parent, cancel
+	c.factory, c.informers = factory, built
+	factory.Start(running.Done())
+	c.informerMu.Unlock()
+	return c.WaitForSync(ctx)
 }
 
 func (c *KubernetesCache) WaitForSync(ctx context.Context) error {
-	if len(c.informers) == 0 {
-		return nil
-	}
+	c.informerMu.RLock()
 	syncs := make([]cache.InformerSynced, 0, len(c.informers))
 	for _, informer := range c.informers {
 		syncs = append(syncs, informer.HasSynced)
+	}
+	c.informerMu.RUnlock()
+	if len(syncs) == 0 {
+		return nil
 	}
 	if !cache.WaitForCacheSync(ctx.Done(), syncs...) {
 		if err := ctx.Err(); err != nil {
@@ -135,6 +197,8 @@ func (c *KubernetesCache) enqueue(watch sdk.WatchKind) {
 
 func (c *KubernetesCache) Snapshot(context.Context) (sdk.DetectionContext, error) {
 	snapshot := controllercore.DetectionSnapshot{NamespaceName: c.config.Namespace}
+	c.informerMu.RLock()
+	defer c.informerMu.RUnlock()
 	for key, informer := range c.informers {
 		for _, object := range informer.GetStore().List() {
 			switch key {

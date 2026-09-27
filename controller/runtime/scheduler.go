@@ -65,6 +65,13 @@ func (s *Scheduler) Expedite(detectorID string, at time.Time) {
 	entry.nextRun = at
 }
 
+// ExpediteAll makes every detector due at or before at.
+func (s *Scheduler) ExpediteAll(at time.Time) {
+	for id := range s.entries {
+		s.Expedite(id, at)
+	}
+}
+
 func (s *Scheduler) NextRun() time.Time {
 	var next time.Time
 	for _, entry := range s.entries {

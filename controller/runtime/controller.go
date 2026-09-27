@@ -239,6 +239,13 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 	return c.dispatchReady(ctx, now)
 }
 
+// EvaluateAll evaluates every detector against one fresh snapshot, for example
+// when observation resumes after a planned maintenance window.
+func (c *Controller) EvaluateAll(ctx context.Context, now time.Time) error {
+	c.scheduler.ExpediteAll(now)
+	return c.StepEvents(ctx, now, nil)
+}
+
 func (c *Controller) mergeIntoOpenIncident(finding sdk.Finding) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

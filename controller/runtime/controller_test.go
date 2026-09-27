@@ -589,3 +589,37 @@ func executePendingEffect(t *testing.T, controller *Controller) {
 }
 
 func (d *sequenceDetector) String() string { return fmt.Sprintf("detector(%s)", d.spec.ID) }
+
+func TestControllerEvaluateAllRunsEveryDetectorRegardlessOfSchedule(t *testing.T) {
+	slow := controllerDetector("slow", time.Hour, sdk.Finding{})
+	fast := controllerDetector("fast", time.Hour, sdk.Finding{})
+	dispatcher := &recordingDispatcher{requests: make(chan IncidentRequest, 1)}
+	controller, err := NewController(
+		testControllerConfig(), []sdk.Detector{slow, fast},
+		staticProvider{snapshot: sdktest.Snapshot{NamespaceName: "demo"}}, dispatcher, time.Unix(0, 0),
+	)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	if err := controller.Step(context.Background(), time.Unix(0, 0), nil); err != nil {
+		t.Fatalf("initial step: %v", err)
+	}
+	if err := controller.Step(context.Background(), time.Unix(10, 0), nil); err != nil {
+		t.Fatalf("idle step: %v", err)
+	}
+	if slow.calls != 1 || fast.calls != 1 {
+		t.Fatalf("detectors ran before their interval: slow=%d fast=%d", slow.calls, fast.calls)
+	}
+	var evaluated []sdk.Finding
+	evaluations := 0
+	controller.OnEvaluation = func(findings []sdk.Finding) {
+		evaluations++
+		evaluated = findings
+	}
+	if err := controller.EvaluateAll(context.Background(), time.Unix(11, 0)); err != nil {
+		t.Fatalf("evaluate all: %v", err)
+	}
+	if slow.calls != 2 || fast.calls != 2 || evaluations != 1 || len(evaluated) != 0 {
+		t.Fatalf("resume evaluation must run every detector once: slow=%d fast=%d evaluations=%d", slow.calls, fast.calls, evaluations)
+	}
+}
