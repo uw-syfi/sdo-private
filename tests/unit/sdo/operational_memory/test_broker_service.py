@@ -7,7 +7,13 @@ import pytest
 
 from sdo.agent_runtime.responder.broker_cli import _memory_validator, _production_reflector
 from sdo.agent_runtime.responder.reflection import ReflectionTurn, SessionReflector, _classification_directive
-from sdo.contracts import DetectorEvaluationStatus, IncidentRequest, IncidentResult
+from sdo.contracts import (
+    DetectorEvaluation,
+    DetectorEvaluationStatus,
+    IncidentRequest,
+    IncidentResult,
+    PriorOutcomeEvidence,
+)
 from sdo.operational_memory.broker_service import (
     BrokerClosure,
     BrokerService,
@@ -920,3 +926,115 @@ def test_reflection_prompt_carries_the_broker_computed_topology_review(tmp_path:
     assert f"arch.md topology fingerprint: {state.architecture_topology_fingerprint}" in prompt
     assert f"current source topology fingerprint: {state.source_topology_fingerprint}" in prompt
     assert "stale_memory_detected: true" in prompt
+
+
+class MustNotReflectBackend(RecordingSessionBackend):
+    def _reflect(self, **_kwargs: object) -> ReflectionTurn:  # type: ignore[override]
+        raise AssertionError("a repeated exact-match success must not run an LLM reflection turn")
+
+
+def _exact_match_outcome(match_reason: str = "exact-fingerprint") -> PriorOutcomeEvidence:
+    return PriorOutcomeEvidence(
+        incident_id="inc-20260701-0001",
+        match_reason=match_reason,  # type: ignore[arg-type]
+        root_cause_summaries=["geo referenced an absent required ConfigMap"],
+        repair_action_summaries=["restored geo-config"],
+        applied_playbooks=[".sdo/playbooks/missing-configmap/README.md"],
+        source_commit="1111111111111111111111111111111111111111",
+        exact_source_match=True,
+    )
+
+
+def _warm_closure(
+    worktree: Path,
+    base_commit: str,
+    *,
+    match_reason: str = "exact-fingerprint",
+    incident_status: DetectorEvaluationStatus | None = DetectorEvaluationStatus.CLEAR,
+    repair_success: bool = True,
+    applied_playbook: bool = True,
+) -> BrokerClosure:
+    closure = _closure(worktree, base_commit)
+    request = closure.request.model_copy(update={"relevant_outcomes": [_exact_match_outcome(match_reason)]})
+    assert closure.result is not None
+    actions = [action.model_copy(update={"success": repair_success}) for action in closure.result.repair_actions]
+    result = closure.result.model_copy(
+        update={
+            "repair_actions": actions,
+            "applied_playbooks": closure.result.applied_playbooks if applied_playbook else [],
+        }
+    )
+    incident_states = (
+        []
+        if incident_status is None
+        else [
+            DetectorEvaluation(
+                detector_id="missing-configmap",
+                evaluated_at=datetime(2026, 7, 9, 18, 5, 30, tzinfo=timezone.utc),
+                status=incident_status,
+                fingerprints=[] if incident_status == DetectorEvaluationStatus.CLEAR else ["hotel-reservation/geo"],
+            )
+        ]
+    )
+    return closure.model_copy(
+        update={"request": request, "result": result, "incident_detector_states": incident_states}
+    )
+
+
+def test_repeated_exact_match_success_records_deterministic_noop_reflection(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    diagnostics_before = _git(target, "rev-parse", "HEAD:.sdo/diagnostics")
+    backend = MustNotReflectBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    receipt = service.process_closure(_warm_closure(workspace.path, workspace.base_commit))
+
+    state = service.completion_state("inc-20260709-0001")
+    assert backend.calls == []
+    assert state.reflection_attempts == 0
+    assert state.reflection_usage == {}
+    assert state.reflection_completed is True
+    assert state.reflection_skipped_reason is not None
+    assert "exact-match" in state.reflection_skipped_reason
+    assert state.reflection_learning_decision == "no_change"
+    assert state.reflection_no_change_reason == state.reflection_skipped_reason
+    assert state.accepted_detector_paths == []
+    assert state.controller_update_required is False
+    assert receipt.reflection_commit is not None
+    assert "SDO-Phase: reflection" in _git(target, "show", "-s", "--format=%B", receipt.reflection_commit)
+    assert _git(target, "rev-parse", "HEAD:.sdo/diagnostics") == diagnostics_before
+    assert MemoryRepository(target).outcomes()[-1].classification == OutcomeClassification.SUCCESS
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        {"match_reason": "detector-rule-resource-kind"},
+        {"incident_status": None},
+        {"incident_status": DetectorEvaluationStatus.FIRING},
+        {"repair_success": False},
+        {"applied_playbook": False},
+    ],
+)
+def test_non_exact_or_unproven_warm_success_still_runs_full_reflection(
+    tmp_path: Path, variant: dict[str, object]
+) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = RecordingSessionBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    service.process_closure(_warm_closure(workspace.path, workspace.base_commit, **variant))  # type: ignore[arg-type]
+
+    state = service.completion_state("inc-20260709-0001")
+    assert len(backend.calls) == 1
+    assert state.reflection_skipped_reason is None

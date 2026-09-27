@@ -284,12 +284,19 @@ def _export_runtime_artifacts(namespace: str, artifacts_dir: Path | None) -> dic
     return {"directory": str(destination), "error": None}
 
 
-def _reflection_telemetry(ledger: dict[str, Any]) -> dict[str, int]:
-    """Reflection attempts; retries after a validation rejection run in a fresh session."""
+def _reflection_telemetry(ledger: dict[str, Any]) -> dict[str, int | str | None]:
+    """Reflection attempts and, when the broker skipped the LLM turn, why.
 
+    Retries after a validation rejection run in a fresh session. A repeated
+    exact-match success records a deterministic no-op reflection with zero
+    attempts and a ``reflection_skipped_reason``.
+    """
+
+    skipped = ledger.get("reflection_skipped_reason")
     return {
         "reflection_attempts": int(ledger.get("reflection_attempts") or 0),
         "reflection_fresh_retry_attempts": int(ledger.get("reflection_fresh_retry_attempts") or 0),
+        "reflection_skipped_reason": skipped if isinstance(skipped, str) and skipped else None,
     }
 
 
@@ -377,6 +384,7 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         "responder_session_id": ledger.get("responder_session_id"),
         "same_session_reflection": bool(ledger.get("responder_session_id") and ledger.get("reflection_commit")),
         "detector_clear": detector_clear,
+        "incident_detector_states": closure.get("incident_detector_states", []),
         "independent_verification": result.get("verification_evidence", []),
         "usage": result.get("usage", {}),
         "reflection_usage": ledger.get("reflection_usage", {}),

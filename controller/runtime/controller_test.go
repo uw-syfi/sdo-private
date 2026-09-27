@@ -449,6 +449,11 @@ func TestResponderCompletionDoesNotCloseIncidentUntilAllHealthFindingsClear(t *t
 		closure.FinalDetectorStates[0].Status != DetectorEvaluationClear {
 		t.Fatalf("closure did not record final health state: %#v", closure.FinalDetectorStates)
 	}
+	if len(closure.IncidentDetectorStates) != 1 || closure.IncidentDetectorStates[0].DetectorID != "cause" ||
+		closure.IncidentDetectorStates[0].Status != DetectorEvaluationClear ||
+		closure.IncidentDetectorStates[0].EvaluatedAt.Before(closure.ResponderCompletedAt) {
+		t.Fatalf("closure did not record the post-response incident detector state: %#v", closure.IncidentDetectorStates)
+	}
 	if closure.DetectedAt.IsZero() || closure.DispatchedAt.Before(closure.DetectedAt) ||
 		closure.ResponderCompletedAt.Before(closure.DispatchedAt) || closure.VerifiedAt.Before(closure.ResponderCompletedAt) {
 		t.Fatalf("closure timestamps are not ordered: %#v", closure)

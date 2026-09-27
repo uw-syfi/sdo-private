@@ -470,7 +470,8 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 	closure := IncidentClosure{
 		Request: *cloneIncidentRequest(c.currentIncidentRequest), Result: cloneIncidentResult(c.currentIncidentResult),
 		DispatchError: c.dispatchError, FinalDetectorStates: finalStates,
-		DetectedAt: c.incidentDetectedAt, DispatchedAt: c.incidentDispatchedAt,
+		IncidentDetectorStates: c.incidentDetectorStates(),
+		DetectedAt:             c.incidentDetectedAt, DispatchedAt: c.incidentDispatchedAt,
 		ResponderCompletedAt: c.responderCompletedAt, VerifiedAt: verifiedAt,
 	}
 	c.pendingClosure = cloneIncidentClosure(&closure)
@@ -517,6 +518,30 @@ func (c *Controller) finalVerificationStates() ([]DetectorEvaluation, bool) {
 		}
 	}
 	return c.latestEvaluations(c.healthDetectorIDs, c.responderCompletedAt, true)
+}
+
+// incidentDetectorStates reports the latest evaluation since responder
+// completion of each non-health detector that raised a finding in the current
+// incident. Detectors that have not evaluated since then are omitted.
+func (c *Controller) incidentDetectorStates() []DetectorEvaluation {
+	health := make(map[string]struct{}, len(c.healthDetectorIDs))
+	for _, detectorID := range c.healthDetectorIDs {
+		health[detectorID] = struct{}{}
+	}
+	ids := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, finding := range c.currentIncidentRequest.Findings {
+		if _, ok := health[finding.DetectorID]; ok {
+			continue
+		}
+		if _, ok := seen[finding.DetectorID]; !ok {
+			seen[finding.DetectorID] = struct{}{}
+			ids = append(ids, finding.DetectorID)
+		}
+	}
+	sort.Strings(ids)
+	states, _ := c.latestEvaluations(ids, c.responderCompletedAt, false)
+	return states
 }
 
 func (c *Controller) latestEvaluations(

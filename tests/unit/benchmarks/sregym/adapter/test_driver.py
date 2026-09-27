@@ -1258,8 +1258,27 @@ def test_receipt_reflection_telemetry_distinguishes_fresh_retries_from_same_sess
     telemetry = runtime._reflection_telemetry(
         {"responder_session_id": "s-1", "reflection_attempts": 2, "reflection_fresh_retry_attempts": 1}
     )
-    assert telemetry == {"reflection_attempts": 2, "reflection_fresh_retry_attempts": 1}
-    assert runtime._reflection_telemetry({}) == {"reflection_attempts": 0, "reflection_fresh_retry_attempts": 0}
+    assert telemetry == {
+        "reflection_attempts": 2,
+        "reflection_fresh_retry_attempts": 1,
+        "reflection_skipped_reason": None,
+    }
+    assert runtime._reflection_telemetry({}) == {
+        "reflection_attempts": 0,
+        "reflection_fresh_retry_attempts": 0,
+        "reflection_skipped_reason": None,
+    }
+
+
+def test_receipt_reports_a_deterministically_skipped_reflection() -> None:
+    import benchmarks.sregym.adapter.runtime as runtime
+
+    telemetry = runtime._reflection_telemetry(
+        {"reflection_attempts": 0, "reflection_skipped_reason": "repeated exact-match success: ..."}
+    )
+
+    assert telemetry["reflection_attempts"] == 0
+    assert telemetry["reflection_skipped_reason"] == "repeated exact-match success: ..."
 
 
 def test_driver_exports_runtime_artifacts_beside_the_receipt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -10,8 +10,9 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
-from sdo.contracts import (  # noqa: TC001 - Pydantic resolves these annotations at runtime.
+from sdo.contracts import (
     DetectorEvaluation,
+    DetectorEvaluationStatus,
     IncidentRequest,
     IncidentResult,
 )
@@ -23,8 +24,9 @@ from sdo.operational_memory.models import (
     ValidatorNetworkPolicyCanary,
 )
 from sdo.operational_memory.outcomes import OutcomeFacts, derive_outcome
-from sdo.operational_memory.repository import MemoryRepository
+from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
 from sdo.operational_memory.validation import MemoryValidationError
+from sdo.operational_memory.warm_path import warm_incident_findings
 from sdo.operational_memory.worktrees import IncidentWorktree, WorktreeManager
 
 if TYPE_CHECKING:
@@ -91,6 +93,9 @@ class BrokerClosure(BaseModel):
     result: IncidentResult | None = None
     dispatch_error: str | None = None
     final_detector_states: list[DetectorEvaluation] = Field(default_factory=list)
+    # Latest post-response evaluation of each non-health detector that raised a
+    # finding; learning evidence only, never a closure gate.
+    incident_detector_states: list[DetectorEvaluation] = Field(default_factory=list)
     detected_at: datetime
     dispatched_at: datetime
     responder_completed_at: datetime
@@ -170,6 +175,9 @@ class BrokerLedger(BaseModel):
     # Provider accounting summed over every reflection attempt for the incident.
     reflection_usage: dict[str, int | float] = Field(default_factory=dict)
     reflection_validation_error: str | None = None
+    # Set when the broker recorded a deterministic no-op reflection instead of
+    # running an LLM turn (a repeated exact-match success).
+    reflection_skipped_reason: str | None = None
     reflection_completed: bool = False
     reflection_commit: str | None = None
     topology_reviewed_at_commit: str | None = None
@@ -485,6 +493,19 @@ class BrokerService:
             self._save(ledger)
             return ledger
         changed_paths = self.broker.proposal_changed_paths(worktree)
+        if not ledger.reflection_started and ledger.reflection_attempts == 0 and not changed_paths:
+            skipped_reason = self._exact_match_noop_reason(
+                closure, outcome, repository, health_verified=health_verified
+            )
+            if skipped_reason is not None:
+                ledger.reflection_skipped_reason = skipped_reason
+                ledger.reflection_backend_completed = True
+                ledger.reflection_summary = "Deterministic no-op reflection: " + skipped_reason
+                ledger.reflection_learning_decision = "no_change"
+                ledger.reflection_no_change_reason = skipped_reason
+                ledger.reflection_proposed_changes = []
+                self._save(ledger)
+                return self._commit_noop_reflection(ledger, worktree)
         retry_feedback = ledger.reflection_validation_error
         if ledger.reflection_started and not ledger.reflection_backend_completed:
             if changed_paths:
@@ -581,6 +602,63 @@ class BrokerService:
         ledger.reflection_completed = True
         self._save(ledger)
         return ledger
+
+    @staticmethod
+    def _exact_match_noop_reason(
+        closure: BrokerClosure,
+        outcome: OutcomeRecord,
+        repository: MemoryRepository,
+        *,
+        health_verified: bool,
+    ) -> str | None:
+        """Why reflection can be skipped for a repeated exact-match success, or ``None``.
+
+        Only a fully successful, verified repair of an incident whose validated
+        incident detector and playbook already encode it qualifies: the prior
+        verified outcome matched by exact fingerprint, the repair applied that
+        detector's playbook, every repair action and verification passed, the
+        controller verified health, and the incident detector cleared after the
+        response. Anything else runs the full reflection turn.
+        """
+
+        result = closure.result
+        if (
+            not health_verified
+            or outcome.classification != OutcomeClassification.SUCCESS
+            or result is None
+            or result.status.value != "completed"
+            or not result.confirmed_root_causes
+            or any(not action.success for action in result.repair_actions)
+            or any(not evidence.passed for evidence in result.verification_evidence)
+        ):
+            return None
+        try:
+            manifest = repository.diagnostics()
+        except (MemoryRepositoryError, ValueError):
+            return None
+        findings = warm_incident_findings(closure.request, manifest)
+        applied = {playbook.path for playbook in result.applied_playbooks}
+        cleared = {
+            state.detector_id
+            for state in closure.incident_detector_states
+            if state.status == DetectorEvaluationStatus.CLEAR and not state.fingerprints
+        }
+        matched = sorted(
+            {
+                finding.detector_id
+                for finding in findings
+                if applied.intersection(finding.playbooks) and finding.detector_id in cleared
+            }
+        )
+        if not matched:
+            return None
+        playbooks = sorted(applied.intersection(path for finding in findings for path in finding.playbooks))
+        return (
+            "repeated exact-match success: validated incident detector(s) "
+            f"{', '.join(matched)} fired, their playbook(s) {', '.join(playbooks)} repaired the incident, the "
+            "detector(s) cleared after the response, and the controller verified health; existing memory already "
+            "encodes this incident"
+        )
 
     def _reject_reflection(self, ledger: BrokerLedger, worktree: Path, error: str) -> None:
         """Persist a rejection so the next attempt can retry from the rejected diff.
