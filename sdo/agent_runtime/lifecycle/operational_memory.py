@@ -24,7 +24,13 @@ from sdo.agent_runtime.lifecycle.agents import (
     LifecycleAgentError,
     WorkspaceHealthJudgeBackend,
 )
-from sdo.operational_memory import ContainerSandboxRunner, SandboxResult, SandboxRunner
+from sdo.operational_memory import (
+    BROKER_AUTHOR_EMAIL,
+    VALIDATION_PASSED_TRAILER,
+    ContainerSandboxRunner,
+    SandboxResult,
+    SandboxRunner,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +182,9 @@ def reuse_initial_lifecycle_if_valid(
                 return False
         expected = _deployer_assessment({"repository": str(root), "application": application})
         current_deployer = deployer.model_copy(update={"source_commit": str(expected["source_commit"])})
-        if _validate_deployer_assessment(root, current_deployer):
+        if _validate_deployer_assessment(root, current_deployer) and not _deployer_survives_validated_sdo_changes(
+            root, deployer, health_objective=health_objective
+        ):
             return False
         session_ids = [deployer.session_id, *(attempt.session_id for attempt in attempts)]
         if len(session_ids) != len(set(session_ids)):
@@ -218,6 +226,63 @@ def reuse_initial_lifecycle_if_valid(
         return True
     except (LifecycleError, OSError, TypeError, ValueError, yaml.YAMLError):
         return False
+
+
+def _deployer_survives_validated_sdo_changes(
+    root: Path,
+    deployer: DeployerAssessment,
+    *,
+    health_objective: str,
+) -> bool:
+    """Keep a lifecycle handoff across source changes SDO itself validated.
+
+    An incident outcome may commit a source repair, such as restoring a missing
+    manifest. That drift does not invalidate the deployer and health judge when
+    every source-changing commit since the handoff is a broker-validated SDO
+    commit, the deployer assessment still holds at its recorded commit, and the
+    health judge's derived input is unchanged at HEAD.
+    """
+
+    base = deployer.source_commit
+    try:
+        _git(root, "merge-base", "--is-ancestor", base, "HEAD")
+        source_commits = _git(root, "rev-list", f"{base}..HEAD", "--", ".", ":(exclude).sdo").split()
+        for commit in source_commits:
+            author = _git(root, "log", "-1", "--format=%ae", commit)
+            message = _git(root, "log", "-1", "--format=%B", commit)
+            if author != BROKER_AUTHOR_EMAIL or VALIDATION_PASSED_TRAILER not in message.splitlines():
+                return False
+        with tempfile.TemporaryDirectory(prefix="sdo-lifecycle-handoff-") as scratch:
+            checkout = Path(scratch) / "source"
+            _git(root, "worktree", "add", "--detach", "--quiet", str(checkout), base)
+            try:
+                if _validate_deployer_assessment(checkout, deployer):
+                    return False
+            finally:
+                _git(root, "worktree", "remove", "--force", str(checkout))
+        current = _deployer_assessment({"repository": str(root), "application": root.name})
+    except LifecycleError:
+        return False
+
+    def judged(resources: object) -> dict[str, object]:
+        plan = _judge_assessment(
+            {
+                "health_objective": health_objective,
+                "deployer_assessment": {"resources": resources, "source_commit": ""},
+            }
+        )
+        plan.pop("source_commit", None)
+        return plan
+
+    recorded = [resource.model_dump(mode="json") for resource in deployer.resources]
+    if judged(recorded) != judged(current["resources"]):
+        return False
+    logger.info(
+        "reusing lifecycle handoff across %d validated SDO source commit(s) since %s",
+        len(source_commits),
+        base[:12],
+    )
+    return True
 
 
 def run_initial_lifecycle(

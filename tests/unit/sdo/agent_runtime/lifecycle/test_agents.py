@@ -459,6 +459,87 @@ def test_existing_model_backed_lifecycle_is_reused_only_while_source_topology_ma
     )
 
 
+_CONFIGMAP_MANIFEST = """apiVersion: v1
+kind: ConfigMap
+metadata: {name: example-script, namespace: demo}
+data: {init.sh: "echo ok"}
+"""
+
+
+def _commit_source(repository: Path, name: str, content: str, *, broker: bool) -> None:
+    (repository / name).write_text(content, encoding="utf-8")
+    _git(repository, "add", name)
+    if broker:
+        _git(
+            repository,
+            "-c",
+            "user.name=SDO Commit Broker",
+            "-c",
+            "user.email=sdo-commit-broker@localhost",
+            "commit",
+            "-q",
+            "-m",
+            "sdo(incident-1): validated operational memory\n\n"
+            "SDO-Incident: incident-1\nSDO-Actor: responder\nSDO-Phase: outcome\nSDO-Validation: passed",
+        )
+    else:
+        _git(repository, "commit", "-q", "-m", "operator source change")
+
+
+def _lifecycle_repository(tmp_path: Path, objective: str) -> Path:
+    repository = _repository(tmp_path)
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective=objective,
+        backend=RecordingBackend(),
+        validator=PassingValidator(),
+        judge_rounds=3,
+    )
+    return repository
+
+
+def test_lifecycle_is_reused_after_validated_sdo_source_change_that_keeps_judged_topology(tmp_path: Path) -> None:
+    objective = "Deployment example and Service example must remain available."
+    repository = _lifecycle_repository(tmp_path, objective)
+    _commit_source(repository, "configmap.yaml", _CONFIGMAP_MANIFEST, broker=True)
+
+    assert reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=PassingValidator(),
+    )
+    assert _git(repository, "worktree", "list").count("\n") == 0
+
+
+def test_lifecycle_is_not_reused_after_unvalidated_source_change(tmp_path: Path) -> None:
+    objective = "Deployment example and Service example must remain available."
+    repository = _lifecycle_repository(tmp_path, objective)
+    _commit_source(repository, "configmap.yaml", _CONFIGMAP_MANIFEST, broker=False)
+
+    assert not reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=PassingValidator(),
+    )
+
+
+def test_lifecycle_is_not_reused_after_validated_sdo_change_to_judged_topology(tmp_path: Path) -> None:
+    objective = "Deployment example and Service example must remain available."
+    repository = _lifecycle_repository(tmp_path, objective)
+    relabeled = (repository / "deploy.yaml").read_text(encoding="utf-8").replace("app: example", "app: example-v2")
+    _commit_source(repository, "deploy.yaml", relabeled, broker=True)
+
+    assert not reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=PassingValidator(),
+    )
+
+
 def test_lifecycle_reuse_skips_identical_independent_validation_with_attestation(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     objective = "Deployment example and Service example must remain available."

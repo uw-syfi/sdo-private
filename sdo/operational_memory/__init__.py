@@ -8,7 +8,12 @@ from sdo.operational_memory.broker_service import (
     ControllerRolloutExpectation,
     ControllerRolloutRecord,
 )
-from sdo.operational_memory.commit_broker import CommandProposalValidator, CommitBroker
+from sdo.operational_memory.commit_broker import (
+    BROKER_AUTHOR_EMAIL,
+    VALIDATION_PASSED_TRAILER,
+    CommandProposalValidator,
+    CommitBroker,
+)
 from sdo.operational_memory.models import ArtifactOwner, OutcomeClassification, OutcomeRecord
 from sdo.operational_memory.repository import MemoryRepository
 from sdo.operational_memory.sandbox import (
@@ -21,6 +26,8 @@ from sdo.operational_memory.sandbox import (
 from sdo.operational_memory.validation import MemoryValidationError, MemoryValidator
 
 __all__ = [
+    "BROKER_AUTHOR_EMAIL",
+    "VALIDATION_PASSED_TRAILER",
     "ArtifactOwner",
     "BrokerClosure",
     "BrokerService",
