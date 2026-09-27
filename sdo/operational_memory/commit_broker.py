@@ -28,6 +28,13 @@ class CommitResult:
     validator_network_policy_canaries: tuple[ValidatorNetworkPolicyCanary, ...] = ()
 
 
+#: The broker's source-repair gate: reject conflict markers in the proposal's diff. Whitespace style
+#: is not a repair error: a verified repair may embed an existing script verbatim, blank lines included.
+SOURCE_REPAIR_CHECK_COMMAND = (
+    "git -c core.whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab diff --check HEAD --"
+)
+
+
 class ProposalValidator(Protocol):
     def validate(self, worktree: Path, changed_paths: list[str]) -> None: ...
 
