@@ -21,7 +21,7 @@ Path: `.sdo/lifecycle-provenance.yaml`
 
 Expected sections:
 
-- `deployer`: session ID, source commit, topology fingerprint, resource inventory, and architecture summary.
+- `deployer`: session ID, source commit, topology fingerprint, resource inventory, and architecture summary. The model returns only the commit, fingerprint, and summary; the controller attaches the resource inventory deterministically from tracked manifests, so the inventory is a controller fact rather than model output.
 - `active_topology` (when supplied by the deployment adapter): sorted kind/name references for the deployed source variant and required non-optional ConfigMap dependencies.
 - `health_judge`: the accepted final detector artifact.
 - `health_judge_rounds`: ordered structured attempts with distinct session IDs, round numbers, objective digest, covered resources, source, and tests.

@@ -18,10 +18,12 @@ from sdo.agent_runtime.lifecycle.agents import (
     ActiveTopologyResourceDTO,
     CodexLifecycleBackend,
     DeployerAssessment,
+    DeployerHandoff,
     HealthJudgeArtifact,
     HealthJudgeWorkspaceArtifact,
     LifecycleAgentBackend,
     LifecycleAgentError,
+    TopologyResourceDTO,
     WorkspaceHealthJudgeBackend,
 )
 from sdo.operational_memory import ContainerSandboxRunner, SandboxResult, SandboxRunner
@@ -244,8 +246,10 @@ def run_initial_lifecycle(
     trusted_source_facts = _deployer_assessment({"repository": str(root), "application": application})
     trusted_resources = cast("list[dict[str, object]]", trusted_source_facts["resources"])
     required_resource_names = ", ".join(sorted(repr(str(resource["name"])) for resource in trusted_resources))
+    trusted_inventory = [TopologyResourceDTO.model_validate(resource) for resource in trusted_resources]
     trusted_source_feedback = (
-        "Trusted controller-derived source facts. Copy source_commit, topology_fingerprint, and resources exactly. "
+        "Trusted controller-derived source facts. Copy source_commit and topology_fingerprint exactly. The "
+        "controller attaches the resource inventory below to your handoff; do not return it. "
         "The architecture_summary_markdown must mention every resource name verbatim, including low-level data "
         f"stores and observability resources. Required names: {required_resource_names}. Use repository inspection "
         "to describe their relationships:\n" + json.dumps(trusted_source_facts, indent=2, sort_keys=True)
@@ -254,11 +258,12 @@ def run_initial_lifecycle(
     deployer_errors: list[str] = []
     for attempt_index in range(1, deployer_attempts + 1):
         try:
-            candidate = selected_backend.run_deployer(
+            handoff = selected_backend.run_deployer(
                 repository=root,
                 application=application,
                 correction_feedback=deployer_feedback,
             )
+            candidate = _attach_trusted_inventory(handoff, trusted_inventory)
             validation_errors = _validate_deployer_assessment(root, candidate)
         except (LifecycleAgentError, ValueError) as exc:
             validation_errors = [str(exc)]
@@ -415,6 +420,13 @@ def run_initial_lifecycle(
         architecture_summary_markdown=deployer.architecture_summary_markdown,
         lifecycle_provenance=provenance,
     )
+
+
+def _attach_trusted_inventory(handoff: DeployerHandoff, inventory: list[TopologyResourceDTO]) -> DeployerAssessment:
+    """Make the source resource inventory a controller fact, not model output."""
+
+    fields = handoff.model_dump(include=set(DeployerHandoff.model_fields))
+    return DeployerAssessment(**fields, resources=inventory)
 
 
 def _deployer_assessment(payload: dict[str, object]) -> dict[str, object]:
