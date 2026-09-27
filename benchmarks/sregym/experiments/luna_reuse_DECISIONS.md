@@ -887,3 +887,32 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
 - **Confidence:** very low. n=1 per stage, and only 2 of 8 stages ran. The sequence's real test, repeats in the second pass, never ran.
 - **Implications for SDO:** a cold SDO responder beats or matches cold Codex on the first stages. But the sequence claim (memory amortizes across a mixed stream) is **untested** in this queue.
 - **Next action:** rerun the full SDO and Codex sequences in the next round, when quota allows, as the priority experiment. Consider making strict-receipt and rollout export per stage rather than at pipeline end, so a stopped run keeps its token evidence.
+
+### Quota: final reading and per-run estimate
+
+- **Readings:** final 89% of the weekly Codex window (last exported rollout, 21:45Z; resets 2026-10-03 18:19Z), against 87% at the relaunch (21:02Z). About 11% is left for the user. No 429s, error events or limit-reached flags occurred in the queue, and the 97% stop never triggered.
+- **Queue tokens** (input + output, including cached input; corrected accounting at `7e32268`):
+
+| Run | Arm | Incidents | Raw tokens | Uncached input + output |
+|---|---|---|---|---|
+| fresh3 rerun | SDO | 2 stages | 1.35M | 128K |
+| sdo_variants | SDO | 3 stages | 2.73M | 256K |
+| Codex x5 | Codex | 5 attempts | 1.67M | 189K |
+| codex_variants | Codex | 3 attempts | 1.25M | 108K |
+| codex_sequence | Codex | 8 attempts | 4.15M | 337K |
+
+  The partially run sdo_sequence (2 stages, tokens not exported) is estimated at about 1.6M from the SDO per-stage mean. The queue total is about 12.7M raw tokens, plus judge calls, which are not in the rollouts.
+- **Estimate:** about 2 points for about 12.7M raw tokens, so roughly 6M raw tokens per point of the weekly window.
+  - Per SDO incident stage: about 0.8M raw tokens, **about 0.13%**. A 2-stage persistent pipeline is about 0.25%, a 3-stage variants pipeline about 0.4%, and an 8-stage sequence about 1–1.3%.
+  - Per Codex attempt: about 0.44M raw tokens, **about 0.07%**. An x5 is about 0.35%, and the 8-problem sequence about 0.6%.
+- **Caveats:**
+  - The window reports whole percentage points, so the true delta lies anywhere from about 1.0 to 3.0 points. The estimates are good to about a factor of 2.
+  - Other sessions on the same account (the coordinator, the fastloop and token-audit agents) drew on the window at the same time, so these figures are upper bounds per run.
+  - The judge's xhigh calls draw on the same window and are folded in proportionally.
+- **Budget for the next round:** the full sequence pair (SDO about 1.3%, Codex about 0.6%) plus a replicated variants pair (n=3: SDO about 1.2%, Codex about 0.5%) comes to about 3.6%. That fits after the weekly reset, not in the remaining 11% alongside the user's own use.
+
+**Takeaways**
+- **What the data shows:** per incident, SDO costs about 2× Codex's quota (0.8M vs 0.44M raw tokens), because reflection roughly doubles each incident's token use. Exact-match repeats that skip reflection are the exception.
+- **Confidence:** low on the absolute figures (integer-percent readings, shared account) and moderate on the 2× ratio, which comes from per-run token counts.
+- **Implications for SDO:** SDO's quota advantage only appears once repeats skip reflection. Break-even needs long runs of the same incident, which the stopped sequence was meant to test.
+- **Next action:** budget the next round from these figures, run it after the 2026-10-03 reset, and set `AGENT_REASONING_EFFORT=medium` explicitly for Codex.
