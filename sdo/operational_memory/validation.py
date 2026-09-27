@@ -5,7 +5,12 @@ import subprocess
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
-from sdo.operational_memory.models import INCIDENT_DETECTOR_MAX_FIRING, ArtifactOwner, ValidatorNetworkPolicyCanary
+from sdo.operational_memory.models import (
+    INCIDENT_DETECTOR_MAX_FIRING,
+    TRAFFIC_MIX_DIRECTORY,
+    ArtifactOwner,
+    ValidatorNetworkPolicyCanary,
+)
 from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
 from sdo.operational_memory.sandbox import ContainerSandboxRunner
 
@@ -63,6 +68,7 @@ class MemoryValidator:
             architecture = repository.architecture()
             playbooks = repository.playbooks()
             repository.diagnostics()
+            repository.traffic_mixes()
             repository.outcomes()
         except MemoryRepositoryError as exc:
             raise MemoryValidationError(str(exc)) from exc
@@ -126,7 +132,9 @@ class MemoryValidator:
         if actor == ArtifactOwner.CONTROLLER:
             return value == ".sdo/outcomes.jsonl"
         if actor == ArtifactOwner.HEALTH_JUDGE:
-            return value == ".sdo/diagnostics/manifest.yaml" or value.startswith(".sdo/diagnostics/detectors/health/")
+            return value == ".sdo/diagnostics/manifest.yaml" or value.startswith(
+                (".sdo/diagnostics/detectors/health/", f"{TRAFFIC_MIX_DIRECTORY}/")
+            )
         if actor == ArtifactOwner.RESPONDER:
             return (
                 value.startswith((".sdo/playbooks/", ".sdo/diagnostics/detectors/incidents/"))

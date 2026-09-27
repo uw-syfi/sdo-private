@@ -15,6 +15,7 @@ from sdo.operational_memory.models import (
     GoalMetadata,
     OutcomeRecord,
     PlaybookMetadata,
+    TrafficMix,
 )
 
 MetadataT = TypeVar("MetadataT", bound=BaseModel)
@@ -87,6 +88,23 @@ class MemoryRepository:
             if not package_path.is_dir() or not any(package_path.glob("*.go")):
                 raise MemoryRepositoryError(f"detector {detector.id!r} package must contain a Go file")
         return manifest
+
+    def traffic_mixes(self) -> list[TrafficMix]:
+        """Health-judge traffic mixes under ``.sdo/diagnostics/traffic/``, sorted by name."""
+
+        directory = self.memory_root / "diagnostics" / "traffic"
+        mixes: list[TrafficMix] = []
+        for path in sorted(directory.glob("*.yaml")) if directory.is_dir() else []:
+            relative = path.relative_to(self.memory_root).as_posix()
+            self._contained(path, label=relative)
+            try:
+                mix = TrafficMix.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+            except (OSError, yaml.YAMLError, ValidationError) as exc:
+                raise MemoryRepositoryError(f"invalid traffic mix {relative}: {exc}") from exc
+            if mix.name != path.stem:
+                raise MemoryRepositoryError(f"traffic mix {relative}: name {mix.name!r} must match its file name")
+            mixes.append(mix)
+        return mixes
 
     def outcomes(self) -> list[OutcomeRecord]:
         path = self.memory_root / "outcomes.jsonl"
