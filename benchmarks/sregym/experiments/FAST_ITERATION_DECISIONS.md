@@ -161,3 +161,30 @@ Second integration with `main` (at `ca73539`), then two fixes, then a `--no-ff` 
 - **The fastloop's `TokenCounts` stays `input`/`cached_input`/`output`.** Under agentshim 0.7 `cached_input_tokens` is the cache-read alias and Codex reports no cache writes, so the Codex-only fastloop's counts stay correct. The full breakdown remains available from the receipts through `incident_cost`. Extending the record schema can wait for a Claude fastloop arm.
 - **Reversed the earlier "`SDO_GO_CACHE_SEED` stays unconditional, images must be rebuilt" stance, in part** (`7ba59f2`). The env stays unconditional, but a missing seed directory now prints `warning: ... building the controller with a cold Go cache` and builds cold instead of raising. Merged host code on an old image therefore degrades to the old 85 s gate instead of failing. A seed path that exists but is not a directory is still an error (a broken image, not an old one). A successful seed prints `seeded GOCACHE ... from SDO_GO_CACHE_SEED ...`, so a startup check can prove the warm cache was used.
 - **Fastloop timing gap fixed from the receipt, not the ledger** (`ac811bc`). The runtime receipt's `phase_timings_seconds.total` and `post_recovery_learning_and_receipt` are computed from the broker closure's `detected_at`/`verified_at` and the receipt's `recorded_at`, so `recorded_at` minus each gives those timestamps exactly. On `integ-sdo-2` incident 1 this gives detection `20:44:24.743` (equal to the incident ID's nanosecond stamp) and verification `20:45:43.051` (equal to `detector_clear.evaluated_at`). `learn()` fills only fields still missing after `resolve()`, and also fills the empty diagnosis and mitigation summaries, which had the same cause.
+- **Checks on the branch head before landing:** `format_code.sh`, `check_errors.sh` (ruff, tach), pyright (0 errors), `check_arch.sh`; unit suite 1658 passed, 2 skipped; Go `controller/sdk`, `core`, `runtime` ok; SREGym fastloop, isolation, deferred grading, fast teardown, submit-during-evaluation, deferred cleanup and deferred injection tests: 39 passed.
+- **Landed with `--no-ff`** as `629d543`. Its CI run was cancelled by the next push. CI on the following head `f5fe714` passed: all 8 jobs (formatting, static analysis, type check, architecture, unit tests, controller sdk, core, runtime).
+- **Found and fixed a `main` bug while rebuilding images** (`f5fe714`, test-first). `0bff184` moved `libs/agent_cli` to agentshim 0.7 (`normalized_usage`), but `controller/Dockerfile.runtime` still pinned `agentshim==0.6.8`, so `build_sdo_images.sh` failed its responder import check. The pin is now `0.7.0`. `tests/unit/controller/test_image_python_pins.py` checks every pip pin in both Dockerfiles against `uv.lock`. The fix went straight to `main`, since the fastloop branch was already merged.
+- **Images:** built from `f5fe714` with `BUILDX_BUILDER=sdo-example bash scripts/build_sdo_images.sh` (103 s once layers were warm). The shared `:v0.1.0` tags now point at them, and `:fastloop` was re-tagged onto the same IDs, as for item 1.
+  - `sdo-controller` `9973fff8f797`, 3.27 GB (761 MB Go seed at `/opt/sdo/go-build-cache`)
+  - `sdo-responder` `6077213eb027`, 2.26 GB
+  - `sdo-sregym-responder` `c4a0ccc3319f`, 2.28 GB
+  - `sdo-detector-validator` `84a3e479852a`, 1.97 GB
+  - `fastloop up` (the SREGym worker's `SREGYM_KIND_REQUIRED_IMAGES`) loaded them into every `fastloop-w0` node; node image creation times match the local builds.
+
+### No-LLM startup check on `fastloop-w0` (new images, main checkout)
+
+- First `fastloop down` (46 s), which drained and removed the controller still running the previous `:fastloop` image; no incident was pending. Then `fastloop up` (82 s, application healthy, deploy skipped).
+- The probe script called `reuse_initial_lifecycle_if_valid` directly, never `run_or_reuse_lifecycle`, whose fallback runs a model-backed lifecycle. It then installed the persistent controller with `fastloop run`'s `RuntimeConfig` and passed the baseline gate with a no-op injection. It injected no fault and made no model calls.
+
+| Step | Source | Time (s) |
+|---|---|---|
+| Lifecycle, run workspace (new validator image, so the old attestation no longer matched) | `validator` | 16.4 |
+| Lifecycle, fresh clone at the pre-attestation commit, same shared cache | `validation-cache` (hit) | 4.1 |
+| Lifecycle, run workspace again | `workspace-attestation` (hit) | 5.9 |
+| Controller install (manifests applied) | - | 8.5 |
+| Install to controller pod `Running` | - | 4.5 |
+| Controller baseline gate (resume to all-clear) | seeded Go cache | 5.6 |
+| Install to gate passed | - | 18.7 |
+
+- The controller log's first line is `seeded GOCACHE /workspace/.sdo-runtime/build/go-cache from SDO_GO_CACHE_SEED /opt/sdo/go-build-cache`. Iterations 0 and 1 had no findings, and there was no cold-build warning. For comparison, the gate was 85.6 s before the seed and 4.4 s in `sdo-seeded-2`.
+- The probe's lifecycle step committed a fresh validation attestation to the smoke workspace, as a real run would. The probe's controller was deleted afterwards, because it is not recorded in `sdo_persistent_controller.json`. The next `fastloop run` installs its own.
