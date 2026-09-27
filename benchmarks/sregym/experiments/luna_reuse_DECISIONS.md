@@ -1056,3 +1056,78 @@ All times are in seconds. Summary, as mean [min–max] with the standard deviati
 - **Next action:**
   - Rerun the full SDO and Codex sequences (priority) and replicate variants at n=3 after the quota reset.
   - Look at whether the warm prompt for a family-level match could let the responder apply the generalized playbook directly.
+
+### 3.3 Tokens: breakdown, cost weighting, break-even (corrected accounting)
+
+- **Tool:** `origin/main` `incident_cost` at `0bff184` (a cache-aware breakdown from agentshim, including the `7e32268` fix for resumed reflections), run read-only from a separate worktree:
+  ```
+  --codex 20260927_205946_codex
+  --lifecycle-usage third_party/sregym/.runtime/sdo_codex/anon_c4ffcb5e5fac1834ebf48400a7e8814a/sdo_turn_usage.jsonl
+  --weight cache_read=0.1 --weight output=8
+  ```
+- **The weights are an assumption**, not a bill. They are relative prices in base-input-token units: uncached input 1×, cached input 0.1×, output (including reasoning) 8×, and cache write 1.25× (tool default; none occurred).
+- **Lifecycle:** the one-time SDO lifecycle (deploy plus 3 health-judge rounds, shared by every pipeline) is stated explicitly and included in the break-even rows marked "with lifecycle".
+- **Reasoning effort:** both arms ran at `medium` (see "Reasoning effort").
+- **Units:** raw = all input (cached included) + output. Requests are model requests per incident.
+
+**Persistent A/B (`missing_configmap`, stage 0 first incident, stage 1 warm repeat), means of 3 runs per arm:**
+
+| Arm | Stage | Part | uncached in | cached in | output | (reasoning) | raw | weighted | requests |
+|---|---|---|---|---|---|---|---|---|---|
+| reuse (mean of 3) | 0 | responder | 39K | 574K | 5,409 | 1,418 | 619K | 140K | 21.7 |
+| reuse (mean of 3) | 0 | reflection | 64K | 616K | 9,854 | 3,478 | 690K | 204K | 12.7 |
+| reuse (mean of 3) | 0 | **incident total** | 103K | 1,191K | 15K | 4,896 | 1,309K | 344K | 34.3 |
+| reuse (mean of 3) | 1 | responder | 21K | 162K | 2,086 | 324 | 185K | 54K | 9.7 |
+| reuse (mean of 3) | 1 | reflection | 0 | 0 | 0 | 0 | 0 | 0.0 | – |
+| reuse (mean of 3) | 1 | **incident total** | 21K | 162K | 2,086 | 324 | 185K | 54K | 9.7 |
+| fresh (mean of 3) | 0 | responder | 47K | 573K | 4,801 | 1,063 | 626K | 143K | 21 |
+| fresh (mean of 3) | 0 | reflection | 47K | 499K | 6,519 | 1,121 | 553K | 149K | 15.3 |
+| fresh (mean of 3) | 0 | **incident total** | 94K | 1,073K | 11K | 2,185 | 1,178K | 292K | 36.3 |
+| fresh (mean of 3) | 1 | responder | 19K | 194K | 1,905 | 322.3 | 215K | 54K | 10.7 |
+| fresh (mean of 3) | 1 | reflection | 0 | 0 | 0 | 0 | 0 | 0.0 | – |
+| fresh (mean of 3) | 1 | **incident total** | 19K | 194K | 1,905 | 322.3 | 215K | 54K | 10.7 |
+| Codex x5 (mean of 5) | – | whole attempt | 36K | 296K | 2,137 | 600.4 | 333K | 82K | 10.2 |
+| SDO lifecycle (one-time) | – | deploy + 3 judge rounds | 229K | 1,517K | 20K | 0 | 1,766K | 543K | – |
+
+Stage 0 reflection raw tokens per run: reuse 809K, 586K, 674K; fresh 757K, 245K, 656K. Every stage 1 skipped reflection (exact-match success).
+
+**Break-even against Codex x5** (first stage where cumulative SDO ≤ cumulative Codex). It was not reached within 2 stages in any run. The projection is extra repeat incidents at the observed repeat saving:
+
+| Measure | Without lifecycle (range over 6 runs) | With lifecycle, 1.77M raw / 543K weighted (range) |
+|---|---|---|
+| incident tokens (responder only) | ~1–3 more repeats | ~12–39 |
+| total tokens incl. learning | ~3–15 | ~14–54 |
+| weighted incident tokens | ~1–3 | ~16–29 |
+| weighted tokens incl. learning | ~4–12 | ~18–38 |
+
+**Variants** (`20260927_211548` vs `20260927_210409_codex`), per stage:
+
+| Stage | Problem | SDO responder raw / weighted / req | SDO reflection raw / weighted / req | Codex raw / weighted / req |
+|---|---|---|---|---|
+| 0 | missing_configmap | 712K / 154K / 27 | 873K / 213K / 17 | 296K / 78K / 10 |
+| 1 | mongodb_rate | 591K / 127K / 18 | 335K / 109K / 6 | 413K / 89K / 12 |
+| 2 | mongodb_geo_rate | 216K / 73K / 10 | 0 (skipped) | 544K / 110K / 18 (failed) |
+
+Variants cumulative break-even was not reached within 3 stages (incident-only gap 266K raw, 75K weighted without lifecycle).
+
+**Takeaways**
+- **What the data shows:**
+  - A warm SDO repeat is cheaper than a Codex attempt: 185–215K raw (54K weighted, about 10 requests) against 333K raw (82K weighted, 10 requests). That is about 0.6× raw and 0.66× weighted.
+  - The first incident costs about 3.5–4× Codex (1.18–1.31M raw including reflection), because the responder alone (about 620K) already costs about 1.9× Codex, and reflection adds 550–690K.
+  - Most tokens on both arms are cached input (about 90%). The weighting therefore shrinks the gap: a first SDO incident is about 3.5–4.2× Codex weighted.
+  - On the variants, the exact-match stage cost 216K against Codex's 544K, and SDO passed where Codex failed.
+- **Reuse vs fresh reflection:** fresh reflection is cheaper, at 553K vs 690K raw and 149K vs 204K weighted (−27%). Its outputs are smaller (6.5K vs 9.9K), and it performs no worse on speed (3.1) or memory (the memory check). fresh2's 245K reflection is an outlier.
+- **Confidence:**
+  - Moderate that a warm SDO repeat costs less than Codex: all 6 runs are 185–242K against Codex's per-attempt range of 253–462K.
+  - Low on reuse vs fresh (n=3, overlapping ranges).
+  - The break-even counts are extrapolations from one repeat each, and they assume every later incident is an exact repeat.
+  - Weighted costs depend on the assumed price ratios.
+- **Implications for SDO:**
+  - SDO pays up front, in learning plus the one-time lifecycle, and saves per repeat.
+  - On tokens, break-even needs about 4–12 exact repeats of an incident (weighted, including learning), or about 18–38 once the lifecycle is included. That is a claim about long-running operations, not about a short benchmark.
+  - The speed advantage (3.1) comes immediately. The cost advantage only arrives with many repeats.
+  - Reflection is the main lever.
+- **Next action:**
+  - Default the persistent controller to fresh reflection sessions, subject to a larger-n confirmation.
+  - Look at trimming the first responder's context: its 574K cached input is about 1.9× Codex, which points to the controller's incident prompt.
+  - Measure break-even directly with a longer same-incident run in the next round, instead of projecting it.
