@@ -33,9 +33,10 @@ class KubectlRunner(Protocol):
     def __call__(self, args: list[str], *, namespace: str, check: bool) -> subprocess.CompletedProcess[str]: ...
 
 
-def controller_baseline_clear(controller_logs: str) -> bool:
-    """Return whether any controller evaluation reported no active finding."""
+def controller_active_findings(controller_logs: str) -> list[str] | None:
+    """Return the active rule IDs of the latest controller evaluation, or None before any evaluation."""
 
+    latest: list[str] | None = None
     for line in controller_logs.splitlines():
         try:
             payload: Any = json.loads(line)
@@ -44,11 +45,18 @@ def controller_baseline_clear(controller_logs: str) -> bool:
         if not isinstance(payload, dict) or "controller_iteration" not in payload:
             continue
         findings = payload.get("findings") or []
-        if isinstance(findings, list) and not any(
-            isinstance(finding, dict) and finding.get("status") == "active" for finding in findings
-        ):
-            return True
-    return False
+        latest = [
+            str(finding.get("rule_id"))
+            for finding in (findings if isinstance(findings, list) else [])
+            if isinstance(finding, dict) and finding.get("status") == "active"
+        ]
+    return latest
+
+
+def controller_baseline_clear(controller_logs: str) -> bool:
+    """Return whether the latest controller evaluation reported no active finding."""
+
+    return controller_active_findings(controller_logs) == []
 
 
 def request_fault_injection(api_base: str) -> None:
@@ -81,8 +89,11 @@ def inject_fault_after_controller_baseline(
             last_error = "current controller Job has not been created"
             sleep(BASELINE_POLL_SECONDS)
             continue
-        completed = kubectl_runner(["logs", "job/sdo-controller-run"], namespace=namespace, check=False)
-        if completed.returncode == 0 and controller_baseline_clear(completed.stdout):
+        completed = kubectl_runner(["logs", "job/sdo-controller-run", "--tail=200"], namespace=namespace, check=False)
+        active = controller_active_findings(completed.stdout) if completed.returncode == 0 else None
+        if active:
+            last_error = f"latest controller evaluation has active findings {sorted(set(active))}"
+        if active == []:
             baseline_ready = monotonic()
             inject()
             return {

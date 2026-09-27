@@ -29,6 +29,7 @@ def test_baseline_requires_a_controller_evaluation_without_active_findings() -> 
     assert not controller_baseline_clear("building detectors\n")
     assert not controller_baseline_clear(_evaluation("active", "resolved"))
     assert controller_baseline_clear("noise\n" + _evaluation("resolved"))
+    assert not controller_baseline_clear(_evaluation("resolved") + "\n" + _evaluation("active"))
     assert controller_baseline_clear(json.dumps({"controller_iteration": 3, "returncode": 0, "findings": None}))
 
 
@@ -79,7 +80,7 @@ def test_gate_injects_once_after_controller_reports_all_clear() -> None:
     )
 
     assert injected == ["fault"]
-    assert ["logs", "job/sdo-controller-run"] in calls
+    assert ["logs", "job/sdo-controller-run", "--tail=200"] in calls
     assert timings["controller_baseline_wait"] == pytest.approx(2.0)
 
 
@@ -88,7 +89,7 @@ def test_gate_fails_without_injecting_when_controller_never_settles() -> None:
     kubectl, _ = _logs((0, _evaluation("active")))
     injected: list[str] = []
 
-    with pytest.raises(FaultGateError, match="all-clear"):
+    with pytest.raises(FaultGateError, match=r"all-clear.*active findings \['r0'\]"):
         inject_fault_after_controller_baseline(
             "hotel",
             inject=lambda: injected.append("fault"),

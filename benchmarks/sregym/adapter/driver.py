@@ -274,7 +274,21 @@ def _deployed_lifecycle_context(
         )
 
     deployments = names("Deployment")
-    services = names("Service")
+    all_services = names("Service")
+    # ExternalName Services are DNS aliases: Kubernetes never gives them endpoints.
+    external_name_services = sorted(
+        {
+            str(item["metadata"]["name"])
+            for item in items
+            if isinstance(item, dict)
+            and item.get("kind") == "Service"
+            and isinstance(item.get("metadata"), dict)
+            and item["metadata"].get("name")
+            and isinstance(item.get("spec"), dict)
+            and item["spec"].get("type") == "ExternalName"
+        }
+    )
+    services = [name for name in all_services if name not in external_name_services]
     if not deployments:
         raise RuntimeError(f"no deployed Deployments found in SREGym namespace {namespace!r}")
     service_clause = (
@@ -282,6 +296,11 @@ def _deployed_lifecycle_context(
         if services
         else "the deployed workload remains reachable through its declared interfaces"
     )
+    if external_name_services:
+        service_clause += (
+            f"; the ExternalName Services named {', '.join(external_name_services)} are DNS aliases with no "
+            "endpoints and must not be required to have ready endpoints"
+        )
     health_objective = (
         f"The deployed Deployments named {', '.join(deployments)} remain available; {service_clause}; "
         "required non-optional ConfigMap volume references remain present; and representative requests succeed."

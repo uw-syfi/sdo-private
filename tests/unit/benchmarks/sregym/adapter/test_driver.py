@@ -1173,3 +1173,26 @@ def test_driver_records_host_turn_usage_beside_run_artifacts(monkeypatch: pytest
     monkeypatch.setenv("SDO_TURN_USAGE_LOG", "/elsewhere.jsonl")
     driver._configure_turn_usage_log(str(tmp_path))
     assert os.environ["SDO_TURN_USAGE_LOG"] == "/elsewhere.jsonl"
+
+
+def test_health_objective_never_requires_endpoints_for_external_name_services() -> None:
+    payload = {
+        "items": [
+            {"kind": "Deployment", "metadata": {"name": "frontend"}},
+            {"kind": "Service", "metadata": {"name": "frontend"}, "spec": {"selector": {"app": "frontend"}}},
+            {"kind": "Service", "metadata": {"name": "jaeger"}, "spec": {"type": "ExternalName"}},
+        ]
+    }
+
+    def fake_runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    context = _deployed_lifecycle_context("hotel-reservation", command_runner=fake_runner)
+
+    assert "the deployed Services named frontend expose ready endpoints" in context.health_objective
+    assert "Services named frontend, jaeger" not in context.health_objective
+    assert (
+        "the ExternalName Services named jaeger are DNS aliases with no endpoints and must not be required to "
+        "have ready endpoints" in context.health_objective
+    )
+    assert ("Service", "jaeger") in [(resource.kind, resource.name) for resource in context.active_resources]
