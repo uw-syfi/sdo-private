@@ -6,10 +6,18 @@ from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, cast
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from libs.agent_cli.structured import AgentProvider, StructuredTurnError, run_structured_turn, turn_usage
-from sdo.operational_memory import OutcomeClassification, OutcomeRecord, TopologyReview
-from sdo.operational_memory.detector_sdk import DETECTOR_SDK_REFERENCE
-from sdo.operational_memory.models import DETECTOR_ID_PATTERN, FAULT_CLASS_PATTERN, INCIDENT_DETECTOR_MAX_FIRING
-from sdo.operational_memory.validation import PLACEHOLDER_RE, PLAYBOOK_INDEX_PATH, PLAYBOOK_SCRIPT_SUFFIX
+from sdo.operational_memory import (
+    DETECTOR_ID_PATTERN,
+    DETECTOR_SDK_REFERENCE,
+    FAULT_CLASS_PATTERN,
+    INCIDENT_DETECTOR_MAX_FIRING,
+    PLACEHOLDER_RE,
+    PLAYBOOK_INDEX_PATH,
+    PLAYBOOK_SCRIPT_SUFFIX,
+    OutcomeClassification,
+    OutcomeRecord,
+    TopologyReview,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path

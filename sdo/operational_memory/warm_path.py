@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from sdo.contracts.models import FindingStatus
+from sdo.contracts import FindingStatus
 from sdo.operational_memory.models import ArtifactOwner
 
 if TYPE_CHECKING:

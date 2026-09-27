@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
-from benchmarks.sregym.protocol._http import request_with_retry
+from benchmarks.sregym.protocol import request_with_retry
 
 if TYPE_CHECKING:
     import subprocess

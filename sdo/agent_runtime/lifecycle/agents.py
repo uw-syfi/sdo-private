@@ -19,7 +19,7 @@ from libs.agent_cli.structured import (
     StructuredTurnTimeout,
     run_structured_turn,
 )
-from sdo.operational_memory.detector_sdk import DETECTOR_SDK_REFERENCE
+from sdo.operational_memory import DETECTOR_SDK_REFERENCE
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence

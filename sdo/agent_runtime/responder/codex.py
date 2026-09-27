@@ -10,8 +10,7 @@ from typing import TYPE_CHECKING
 
 from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_structured_turn
 from sdo.contracts import DetectorEvaluation, DetectorEvaluationStatus, Finding, IncidentRequest, IncidentResult
-from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
-from sdo.operational_memory.warm_path import WarmPlaybookMatch, warm_playbook_matches
+from sdo.operational_memory import MemoryRepository, MemoryRepositoryError, WarmPlaybookMatch, warm_playbook_matches
 
 if TYPE_CHECKING:
     from agentshim import CommandExecutor

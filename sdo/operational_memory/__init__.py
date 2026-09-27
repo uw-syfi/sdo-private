@@ -15,8 +15,16 @@ from sdo.operational_memory.commit_broker import (
     CommandProposalValidator,
     CommitBroker,
 )
-from sdo.operational_memory.models import ArtifactOwner, OutcomeClassification, OutcomeRecord
-from sdo.operational_memory.repository import MemoryRepository
+from sdo.operational_memory.detector_sdk import DETECTOR_SDK_REFERENCE
+from sdo.operational_memory.models import (
+    DETECTOR_ID_PATTERN,
+    FAULT_CLASS_PATTERN,
+    INCIDENT_DETECTOR_MAX_FIRING,
+    ArtifactOwner,
+    OutcomeClassification,
+    OutcomeRecord,
+)
+from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
 from sdo.operational_memory.sandbox import (
     ContainerSandboxRunner,
     KubernetesJobSandboxRunner,
@@ -24,10 +32,24 @@ from sdo.operational_memory.sandbox import (
     SandboxResult,
     SandboxRunner,
 )
-from sdo.operational_memory.validation import MemoryValidationError, MemoryValidator
+from sdo.operational_memory.validation import (
+    PLACEHOLDER_RE,
+    PLAYBOOK_INDEX_PATH,
+    PLAYBOOK_SCRIPT_SUFFIX,
+    MemoryValidationError,
+    MemoryValidator,
+)
+from sdo.operational_memory.warm_path import WarmPlaybookMatch, warm_playbook_matches
 
 __all__ = [
     "BROKER_AUTHOR_EMAIL",
+    "DETECTOR_ID_PATTERN",
+    "DETECTOR_SDK_REFERENCE",
+    "FAULT_CLASS_PATTERN",
+    "INCIDENT_DETECTOR_MAX_FIRING",
+    "PLACEHOLDER_RE",
+    "PLAYBOOK_INDEX_PATH",
+    "PLAYBOOK_SCRIPT_SUFFIX",
     "VALIDATION_PASSED_TRAILER",
     "ArtifactOwner",
     "BrokerClosure",
@@ -42,6 +64,7 @@ __all__ = [
     "KubernetesJobSandboxRunner",
     "LocalSandboxRunner",
     "MemoryRepository",
+    "MemoryRepositoryError",
     "MemoryValidationError",
     "MemoryValidator",
     "OutcomeClassification",
@@ -49,4 +72,6 @@ __all__ = [
     "SandboxResult",
     "SandboxRunner",
     "TopologyReview",
+    "WarmPlaybookMatch",
+    "warm_playbook_matches",
 ]
