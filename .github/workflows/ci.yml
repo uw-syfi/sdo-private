@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: static analysis
+            run: ./scripts/check_errors.sh
+          - name: type check
+            run: ./scripts/type_check.sh
+          - name: formatting
+            run: ./scripts/format_code.sh --check
+          - name: architecture
+            run: ./scripts/check_arch.sh
+          - name: unit tests
+            run: ./scripts/test_python.sh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out the SREGym harness
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 third_party/sregym
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: ${{ matrix.run }}
+
+  controller:
+    name: controller (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [sdk, core, runtime]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.5"
+          cache-dependency-path: controller/${{ matrix.module }}/go.sum
+      - run: go test -race ./...
+        working-directory: controller/${{ matrix.module }}
