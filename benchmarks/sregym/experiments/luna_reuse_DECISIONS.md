@@ -384,6 +384,46 @@ Goal: keep ONE SDO controller running across the rounds of a pipeline (the paper
 - **Responder Jobs of earlier incidents coexist** in the controller namespace until their TTL. In persistent mode the receipt's live-Job consistency check ignores Jobs of other incidents; the durable request/result pair is still required to be unique.
 - **Merged `vic/perf/controller-api-rate`** (`0fcd065`, `1643124`: QPS 50 / burst 100, one cached-resourceVersion state update, and the `ErrEffectNotDurable` guard) into this branch before the live check, as the coordinator asked. The merge was clean: it touched `controller.go`, `effects.go`, `broker_effects.go`, and `state_store.go`, while this branch touched `controller.go` only in a new method. Go tests pass for `runtime`, `core`, and `sdk`.
 
+### Bugs found by the live check (fixed test-first)
+
+- **Deferred receipts landed in an orphaned staging directory** (run 1, `20260927_163003_pipeline_sdo-codex-luna-persistent`). SREGym publishes `.runtime/<agent>/<opaque id>` to `results/<agent>/<problem>/run_N` when a problem ends, so the receipt that the later drain wrote never reached the results tree.
+  - Fix (`201fea0`): the pipeline state records `deferred_receipts`, and teardown `--publish-root` copies each drained receipt and drain-time controller log into the published run. The run is matched by the `incident_id` in its `sdo_incident_resolution.json`, and the opaque ID is canonicalized to the problem ID.
+  - A receipt that fails validation is kept as `sdo_rejected_production_receipt.json`.
+  - Each deferred stage is judged by its own receipt.
+- **A repeated mitigation call blocked for 300 s and turned a solved incident into `status: failed`** (runs 1 and 2).
+  - The responder re-ran `adapter.submission mitigation` after the problem had ended (`awaiting_cleanup`). The command waited for a `mitigation` stage that never reopens, the responder reported `status: failed`, and the drained receipt failed `completed=true`. Both oracles had passed.
+  - This is not persistent-specific: the same transport serves per-problem runs.
+  - Fix (`69ef2fe`): a mitigation call on a finished problem returns `already_submitted` at once, and the responder instructions say to submit mitigation once. Images were rebuilt afterwards (sregym-responder `7a5216c1817c`).
+
+### Live result (kind `luna-w0`, lifecycle seed 64b3ac2, judge codex-gpt-6-luna xhigh)
+
+Pipeline: `third_party/sregym/logs/20260927_174023_pipeline_sdo-codex-luna-persistent` (rc=0, 20.5 min wall).
+
+| | stage 0 (install) | stage 1 (reuse) | v3 stage 0 | v3 stage 1 |
+|---|---|---|---|---|
+| Diagnosis / Mitigation oracle | pass / pass | pass / pass | pass / pass | pass / pass |
+| Controller pod UID | `60db893c…` | `60db893c…` (same) | per-round pod | per-round pod |
+| Primary (mitigation POST − injection) | 96.0 s | 57.2 s | 91.4 s | 43.6 s |
+| `incident_resolution_seconds` | 155.6 s | 89.6 s | 196.0 s | 112.2 s |
+| Inventory + lifecycle revalidation | 210.1 s | 4.1 s (skipped) | 213.3 s | 198.6 s |
+| Controller install | 13.7 s | 2.0 s (reused) | per round | per round |
+| Controller baseline gate | 107.3 s | 1.2 s | 121.8 s | 108.3 s |
+| Reflection drain before injection | 0 | 158.1 s | (inside previous round) | (inside previous round) |
+| Injection deferred (conductor view) | 338.8 s | 173.5 s | 342.5 s | 314.4 s |
+| Responder tokens in / out | 340k / 3.8k | 246k / 2.9k | 684k / 6.9k | 247k / 2.5k |
+| Reflection tokens in / out | 841k / 13.0k | none (playbook reuse) | 1.59M / 18.9k | none |
+
+- **Stage 1 skipped install, revalidation, and baseline**: `installed_this_stage=false` and `lifecycle_revalidation_skipped=true`. Per-round setup fell from about 307 s + install (v3) to 7.3 s, saving about 300 s.
+  - The previous incident's reflection (158 s in this run) now finishes before injection, as a measured `reflection_drain_seconds` that is not counted in resolution. So the net pre-injection time for stage 1 was 173.5 s versus v3's 314.4 s (−141 s).
+- **The receipts are per incident**:
+  - Each strict receipt's `incident_id` matches its stage's resolution record.
+  - There is one responder Job per incident.
+  - `controller_namespace=hotel-reservation-sdo`.
+  - Stage 0 was drained by stage 1 (`reflection_commit` b2389015, learned-detector rollout recorded).
+  - Stage 1 was drained by pipeline teardown.
+  - After teardown the cluster has no `hotel-reservation-sdo` namespace, and only the `observe` PVs remain.
+- **Stage 0's primary time and resolution are within run-to-run variance of v3.** One sample per stage; the model responder dominates both.
+
 ## Program integration: persistent controller + variants, sequence, fresh reflection
 
 Branch `vic/exp/program-integration`, merge of `vic/feat/persistent-controller` (28c99f3, which already contains `vic/perf/controller-api-rate`). No SREGym runs and no image rebuilds were started for this entry.
