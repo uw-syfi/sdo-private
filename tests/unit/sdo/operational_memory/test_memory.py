@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import pathlib
 import shutil
 import subprocess
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import pytest
+import yaml
 
 from sdo.operational_memory.commit_broker import CommandProposalValidator, CommitBroker
 from sdo.operational_memory.models import (
@@ -17,7 +19,11 @@ from sdo.operational_memory.models import (
 )
 from sdo.operational_memory.repository import MemoryRepository
 from sdo.operational_memory.sandbox import KubernetesJobSandboxRunner, LocalSandboxRunner
-from sdo.operational_memory.validation import MemoryValidationError, MemoryValidator
+from sdo.operational_memory.validation import (
+    RESPONDER_FORBIDDEN_KUBECTL_VERBS,
+    MemoryValidationError,
+    MemoryValidator,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -801,3 +807,104 @@ def test_commit_broker_squashes_and_validates_precommitted_responder_repair(tmp_
     assert _git(target, "rev-list", "--count", f"{base}..HEAD") == "1"
     assert result.commit_sha != untrusted_commit
     assert "SDO-Phase: proposal" in _git(target, "show", "-s", "--format=%B", "HEAD")
+
+
+_EXEC_VERIFY = """#!/bin/sh
+set -eu
+RESPONSE=$(kubectl -n "$1" exec "deployment/$2" -- \\
+  wget -S -O - "http://$3:$4/" 2>&1)
+"""
+
+
+@pytest.mark.parametrize(
+    ("relative", "content"),
+    [
+        ("scripts/verify.sh", _EXEC_VERIFY),
+        ("scripts/verify.sh", '#!/bin/sh\nset -eu\nkubectl port-forward -n "$1" svc/frontend 5000:5000 &\n'),
+        ("scripts/verify.sh", '#!/bin/sh\nset -eu\nkubectl --namespace="$1" attach pod/x\n'),
+        ("scripts/verify.sh", '#!/bin/sh\nset -eu\nkubectl cp "$1"/pod:/etc/config ./config\n'),
+        ("README.md", None),
+    ],
+)
+def test_validator_rejects_playbook_steps_the_responder_rbac_forbids(
+    tmp_path: Path, relative: str, content: str | None
+) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_memory(baseline)
+    shutil.copytree(baseline, candidate)
+    playbook = candidate / ".sdo" / "playbooks" / "missing-configmap"
+    target = playbook / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if content is None:
+        content = target.read_text(encoding="utf-8") + (
+            "\nVerify: `kubectl -n <NAMESPACE> exec deploy/<ENTRYPOINT> -- wget -qO- http://localhost:5000/`\n"
+        )
+    target.write_text(content, encoding="utf-8")
+
+    with pytest.raises(
+        MemoryValidationError, match=r"responder RBAC does not grant kubectl (exec|port-forward|attach|cp)"
+    ):
+        MemoryValidator(run_diagnostics=False).validate(
+            candidate,
+            actor=ArtifactOwner.RESPONDER,
+            changed_paths=[f".sdo/playbooks/missing-configmap/{relative}"],
+            baseline_root=baseline,
+        )
+
+
+def test_validator_accepts_read_only_kubectl_and_prose_mentions_of_forbidden_verbs(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_memory(baseline)
+    shutil.copytree(baseline, candidate)
+    scripts = candidate / ".sdo" / "playbooks" / "missing-configmap" / "scripts"
+    scripts.mkdir()
+    (scripts / "verify.sh").write_text(
+        '#!/bin/sh\nset -eu\nkubectl -n "$1" get endpoints "$2"\nkubectl -n "$1" logs deployment/exec-proxy\n'
+        "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://frontend:5000/\")'\n",
+        encoding="utf-8",
+    )
+    readme = candidate / ".sdo" / "playbooks" / "missing-configmap" / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8") + "\nThe responder cannot use `kubectl exec`; see `scripts/verify.sh`.\n",
+        encoding="utf-8",
+    )
+
+    MemoryValidator(run_diagnostics=False).validate(
+        candidate,
+        actor=ArtifactOwner.RESPONDER,
+        changed_paths=[
+            ".sdo/playbooks/missing-configmap/README.md",
+            ".sdo/playbooks/missing-configmap/scripts/verify.sh",
+        ],
+        baseline_root=baseline,
+    )
+
+
+def test_validator_does_not_reject_outcomes_over_an_untouched_legacy_exec_playbook(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline"
+    _write_memory(baseline)
+    scripts = baseline / ".sdo" / "playbooks" / "missing-configmap" / "scripts"
+    scripts.mkdir()
+    (scripts / "verify.sh").write_text(_EXEC_VERIFY, encoding="utf-8")
+    candidate = tmp_path / "candidate"
+    shutil.copytree(baseline, candidate)
+    MemoryRepository(candidate).append_outcome(_outcome(), actor=ArtifactOwner.CONTROLLER)
+
+    MemoryValidator(run_diagnostics=False).validate(
+        candidate,
+        actor=ArtifactOwner.CONTROLLER,
+        changed_paths=[".sdo/outcomes.jsonl"],
+        baseline_root=baseline,
+    )
+
+
+def test_responder_rbac_grants_none_of_the_verbs_playbooks_may_not_use() -> None:
+    root = pathlib.Path(__file__).resolve().parents[4]
+    documents = list(yaml.safe_load_all((root / "controller/runtime/deploy/rbac.yaml").read_text(encoding="utf-8")))
+    role = next(d for d in documents if d and d["kind"] == "Role" and d["metadata"]["name"] == "sdo-responder")
+    granted = {resource for rule in role["rules"] for resource in rule["resources"]}
+    subresources = {"exec": "pods/exec", "port-forward": "pods/portforward", "attach": "pods/attach", "cp": "pods/exec"}
+    assert set(RESPONDER_FORBIDDEN_KUBECTL_VERBS) == set(subresources)
+    assert not granted & set(subresources.values())

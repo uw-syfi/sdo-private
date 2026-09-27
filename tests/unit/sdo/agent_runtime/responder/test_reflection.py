@@ -26,6 +26,7 @@ from sdo.operational_memory.validation import (
     PLACEHOLDER_RE,
     PLAYBOOK_INDEX_PATH,
     PLAYBOOK_SCRIPT_SUFFIX,
+    RESPONDER_FORBIDDEN_KUBECTL_VERBS,
     MemoryValidator,
 )
 from tests.structured_turns import ScriptedAgent, reply, turn_schema
@@ -525,3 +526,18 @@ def test_resumed_and_retry_reflection_both_run_the_memory_check(tmp_path: Path) 
         assert "there is no local command that checks them" not in prompt
     # A validation retry keeps its own short prompt in either mode.
     assert "Validator error:\nplaybook is missing from index" in retry
+
+
+def test_reflection_states_which_kubectl_verbs_the_responder_may_use(tmp_path: Path) -> None:
+    prompt = _first_reflection_prompt(tmp_path)
+
+    # The responder's RBAC has no pods/exec, pods/portforward, or pods/attach; playbooks must not need them.
+    assert "`kubectl exec`" not in prompt.split("cannot", 1)[0]
+    for verb in RESPONDER_FORBIDDEN_KUBECTL_VERBS:
+        assert f"`kubectl {verb}`" in prompt
+    assert "responder's RBAC" in prompt
+    for allowed in ("get", "logs", "patch", "rollout restart", "delete pod"):
+        assert allowed in prompt
+    # The representative request comes from the responder's own pod, which has python3 but no curl or wget.
+    assert "python3" in prompt
+    assert ".svc" in prompt

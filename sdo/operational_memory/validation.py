@@ -18,6 +18,14 @@ PLACEHOLDER_RE = re.compile(r"<[A-Z][A-Z0-9_]+>")
 PLAYBOOK_INDEX_PATH = PurePosixPath(".sdo/playbooks/README.md")
 #: Required extension of files under ``.sdo/playbooks/<fault-class>/scripts/``.
 PLAYBOOK_SCRIPT_SUFFIX = ".sh"
+#: kubectl subcommands the responder's RBAC does not grant (no pods/exec, pods/portforward, or pods/attach).
+RESPONDER_FORBIDDEN_KUBECTL_VERBS = ("exec", "port-forward", "attach", "cp")
+#: A kubectl invocation whose subcommand, after at most four flag or value tokens, is a forbidden verb.
+#: A verb immediately followed by a backtick is prose (`kubectl exec`), not a runnable step.
+FORBIDDEN_KUBECTL_RE = re.compile(
+    r"\bkubectl(?:[ \t]+(?:\\\n[ \t]*)?[^\s;|&`]+){0,4}?[ \t]+(?:\\\n[ \t]*)?"
+    rf"({'|'.join(re.escape(verb) for verb in RESPONDER_FORBIDDEN_KUBECTL_VERBS)})(?=\s|$)"
+)
 MARKDOWN_LINK_RE = re.compile(r"\[[^]]+\]\(([^)]+)\)")
 SPEC_PROVENANCE_RE = re.compile(r'\b(OriginatingIncident|OriginatingCommit)\s*:\s*("(?:[^"\\]|\\.)*"|`[^`]*`)')
 
@@ -68,6 +76,7 @@ class MemoryValidator:
         if not playbooks:
             raise MemoryValidationError("at least one playbook is required")
         self._validate_playbooks(repository)
+        self._reject_forbidden_kubectl(resolved_root, normalized)
         self._validate_detector_classes(repository)
         self._validate_detector_ownership(
             repository,
@@ -188,6 +197,28 @@ class MemoryValidator:
             if completed.returncode != 0:
                 details = completed.stderr.strip() or "bash -n failed"
                 raise MemoryValidationError(f"invalid shell syntax in {script}: {details}")
+
+    @staticmethod
+    def _reject_forbidden_kubectl(app_root: Path, changed_paths: list[PurePosixPath]) -> None:
+        """Reject changed playbook files whose steps need verbs the responder cannot run.
+
+        Only changed files are checked, so an untouched legacy playbook never
+        blocks an unrelated outcome append.
+        """
+
+        for relative in changed_paths:
+            if relative.parts[:2] != (".sdo", "playbooks"):
+                continue
+            path = app_root / relative
+            if not path.is_file():
+                continue
+            match = FORBIDDEN_KUBECTL_RE.search(path.read_text(encoding="utf-8", errors="replace"))
+            if match:
+                raise MemoryValidationError(
+                    f"responder RBAC does not grant kubectl {match.group(1)} in {relative.as_posix()}: "
+                    "read state with kubectl get/describe/logs and send representative requests from the "
+                    "responder pod to the Service DNS name"
+                )
 
     @staticmethod
     def _validate_detector_classes(repository: MemoryRepository) -> None:

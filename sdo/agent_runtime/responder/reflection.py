@@ -16,6 +16,7 @@ from sdo.operational_memory import (
     PLAYBOOK_INDEX_PATH,
     PLAYBOOK_SCRIPT_SUFFIX,
     REFLECTION_SESSION_MODES,
+    RESPONDER_FORBIDDEN_KUBECTL_VERBS,
     OutcomeClassification,
     OutcomeRecord,
     TopologyReview,
@@ -171,13 +172,27 @@ _SELF_CHECK_RULES = (
 )
 
 
+_RESPONDER_PERMISSIONS = (
+    "The responder that runs a playbook works from its own pod under the responder's RBAC in the application "
+    "namespace: it may `kubectl get`, `describe`, `logs`, and watch pods, Services, Endpoints, Events, and "
+    "ConfigMaps; create, apply, or patch ConfigMaps; patch Deployments, StatefulSets, DaemonSets, and ReplicaSets "
+    "(including `kubectl rollout restart`); delete pod; and delete NetworkPolicies. It cannot run "
+    + ", ".join(f"`kubectl {verb}`" for verb in RESPONDER_FORBIDDEN_KUBECTL_VERBS)
+    + " against the application, and the broker's validator rejects playbook steps that need them. Send "
+    "representative requests from the responder pod to the Service DNS name with python3 (the image has no curl "
+    "or wget), for example `python3 -c 'import urllib.request as u; r = u.urlopen(\"http://<SERVICE>.<NAMESPACE>"
+    ".svc:<PORT>/\", timeout=10); print(r.status); print(r.read().decode())'`. "
+)
+
+
 _PLAYBOOK_RULES = (
     "Playbook rules: a fault-specific playbook is surfaced when its incident detector fires, and that detector's "
     "evidence already establishes the playbook's preconditions, so do not prescribe re-diagnosis the detector "
     "establishes; keep at most one combined sanity check. Give concrete repair commands and copy-pasteable "
     "verification commands with role placeholders (never prose such as 'check every Deployment'), including a concrete "
-    "representative request command (for example a `kubectl exec` or `curl` against the entrypoint with its "
-    "expected status and body) when the health objective needs one. Put multi-step repair and verification "
+    "representative request command against the entrypoint Service with its expected status and body when the "
+    "health objective needs one. "
+    f"{_RESPONDER_PERMISSIONS}Put multi-step repair and verification "
     "commands in executable scripts under `.sdo/playbooks/<playbook>/scripts/` (`.sh`, parameters as positional "
     "arguments, `set -eu`) and reference them from the README. After restoring a missing mount source (a "
     "ConfigMap or Secret), delete the pods stuck on it or rollout-restart their workload instead of waiting for "
