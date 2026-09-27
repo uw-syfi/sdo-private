@@ -31,7 +31,14 @@ uv run pytest tests/ --cov=sdo --cov=controller
 (cd controller/runtime && go test ./...)
 ```
 
-Use `scripts/run_tests.sh` for the repository-wide suite. Live Codex or Kubernetes tests may require explicit markers, credentials, images, a cluster, and longer timeouts; do not infer production readiness from skipped external tests.
+Use `scripts/run_tests.sh` for the repository-wide suite.
+
+Agent turns are tested with agentshim's `FakeExecutor` through `tests/structured_turns.py`, which replays each provider's real stream format. Tests marked `live_agents` run the real Codex and Claude Code CLIs and are opt-in; cheap models keep them inexpensive:
+
+```bash
+SDO_RUN_LIVE_AGENTS=1 SDO_LIVE_CODEX_MODEL=gpt-6-luna SDO_LIVE_CLAUDE_MODEL=haiku \
+  uv run pytest -m live_agents tests/
+``` Live Codex or Kubernetes tests may require explicit markers, credentials, images, a cluster, and longer timeouts; do not infer production readiness from skipped external tests.
 
 ## Test the paper contracts
 

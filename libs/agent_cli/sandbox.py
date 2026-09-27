@@ -17,9 +17,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 _CONFINE_READS_HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks", "confine_reads.py")
-_DENY_BASH_EXECUTABLES_HOOK = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "hooks", "deny_bash_executables.py"
-)
 
 
 @dataclass
@@ -72,7 +69,6 @@ class SandboxConfig:
     # the listed roots. Leave empty to allow Claude's native tools to read
     # anywhere (the default; matches unsandboxed behavior).
     confine_native_reads_to: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
-    denied_bash_executables: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
 
 def resolve_sandbox(value: bool | SandboxConfig | None) -> SandboxConfig | None:
@@ -116,34 +112,22 @@ def build_claude_sandbox_settings(config: SandboxConfig) -> dict[str, Any]:
     sandbox.update(config.extra_settings)
 
     settings: dict[str, Any] = {"sandbox": sandbox}
-    hooks: list[dict[str, Any]] = []  # pyright: ignore[reportExplicitAny]
     if config.confine_native_reads_to:
-        hooks.extend(_build_confine_reads_hook(config.confine_native_reads_to))
-    if config.denied_bash_executables:
-        hooks.append(_build_deny_bash_executables_hook(config.denied_bash_executables))
-    if hooks:
-        settings["hooks"] = {"PreToolUse": hooks}
+        settings["hooks"] = _build_confine_reads_hook(config.confine_native_reads_to)
     return settings
 
 
-def _build_confine_reads_hook(roots: list[str]) -> list[dict[str, Any]]:
+def _build_confine_reads_hook(roots: list[str]) -> dict[str, Any]:
     """Build the ``hooks`` block that denies native-tool reads outside ``roots``."""
     resolved = [os.path.realpath(r) for r in roots]
     # Quote each arg with double-quotes so paths with spaces survive shell parsing.
     args = " ".join(f'"{r}"' for r in resolved)
     command = f'"{_CONFINE_READS_HOOK}" {args}'
-    return [
-        {
-            "matcher": "Read|Glob|Grep|Edit|Write|NotebookEdit",
-            "hooks": [{"type": "command", "command": command}],
-        }
-    ]
-
-
-def _build_deny_bash_executables_hook(executables: list[str]) -> dict[str, Any]:
-    args = " ".join(f'"{executable}"' for executable in executables)
-    command = f'"{_DENY_BASH_EXECUTABLES_HOOK}" {args}'
     return {
-        "matcher": "Bash",
-        "hooks": [{"type": "command", "command": command}],
+        "PreToolUse": [
+            {
+                "matcher": "Read|Glob|Grep|Edit|Write|NotebookEdit",
+                "hooks": [{"type": "command", "command": command}],
+            }
+        ]
     }

@@ -5,20 +5,23 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import subprocess
-from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from libs.agent_cli.claude_structured import ClaudeStructuredExecutionError, run_claude_structured
-from libs.agent_cli.codex import (
-    CodexSessionIdError,
-    CodexStructuredExecutionError,
-    CodexStructuredOutputError,
-    run_codex_structured,
+from libs.agent_cli.structured import (
+    AccessMode,
+    AgentProvider,
+    StructuredTurnError,
+    StructuredTurnTimeout,
+    run_structured_turn,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from agentshim import CommandExecutor
 
 
 class LifecycleAgentError(RuntimeError):
@@ -127,9 +130,6 @@ class WorkspaceHealthJudgeBackend(Protocol):
     ) -> HealthJudgeWorkspaceArtifact: ...
 
 
-CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
-
-
 _DETECTOR_SDK_REFERENCE = """Trusted controller/sdk API reference (do not search outside the application checkout):
 
 - import path `sdo.dev/controller/sdk`; test helper import path `sdo.dev/controller/sdk/sdktest`.
@@ -163,24 +163,24 @@ _SYSTEM_COMMAND_ROOTS = tuple(Path(path) for path in ("/bin", "/usr/bin", "/usr/
 
 
 class CodexLifecycleBackend:
-    """Run each lifecycle handoff as a new read-only Codex CLI session."""
+    """Run each lifecycle handoff as a new confined Codex CLI session."""
+
+    provider: ClassVar[AgentProvider] = "codex"
 
     def __init__(
         self,
         *,
-        executable: str = "codex",
         model: str | None = None,
         reasoning_effort: str = "medium",
         timeout_seconds: int = 900,
-        command_runner: CommandRunner | None = None,
+        executor: CommandExecutor | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("lifecycle agent timeout must be positive")
-        self.executable = executable
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.timeout_seconds = timeout_seconds
-        self.command_runner = command_runner
+        self.executor = executor
 
     def run_deployer(
         self,
@@ -403,126 +403,46 @@ handoff. Do not include source code in the response because the files are the au
         prompt: str,
         output_type: type[DeployerDraft] | type[HealthJudgeDraft] | type[HealthJudgeWorkspaceDraft],
         *,
-        sandbox: str = "read-only",
+        sandbox: AccessMode = "read-only",
     ) -> tuple[DeployerDraft | HealthJudgeDraft | HealthJudgeWorkspaceDraft, str]:
+        role = f"{self.provider.capitalize()} lifecycle session"
         try:
-            completed = run_codex_structured(
+            turn = run_structured_turn(
+                self.provider,
                 prompt,
                 output_schema=output_type.model_json_schema(),
                 cwd=repository,
-                executable=self.executable,
+                access=sandbox,
                 model=self.model,
                 reasoning_effort=self.reasoning_effort,
                 timeout_seconds=self.timeout_seconds,
-                sandbox=sandbox,  # type: ignore[arg-type]
-                runner=self.command_runner,
+                executor=self.executor,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise LifecycleAgentError(f"Codex lifecycle session timed out after {self.timeout_seconds}s") from exc
-        except CodexStructuredExecutionError as exc:
-            raise LifecycleAgentError(str(exc) or "Codex lifecycle session failed") from exc
-        except CodexSessionIdError as exc:
-            raise LifecycleAgentError("Codex lifecycle session did not report a fresh thread id") from exc
-        except CodexStructuredOutputError as exc:
-            raise LifecycleAgentError(f"invalid structured Codex lifecycle output: {exc}") from exc
-        escaped_command = _first_repository_escape(completed.stdout, repository.resolve())
+        except StructuredTurnTimeout as exc:
+            raise LifecycleAgentError(f"{role} timed out after {self.timeout_seconds}s") from exc
+        except StructuredTurnError as exc:
+            raise LifecycleAgentError(f"{role} failed: {exc}") from exc
+        escaped_command = _first_repository_escape(turn.shell_commands, repository.resolve())
         if escaped_command is not None:
             raise LifecycleAgentError(
-                "Codex lifecycle session read outside the application repository; "
-                f"discarding its output: {escaped_command[:300]}"
+                f"{role} read outside the application repository; discarding its output: {escaped_command[:300]}"
             )
         try:
-            output = output_type.model_validate_json(completed.output_json)
-        except (OSError, ValueError) as exc:
-            raise LifecycleAgentError(f"invalid structured Codex lifecycle output: {exc}") from exc
-        return output, completed.session_id
+            output = output_type.model_validate_json(turn.output_json)
+        except ValueError as exc:
+            raise LifecycleAgentError(f"invalid structured {role} output: {exc}") from exc
+        return output, turn.session_id
 
 
 class ClaudeLifecycleBackend(CodexLifecycleBackend):
     """Run lifecycle handoffs as fresh structured Claude Code sessions."""
 
-    def __init__(
-        self,
-        *,
-        executable: str = "claude",
-        model: str | None = None,
-        reasoning_effort: str = "medium",
-        timeout_seconds: int = 900,
-        command_runner: CommandRunner = subprocess.run,
-    ) -> None:
-        super().__init__(
-            executable=executable,
-            model=model,
-            reasoning_effort=reasoning_effort,
-            timeout_seconds=timeout_seconds,
-            command_runner=command_runner,
-        )
-
-    def _execute(
-        self,
-        repository: Path,
-        prompt: str,
-        output_type: type[DeployerDraft] | type[HealthJudgeDraft] | type[HealthJudgeWorkspaceDraft],
-        *,
-        sandbox: str = "read-only",
-    ) -> tuple[DeployerDraft | HealthJudgeDraft | HealthJudgeWorkspaceDraft, str]:
-        try:
-            completed = run_claude_structured(
-                prompt,
-                output_schema=output_type.model_json_schema(),
-                cwd=repository,
-                executable=self.executable,
-                model=self.model,
-                effort=self.reasoning_effort,
-                timeout_seconds=self.timeout_seconds,
-                sandbox=sandbox,  # type: ignore[arg-type]
-                runner=self.command_runner or subprocess.run,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise LifecycleAgentError(f"Claude lifecycle session timed out after {self.timeout_seconds}s") from exc
-        except ClaudeStructuredExecutionError as exc:
-            raise LifecycleAgentError(str(exc) or "Claude lifecycle session failed") from exc
-        escaped_command = _first_repository_escape(completed.stdout, repository.resolve())
-        if escaped_command is not None:
-            raise LifecycleAgentError(
-                "Claude lifecycle session read outside the application repository; "
-                f"discarding its output: {escaped_command[:300]}"
-            )
-        try:
-            output = output_type.model_validate_json(completed.output_json)
-        except (OSError, ValueError) as exc:
-            raise LifecycleAgentError(f"invalid structured Claude lifecycle output: {exc}") from exc
-        return output, completed.session_id
+    provider: ClassVar[AgentProvider] = "claude"
 
 
-def _first_repository_escape(stdout: str, repository: Path) -> str | None:
-    for line in stdout.splitlines():
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(event, dict):
-            continue
-        if event.get("type") == "assistant":
-            message = event.get("message")
-            content = message.get("content", []) if isinstance(message, dict) else []
-            for item in content if isinstance(content, list) else []:
-                if not isinstance(item, dict) or item.get("type") != "tool_use" or item.get("name") != "Bash":
-                    continue
-                arguments = item.get("input")
-                command = arguments.get("command") if isinstance(arguments, dict) else None
-                if isinstance(command, str) and _command_escapes_repository(command, repository):
-                    return command
-            continue
-        if event.get("type") != "item.completed":
-            continue
-        item = event.get("item")
-        if not isinstance(item, dict) or item.get("type") != "command_execution":
-            continue
-        command = item.get("command")
-        if isinstance(command, str) and _command_escapes_repository(command, repository):
-            return command
-    return None
+def _first_repository_escape(commands: Sequence[str], repository: Path) -> str | None:
+    """Return the first shell command that reaches outside *repository*, if any."""
+    return next((command for command in commands if _command_escapes_repository(command, repository)), None)
 
 
 def _command_escapes_repository(command: str, repository: Path) -> bool:

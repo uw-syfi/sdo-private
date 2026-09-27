@@ -4,13 +4,17 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+from agentshim.providers.codex import CodexSandboxConfig, parse_sandbox
 
 from sdo.agent_runtime.lifecycle.agents import (
     ActiveTopologyResourceDTO,
+    ClaudeLifecycleBackend,
     CodexLifecycleBackend,
     DeployerAssessment,
     HealthJudgeArtifact,
@@ -34,6 +38,11 @@ from sdo.agent_runtime.lifecycle.operational_memory import (
     run_initial_lifecycle,
 )
 from sdo.operational_memory.sandbox import LocalSandboxRunner, SandboxResult
+from tests.structured_turns import ScriptedAgent, failure, reply, turn_schema
+
+if TYPE_CHECKING:
+    from agentshim import CommandRequest
+    from agentshim.testing import FakeRun
 
 
 def _git(repository: Path, *args: str) -> str:
@@ -757,15 +766,9 @@ def test_lifecycle_rejects_source_default_as_a_literal_runtime_namespace(tmp_pat
 def test_codex_backend_starts_independent_read_only_sessions_and_validates_structured_outputs(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     raw = _deployer_assessment({"repository": str(repository), "application": "example"})
-    calls: list[list[str]] = []
-    prompts: list[str] = []
 
-    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(command)
-        prompts.append(str(kwargs["input"]))
-        output_path = Path(command[command.index("--output-last-message") + 1])
-        schema_path = Path(command[command.index("--output-schema") + 1])
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    def respond(request: CommandRequest) -> FakeRun:
+        schema = turn_schema(request)
         if "architecture_summary_markdown" in schema["properties"]:
             output = {
                 "source_commit": raw["source_commit"],
@@ -783,11 +786,10 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
             )
             artifact = _artifact(repository, session_id="placeholder", round_index=1, deployer=deployer)
             output = artifact.model_dump(mode="json", exclude={"session_id"})
-        output_path.write_text(json.dumps(output), encoding="utf-8")
-        session = f"fresh-session-{len(calls)}"
-        return subprocess.CompletedProcess(command, 0, f'{{"type":"thread.started","thread_id":"{session}"}}\n', "")
+        return reply("codex", output, session_id=f"fresh-session-{len(agent.requests)}")
 
-    backend = CodexLifecycleBackend(command_runner=runner)
+    agent = ScriptedAgent(respond)
+    backend = CodexLifecycleBackend(executor=agent.executor)
     deployer = backend.run_deployer(
         repository=repository,
         application="example",
@@ -805,10 +807,11 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
 
     assert deployer.session_id == "fresh-session-1"
     assert judge.session_id == "fresh-session-2"
-    assert len(calls) == 2
-    assert all("resume" not in command for command in calls)
-    assert all(command[command.index("--sandbox") + 1] == "read-only" for command in calls)
-    assert all("--output-schema" in command and "--json" in command for command in calls)
+    prompts = agent.prompts
+    assert len(agent.argvs) == 2
+    assert all("resume" not in argv for argv in agent.argvs)
+    assert all(parse_sandbox(argv) == CodexSandboxConfig(mode="read-only") for argv in agent.argvs)
+    assert all("--output-schema" in argv and "--json" in argv for argv in agent.argvs)
     assert "copy every resource required by the objective exactly from the deployer handoff" in prompts[1]
     assert "Trusted controller/sdk API reference" in prompts[1]
     assert "Inspect only the current application checkout" in prompts[1]
@@ -820,12 +823,6 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
     assert "last structured response is the only response the controller accepts" in prompts[1]
     assert "Every Go func declaration must be package-level" in prompts[1]
     assert "Mentally parse both complete files before returning them" in prompts[1].replace("\n", " ")
-
-
-def test_codex_backend_uses_managed_process_group_execution_by_default() -> None:
-    backend = CodexLifecycleBackend()
-
-    assert backend.command_runner is None
 
 
 @pytest.mark.parametrize(
@@ -844,36 +841,20 @@ def test_codex_backend_rejects_sessions_that_read_outside_application_repository
     raw = _deployer_assessment({"repository": str(repository), "application": "example"})
     escaped_command = escaped_command.format(outside=tmp_path.parent / "older-run")
 
-    def runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        output_path = Path(command[command.index("--output-last-message") + 1])
-        output_path.write_text(
-            json.dumps(
-                {
-                    "source_commit": raw["source_commit"],
-                    "topology_fingerprint": raw["topology_fingerprint"],
-                    "resources": raw["resources"],
-                    "architecture_summary_markdown": "# Architecture\n\nExample Deployment and Service.",
-                }
-            ),
-            encoding="utf-8",
+    agent = ScriptedAgent(
+        lambda _request: reply(
+            "codex",
+            {
+                "source_commit": raw["source_commit"],
+                "topology_fingerprint": raw["topology_fingerprint"],
+                "resources": raw["resources"],
+                "architecture_summary_markdown": "# Architecture\n\nExample Deployment and Service.",
+            },
+            session_id="fresh-session",
+            commands=[escaped_command],
         )
-        stdout = "\n".join(
-            [
-                '{"type":"thread.started","thread_id":"fresh-session"}',
-                json.dumps(
-                    {
-                        "type": "item.completed",
-                        "item": {
-                            "type": "command_execution",
-                            "command": escaped_command,
-                        },
-                    }
-                ),
-            ]
-        )
-        return subprocess.CompletedProcess(command, 0, stdout, "")
-
-    backend = CodexLifecycleBackend(command_runner=runner)
+    )
+    backend = CodexLifecycleBackend(executor=agent.executor)
 
     with pytest.raises(LifecycleAgentError, match="outside the application repository"):
         backend.run_deployer(
@@ -913,15 +894,11 @@ def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_fee
 ) -> None:
     repository = _repository(tmp_path)
     raw = _deployer_assessment({"repository": str(repository), "application": "example"})
-    prompts: list[str] = []
     judge_calls = 0
 
-    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def respond(request: CommandRequest) -> FakeRun:
         nonlocal judge_calls
-        prompts.append(str(kwargs["input"]))
-        output_path = Path(command[command.index("--output-last-message") + 1])
-        schema_path = Path(command[command.index("--output-schema") + 1])
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema = turn_schema(request)
         if "architecture_summary_markdown" in schema["properties"]:
             output = {
                 "source_commit": raw["source_commit"],
@@ -932,11 +909,9 @@ def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_fee
         else:
             judge_calls += 1
             if judge_calls == 1:
-                return subprocess.CompletedProcess(
-                    command,
-                    1,
-                    '{"type":"error","message":"Go output was incomplete"}\n',
-                    "unexpected end of file before func TestDetector\n",
+                return failure(
+                    stdout='{"type":"error","message":"Go output was incomplete"}\n',
+                    stderr="unexpected end of file before func TestDetector\n",
                 )
             deployer = DeployerAssessment(
                 session_id="deployer-session",
@@ -954,28 +929,28 @@ def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_fee
             if "detector_source" in schema["properties"]:
                 output = artifact.model_dump(mode="json", exclude={"session_id"})
             else:
-                candidate = Path(command[command.index("--cd") + 1])
-                detector = candidate / ".sdo/diagnostics/detectors/health/objective"
+                detector = Path(request.cwd or "") / ".sdo/diagnostics/detectors/health/objective"
                 (detector / "detector.go").write_text(artifact.detector_source, encoding="utf-8")
                 (detector / "detector_test.go").write_text(artifact.detector_test_source, encoding="utf-8")
                 output = artifact.model_dump(
                     mode="json",
                     exclude={"session_id", "detector_source", "detector_test_source"},
                 )
-        output_path.write_text(json.dumps(output), encoding="utf-8")
-        session = f"fresh-session-{len(prompts)}"
-        return subprocess.CompletedProcess(command, 0, f'{{"type":"thread.started","thread_id":"{session}"}}\n', "")
+        return reply("codex", output, session_id=f"fresh-session-{len(agent.requests)}")
+
+    agent = ScriptedAgent(respond)
 
     with caplog.at_level(logging.WARNING, logger="sdo.agent_runtime.lifecycle.operational_memory"):
         run_initial_lifecycle(
             repository,
             application="example",
             health_objective="Deployment example and Service example must remain available.",
-            backend=CodexLifecycleBackend(command_runner=runner),
+            backend=CodexLifecycleBackend(executor=agent.executor),
             validator=PassingValidator(),
             judge_rounds=3,
         )
 
+    prompts = agent.prompts
     combined_failure = (
         'unexpected end of file before func TestDetector\n{"type":"error","message":"Go output was incomplete"}'
     )
@@ -1131,15 +1106,26 @@ def test_global_health_objective_requires_dynamic_missing_configmap_dependency_d
     )
 
 
-@pytest.mark.live_codex
+@pytest.mark.live_agents
 @pytest.mark.skipif(
-    os.getenv("SDO_RUN_LIVE_CODEX", "").strip() != "1",
-    reason="set SDO_RUN_LIVE_CODEX=1 to spend model tokens on the real three-round lifecycle",
+    os.getenv("SDO_RUN_LIVE_AGENTS", "").strip() != "1",
+    reason="set SDO_RUN_LIVE_AGENTS=1 to spend model tokens on the real three-round lifecycle",
 )
-def test_real_codex_three_round_health_judge_authors_compiling_detector(
+@pytest.mark.parametrize(
+    ("backend_type", "model_variable"),
+    [
+        pytest.param(CodexLifecycleBackend, "SDO_LIVE_CODEX_MODEL", id="codex"),
+        pytest.param(ClaudeLifecycleBackend, "SDO_LIVE_CLAUDE_MODEL", id="claude"),
+    ],
+)
+def test_real_three_round_health_judge_authors_compiling_detector(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    backend_type: type[CodexLifecycleBackend],
+    model_variable: str,
 ) -> None:
+    if shutil.which(backend_type.provider) is None:
+        pytest.skip(f"{backend_type.provider} is not installed")
     repository = _repository(tmp_path)
     # This opt-in integration uses the explicit development-only validator.
     # Reuse the host module cache across all three candidates so the test
@@ -1156,7 +1142,7 @@ def test_real_codex_three_round_health_judge_authors_compiling_detector(
         repository,
         application="example",
         health_objective="Deployment example and Service example must remain available.",
-        backend=CodexLifecycleBackend(timeout_seconds=900),
+        backend=backend_type(model=os.getenv(model_variable) or None, timeout_seconds=900),
         validator=LocalSandboxRunner(timeout_seconds=300),
         judge_rounds=3,
     )

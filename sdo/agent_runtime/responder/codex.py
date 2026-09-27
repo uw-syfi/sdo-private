@@ -2,20 +2,14 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
-from libs.agent_cli.claude_structured import ClaudeStructuredExecutionError, run_claude_structured
-from libs.agent_cli.codex import (
-    CodexSessionIdError,
-    CodexStructuredExecutionError,
-    CodexStructuredOutputError,
-    run_codex_structured,
-)
+from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_structured_turn
 from sdo.contracts import IncidentRequest, IncidentResult
 
-CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
+if TYPE_CHECKING:
+    from agentshim import CommandExecutor
 
 
 class ResponderExecutionError(RuntimeError):
@@ -43,40 +37,24 @@ def execute_incident(
     *,
     model: str | None = None,
     provider: str | None = None,
-    runner: CommandRunner | None = None,
+    executor: CommandExecutor | None = None,
 ) -> IncidentResult:
     selected_provider = (provider or os.getenv("SDO_AGENT_PROVIDER") or "codex").strip().lower()
+    if selected_provider not in AGENT_PROVIDERS:
+        raise ResponderExecutionError(f"unsupported agent provider {selected_provider!r}")
     try:
-        if selected_provider == "claude":
-            completed = run_claude_structured(
-                _responder_prompt(request),
-                output_schema=_incident_result_schema(),
-                cwd=request.repository_worktree,
-                model=model or os.getenv("SDO_RESPONDER_MODEL") or None,
-                timeout_seconds=None,
-                sandbox="danger-full-access",
-                runner=runner or subprocess.run,
-            )
-        elif selected_provider == "codex":
-            completed = run_codex_structured(
-                _responder_prompt(request),
-                output_schema=_incident_result_schema(),
-                cwd=request.repository_worktree,
-                model=model or os.getenv("SDO_RESPONDER_MODEL") or None,
-                timeout_seconds=None,
-                sandbox="danger-full-access",
-                runner=runner,
-            )
-        else:
-            raise ResponderExecutionError(f"unsupported agent provider {selected_provider!r}")
-    except CodexStructuredExecutionError as exc:
-        raise ResponderExecutionError(str(exc) or "Codex responder failed") from exc
-    except CodexSessionIdError as exc:
-        raise ResponderExecutionError("Codex did not report a resumable session id") from exc
-    except CodexStructuredOutputError as exc:
-        raise ResponderExecutionError(f"invalid Codex incident result: {exc}") from exc
-    except ClaudeStructuredExecutionError as exc:
-        raise ResponderExecutionError(str(exc) or "Claude responder failed") from exc
+        completed = run_structured_turn(
+            selected_provider,  # type: ignore[arg-type]
+            _responder_prompt(request),
+            output_schema=_incident_result_schema(),
+            cwd=request.repository_worktree,
+            access="danger-full-access",
+            model=model or os.getenv("SDO_RESPONDER_MODEL") or None,
+            reasoning_effort="medium",
+            executor=executor,
+        )
+    except StructuredTurnError as exc:
+        raise ResponderExecutionError(f"{selected_provider} responder failed: {exc}") from exc
     try:
         payload = json.loads(completed.output_json)
         tokens = completed.usage.tokens

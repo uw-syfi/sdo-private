@@ -268,15 +268,16 @@ def _service(target: Path, worktrees: Path, validator: AcceptRepairValidator, **
     return BrokerService(target, worktrees, broker=broker, responder_model="gpt-5", **kwargs)
 
 
-def test_production_broker_configures_same_session_reflector() -> None:
+@pytest.mark.parametrize("provider", ["codex", "claude"])
+def test_production_broker_configures_same_session_reflector(provider: str) -> None:
     reflector = _production_reflector(
-        executable="codex-custom",
+        provider=provider,
         model="gpt-5",
         reasoning_effort="high",
         timeout_seconds=321,
     )
 
-    assert reflector.backend.executable == "codex-custom"
+    assert reflector.backend.provider == provider
     assert reflector.backend.model == "gpt-5"
     assert reflector.backend.reasoning_effort == "high"
     assert reflector.backend.timeout_seconds == 321

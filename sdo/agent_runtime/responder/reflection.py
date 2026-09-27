@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import json
-import subprocess
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from libs.agent_cli.claude_structured import ClaudeStructuredExecutionError, resume_claude_structured
-from libs.agent_cli.codex import CodexStructuredExecutionError, resume_codex_structured
+from libs.agent_cli.structured import AgentProvider, StructuredTurnError, run_structured_turn
 from sdo.operational_memory import OutcomeClassification, OutcomeRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
+    from agentshim import CommandExecutor
 
 
 def _classification_directive(classification: OutcomeClassification) -> str:
@@ -127,20 +124,22 @@ class SessionReflector:
 
 
 class CodexSessionBackend:
+    """Resume the responder's own Codex session to reflect on its outcome."""
+
+    provider: ClassVar[AgentProvider] = "codex"
+
     def __init__(
         self,
         *,
-        executable: str = "codex",
         model: str | None = None,
         reasoning_effort: str = "medium",
         timeout_seconds: int = 900,
-        command_runner: CommandRunner | None = None,
+        executor: CommandExecutor | None = None,
     ) -> None:
-        self.executable = executable
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.timeout_seconds = timeout_seconds
-        self.command_runner = command_runner
+        self.executor = executor
 
     def resume(
         self,
@@ -151,62 +150,24 @@ class CodexSessionBackend:
         idempotency_key: str,
     ) -> ReflectionTurn:
         try:
-            completed = resume_codex_structured(
-                session_id,
+            turn = run_structured_turn(
+                self.provider,
                 f"Idempotency key: {idempotency_key}\n\n{prompt}",
                 output_schema=ReflectionTurn.model_json_schema(),
                 cwd=worktree,
-                executable=self.executable,
+                access="danger-full-access",
                 model=self.model,
                 reasoning_effort=self.reasoning_effort,
                 timeout_seconds=self.timeout_seconds,
-                sandbox="danger-full-access",
-                runner=self.command_runner,
+                resume_session_id=session_id,
+                executor=self.executor,
             )
-        except CodexStructuredExecutionError as exc:
-            raise RuntimeError(exc.stderr or exc.stdout or "Codex reflection failed") from exc
-        return ReflectionTurn.model_validate_json(completed.output_json)
+        except StructuredTurnError as exc:
+            raise RuntimeError(f"{self.provider} reflection failed: {exc}") from exc
+        return ReflectionTurn.model_validate_json(turn.output_json)
 
 
 class ClaudeSessionBackend(CodexSessionBackend):
-    def __init__(
-        self,
-        *,
-        executable: str = "claude",
-        model: str | None = None,
-        reasoning_effort: str = "medium",
-        timeout_seconds: int = 900,
-        command_runner: CommandRunner | None = None,
-    ) -> None:
-        super().__init__(
-            executable=executable,
-            model=model,
-            reasoning_effort=reasoning_effort,
-            timeout_seconds=timeout_seconds,
-            command_runner=command_runner,
-        )
+    """Resume the responder's own Claude Code session to reflect on its outcome."""
 
-    def resume(
-        self,
-        *,
-        session_id: str,
-        worktree: Path,
-        prompt: str,
-        idempotency_key: str,
-    ) -> ReflectionTurn:
-        try:
-            completed = resume_claude_structured(
-                session_id,
-                f"Idempotency key: {idempotency_key}\n\n{prompt}",
-                output_schema=ReflectionTurn.model_json_schema(),
-                cwd=worktree,
-                executable=self.executable,
-                model=self.model,
-                effort=self.reasoning_effort,
-                timeout_seconds=self.timeout_seconds,
-                sandbox="danger-full-access",
-                runner=self.command_runner or subprocess.run,
-            )
-        except ClaudeStructuredExecutionError as exc:
-            raise RuntimeError(str(exc) or "Claude reflection failed") from exc
-        return ReflectionTurn.model_validate_json(completed.output_json)
+    provider: ClassVar[AgentProvider] = "claude"

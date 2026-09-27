@@ -138,27 +138,3 @@ class TestConfineReadsHook:
         )
         assert rc == 0
         assert out == ""
-
-
-class TestDenyBashExecutablesHook:
-    def _run_hook(self, command: str) -> str:
-        hook_path = Path(__file__).resolve().parents[2] / "libs/agent_cli/hooks/deny_bash_executables.py"
-        completed = subprocess.run(
-            [sys.executable, str(hook_path), "go"],
-            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}}),
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        assert completed.returncode == 0
-        return completed.stdout
-
-    @pytest.mark.parametrize("command", ["go test ./...", "GOCACHE=/dev/null go test ./...", "cd . && go test"])
-    def test_denies_direct_go_execution(self, command: str) -> None:
-        decision = json.loads(self._run_hook(command))
-
-        assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
-        assert "validation gateway" in decision["hookSpecificOutput"]["permissionDecisionReason"]
-
-    def test_allows_detector_gateway(self) -> None:
-        assert self._run_hook("sdo detector check") == ""

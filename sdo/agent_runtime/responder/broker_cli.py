@@ -31,7 +31,6 @@ from sdo.operational_memory import (
 def _production_reflector(
     *,
     provider: str = "codex",
-    executable: str,
     model: str | None,
     reasoning_effort: str,
     timeout_seconds: int,
@@ -39,7 +38,6 @@ def _production_reflector(
     backend_type = ClaudeSessionBackend if provider == "claude" else CodexSessionBackend
     return SessionReflector(
         backend_type(
-            executable="claude" if provider == "claude" and executable == "codex" else executable,
             model=model,
             reasoning_effort=reasoning_effort,
             timeout_seconds=timeout_seconds,
@@ -82,7 +80,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--responder-model", default="unknown")
     parser.add_argument("--agent-provider", choices=("codex", "claude"), default="codex")
     parser.add_argument("--repair-policy", choices=("commit", "recorded-actions"), default="commit")
-    parser.add_argument("--reflection-executable", default="codex")
     parser.add_argument("--reflection-model")
     parser.add_argument("--reflection-reasoning-effort", default="medium")
     parser.add_argument("--reflection-timeout-seconds", type=int, default=900)
@@ -113,7 +110,6 @@ def main(argv: list[str] | None = None) -> int:
         repair_policy=args.repair_policy,
         reflector=_production_reflector(
             provider=args.agent_provider,
-            executable=args.reflection_executable,
             model=args.reflection_model,
             reasoning_effort=args.reflection_reasoning_effort,
             timeout_seconds=args.reflection_timeout_seconds,

@@ -96,7 +96,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 norecursedirs = ["apps", ".venv", "venv", "build", "dist", ".hypothesis"]
 markers = [
-    "live_codex: opt-in test that invokes a live Codex CLI session",
+    "live_agents: opt-in test that invokes live Codex and Claude Code CLI sessions",
 ]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
