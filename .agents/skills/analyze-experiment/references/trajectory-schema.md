@@ -109,9 +109,12 @@ third_party/sregym/logs/<run-or-pipeline>/
         │       ├── usage/controller-turns.jsonl   # broker + reflection turns
         │       ├── usage/responder-turns.jsonl    # responder Job turns
         │       ├── codex/sessions/YYYY/MM/DD/rollout-*-<session>.jsonl
-        │       └── claude/projects/...            # Claude provider only
+        │       ├── claude/projects/...            # Claude provider only
+        │       └── controller_logs/<pod>.log      # kubectl logs --timestamps of each sdo-controller-run pod
         └── <harness and agent logs>
 ```
+
+`controller_logs/` is written by the adapter's cleanup, so it also exists after a failed controller Job; an export failure is recorded in `controller_logs/export_error.txt` instead of failing the run. Each controller evaluation line (`controller_iteration`, `findings`) carries no timestamp of its own; use the `kubectl` timestamp prefix. The broker ledger's `closure.request.detector_history` is frozen when the incident opens and compacted to the last 12 evaluations, so evaluations after dispatch appear only in these logs.
 
 Every structured agent turn appends one JSONL record to the file named by `SDO_TURN_USAGE_LOG`: host-side lifecycle turns to `sdo_turn_usage.jsonl` in the run's agent log directory, and in-cluster turns to `/workspace/.sdo-runtime/usage/{controller,responder}-turns.jsonl` on the workspace PVC, which the adapter exports to `agent/sdo_runtime/usage/` before building the receipt. Each record has `recorded_at`, `provider`, `model`, `cwd`, `session_id`, `resumed`, `duration_seconds`, `tool_calls`, `shell_commands` (count), `shell_command_lines` (the commands in order, each capped at 2,000 chars; absent in older logs), `model_requests`, `model_requests_source`, and `usage` (`llm_calls`, token counts, and `model_requests` when known). `llm_calls` is agentshim's turn count: always 1 per Codex `exec` run, but Claude's agentic turns. `model_requests` is the per-request count: for Codex, `token_count` events with usage that this turn added to its session rollout (`model_requests_source=codex-rollout-token-count`); for Claude, its reported turns (`claude-num-turns`); `null` when the rollout could not be read. Cross-check against the exported Codex rollouts, whose `event_msg`/`token_count` entries carry per-request `last_token_usage`; a resumed session's rollout also contains the earlier turns. Responder Jobs run Codex with `CODEX_HOME=/workspace/.sdo-runtime/codex`, so responder rollouts are exported under `agent/sdo_runtime/codex/sessions/` beside the reflection's (same session file when reflection resumed it).
 

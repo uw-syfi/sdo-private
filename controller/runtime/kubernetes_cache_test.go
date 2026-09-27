@@ -46,7 +46,7 @@ func TestKubernetesCacheUsesDeclaredInformerUnionWithoutRelisting(t *testing.T) 
 	if err := cache.WaitForSync(ctx); err != nil {
 		t.Fatalf("wait for sync: %v", err)
 	}
-	drainWatchEvents(cache.Events())
+	drainWatchEvents(cache)
 
 	snapshot, err := cache.Snapshot(ctx)
 	if err != nil {
@@ -92,16 +92,16 @@ func TestKubernetesCacheRoutesEventsAndIgnoresUndeclaredAndInternalState(t *test
 	if err != nil {
 		t.Fatalf("create ConfigMap: %v", err)
 	}
-	awaitWatchEvent(t, cache.Events(), sdk.WatchKind{APIVersion: "v1", Kind: "ConfigMap", Namespace: "demo"})
+	awaitWatchEvent(t, cache, sdk.WatchKind{APIVersion: "v1", Kind: "ConfigMap", Namespace: "demo"})
 	configMap.Data = map[string]string{"updated": "true"}
 	if _, err := client.CoreV1().ConfigMaps("demo").Update(ctx, configMap, metav1.UpdateOptions{}); err != nil {
 		t.Fatalf("update ConfigMap: %v", err)
 	}
-	awaitWatchEvent(t, cache.Events(), sdk.WatchKind{APIVersion: "v1", Kind: "ConfigMap", Namespace: "demo"})
+	awaitWatchEvent(t, cache, sdk.WatchKind{APIVersion: "v1", Kind: "ConfigMap", Namespace: "demo"})
 	if err := client.CoreV1().ConfigMaps("demo").Delete(ctx, "settings", metav1.DeleteOptions{}); err != nil {
 		t.Fatalf("delete ConfigMap: %v", err)
 	}
-	awaitWatchEvent(t, cache.Events(), sdk.WatchKind{APIVersion: "v1", Kind: "ConfigMap", Namespace: "demo"})
+	awaitWatchEvent(t, cache, sdk.WatchKind{APIVersion: "v1", Kind: "ConfigMap", Namespace: "demo"})
 
 	if _, err := client.CoreV1().Services("demo").Create(ctx, &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: "undeclared"},
@@ -114,8 +114,8 @@ func TestKubernetesCacheRoutesEventsAndIgnoresUndeclaredAndInternalState(t *test
 		t.Fatalf("create internal state ConfigMap: %v", err)
 	}
 	select {
-	case event := <-cache.Events():
-		t.Fatalf("unexpected event for undeclared/internal resource: %#v", event)
+	case <-cache.Notifications():
+		t.Fatalf("unexpected event for undeclared/internal resource: %#v", cache.TakeEvents())
 	case <-time.After(50 * time.Millisecond):
 	}
 }
@@ -143,24 +143,23 @@ func countList(counter *atomic.Int32) func(ktesting.Action) (bool, runtime.Objec
 	}
 }
 
-func awaitWatchEvent(t *testing.T, events <-chan sdk.WatchKind, want sdk.WatchKind) {
+func awaitWatchEvent(t *testing.T, cache *KubernetesCache, want sdk.WatchKind) {
 	t.Helper()
 	select {
-	case got := <-events:
-		if got != want {
-			t.Fatalf("unexpected watch event: got %#v, want %#v", got, want)
+	case <-cache.Notifications():
+		got := cache.TakeEvents()
+		if len(got) != 1 || got[0] != want {
+			t.Fatalf("unexpected watch events: got %#v, want %#v", got, want)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for watch event")
 	}
 }
 
-func drainWatchEvents(events <-chan sdk.WatchKind) {
-	for {
-		select {
-		case <-events:
-		default:
-			return
-		}
+func drainWatchEvents(cache *KubernetesCache) {
+	select {
+	case <-cache.Notifications():
+	default:
 	}
+	cache.TakeEvents()
 }

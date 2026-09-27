@@ -33,7 +33,11 @@ type ControllerConfig struct {
 	FiringThreshold         int
 	ClearThreshold          int
 	BatchDebounce           time.Duration
-	RepairPolicy            string
+	// ConfirmationInterval bounds how long a detector with a finding below its
+	// firing threshold waits for its next evaluation. Zero leaves confirmation
+	// to watch events and the detector's own interval.
+	ConfirmationInterval time.Duration
+	RepairPolicy         string
 }
 
 type dispatchCompletion struct {
@@ -109,6 +113,9 @@ func NewController(
 	if config.VerificationTimeout < 0 {
 		return nil, fmt.Errorf("verification timeout must not be negative")
 	}
+	if config.ConfirmationInterval < 0 {
+		return nil, fmt.Errorf("confirmation interval must not be negative")
+	}
 	if config.VerificationTimeout == 0 {
 		config.VerificationTimeout = config.ResponseTimeout
 	}
@@ -147,9 +154,18 @@ func NewController(
 }
 
 func (c *Controller) Step(ctx context.Context, now time.Time, event *sdk.WatchKind) error {
+	if event == nil {
+		return c.StepEvents(ctx, now, nil)
+	}
+	return c.StepEvents(ctx, now, []sdk.WatchKind{*event})
+}
+
+// StepEvents evaluates, against one snapshot, every detector that is due or
+// watches any of the coalesced watch events.
+func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk.WatchKind) error {
 	c.processDispatchCompletions(now)
 	c.processBrokerCompletions()
-	detectors := c.scheduler.Select(now, event)
+	detectors := c.scheduler.SelectEvents(now, events)
 	if len(detectors) == 0 {
 		c.maybeCloseIncident(now)
 		return c.dispatchReady(ctx, now)
@@ -189,7 +205,11 @@ func (c *Controller) Step(ctx context.Context, now time.Time, event *sdk.WatchKi
 		}
 		changes := c.tracker.Observe(spec.ID, validFindings)
 		sampleFindings = append(sampleFindings, validFindings...)
+		c.recordEvaluation(spec.ID, now, validFindings)
 		c.batcher.RemoveKeys(changes.Cleared)
+		if c.config.ConfirmationInterval > 0 && c.tracker.HasPendingDetector(spec.ID) {
+			c.scheduler.Expedite(spec.ID, now.Add(c.config.ConfirmationInterval))
+		}
 		for _, finding := range changes.Activated {
 			if c.mergeIntoOpenIncident(finding) {
 				continue
@@ -198,13 +218,15 @@ func (c *Controller) Step(ctx context.Context, now time.Time, event *sdk.WatchKi
 			if batchSpec.Class != "" && !severityAtLeast(finding.Severity, batchSpec.Batching.Severity) {
 				continue
 			}
+			if c.attachBeforeLaunch([]sdk.Finding{finding}) {
+				continue
+			}
 			if batchSpec.Class == "" {
 				c.batcher.AddAt(finding, now)
 			} else {
 				c.batcher.AddAtWithDebounce(finding, now, batchSpec.Batching.Debounce)
 			}
 		}
-		c.recordEvaluation(spec.ID, now, validFindings)
 	}
 	sort.Slice(sampleFindings, func(left int, right int) bool {
 		return sampleFindings[left].Fingerprint < sampleFindings[right].Fingerprint
@@ -213,13 +235,7 @@ func (c *Controller) Step(ctx context.Context, now time.Time, event *sdk.WatchKi
 		c.OnEvaluation(sampleFindings)
 	}
 
-	if c.IncidentOpen() {
-		c.maybeCloseIncident(now)
-		if c.IncidentOpen() {
-			return nil
-		}
-		return c.dispatchReady(ctx, now)
-	}
+	c.maybeCloseIncident(now)
 	return c.dispatchReady(ctx, now)
 }
 
@@ -241,12 +257,68 @@ func (c *Controller) mergeIntoOpenIncident(finding sdk.Finding) bool {
 	return false
 }
 
+// attachBeforeLaunch adds newly activated findings to an open incident whose
+// responder has never been launched. The request is still only controller
+// state, so the responder receives one incident with all corroborating
+// evidence instead of the later finding waiting in the batcher until closure.
+func (c *Controller) attachBeforeLaunch(findings []sdk.Finding) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.canAttachBeforeLaunchLocked() {
+		return false
+	}
+	request := c.currentIncidentRequest
+	existing := make(map[string]struct{}, len(request.Findings))
+	for _, finding := range request.Findings {
+		existing[FindingStateKey(finding.DetectorID, FindingFingerprint(finding))] = struct{}{}
+	}
+	for _, finding := range findings {
+		finding.Fingerprint = FindingFingerprint(finding)
+		if _, ok := existing[FindingStateKey(finding.DetectorID, finding.Fingerprint)]; ok {
+			continue
+		}
+		request.Findings = append(request.Findings, finding)
+	}
+	sortFindings(request.Findings)
+	request.SurfacedPlaybooks = surfacedPlaybooks(request.Findings)
+	request.RelevantOutcomes = relevantOutcomeEvidence(
+		c.config.RepositoryWorktree, request.Findings, c.config.SourceCommit,
+	)
+	request.DetectorHistory = compactDetectorHistory(c.history)
+	c.incidentFindingKeys = findingKeys(request.Findings)
+	return true
+}
+
+// canAttachBeforeLaunchLocked requires c.mu. A responder that was ever
+// launched keeps its original request, including across dispatch retries,
+// because an idempotent dispatcher may rejoin the same Job.
+func (c *Controller) canAttachBeforeLaunchLocked() bool {
+	if !c.incidentOpen || c.currentIncidentRequest == nil || !c.incidentDispatchedAt.IsZero() {
+		return false
+	}
+	switch c.dispatchState {
+	case "workspace_pending", "workspace_running", "pending":
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 	c.mu.Lock()
 	incidentOpen := c.incidentOpen
 	closurePending := c.pendingClosure != nil && c.broker != nil
 	c.mu.Unlock()
-	if incidentOpen || closurePending {
+	if incidentOpen {
+		c.mu.Lock()
+		attachable := c.canAttachBeforeLaunchLocked()
+		c.mu.Unlock()
+		if attachable && c.batcher.Ready(now) {
+			c.attachBeforeLaunch(c.batcher.DrainReady(now))
+		}
+		return nil
+	}
+	if closurePending {
 		return nil
 	}
 	if !c.batcher.Ready(now) {
@@ -287,7 +359,14 @@ func severityAtLeast(actual sdk.FindingSeverity, threshold sdk.FindingSeverity) 
 
 func (c *Controller) NextWake() time.Time {
 	next := c.scheduler.NextRun()
-	if deadline, ok := c.batcher.Deadline(); ok && (next.IsZero() || deadline.Before(next)) {
+	c.mu.Lock()
+	// A batch deadline only matters when the batch can be dispatched or
+	// attached. Otherwise an expired deadline would spin the runtime loop for
+	// the whole incident.
+	batchActionable := (!c.incidentOpen && (c.pendingClosure == nil || c.broker == nil)) ||
+		c.canAttachBeforeLaunchLocked()
+	c.mu.Unlock()
+	if deadline, ok := c.batcher.Deadline(); ok && batchActionable && (next.IsZero() || deadline.Before(next)) {
 		return deadline
 	}
 	c.mu.Lock()
