@@ -3,7 +3,7 @@
 # starts cold from a fresh application workspace; every later stage chains the
 # workspace, so round 2 sees the detectors, playbooks, and outcomes learned in
 # round 1. Env and agent settings are copied from sdo_codex_luna_reuse.toml.
-# Baseline: codex_luna_sequence_baseline.toml (run it twice).
+# Baseline: codex_luna_sequence_baseline.toml (lists all eight runs).
 #
 # The faults are those of sdo_codex_four_e2e.toml; all four are registered
 # SREGym problems bound to HotelReservation, so they source-deploy.

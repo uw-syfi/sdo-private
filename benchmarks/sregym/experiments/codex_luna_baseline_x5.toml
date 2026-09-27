@@ -1,0 +1,25 @@
+# Five independent attempts of the memoryless stock Codex baseline for the SDO
+# luna reuse comparison, in one run. Identical to codex_luna_baseline.toml
+# except `repeat = 5`, which the runner passes to SREGym as --n-attempts 5:
+# five independent end-to-end runs (fresh fault injection and agent launch),
+# not retries, each in its own runs/<seq>_<problem>/ directory.
+
+[runner]
+agent = "codex"
+model = "gpt-6-luna"
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+enable_summary = false
+no_inject_summary = true
+problems = ["missing_configmap_hotel_reservation"]
+repeat = 5
+
+[runner.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+docker_builder = "sdo-example"

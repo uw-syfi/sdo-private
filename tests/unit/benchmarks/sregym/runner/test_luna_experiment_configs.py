@@ -1,4 +1,4 @@
-"""The luna variants and sequence experiments reuse the luna reuse settings exactly."""
+"""The luna variants, sequence, fresh-reflection, and repeat experiments reuse the luna reuse settings exactly."""
 
 from __future__ import annotations
 
@@ -29,8 +29,9 @@ PIPELINES = {
     "sdo_codex_luna_sequence.toml": FOUR_FAULTS + FOUR_FAULTS,
 }
 BASELINES = {
-    "codex_luna_variants_baseline.toml": VARIANTS,
-    "codex_luna_sequence_baseline.toml": FOUR_FAULTS,
+    "codex_luna_variants_baseline.toml": (VARIANTS, 1),
+    "codex_luna_sequence_baseline.toml": (FOUR_FAULTS + FOUR_FAULTS, 1),
+    "codex_luna_baseline_x5.toml": ([ORIGINAL], 5),
 }
 
 
@@ -53,14 +54,35 @@ def test_pipeline_copies_luna_defaults_and_chains_one_hotel_workspace(name: str,
     assert not any(stage.chain_kb for stage in config.stages)
 
 
-@pytest.mark.parametrize(("name", "problems"), sorted(BASELINES.items()))
-def test_codex_baseline_differs_from_luna_baseline_only_in_problems(name: str, problems: list[str]) -> None:
+@pytest.mark.parametrize(("name", "selection"), sorted(BASELINES.items()))
+def test_codex_baseline_differs_from_luna_baseline_only_in_problems_and_repeat(
+    name: str, selection: tuple[list[str], int]
+) -> None:
+    problems, repeat = selection
     baseline = _toml(name)
     reference = _toml("codex_luna_baseline.toml")
 
     assert baseline["runner"].pop("problems") == problems
+    assert baseline["runner"].pop("repeat", 1) == repeat
     reference["runner"].pop("problems")
     assert baseline == reference
     config = load_experiment_config(EXPERIMENTS / name)
     assert config.agent == "codex"
     assert config.problems == problems
+    assert config.repeat == repeat
+    assert config.env.judge_model_id == "codex-gpt-6-luna"
+
+
+def test_fresh_reflection_arm_differs_from_luna_reuse_only_in_reflection_session() -> None:
+    fresh = _toml("sdo_codex_luna_reuse_fresh.toml")
+    reference = _toml("sdo_codex_luna_reuse.toml")
+
+    assert fresh["defaults"]["agent_config"]["sdo_codex"].pop("reflection_session") == "fresh"
+    assert fresh["pipeline"].pop("name") == "sdo-codex-luna-reuse-fresh"
+    reference["pipeline"].pop("name")
+    assert fresh == reference
+
+    config = load_pipeline_config(EXPERIMENTS / "sdo_codex_luna_reuse_fresh.toml")
+    resolved = [merge_stage_config(config.defaults, stage.runner_overrides) for stage in config.stages]
+    assert all(stage.env.judge_model_id == "codex-gpt-6-luna" for stage in resolved)
+    assert all(stage.agent_config["sdo_codex"]["reflection_session"] == "fresh" for stage in resolved)

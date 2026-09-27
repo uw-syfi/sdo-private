@@ -1,9 +1,8 @@
 # Memoryless stock Codex baseline for the SDO luna sequence comparison
-# (sdo_codex_luna_sequence.toml). Codex keeps no memory between problems, so the
-# A B C D A B C D sequence is covered by running this A B C D config twice, each
-# in a new log dir; the analysis script averages Codex per problem. (Inline
-# problem lists are de-duplicated by the runner, and runner `repeat` is not
-# accepted by SREGym main.py, so the list cannot repeat problems itself.)
+# (sdo_codex_luna_sequence.toml). Lists the full A B C D A B C D sequence; the
+# runner keeps repeated inline problems as separate runs in order. Codex keeps
+# no memory between problems, so each run is an independent sample and the
+# analysis script averages Codex per problem.
 # Settings copied from codex_luna_baseline.toml.
 
 [runner]
@@ -16,6 +15,10 @@ deploy_from_source = true
 enable_summary = false
 no_inject_summary = true
 problems = [
+    "readiness_probe_misconfiguration_hotel_reservation",
+    "missing_configmap_hotel_reservation",
+    "wrong_service_selector_hotel_reservation",
+    "network_policy_block",
     "readiness_probe_misconfiguration_hotel_reservation",
     "missing_configmap_hotel_reservation",
     "wrong_service_selector_hotel_reservation",
