@@ -23,6 +23,7 @@ from sdo.agent_runtime.lifecycle.operational_memory import (
     reuse_initial_lifecycle_if_valid,
     run_initial_lifecycle,
 )
+from sdo.agent_runtime.lifecycle.validation_cache import LifecycleValidationCache, validation_report
 from sdo.operational_memory import SandboxResult, SandboxRunner
 
 __all__ = [
@@ -38,6 +39,7 @@ __all__ = [
     "DeploymentVerifier",
     "LifecycleAgentBackend",
     "LifecycleError",
+    "LifecycleValidationCache",
     "SandboxResult",
     "SandboxRunner",
     "check_detector_workspace",
@@ -45,4 +47,5 @@ __all__ = [
     "ensure_operational_memory",
     "reuse_initial_lifecycle_if_valid",
     "run_initial_lifecycle",
+    "validation_report",
 ]

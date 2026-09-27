@@ -49,8 +49,10 @@ from sdo.agent_runtime.lifecycle import (
     ActiveTopologyResourceDTO,
     ClaudeLifecycleBackend,
     CodexLifecycleBackend,
+    LifecycleValidationCache,
     reuse_initial_lifecycle_if_valid,
     run_initial_lifecycle,
+    validation_report,
 )
 from sdo.controller_install import kubectl
 
@@ -436,6 +438,7 @@ def run_or_reuse_lifecycle(
     context: DeployedLifecycleContext,
     provider: str,
     model: str,
+    validation_cache: LifecycleValidationCache | None = None,
 ) -> bool:
     """Reuse a still-valid lifecycle handoff, or run a fresh model-backed lifecycle; return whether it was reused."""
 
@@ -444,6 +447,7 @@ def run_or_reuse_lifecycle(
         application=application,
         health_objective=context.health_objective,
         active_resources=context.active_resources,
+        validation_cache=validation_cache,
     )
     if not reused:
         lifecycle_type = ClaudeLifecycleBackend if provider == "claude" else CodexLifecycleBackend
@@ -508,6 +512,7 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
     receipt_dir = _receipt_directory(args.logs_dir, repository)
     trusted_kubeconfig = os.getenv("SREGYM_BASE_KUBECONFIG", "").strip() or None
     ambient_kubeconfig = os.environ.get("KUBECONFIG")
+    validation_cache = LifecycleValidationCache.from_env()
 
     def lifecycle() -> bool:
         # Host-side lifecycle keeps the benchmark's agent access path.
@@ -518,6 +523,7 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
                 context=lifecycle_context,
                 provider=args.provider,
                 model=args.model,
+                validation_cache=validation_cache,
             )
         if args.logs_dir:
             persist_lifecycle_seed(repository, Path(args.logs_dir))
@@ -556,6 +562,7 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
                 state_path=Path(raw_state_path),
                 kubeconfig=trusted_kubeconfig,
                 verification_timeout_seconds=float(args.timeout_sec + 300),
+                validation_cache=validation_cache,
             ),
             ops=KubectlClusterOps(),
             run_lifecycle=lifecycle,
@@ -586,11 +593,13 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     namespace = str(app_info.get("namespace") or "default")
     lifecycle_context = _deployed_lifecycle_context(namespace)
     health_objective = lifecycle_context.health_objective
+    validation_cache = LifecycleValidationCache.from_env()
     lifecycle_reused = reuse_initial_lifecycle_if_valid(
         repository,
         application=application,
         health_objective=health_objective,
         active_resources=lifecycle_context.active_resources,
+        validation_cache=validation_cache,
     )
     if not lifecycle_reused:
         lifecycle_type = ClaudeLifecycleBackend if args.provider == "claude" else CodexLifecycleBackend
@@ -634,6 +643,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     if gate is not None:
         gate.join()
     receipt["lifecycle_reused"] = lifecycle_reused
+    receipt["lifecycle_validation"] = validation_report(validation_cache)
     receipt["fault_injection_deferred"] = fault_deferred
     if gate is not None:
         receipt["fault_gate_timings_seconds"] = gate.timings

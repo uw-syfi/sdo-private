@@ -10,7 +10,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import yaml
 
@@ -33,6 +33,9 @@ from sdo.operational_memory import (
     SandboxResult,
     SandboxRunner,
 )
+
+if TYPE_CHECKING:
+    from sdo.agent_runtime.lifecycle.validation_cache import LifecycleValidationCache
 
 logger = logging.getLogger(__name__)
 
@@ -149,8 +152,14 @@ def reuse_initial_lifecycle_if_valid(
     health_objective: str,
     active_resources: list[ActiveTopologyResourceDTO] | None = None,
     validator: SandboxRunner | None = None,
+    validation_cache: LifecycleValidationCache | None = None,
 ) -> bool:
-    """Reuse a real lifecycle handoff only while its source and contracts remain valid."""
+    """Reuse a real lifecycle handoff only while its source and contracts remain valid.
+
+    An opt-in ``validation_cache`` shares passing validator verdicts, under the
+    attestation's own key, across workspace copies and records in ``source``
+    how this check was satisfied.
+    """
 
     root = app_root.resolve()
     provenance_path = root / ".sdo" / "lifecycle-provenance.yaml"
@@ -205,26 +214,45 @@ def reuse_initial_lifecycle_if_valid(
             return False
         selected_validator = validator or ContainerSandboxRunner()
         validation_identity = _validator_identity(selected_validator)
+        diagnostics_digest = _diagnostics_digest(root)
         validation = provenance.get("validation")
         if (
             validation_identity is not None
             and isinstance(validation, dict)
             and validation.get("schema_version") == _VALIDATION_ATTESTATION_SCHEMA
             and validation.get("validator_identity") == validation_identity
-            and validation.get("diagnostics_digest") == _diagnostics_digest(root)
+            and validation.get("diagnostics_digest") == diagnostics_digest
         ):
+            if validation_cache is not None:
+                validation_cache.source = "workspace-attestation"
             return True
-        result = selected_validator.run(root)
-        if result.returncode != 0:
-            return False
+        cached = (
+            validation_cache is not None
+            and validation_identity is not None
+            and validation_cache.contains(validation_identity, diagnostics_digest)
+        )
+        if not cached:
+            result = selected_validator.run(root)
+            if result.returncode != 0:
+                return False
+            if validation_cache is not None and validation_identity is not None:
+                validation_cache.record(validation_identity, diagnostics_digest)
+        if validation_cache is not None:
+            validation_cache.source = "validation-cache" if cached else "validator"
         if validation_identity is not None:
             provenance["validation"] = {
                 "schema_version": _VALIDATION_ATTESTATION_SCHEMA,
-                "diagnostics_digest": _diagnostics_digest(root),
+                "diagnostics_digest": diagnostics_digest,
                 "validator_identity": validation_identity,
+                "attested_by": "validation-cache" if cached else "validator",
             }
             provenance_path.write_text(yaml.safe_dump(provenance, sort_keys=True), encoding="utf-8")
-            _commit(root, "sdo: attest independently validated lifecycle memory")
+            _commit(
+                root,
+                "sdo: attest lifecycle memory from the shared validation cache"
+                if cached
+                else "sdo: attest independently validated lifecycle memory",
+            )
         return True
     except (LifecycleError, OSError, TypeError, ValueError, yaml.YAMLError):
         return False
