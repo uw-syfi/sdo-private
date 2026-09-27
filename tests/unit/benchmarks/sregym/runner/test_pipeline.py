@@ -1318,7 +1318,13 @@ class TestPersistentControllerPipeline:
         )
 
     def _run(
-        self, sregym_dir: Path, tmp_path: Path, *, teardown_writes_receipts: bool
+        self,
+        sregym_dir: Path,
+        tmp_path: Path,
+        *,
+        teardown_writes_receipts: bool,
+        receipt_stages: tuple[int, ...] = (0, 1),
+        teardown_returncode: int = 0,
     ) -> tuple[int, list[list[str]], list[dict[str, str]], Path]:
         config = self._config()
         pipeline_dir = tmp_path / "pipeline"
@@ -1332,11 +1338,12 @@ class TestPersistentControllerPipeline:
             envs.append(dict(env or {}))
             if "benchmarks.sregym.adapter.persistent" in argv:
                 if teardown_writes_receipts:
-                    for agent_dir in agent_dirs:
-                        (agent_dir / "sdo_production_receipt_strict.json").write_text(
-                            json.dumps(_valid_strict_receipt()) + "\n", encoding="utf-8"
-                        )
-                return type("Result", (), {"returncode": 0})()
+                    for index, agent_dir in enumerate(agent_dirs):
+                        if index in receipt_stages:
+                            (agent_dir / "sdo_production_receipt_strict.json").write_text(
+                                json.dumps(_valid_strict_receipt()) + "\n", encoding="utf-8"
+                            )
+                return type("Result", (), {"returncode": teardown_returncode})()
             experiment_dir = Path(argv[argv.index("--experiment-dir") + 1])
             problem_run = experiment_dir / "problem_runs" / "run"
             agent_dir = problem_run / "agent"
@@ -1371,7 +1378,21 @@ class TestPersistentControllerPipeline:
             assert env["SREGYM_PRESERVE_NAMESPACE_LABEL"] == "sdo.dev/controller-namespace"
         assert "benchmarks.sregym.adapter.persistent" in calls[-1]
         assert calls[-1][calls[-1].index("--state") + 1] == str(pipeline_dir / "sdo_persistent_controller.json")
+        # Deferred receipts are published into the harness's results tree.
+        assert calls[-1][calls[-1].index("--publish-root") + 1] == str(pipeline_dir)
         assert read_pipeline_state(pipeline_dir).stages[1].status == "completed"
+
+    def test_a_failed_last_drain_does_not_blame_stages_with_valid_receipts(self, sregym_dir, tmp_path: Path) -> None:
+        rc, _calls, _envs, pipeline_dir = self._run(
+            sregym_dir, tmp_path, teardown_writes_receipts=True, receipt_stages=(0,), teardown_returncode=1
+        )
+
+        assert rc == 1
+        states = read_pipeline_state(pipeline_dir).stages
+        assert states[0].status == "completed"
+        assert states[1].status == "failed"
+        assert "strict receipt" in states[1].error
+        assert "teardown exited with code 1" in states[1].error
 
     def test_missing_deferred_strict_receipt_fails_the_pipeline(self, sregym_dir, tmp_path: Path) -> None:
         rc, _calls, _envs, pipeline_dir = self._run(sregym_dir, tmp_path, teardown_writes_receipts=False)

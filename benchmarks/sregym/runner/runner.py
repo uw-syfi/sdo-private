@@ -407,11 +407,22 @@ def _resolve_workspace_seed_env(
 
 
 def _teardown_persistent_controllers(state_path: Path, project_root: Path, env: dict[str, str]) -> str | None:
-    """Drain the last incidents, write their strict receipts, and stop every persistent controller."""
+    """Drain the last incidents, publish every deferred strict receipt, and stop every persistent controller."""
 
     if not state_path.exists():
         return None
-    argv = ["uv", "run", "python", "-m", "benchmarks.sregym.adapter.persistent", "teardown", "--state", str(state_path)]
+    argv = [
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "benchmarks.sregym.adapter.persistent",
+        "teardown",
+        "--state",
+        str(state_path),
+        "--publish-root",
+        str(state_path.parent),
+    ]
     print(f"  persistent controller teardown: {' '.join(argv)}", flush=True)
     result = subprocess.run(argv, cwd=str(project_root), env=env)
     if result.returncode != 0:
@@ -590,7 +601,11 @@ def run_pipeline(
         if deferred_receipt_stages or persistent_state.exists():
             teardown_error = _teardown_persistent_controllers(persistent_state, project_root, hook_env)
             for index, stage_dir in deferred_receipt_stages:
-                receipt_error = teardown_error or _stage_results_error(stage_dir, require_strict_receipt=True)
+                # Each stage is judged by its own published receipt; a teardown
+                # failure is reported with the stages it left without one.
+                receipt_error = _stage_results_error(stage_dir, require_strict_receipt=True)
+                if receipt_error is not None and teardown_error is not None:
+                    receipt_error = f"{receipt_error} ({teardown_error})"
                 if receipt_error is not None:
                     state.stages[index].status = "failed"
                     state.stages[index].error = f"deferred strict receipt: {receipt_error}"

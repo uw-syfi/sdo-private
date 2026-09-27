@@ -60,6 +60,9 @@ PERSISTENT_STATE_ENV = "SDO_PERSISTENT_CONTROLLER_STATE"
 CONTROL_NAMESPACE_SUFFIX = "-sdo"
 RESOLUTION_FILENAME = "sdo_incident_resolution.json"
 STRICT_RECEIPT_FILENAME = "sdo_production_receipt_strict.json"
+# A drained receipt that failed production validation, kept with its error for analysis.
+REJECTED_RECEIPT_FILENAME = "sdo_rejected_production_receipt.json"
+CONTROLLER_LOGS_SUBDIR = Path("sdo_runtime") / "controller_logs"
 POLL_SECONDS = 1.0
 MAINTENANCE_ACK_TIMEOUT_SECONDS = 600.0
 DRAIN_TIMEOUT_SECONDS = 3600.0
@@ -111,12 +114,23 @@ class ControllerRecord(BaseModel):
     pending: PendingIncident | None = None
 
 
+class DeferredReceipt(BaseModel):
+    """Where a stage's receipt is written after its drain, for publication into the results tree."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    incident_id: str = Field(min_length=1)
+    stage_label: str
+    staging_dir: Path
+
+
 class PersistentState(BaseModel):
     """Pipeline-scoped registry of persistent controllers, keyed by application namespace."""
 
     model_config = ConfigDict(extra="forbid")
 
     controllers: dict[str, ControllerRecord] = Field(default_factory=dict)
+    deferred_receipts: list[DeferredReceipt] = Field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path) -> PersistentState:
@@ -418,6 +432,11 @@ def run_persistent_stage(
         },
     )
     record.served_stages.append(inputs.stage_label)
+    state.deferred_receipts.append(
+        DeferredReceipt(
+            incident_id=verified.incident_id, stage_label=inputs.stage_label, staging_dir=inputs.receipt_dir
+        )
+    )
     state.save(inputs.state_path)
     persist_resolution(resolution, inputs.receipt_dir)
     return resolution
@@ -466,9 +485,14 @@ def drain_pending_incident(
         ),
     }
     receipt["reflection_drain"] = {"drained_by": drained_by, "waited_seconds": waited}
-    validate_production_receipt(receipt, allow_test_lifecycle=config.allow_test_lifecycle)
-    persist_strict_receipt(receipt, pending.receipt_dir)
+    # The controller log covering reflection is evidence whether or not the receipt validates.
     ops.export_controller_logs(record.control_namespace, pending.receipt_dir)
+    try:
+        validate_production_receipt(receipt, allow_test_lifecycle=config.allow_test_lifecycle)
+    except ControllerInstallError as exc:
+        _write_json({"validation_error": str(exc), "receipt": receipt}, pending.receipt_dir / REJECTED_RECEIPT_FILENAME)
+        raise
+    persist_strict_receipt(receipt, pending.receipt_dir)
     return waited
 
 
@@ -495,6 +519,55 @@ def teardown(state_path: Path, *, ops: ClusterOps, clock: Clock | None = None) -
             state.controllers.pop(namespace, None)
             state.save(state_path)
     return errors
+
+
+def publish_deferred_receipts(state_path: Path, results_root: Path) -> list[Path]:
+    """Copy drained receipts and controller logs into the harness's published run directories.
+
+    SREGym publishes a stage's staging tree (``.runtime/<agent>/<opaque id>``)
+    to ``results/<agent>/<problem>/run_N`` when the stage ends, before the
+    drain can write the strict receipt. Each published run is matched to its
+    incident by the resolution record it already contains, and the opaque id is
+    replaced by the problem id, as the harness does at publication.
+    """
+
+    state = PersistentState.load(state_path)
+    deferred = {receipt.incident_id: receipt for receipt in state.deferred_receipts}
+    published: list[Path] = []
+    for resolution_path in sorted(results_root.rglob(RESOLUTION_FILENAME)):
+        run_dir = resolution_path.parent
+        try:
+            incident_id = json.loads(resolution_path.read_text(encoding="utf-8")).get("incident_id")
+        except (OSError, json.JSONDecodeError, AttributeError):
+            continue
+        entry = deferred.get(incident_id) if isinstance(incident_id, str) else None
+        if entry is None or entry.staging_dir.resolve() == run_dir.resolve() or not entry.staging_dir.is_dir():
+            continue
+        sources = [entry.staging_dir / STRICT_RECEIPT_FILENAME, entry.staging_dir / REJECTED_RECEIPT_FILENAME]
+        logs_dir = entry.staging_dir / CONTROLLER_LOGS_SUBDIR
+        if logs_dir.is_dir():
+            sources.extend(sorted(path for path in logs_dir.iterdir() if path.is_file()))
+        for source in sources:
+            if not source.is_file():
+                continue
+            target = run_dir / source.relative_to(entry.staging_dir)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            text = source.read_text(encoding="utf-8").replace(entry.staging_dir.name, run_dir.parent.name)
+            temporary = target.with_suffix(target.suffix + ".tmp")
+            temporary.write_text(text, encoding="utf-8")
+            temporary.replace(target)
+            source.unlink()
+            published.append(target)
+        _remove_empty_directories(entry.staging_dir)
+    return published
+
+
+def _remove_empty_directories(root: Path) -> None:
+    for directory in sorted((path for path in root.rglob("*") if path.is_dir()), reverse=True):
+        if not any(directory.iterdir()):
+            directory.rmdir()
+    if root.is_dir() and not any(root.iterdir()):
+        root.rmdir()
 
 
 def persist_resolution(resolution: dict[str, Any], receipt_dir: Path) -> Path:
@@ -651,12 +724,20 @@ def _main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     teardown_parser = subparsers.add_parser("teardown", help="drain pending incidents and stop every controller")
     teardown_parser.add_argument("--state", type=Path, required=True)
+    teardown_parser.add_argument(
+        "--publish-root",
+        type=Path,
+        help="pipeline directory whose published runs receive the drained receipts and controller logs",
+    )
     args = parser.parse_args(argv)
     state = PersistentState.load(args.state)
     kubeconfigs = {record.kubeconfig for record in state.controllers.values() if record.kubeconfig}
     if kubeconfigs:
         os.environ["KUBECONFIG"] = sorted(kubeconfigs)[0]
     errors = teardown(args.state, ops=KubectlClusterOps())
+    if args.publish_root is not None:
+        for path in publish_deferred_receipts(args.state, args.publish_root):
+            logger.info("published deferred artifact %s", path)
     for error in errors:
         logger.error("persistent controller teardown: %s", error)
     return 1 if errors else 0
