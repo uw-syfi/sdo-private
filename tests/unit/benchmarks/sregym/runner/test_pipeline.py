@@ -397,6 +397,10 @@ class TestMergeStageConfig:
         config = merge_stage_config(defaults, {})
         assert config.env.submit_done_returns_feedback is True
 
+    def test_defaults_env_preserves_deferred_diagnosis_grading(self) -> None:
+        config = merge_stage_config({"env": {"defer_diagnosis_grading": True}}, {})
+        assert config.env.defer_diagnosis_grading is True
+
     def test_with_overrides(self) -> None:
         defaults = {
             "agent": "crucible",

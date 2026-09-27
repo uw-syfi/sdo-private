@@ -554,6 +554,31 @@ def test_cleanup_timeout_process_env_overrides_stale_persisted_config(tmp_path: 
     assert config_to_env(resolved, project_root=tmp_path)["SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS"] == "1800"
 
 
+def test_deferred_diagnosis_grading_is_opt_in_and_reaches_the_conductor(tmp_path: Path) -> None:
+    assert ExperimentConfig().env.defer_diagnosis_grading is False
+    assert "SREGYM_DEFER_DIAGNOSIS_GRADING" not in config_to_env(ExperimentConfig(), project_root=tmp_path)
+
+    toml = _write_toml(
+        tmp_path,
+        """
+        [runner]
+        agent = "sdo-codex"
+
+        [runner.env]
+        defer_diagnosis_grading = true
+    """,
+    )
+    config = load_experiment_config(toml)
+
+    assert config.env.defer_diagnosis_grading is True
+    assert config_to_env(config, project_root=tmp_path)["SREGYM_DEFER_DIAGNOSIS_GRADING"] == "1"
+    snapshot = tmp_path / "snapshot.toml"
+    snapshot.write_text(_serialize_config(config))
+    assert load_experiment_config(snapshot).env.defer_diagnosis_grading is True
+    disabled = resolve_config(config, env_overrides={"SREGYM_DEFER_DIAGNOSIS_GRADING": "0"})
+    assert disabled.env.defer_diagnosis_grading is False
+
+
 def test_deploy_from_source_env_override_enables() -> None:
     config = ExperimentConfig(deploy_from_source=False)
     resolved = resolve_config(config, env_overrides={"SREGYM_DEPLOY_FROM_SOURCE": "1"})
