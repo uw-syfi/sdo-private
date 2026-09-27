@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
 from benchmarks.sregym.fastloop.cli import build_parser, format_incidents, format_summary, main
 from benchmarks.sregym.fastloop.environment import FastloopEnvironment
 from benchmarks.sregym.fastloop.records import IncidentRecord, OracleVerdict, append_record
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 T0 = datetime(2026, 9, 27, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -70,3 +67,44 @@ def test_parser_defaults_match_the_benchmark_configuration() -> None:
     assert up.cpu_limit == "3"
     assert up.cluster_prefix == "fastloop-w"
     assert up.no_sandbox is False
+
+
+class _StopAtProxy(Exception):
+    pass
+
+
+def test_codex_run_hands_the_worker_an_agent_kubeconfig_path_it_can_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from benchmarks.sregym.fastloop import cli
+
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    requested: list[Path] = []
+
+    class Worker:
+        def request(self, op: str, **args: object) -> dict[str, object]:
+            assert op == "proxy"
+            requested.append(Path(str(args["kubeconfig"])))
+            raise _StopAtProxy
+
+    environment = FastloopEnvironment(
+        run_dir=tmp_path,
+        cluster="fastloop-w0",
+        kubeconfig=tmp_path / "kubeconfig",
+        namespace="hotel-reservation",
+        application="Hotel Reservation",
+        workspace=tmp_path / "workspace",
+        sregym_dir=tmp_path / "sregym",
+        private_tmp=None,
+    )
+    args = build_parser().parse_args(["run", "--run-dir", str(tmp_path), "--agent", "codex"])
+    results_dir = tmp_path / "results" / "fresh-run"
+
+    with pytest.raises(_StopAtProxy):
+        cli._run_codex(args, environment, results_dir, Worker(), None, None)  # type: ignore[arg-type]
+
+    assert requested == [results_dir / "agent.kubeconfig"]
+    assert results_dir.is_dir()

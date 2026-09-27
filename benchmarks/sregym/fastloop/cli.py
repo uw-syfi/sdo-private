@@ -238,6 +238,8 @@ def _run_codex(
     auth = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "auth.json"
     if not auth.is_file():
         raise SystemExit(f"{auth} is required for the Codex baseline")
+    # The worker writes the agent kubeconfig here before the first incident creates the directory.
+    results_dir.mkdir(parents=True, exist_ok=True)
     proxy = worker.request(
         "proxy",
         port=args.proxy_port or _free_port(),
