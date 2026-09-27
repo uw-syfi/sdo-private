@@ -414,3 +414,9 @@ Branch `vic/exp/program-integration`, merge of `vic/feat/persistent-controller` 
 ### Test-suite fix
 
 - The three `TestGrepProperties` Hypothesis tests (legacy crucible grep tool) now use `deadline=None`. Each example creates a temp directory, writes a file, patches the cwd, and compiles an arbitrary regex, so per-example wall time follows filesystem and machine load. Under load that exceeded the default 200 ms deadline. Example counts are unchanged; the file runs in about 5 s.
+
+### Merged 201fea0 (publish drained receipts) and composed it with per-incident usage scoping
+
+- `201fea0` merged cleanly. Its teardown publishes the drained strict receipt and controller log from the orphaned staging directory into the run directory SREGym already published.
+- **Gap found:** the drain also exports the controller PVC's runtime evidence (`sdo_runtime/usage/*.jsonl`, Codex/Claude transcripts) into that staging directory, and it was not published. The persistent stage itself exports only controller logs, so published runs had no `controller-turns.jsonl` or rollouts. `incident_cost.py` would have reported no reflection turn time and no warm-prompt evidence for persistent stages.
+- **Fix:** `publish_deferred_receipts` also moves every file under the staging `sdo_runtime/` into the run directory, byte for byte. Only the receipts and controller logs get the opaque-ID rewrite. The published usage log is cumulative, and the per-incident `cwd` filter from `15efd16` then scopes it to the stage's incident. Responder rollouts were already scoped by `responder_session_id`. `test_deferred_receipts_are_published_into_the_run_the_harness_already_published` asserts the usage log and a transcript are published and the staging directory is removed.

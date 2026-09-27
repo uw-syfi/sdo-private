@@ -177,6 +177,13 @@ class FakeOps:
 
     def collect_receipt(self, config: RuntimeConfig, incident_id: str, artifacts_dir: Path) -> dict[str, Any]:
         self.events.append(("receipt", incident_id, str(config.repository)))
+        # The drain exports the controller PVC's cumulative runtime evidence.
+        usage = artifacts_dir / "sdo_runtime" / "usage" / "controller-turns.jsonl"
+        usage.parent.mkdir(parents=True, exist_ok=True)
+        usage.write_text(json.dumps({"cwd": f"/wt/{incident_id}", "duration_seconds": 1.0}) + "\n", encoding="utf-8")
+        rollout = artifacts_dir / "sdo_runtime" / "codex" / "sessions" / f"rollout-{incident_id}.jsonl"
+        rollout.parent.mkdir(parents=True, exist_ok=True)
+        rollout.write_bytes(b'{"type":"session_meta"}\n')
         receipt = _receipt(incident_id)
         receipt["artifacts_dir"] = str(artifacts_dir)
         receipt["completed"] = incident_id not in self.incomplete
@@ -422,7 +429,13 @@ def test_deferred_receipts_are_published_into_the_run_the_harness_already_publis
     assert "anon_abc" not in receipt_path.read_text(encoding="utf-8")
     assert receipt["artifacts_dir"].endswith("problem-1")
     assert (run_dir / "sdo_runtime" / "controller_logs" / "sdo-controller-run-1.log").is_file()
+    # Drain-time usage logs and transcripts back per-stage reflection and warm-prompt analysis.
+    assert (run_dir / "sdo_runtime" / "usage" / "controller-turns.jsonl").is_file()
+    assert (run_dir / "sdo_runtime" / "codex" / "sessions" / "rollout-incident-1.jsonl").read_bytes() == (
+        b'{"type":"session_meta"}\n'
+    )
     assert not (staging / STRICT_RECEIPT_FILENAME).exists()
+    assert not staging.exists()
 
 
 def test_a_rejected_receipt_is_kept_with_its_validation_error_and_logs(tmp_path: Path) -> None:

@@ -23,6 +23,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import sys
 import time
 import uuid
@@ -35,6 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from benchmarks.sregym.adapter.fault_gate import inject_fault_after_resumed_baseline
 from benchmarks.sregym.adapter.runtime import (
+    RUNTIME_ARTIFACTS_DIRNAME,
     RuntimeConfig,
     collect_production_receipt,
     export_controller_logs,
@@ -62,7 +64,7 @@ RESOLUTION_FILENAME = "sdo_incident_resolution.json"
 STRICT_RECEIPT_FILENAME = "sdo_production_receipt_strict.json"
 # A drained receipt that failed production validation, kept with its error for analysis.
 REJECTED_RECEIPT_FILENAME = "sdo_rejected_production_receipt.json"
-CONTROLLER_LOGS_SUBDIR = Path("sdo_runtime") / "controller_logs"
+CONTROLLER_LOGS_SUBDIR = Path(RUNTIME_ARTIFACTS_DIRNAME) / "controller_logs"
 POLL_SECONDS = 1.0
 MAINTENANCE_ACK_TIMEOUT_SECONDS = 600.0
 DRAIN_TIMEOUT_SECONDS = 3600.0
@@ -547,14 +549,25 @@ def publish_deferred_receipts(state_path: Path, results_root: Path) -> list[Path
         logs_dir = entry.staging_dir / CONTROLLER_LOGS_SUBDIR
         if logs_dir.is_dir():
             sources.extend(sorted(path for path in logs_dir.iterdir() if path.is_file()))
-        for source in sources:
+        # Drain-time runtime evidence (usage logs, agent transcripts) is published
+        # byte for byte; per-incident analysis scopes the cumulative logs itself.
+        runtime_dir = entry.staging_dir / RUNTIME_ARTIFACTS_DIRNAME
+        evidence = (
+            sorted(path for path in runtime_dir.rglob("*") if path.is_file() and logs_dir not in path.parents)
+            if runtime_dir.is_dir()
+            else []
+        )
+        for source in [*sources, *evidence]:
             if not source.is_file():
                 continue
             target = run_dir / source.relative_to(entry.staging_dir)
             target.parent.mkdir(parents=True, exist_ok=True)
-            text = source.read_text(encoding="utf-8").replace(entry.staging_dir.name, run_dir.parent.name)
             temporary = target.with_suffix(target.suffix + ".tmp")
-            temporary.write_text(text, encoding="utf-8")
+            if source in sources:
+                text = source.read_text(encoding="utf-8").replace(entry.staging_dir.name, run_dir.parent.name)
+                temporary.write_text(text, encoding="utf-8")
+            else:
+                shutil.copyfile(source, temporary)
             temporary.replace(target)
             source.unlink()
             published.append(target)
