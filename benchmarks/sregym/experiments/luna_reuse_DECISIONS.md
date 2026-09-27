@@ -694,3 +694,52 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - The earlier scan's hits were Codex's per-turn `rate_limits` usage snapshots, which are informational. `scratchpad/check_ratelimit.sh` now counts only real errors and limit-reached flags.
   - **Budget risk:** those snapshots show the account's weekly Codex window (10080 min, resets 2026-10-03 18:19Z) at 88% used, rising about 1 point per 12 minutes with 5 lanes.
   - Decision: keep 5 lanes, because the remaining items should finish within the remaining budget. Watch the weekly usage and start no new lane items past 97%. If the limit is hit mid-run, that run counts as infrastructure-broken, not as an agent failure.
+
+### Quota decision (coordinator-directed, 21:20Z)
+
+- **Keep 5 lanes and finish this queue.**
+  - New starts stop hard at 97% of the shared Codex weekly window. `run.sh` checks the latest `rate_limits.primary.used_percent` from post-relaunch rollouts and returns `rc=quota`, logging `QUOTA-STOP`, instead of starting a run.
+  - All five lanes were already on their last items when this was decided, so the guard is a backstop.
+- **After this queue, no more Codex runs.** The remaining quota is left for the user.
+- **Budgeting the next round:**
+  - At queue end, I will report the final quota percentage and estimate the quota cost per SDO pipeline and per Codex attempt.
+  - The source is the rollouts' `used_percent` snapshots (87% at 21:02Z, the first post-relaunch snapshot).
+  - With overlapping lanes and integer-percent snapshots, per-run cost is attributed by each run's share of total tokens over the queue's percentage delta. Judge (Codex CLI) usage draws on the same window and is included in that delta.
+
+### Reasoning effort: both arms at `medium`
+
+- **SDO:** every post-relaunch SDO rollout records `effort: "medium"` / `reasoning_effort: "medium"` in `turn_context`.
+- **Codex:** the rollouts record `collaboration_mode.settings.reasoning_effort: null`, and the harness logs "Using reasoning effort: Codex default". `AGENT_REASONING_EFFORT` is unset.
+  - `container_runner._mount_codex_credentials` copies only `auth.json`, not the host `~/.codex/config.toml` (its docstring says it copies both).
+  - The CLI's model catalog (`codex debug models`, codex-cli 0.157.1) gives `default_reasoning_level: "medium"` for `gpt-6-luna`.
+- **Conclusion:** both arms ran at medium, SDO explicitly and Codex through the model default. The judge runs at xhigh, but it is outside both TTM and the agent token counts.
+- **Recommendation for the next round:** set `AGENT_REASONING_EFFORT=medium` explicitly for the Codex arm, so the comparison does not depend on a catalog default.
+
+### Step 3 analysis inputs (coordinator-directed)
+
+- **Wait for the token-accounting fix to reach main** before running the final analysis. The fix covers `incident_cost.py` and `structured.py`: a resumed reuse-arm reflection was charged its whole session, which double-counted the responder, so true reuse reflection is 586K–809K, not 1.1–1.4M. Use `origin/main`'s `incident_cost`, read-only, from a separate worktree.
+  - The reuse reflection counts logged above (reuse1–3 and fresh3's summaries) come from the old accounting and are superseded by the final analysis.
+- **Include the one-time setup cost:** `--lifecycle-usage third_party/sregym/.runtime/sdo_codex/anon_c4ffcb5e5fac1834ebf48400a7e8814a/sdo_turn_usage.jsonl` (about 1.77M tokens: deploy plus 3 health-judge rounds, shared by all pipelines). It is stated explicitly in break-even.
+- **Token breakdown for both arms:** uncached input, cached input and output.
+  - Also a cost-weighted total next to the raw one. The weights are an assumption: uncached input 1×, cached input 0.1×, output 8×.
+  - Also requests (model turns) per incident.
+
+### Codex x5, post-fix (luna-w2): 5/5 pass
+
+- **Run:** `20260927_205946_codex`, 20:59–21:22Z. Problem `missing_configmap_hotel_reservation`, all five attempts D+/M+. This is the counted Codex baseline for the persistent A/B. The pre-fix `superseded_prefix_20260927_195049_codex` stays supplementary only.
+
+| Attempt | TTD s | TTM s | raw incl. judge s | no_judge s | last_mut s | input / cached / output tokens | tool calls |
+|---|---|---|---|---|---|---|---|
+| 1 | 48.6 | 65.4 | 74.4 | 49.3 | 65.4 | 288,616 / 255,744 / 1,820 | 8 |
+| 2 | 30.1 | 73.1 | 82.2 | 59.9 | 73.1 | 253,265 / 218,112 / 1,843 | 7 |
+| 3 | 48.9 | 131.4 | 141.7 | 118.2 | 131.4 | 389,470 / 354,304 / 2,599 | 11 |
+| 4 | 32.1 | 134.1 | 152.0 | 125.8 | 134.1 | 462,256 / 421,632 / 2,861 | 12 |
+| 5 | 33.8 | 54.3 | 62.3 | 39.9 | 54.3 | 262,361 / 228,096 / 1,564 | 8 |
+
+- **Means:** TTD 38.7 s, TTM 91.7 s (min 54.3, max 134.1), raw 102.5 s.
+- **Fairness check on attempts 3 and 4** (TTM 131–134 s, against 54–80 s pre-fix):
+  - Model time per call was a steady 3.8–5.1 s in every attempt, so there was no API throttling.
+  - Read-only kubectl calls stayed under 1 s, so the cluster was not slowed, even though host load reached 21–43 during those attempts.
+  - The extra time is agent behaviour: a second repair round (ConfigMap recreated, then pod delete or rollout with about 30 s waits), with 11–12 tool calls against 7–8.
+  - These are genuine agent-variance results and count as they are.
+- **Rate limits:** no error events and no limit-reached flags. The weekly window was at 88% at 21:21Z.
