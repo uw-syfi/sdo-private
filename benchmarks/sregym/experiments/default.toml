@@ -11,7 +11,7 @@ model = "google-vertex:gemini-2.5-flash"
 parallel = 1
 enable_summary = true
 no_inject_summary = false
-# repeat = 1
+# repeat = 1  # independent attempts per problem (SREGym --n-attempts), not retries
 # sequence_len = 0
 # sequence_seed = 42
 

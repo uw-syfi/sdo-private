@@ -136,6 +136,10 @@ class ExperimentConfig:
     application_workspace: ApplicationWorkspaceSetting = False
     enable_summary: bool = True
     no_inject_summary: bool = True
+    # Independent end-to-end attempts per selected problem, passed to SREGym as
+    # --n-attempts. The parallel runner expands each problem into ``repeat``
+    # consecutive tasks (A A B B), each with its own runs/<seq>_<problem>/ dir,
+    # fresh agent launch, and fault injection; attempts are not retries.
     repeat: int = 1
     sequence_len: int = 0
     sequence_seed: int = 42
@@ -157,6 +161,8 @@ class ExperimentConfig:
 
     @model_validator(mode="after")
     def _validate_mutual_exclusion(self) -> ExperimentConfig:
+        if self.repeat < 1:
+            raise ValueError(f"runner.repeat must be at least 1, got {self.repeat}")
         if self.variants.enabled and (self.tasklist or self.problems):
             raise ValueError("runner.variants.enabled is mutually exclusive with runner.tasklist and runner.problems")
         if self.tasklist and self.problems:
@@ -347,8 +353,10 @@ def resolve_tasklist(
     dest = exp_dir / _TASKLIST_FILENAME
 
     if config.problems:
-        # Generate tasklist YAML from inline problem list
-        tasklist_data = {"all": {"problems": {pid: ["diagnosis", "mitigation"] for pid in config.problems}}}
+        # SREGym's parallel runner accepts all.problems as an ordered list and
+        # runs every entry, so repeated problem ids stay separate runs. A stage
+        # mapping keyed by problem id would silently collapse repeats.
+        tasklist_data = {"all": {"problems": list(config.problems)}}
         with open(dest, "w") as f:
             yaml.dump(tasklist_data, f, default_flow_style=False)
         return dest
@@ -420,7 +428,7 @@ def config_to_main_args(
     if application_workspace_mode(config.application_workspace) is not None:
         args.append("--application-workspace")
     if config.repeat > 1:
-        args.extend(["--repeat", str(config.repeat)])
+        args.extend(["--n-attempts", str(config.repeat)])
 
     if tasklist_path is not None:
         args.extend(["--tasklist", str(tasklist_path)])

@@ -7,6 +7,7 @@ import textwrap
 from typing import TYPE_CHECKING
 
 import pytest
+import yaml
 
 from benchmarks.sregym.runner.experiment import (
     ExperimentConfig,
@@ -17,6 +18,7 @@ from benchmarks.sregym.runner.experiment import (
     config_to_main_args,
     load_experiment_config,
     resolve_config,
+    resolve_tasklist,
 )
 
 if TYPE_CHECKING:
@@ -640,3 +642,46 @@ def test_roundtrip_submit_done_returns_feedback(tmp_path: Path) -> None:
     toml_path.write_text(_serialize_config(config))
     loaded = load_experiment_config(toml_path)
     assert loaded.env.submit_done_returns_feedback is True
+
+
+def test_inline_problems_keep_order_and_duplicates(tmp_path: Path) -> None:
+    """Repeated inline problems each become a run in SREGym's tasklist."""
+    path = _write_toml(
+        tmp_path,
+        """\
+        [runner]
+        problems = ["a", "b", "a", "b"]
+        """,
+    )
+    config = load_experiment_config(path)
+
+    tasklist = resolve_tasklist(config, tmp_path, tmp_path)
+
+    assert tasklist is not None
+    document = yaml.safe_load(tasklist.read_text())
+    # SREGym's parallel runner accepts all.problems as a list of strings and
+    # expands it in order; a mapping would collapse the repeated keys.
+    assert document == {"all": {"problems": ["a", "b", "a", "b"]}}
+
+
+def test_repeat_maps_to_sregym_n_attempts(tmp_path: Path) -> None:
+    """SREGym main.py has no --repeat flag; independent attempts are --n-attempts."""
+    config = ExperimentConfig(problems=["a"], repeat=5)
+
+    args = config_to_main_args(config, tmp_path, None)
+
+    assert "--repeat" not in args
+    assert args[args.index("--n-attempts") + 1] == "5"
+
+
+def test_default_repeat_emits_no_attempt_flag(tmp_path: Path) -> None:
+    args = config_to_main_args(ExperimentConfig(problems=["a"]), tmp_path, None)
+
+    assert "--n-attempts" not in args
+    assert "--repeat" not in args
+
+
+@pytest.mark.parametrize("repeat", [0, -1])
+def test_repeat_must_be_positive(repeat: int) -> None:
+    with pytest.raises(ValueError, match="repeat"):
+        ExperimentConfig(problems=["a"], repeat=repeat)
