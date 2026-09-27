@@ -13,8 +13,9 @@ from sdo.agent_runtime.responder.codex import (
     _responder_prompt,
     execute_incident,
 )
-from sdo.contracts import IncidentRequest, IncidentResult
+from sdo.contracts import IncidentRequest, IncidentResult, PriorOutcomeEvidence
 from tests.structured_turns import ScriptedAgent, failure
+from tests.unit.sdo.operational_memory.test_memory import _write_memory
 
 
 def _fixture(name: str) -> str:
@@ -147,3 +148,84 @@ def test_recorded_actions_policy_is_explicit_in_responder_prompt() -> None:
 
     assert "recorded-actions" in prompt
     assert "repair action receipt" in prompt
+
+
+def _exact_match_outcome(match_reason: str = "exact-fingerprint") -> PriorOutcomeEvidence:
+    return PriorOutcomeEvidence(
+        incident_id="inc-prior",
+        match_reason=match_reason,  # type: ignore[arg-type]
+        root_cause_summaries=["geo required the absent geo-config ConfigMap"],
+        repair_action_summaries=["restored geo-config from source"],
+        applied_playbooks=[".sdo/playbooks/missing-configmap/README.md"],
+        source_commit="1111111111111111111111111111111111111111",
+        exact_source_match=True,
+    )
+
+
+def _warm_request(worktree: Path, *, match_reason: str = "exact-fingerprint") -> IncidentRequest:
+    return IncidentRequest.model_validate_json(_fixture("incident_request.json")).model_copy(
+        update={
+            "repository_worktree": str(worktree),
+            "relevant_outcomes": [_exact_match_outcome(match_reason)],
+        }
+    )
+
+
+def test_exact_match_on_incident_detector_inlines_playbook_and_fast_procedure(tmp_path: Path) -> None:
+    _write_memory(tmp_path)
+    scripts = tmp_path / ".sdo" / "playbooks" / "missing-configmap" / "scripts"
+    scripts.mkdir()
+    (scripts / "verify.sh").write_text('#!/bin/sh\nkubectl -n "$1" get configmap geo-config\n', encoding="utf-8")
+
+    prompt = _responder_prompt(_warm_request(tmp_path))
+
+    assert "Warm path" in prompt
+    assert "restore `<MISSING_CONFIG_MAP>` from source" in prompt
+    assert ".sdo/playbooks/missing-configmap/scripts/verify.sh" in prompt
+    assert 'kubectl -n "$1" get configmap geo-config' in prompt
+    assert "already establishes the playbook's preconditions" in prompt
+    assert "one combined sanity check" in prompt
+    assert "replaces the playbook's own diagnosis steps" in prompt
+    assert "full investigation only if" in prompt
+    assert "Confirm a surfaced playbook against live state before applying it" not in prompt
+
+
+def test_cold_prompt_is_unchanged_without_exact_incident_detector_match(tmp_path: Path) -> None:
+    _write_memory(tmp_path)
+    cold_requests = [
+        IncidentRequest.model_validate_json(_fixture("incident_request.json")).model_copy(
+            update={"repository_worktree": str(tmp_path)}
+        ),
+        _warm_request(tmp_path, match_reason="detector-rule-resource-kind"),
+    ]
+    health_only = _warm_request(tmp_path)
+    health_only.findings[0].detector_id = "health-objective"
+    cold_requests.append(health_only)
+
+    for request in cold_requests:
+        prompt = _responder_prompt(request)
+        assert "Warm path" not in prompt
+        assert "Treat them as hypotheses" in prompt
+        assert "Confirm a surfaced playbook against live state before applying it" in prompt
+
+
+def test_warm_path_requires_the_incident_playbook_to_exist(tmp_path: Path) -> None:
+    _write_memory(tmp_path)
+    (tmp_path / ".sdo" / "playbooks" / "missing-configmap" / "README.md").unlink()
+
+    prompt = _responder_prompt(_warm_request(tmp_path))
+
+    assert "Warm path" not in prompt
+
+
+def test_warm_path_caps_inlined_playbook_text(tmp_path: Path) -> None:
+    _write_memory(tmp_path)
+    playbook = tmp_path / ".sdo" / "playbooks" / "missing-configmap" / "README.md"
+    playbook.write_text(playbook.read_text(encoding="utf-8") + "x" * 50_000 + "TAIL-MARKER\n", encoding="utf-8")
+
+    prompt = _responder_prompt(_warm_request(tmp_path))
+
+    assert "Warm path" in prompt
+    assert "TAIL-MARKER" not in prompt
+    assert "truncated" in prompt
+    assert len(prompt) < 30_000
