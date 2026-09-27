@@ -4,7 +4,6 @@ import hashlib
 import importlib.util
 import json
 import subprocess
-import tarfile
 from pathlib import Path
 from typing import Any, cast
 
@@ -221,6 +220,7 @@ def test_calico_images_are_pulled_and_digest_verified_before_manifest_apply(
         "ensure_kind_platform_images",
         lambda cluster, images, platform: events.append(("verify-platform-images", cluster, images, platform)),
     )
+    monkeypatch.setattr(module, "container_platform", lambda: "linux/arm64")
 
     module.install_calico("sregym-w0", str(kubeconfig))
 
@@ -242,35 +242,34 @@ def test_calico_images_are_pulled_and_digest_verified_before_manifest_apply(
     assert events.index(verified) < events.index(apply)
 
 
-def test_platform_archive_records_single_selected_manifest_digest(
+def test_platform_archive_saves_pulled_image_and_records_its_registry_digest(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
     module = _worker_infra()
     digest = "sha256:" + "a" * 64
+    calls: list[list[str]] = []
 
     def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        archive = Path(command[command.index("--output") + 1])
-        index = tmp_path / "index.json"
-        index.write_text(
-            json.dumps({"schemaVersion": 2, "manifests": [{"digest": digest}]}),
-            encoding="utf-8",
-        )
-        with tarfile.open(archive, "w") as stream:
-            stream.add(index, arcname="index.json")
-        return subprocess.CompletedProcess(command, 0, "", "")
+        calls.append(command)
+        if command[:2] == ["docker", "save"]:
+            Path(command[command.index("--output") + 1]).write_bytes(b"archive")
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if command[:3] == ["docker", "image", "inspect"]:
+            return subprocess.CompletedProcess(command, 0, f"calico/cni@{digest}\n", "")
+        raise AssertionError(f"unexpected command: {command}")
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
 
     archive, observed = module.platform_image_archive("calico/cni:test", "linux/arm64")
     try:
         assert observed == digest
-        assert Path(archive).is_file()
+        assert Path(archive).read_bytes() == b"archive"
+        assert ["docker", "save", "--output", archive, "calico/cni:test"] in calls
     finally:
         Path(archive).unlink()
 
 
-def test_platform_image_preflight_loads_selected_archive_and_verifies_every_node(
+def test_platform_image_preflight_imports_selected_archive_and_verifies_every_node(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -279,12 +278,17 @@ def test_platform_image_preflight_loads_selected_archive_and_verifies_every_node
     archive = tmp_path / "image.tar"
     archive.write_bytes(b"archive")
     calls: list[list[str]] = []
+    imported_archives: dict[str, str] = {}
     monkeypatch.setattr(module, "platform_image_archive", lambda _image, _platform: (str(archive), digest))
 
-    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
         if command[:3] == ["kind", "get", "nodes"]:
             return subprocess.CompletedProcess(command, 0, "node-a\nnode-b\n", "")
+        if command[:3] == ["docker", "exec", "-i"]:
+            stdin = kwargs["stdin"]
+            imported_archives[command[3]] = cast("Any", stdin).name
+            return subprocess.CompletedProcess(command, 0, "", "")
         if command[:2] == ["docker", "exec"]:
             return subprocess.CompletedProcess(command, 0, f"manifest @{digest}\n", "")
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -297,4 +301,9 @@ def test_platform_image_preflight_loads_selected_archive_and_verifies_every_node
         "node-a": {"calico/cni:test": digest},
         "node-b": {"calico/cni:test": digest},
     }
-    assert ["kind", "load", "image-archive", "--name", "sregym-w0", str(archive)] in calls
+    assert imported_archives == {"node-a": str(archive), "node-b": str(archive)}
+    imports = [index for index, command in enumerate(calls) if command[:3] == ["docker", "exec", "-i"]]
+    verifications = [index for index, command in enumerate(calls) if "inspecti" in command]
+    assert len(verifications) == 2
+    assert max(imports) < min(verifications)
+    assert not archive.exists()
