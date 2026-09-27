@@ -12,7 +12,12 @@ from sdo.operational_memory.sandbox import ContainerSandboxRunner
 if TYPE_CHECKING:
     from sdo.operational_memory.sandbox import SandboxRunner
 
+#: Every playbook body must contain at least one role placeholder matching this pattern.
 PLACEHOLDER_RE = re.compile(r"<[A-Z][A-Z0-9_]+>")
+#: Index that must link every ``.sdo/playbooks/<fault-class>/README.md``.
+PLAYBOOK_INDEX_PATH = PurePosixPath(".sdo/playbooks/README.md")
+#: Required extension of files under ``.sdo/playbooks/<fault-class>/scripts/``.
+PLAYBOOK_SCRIPT_SUFFIX = ".sh"
 MARKDOWN_LINK_RE = re.compile(r"\[[^]]+\]\(([^)]+)\)")
 SPEC_PROVENANCE_RE = re.compile(r'\b(OriginatingIncident|OriginatingCommit)\s*:\s*("(?:[^"\\]|\\.)*"|`[^`]*`)')
 
@@ -127,10 +132,10 @@ class MemoryValidator:
 
     @staticmethod
     def _validate_playbooks(repository: MemoryRepository) -> None:
-        playbook_root = repository.memory_root / "playbooks"
-        index_path = playbook_root / "README.md"
+        index_path = repository.app_root / PLAYBOOK_INDEX_PATH
+        playbook_root = index_path.parent
         if not index_path.is_file():
-            raise MemoryValidationError("playbook index .sdo/playbooks/README.md is required")
+            raise MemoryValidationError(f"playbook index {PLAYBOOK_INDEX_PATH} is required")
         index = index_path.read_text(encoding="utf-8")
         linked: set[Path] = set()
         for raw_target in MARKDOWN_LINK_RE.findall(index):
@@ -164,8 +169,10 @@ class MemoryValidator:
         for script in playbook_root.glob("*/scripts/*"):
             if not script.is_file():
                 continue
-            if script.suffix != ".sh":
-                raise MemoryValidationError(f"playbook scripts must use the .sh extension: {script}")
+            if script.suffix != PLAYBOOK_SCRIPT_SUFFIX:
+                raise MemoryValidationError(
+                    f"playbook scripts must use the {PLAYBOOK_SCRIPT_SUFFIX} extension: {script}"
+                )
             completed = subprocess.run(
                 ["bash", "-n", str(script)],
                 check=False,

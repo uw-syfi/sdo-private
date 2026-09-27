@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from libs.agent_cli.structured import AgentProvider, StructuredTurnError, run_structured_turn, turn_usage
 from sdo.operational_memory import OutcomeClassification, OutcomeRecord, TopologyReview
 from sdo.operational_memory.detector_sdk import DETECTOR_SDK_REFERENCE
+from sdo.operational_memory.models import DETECTOR_ID_PATTERN, FAULT_CLASS_PATTERN
+from sdo.operational_memory.validation import PLACEHOLDER_RE, PLAYBOOK_INDEX_PATH, PLAYBOOK_SCRIPT_SUFFIX
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -155,6 +157,39 @@ _PLAYBOOK_RULES = (
 )
 
 
+def _memory_rules(*, incident_id: str, outcome_commit: str) -> str:
+    """The broker validator's rules for reflection-authored files, built from its own constants."""
+
+    return (
+        "Memory rules (the broker's validator rejects any violation; there is no local command that checks them, "
+        "so check each before returning):\n"
+        "- A playbook is `.sdo/playbooks/<fault-class>/README.md` starting with YAML front matter holding only "
+        f"`schema_version: 1`, `owner: responder`, `fault_class` matching `{FAULT_CLASS_PATTERN}`, "
+        "`originating_incident`, and optional `originating_commit`; the body is non-empty.\n"
+        f"- Link every playbook from `{PLAYBOOK_INDEX_PATH}` with a relative Markdown link; every link must "
+        "resolve inside `.sdo/playbooks/`.\n"
+        f"- Each playbook body needs at least one role placeholder matching `{PLACEHOLDER_RE.pattern}`, such as "
+        "`<NAMESPACE>`; lowercase `<namespace>` does not count.\n"
+        f"- Files under `.sdo/playbooks/<fault-class>/scripts/` end in `{PLAYBOOK_SCRIPT_SUFFIX}` and pass "
+        "`bash -n`.\n"
+        f"- Detector `id` matches `{DETECTOR_ID_PATTERN}` and is unique; each `possiblePlaybooks` entry is an "
+        "existing `.sdo/playbooks/<fault-class>/README.md`, listed once. No symlink anywhere under `.sdo/`.\n"
+        "Example playbook README.md:\n"
+        "```markdown\n"
+        "---\n"
+        "schema_version: 1\n"
+        "owner: responder\n"
+        "fault_class: example-fault\n"
+        f"originating_incident: {json.dumps(incident_id)}\n"
+        f"originating_commit: {json.dumps(outcome_commit)}\n"
+        "---\n"
+        "# Example fault\n\n"
+        "Repair: `kubectl -n <NAMESPACE> rollout restart deployment/<DEPLOYMENT>`\n"
+        "```\n"
+        "Example index line: `- [Example fault](example-fault/README.md)`\n"
+    )
+
+
 def _learning_request(
     *,
     outcome: OutcomeRecord,
@@ -173,7 +208,8 @@ def _learning_request(
         "Generalize roles with placeholders and ground structural changes in the supplied history. Create a "
         "sharp fault-specific playbook for the confirmed cause, with deterministic repair and independent "
         "verification steps. "
-        f"{_PLAYBOOK_RULES}"
+        f"{_PLAYBOOK_RULES}\n"
+        f"{_memory_rules(incident_id=outcome.incident_id, outcome_commit=outcome_commit)}"
         "When the confirmed cause exposes a stable low-noise Kubernetes "
         "signature, add a fault-specific incident detector immediately and include both a matching test and a "
         "near-miss test. Register a new detector with owner responder, class incident, originatingIncident set to "
