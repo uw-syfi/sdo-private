@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 PLACEHOLDER_RE = re.compile(r"<[A-Z][A-Z0-9_]+>")
 MARKDOWN_LINK_RE = re.compile(r"\[[^]]+\]\(([^)]+)\)")
+SPEC_PROVENANCE_RE = re.compile(r'\b(OriginatingIncident|OriginatingCommit)\s*:\s*("(?:[^"\\]|\\.)*"|`[^`]*`)')
 
 
 class MemoryValidationError(ValueError):
@@ -64,6 +65,12 @@ class MemoryValidator:
         self._validate_playbooks(repository)
         self._validate_detector_classes(repository)
         self._validate_detector_ownership(
+            repository,
+            actor=actor,
+            changed_paths=normalized,
+            baseline_root=baseline_root,
+        )
+        self._validate_incident_provenance(
             repository,
             actor=actor,
             changed_paths=normalized,
@@ -239,6 +246,52 @@ class MemoryValidator:
             )
 
     @staticmethod
+    def _validate_incident_provenance(
+        repository: MemoryRepository,
+        *,
+        actor: ArtifactOwner,
+        changed_paths: list[PurePosixPath],
+        baseline_root: Path | None,
+    ) -> None:
+        """Reject responder edits that rewrite an existing incident detector's provenance.
+
+        ``originatingIncident`` and ``originatingCommit`` record the incident and
+        outcome that first taught a detector. Refinements keep them; rewriting
+        them erases the true origin and needlessly changes the detector tree.
+        """
+
+        if actor != ArtifactOwner.RESPONDER or baseline_root is None:
+            return
+        if not any(path.as_posix().startswith(".sdo/diagnostics/") for path in changed_paths):
+            return
+        baseline_repository = MemoryRepository(baseline_root)
+        try:
+            baseline = baseline_repository.diagnostics()
+        except MemoryRepositoryError:
+            return
+        candidate = {detector.id: detector for detector in repository.diagnostics().detectors}
+        for detector in baseline.detectors:
+            if detector.detector_class != "incident":
+                continue
+            current = candidate.get(detector.id)
+            if current is not None and (
+                current.originating_incident != detector.originating_incident
+                or current.originating_commit != detector.originating_commit
+            ):
+                raise MemoryValidationError(
+                    f"responder may not rewrite provenance (originatingIncident/originatingCommit) of existing "
+                    f"incident detector {detector.id!r}"
+                )
+            package = detector.package.removeprefix("./")
+            before = _spec_provenance(baseline_repository.memory_root / "diagnostics" / package)
+            after = _spec_provenance(repository.memory_root / "diagnostics" / package)
+            if before and after and before != after:
+                raise MemoryValidationError(
+                    f"responder may not rewrite provenance (OriginatingIncident/OriginatingCommit) in the Spec() of "
+                    f"existing incident detector {detector.id!r}"
+                )
+
+    @staticmethod
     def _validate_outcomes_append_only(
         repository: MemoryRepository,
         *,
@@ -261,3 +314,17 @@ class MemoryValidator:
             details = completed.stderr.strip() or completed.stdout.strip() or "diagnostic checks failed"
             raise MemoryValidationError(details)
         return completed.network_policy_canaries
+
+
+def _spec_provenance(package: Path) -> dict[str, str]:
+    """Originating* string literals declared in a detector package's Go sources."""
+
+    values: dict[str, str] = {}
+    if not package.is_dir():
+        return values
+    for source in sorted(package.glob("*.go")):
+        if source.name.endswith("_test.go"):
+            continue
+        for field, literal in SPEC_PROVENANCE_RE.findall(source.read_text(encoding="utf-8", errors="replace")):
+            values.setdefault(field, literal)
+    return values

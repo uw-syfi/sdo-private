@@ -100,7 +100,8 @@ _INCIDENT_DETECTOR_SKELETON = """Incident detector layout (an existing incident 
   Kind: "Deployment"}}, Interval: 30 * time.Second, Persistence: sdk.PersistencePolicy{Firing: 2, Clearing: 2},
   Batching: sdk.BatchingPolicy{Severity: sdk.SeverityCritical, Debounce: 500 * time.Millisecond},
   Playbooks: []string{".sdo/playbooks/<playbook>/README.md"}, OriginatingIncident: "<incident id>",
-  OriginatingCommit: "<outcome commit>"}`; every field must equal its manifest entry.
+  OriginatingCommit: "<outcome commit>"}` for a new detector (an existing detector keeps its values); every field
+  must equal its manifest entry.
 - manifest entry under `detectors:` in `.sdo/diagnostics/manifest.yaml`: `id`, `package:
   ./detectors/incidents/<snake_name>`, `constructor: New`, `class: incident`, `owner: responder`, `watches`
   (`apiVersion`, `kind`), `interval`, `persistence` (`firing`, `clearing`), `batching` (`severity`, `debounce`),
@@ -175,9 +176,12 @@ def _learning_request(
         f"{_PLAYBOOK_RULES}"
         "When the confirmed cause exposes a stable low-noise Kubernetes "
         "signature, add a fault-specific incident detector immediately and include both a matching test and a "
-        "near-miss test. Register it with owner responder, class incident, originatingIncident set to this "
-        "incident, and originatingCommit set to the authoritative outcome commit. Preserve every existing health "
-        "detector and shared manifest field.\n"
+        "near-miss test. Register a new detector with owner responder, class incident, originatingIncident set to "
+        "this incident, and originatingCommit set to the authoritative outcome commit. Never change "
+        "originatingIncident or originatingCommit of an existing detector, in the manifest or its Spec(): they "
+        "record the incident that first taught it, and the broker rejects any rewrite. When an existing incident "
+        "detector and playbook already cover this incident, change them only to fix a demonstrated gap. Preserve "
+        "every existing health detector and shared manifest field.\n"
         "Return learning_decision=updated when you edit memory. Use learning_decision=no_change only when no "
         "safe reusable signature or playbook improvement exists, leave proposed_changes empty, and provide a "
         "specific no_change_reason grounded in this incident. Never claim files were changed unless they exist "

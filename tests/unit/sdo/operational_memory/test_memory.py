@@ -303,6 +303,67 @@ def test_validator_prevents_cross_owner_detector_and_dependency_edits(tmp_path: 
         )
 
 
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (".sdo/diagnostics/manifest.yaml", "originatingIncident: incident-seed", "originatingIncident: incident-2"),
+        (".sdo/diagnostics/manifest.yaml", "originatingCommit: abc123", "originatingCommit: def456"),
+        (
+            ".sdo/diagnostics/detectors/incidents/missing_configmap/detector.go",
+            'OriginatingIncident: "incident-seed"',
+            'OriginatingIncident: "incident-2"',
+        ),
+        (
+            ".sdo/diagnostics/detectors/incidents/missing_configmap/detector.go",
+            'OriginatingCommit: "abc123"',
+            'OriginatingCommit: "def456"',
+        ),
+    ],
+)
+def test_validator_rejects_rewritten_incident_detector_provenance(
+    tmp_path: Path, path: str, old: str, new: str
+) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_memory(baseline)
+    shutil.copytree(baseline, candidate)
+    target = candidate / path
+    assert old in target.read_text(encoding="utf-8")
+    target.write_text(target.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+
+    with pytest.raises(MemoryValidationError, match="provenance"):
+        MemoryValidator(run_diagnostics=False).validate(
+            candidate,
+            actor=ArtifactOwner.RESPONDER,
+            changed_paths=[path],
+            baseline_root=baseline,
+        )
+
+
+def test_validator_accepts_refinements_that_keep_incident_detector_provenance(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_memory(baseline)
+    shutil.copytree(baseline, candidate)
+    manifest = candidate / ".sdo" / "diagnostics" / "manifest.yaml"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace("interval: 1m", "interval: 30s"), encoding="utf-8")
+    detector = candidate / ".sdo" / "diagnostics" / "detectors" / "incidents" / "missing_configmap" / "detector.go"
+    detector.write_text(
+        detector.read_text(encoding="utf-8").replace("Interval: time.Minute", "Interval: 30 * time.Second"),
+        encoding="utf-8",
+    )
+
+    MemoryValidator(run_diagnostics=False).validate(
+        candidate,
+        actor=ArtifactOwner.RESPONDER,
+        changed_paths=[
+            ".sdo/diagnostics/manifest.yaml",
+            ".sdo/diagnostics/detectors/incidents/missing_configmap/detector.go",
+        ],
+        baseline_root=baseline,
+    )
+
+
 def test_validator_rejects_symlinks_and_invalid_shell(tmp_path: Path) -> None:
     baseline = tmp_path / "baseline"
     candidate = tmp_path / "candidate"

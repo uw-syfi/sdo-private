@@ -280,3 +280,11 @@ def test_reflection_requires_executable_playbooks_that_trust_the_incident_detect
     assert "kubelet" in prompt
     # The incident detector already establishes the playbook's preconditions.
     assert "do not prescribe re-diagnosis" in prompt
+
+
+def test_reflection_never_asks_to_rewrite_existing_detector_provenance(tmp_path: Path) -> None:
+    prompt = _first_reflection_prompt(tmp_path)
+
+    assert "Register a new detector" in prompt
+    assert "Never change originatingIncident or originatingCommit of an existing detector" in prompt
+    assert "an existing detector keeps its values" in prompt
