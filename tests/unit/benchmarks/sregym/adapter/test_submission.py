@@ -21,14 +21,13 @@ class Response:
         return json.dumps(self.payload).encode()
 
 
-def test_submission_bridge_records_diagnosis_through_autonomous_endpoint() -> None:
+def test_submission_bridge_returns_on_diagnosis_acknowledgement_without_waiting_for_grading() -> None:
     requests = []
 
     def opener(request, timeout: int):
         assert timeout == 300
         requests.append(request)
-        if request.full_url.endswith("/status"):
-            return Response({"stage": "mitigation"})
+        assert request.full_url.endswith("/submit"), "diagnosis must not block on benchmark grading"
         assert json.loads(request.data) == {"solution": "payment pods are fully isolated"}
         return Response({"status": "200", "message": "Submission received"})
 
@@ -40,10 +39,7 @@ def test_submission_bridge_records_diagnosis_through_autonomous_endpoint() -> No
     )
 
     assert result == {"status": "200", "message": "Submission received"}
-    assert [request.full_url for request in requests] == [
-        "http://conductor:8123/submit",
-        "http://conductor:8123/status",
-    ]
+    assert [request.full_url for request in requests] == ["http://conductor:8123/submit"]
 
 
 @pytest.mark.parametrize("terminal_stage", ["done", "awaiting_cleanup"])

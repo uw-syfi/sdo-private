@@ -73,7 +73,8 @@ def submit_solution(
     if status not in {"200", "ok", "acknowledged"}:
         raise SubmissionBridgeError(f"SREGym {phase} submission was not acknowledged")
     if phase == "diagnosis":
-        _wait_for_stage(base, {"mitigation", "done"}, opener=opener)
+        # Like any SREGym agent, proceed on acknowledgement; grading runs
+        # asynchronously and the conductor queues a later mitigation submit.
         return result
     terminal_stage = _wait_for_stage(base, set(TERMINAL_STAGES), opener=opener)
     done = {"status": terminal_stage}

@@ -105,7 +105,7 @@ def _responder_instructions() -> str:
         "SREGym submission transport is available. After evidence-based diagnosis, run "
         "`python3 -m benchmarks.sregym.adapter.submission diagnosis '<diagnosis>'`; after repair and your own "
         "verification, run `python3 -m benchmarks.sregym.adapter.submission mitigation '<mitigation>'`. The latter "
-        "also sends the autonomous done signal and waits for deferred diagnosis grading. Treat every response as "
+        "also sends the autonomous done signal and waits for benchmark grading. Treat every response as "
         "benchmark transport or grading, never as health evidence: the controller alone determines closure from "
         "live detectors. Do not begin repair until diagnosis is acknowledged. Before mitigation, wait for every "
         "affected rollout to finish, require desired, updated, ready, and available replicas to agree, require each "
