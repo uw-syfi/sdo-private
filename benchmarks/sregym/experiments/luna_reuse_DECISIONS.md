@@ -649,3 +649,15 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
 | reuse3 | w2 | 32.1 / 12.4 | 101.0 / 17.9 | 126.0 / 28.5 | 101.0 / 12.5 | 59.7 / 17.9 |
 
   Pre-fix Codex x5 (supplementary): TTD 36.7, 27.3, 34.6, 37.7, 37.4; TTM 74.9, 53.9, 79.8, –, 69.4 (4 passed, mean 69.5); raw 80.8, 73.0, 85.7, –, 76.2.
+
+### Relaunch after the conductor and whitespace fixes (20:57Z)
+
+- **Checkout:** main `35c321d`, SREGym `dec0e283`. Every remaining run has both fixes: `8aef8f8`/`dec0e283` (the conductor holds submissions made during grading) and `ca8f741` (the broker keeps verbatim whitespace).
+- **No image rebuild:** neither fix lives in an image. The conductor runs on the host, and the source-repair check command reaches the in-image broker as an installer `--broker-arg`.
+- **Lanes, staggered 2 minutes apart:**
+  - w1: fresh3 rerun (fresh covers w0, w2, w1) → sdo_variants → codex_sequence.
+  - w2 (+2 min): post-fix Codex x5 (the pre-fix x5 ran on w0) → codex_variants.
+  - w0 (+4 min): sdo_sequence.
+  - SDO runs on w0 and w1 and Codex on w1 and w2, so each arm is spread across clusters.
+- **Load:** 37.7 at launch, from another project's test workers (`vibesys`), not from our lanes. The coordinator asked to launch now. I record per-run load and will drop to 2 lanes if the load stays above about 24 once those workers finish.
+- **The TTD/TTM analysis change is offline** and does not touch the harness the runs use.
