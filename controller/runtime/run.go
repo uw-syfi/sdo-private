@@ -199,6 +199,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		VerificationTimeout: *verificationTimeout,
 		RepairPolicy:        *repairPolicy,
 		FiringThreshold:     2, ClearThreshold: 2, BatchDebounce: 500 * time.Millisecond,
+		ConfirmationInterval: time.Second,
 	}, detectors, kubernetesCache, dispatcher, start)
 	if err != nil {
 		return err
@@ -284,11 +285,11 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		case <-runCtx.Done():
 			stopTimerForRuntimeEvent(runCtx, timer)
 			return nil
-		case event := <-kubernetesCache.Events():
+		case <-kubernetesCache.Notifications():
 			if stopTimerForRuntimeEvent(runCtx, timer) {
 				return nil
 			}
-			if err := controller.Step(runCtx, time.Now().UTC(), &event); err != nil {
+			if err := controller.StepEvents(runCtx, time.Now().UTC(), kubernetesCache.TakeEvents()); err != nil {
 				if runCtx.Err() != nil {
 					return nil
 				}

@@ -130,6 +130,17 @@ func (t *FindingStateTracker) HasActiveDetector(detectorID string) bool {
 	return false
 }
 
+// HasPendingDetector reports whether a detector has observed a finding that
+// has not yet reached its firing threshold.
+func (t *FindingStateTracker) HasPendingDetector(detectorID string) bool {
+	for _, state := range t.states {
+		if state.DetectorID == detectorID && !state.Active && state.FiringCount > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *FindingStateTracker) Snapshot() map[string]FindingState {
 	result := make(map[string]FindingState, len(t.states))
 	for fingerprint, state := range t.states {

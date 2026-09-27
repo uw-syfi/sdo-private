@@ -26,11 +26,23 @@ func NewScheduler(detectors []sdk.Detector, start time.Time) *Scheduler {
 }
 
 func (s *Scheduler) Select(now time.Time, event *sdk.WatchKind) []sdk.Detector {
+	if event == nil {
+		return s.SelectEvents(now, nil)
+	}
+	return s.SelectEvents(now, []sdk.WatchKind{*event})
+}
+
+// SelectEvents returns every detector that is due at now or watches any of the
+// coalesced events, and advances each selected detector's next interval run.
+func (s *Scheduler) SelectEvents(now time.Time, events []sdk.WatchKind) []sdk.Detector {
 	selected := make([]sdk.Detector, 0)
 	for _, entry := range s.entries {
 		due := !now.Before(entry.nextRun)
-		if !due && event != nil {
-			due = watchesEvent(entry.detector.Spec().Watches, *event)
+		for _, event := range events {
+			if due {
+				break
+			}
+			due = watchesEvent(entry.detector.Spec().Watches, event)
 		}
 		if !due {
 			continue
@@ -42,6 +54,15 @@ func (s *Scheduler) Select(now time.Time, event *sdk.WatchKind) []sdk.Detector {
 		return selected[left].Spec().ID < selected[right].Spec().ID
 	})
 	return selected
+}
+
+// Expedite moves a detector's next run earlier, never later.
+func (s *Scheduler) Expedite(detectorID string, at time.Time) {
+	entry, ok := s.entries[detectorID]
+	if !ok || !at.Before(entry.nextRun) {
+		return
+	}
+	entry.nextRun = at
 }
 
 func (s *Scheduler) NextRun() time.Time {
