@@ -14,7 +14,20 @@ import (
 	ktesting "k8s.io/client-go/testing"
 
 	"sdo.dev/controller/sdk"
+	"sdo.dev/controller/sdk/traffic"
 )
+
+func TestKubernetesCacheRoutesSyntheticTrafficNotificationsWithoutAnInformer(t *testing.T) {
+	cache, err := NewKubernetesCache(KubernetesCacheConfig{Namespace: "demo", Client: fake.NewSimpleClientset()},
+		[]sdk.Detector{scheduledDetector{spec: sdk.DetectorSpec{
+			ID: "traffic", Interval: time.Second, Watches: []sdk.WatchKind{traffic.Watch},
+		}}})
+	if err != nil {
+		t.Fatalf("a synthetic watch must not require an informer: %v", err)
+	}
+	cache.Notify(traffic.Watch)
+	awaitWatchEvent(t, cache, sdk.WatchKind{APIVersion: traffic.Watch.APIVersion, Kind: traffic.Watch.Kind, Namespace: "demo"})
+}
 
 func TestKubernetesCacheUsesDeclaredInformerUnionWithoutRelisting(t *testing.T) {
 	client := fake.NewSimpleClientset(

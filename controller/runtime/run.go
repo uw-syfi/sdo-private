@@ -16,6 +16,7 @@ import (
 
 	"sdo.dev/controller/core"
 	"sdo.dev/controller/sdk"
+	"sdo.dev/controller/sdk/traffic"
 )
 
 type RuntimeOptions struct {
@@ -111,6 +112,13 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	resumeSyncTimeout := flags.Duration(
 		"resume-sync-timeout", time.Minute, "maximum wait for a fresh application cache when maintenance ends",
 	)
+	syntheticTraffic := flags.Bool(
+		"synthetic-traffic", true, "send the health judge's synthetic traffic mixes to the application's Services",
+	)
+	syntheticWarmup := flags.Duration(
+		"synthetic-traffic-warmup", 5*time.Second,
+		"maximum wait for a first sample of every synthetic route before the first evaluation after start or resume",
+	)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -200,6 +208,19 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err != nil {
 		return fmt.Errorf("create Kubernetes informer cache: %w", err)
 	}
+	prober, trafficFailures, err := NewSyntheticTraffic(
+		resolvedRoot, *namespace, detectors, *syntheticTraffic, func() { kubernetesCache.Notify(traffic.Watch) },
+	)
+	if err != nil {
+		return fmt.Errorf("create synthetic traffic prober: %w", err)
+	}
+	var snapshotProvider SnapshotProvider = kubernetesCache
+	if prober != nil || len(trafficFailures) > 0 {
+		snapshotProvider = TrafficSnapshotProvider{Base: kubernetesCache, Prober: prober, Failures: trafficFailures}
+	}
+	if prober != nil {
+		defer prober.Stop()
+	}
 	argv := append([]string{*dispatcherCommand}, dispatcherArgs...)
 	jobEnvironment, err := parseResponderEnvironment(responderEnvironment)
 	if err != nil {
@@ -230,7 +251,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		RepairPolicy:        *repairPolicy,
 		FiringThreshold:     2, ClearThreshold: 2, BatchDebounce: 500 * time.Millisecond,
 		ConfirmationInterval: time.Second,
-	}, detectors, kubernetesCache, dispatcher, start)
+	}, detectors, snapshotProvider, dispatcher, start)
 	if err != nil {
 		return err
 	}
@@ -302,12 +323,41 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err := encoder.Encode(desired.Record()); err != nil {
 		fmt.Fprintln(stderr, err)
 	}
+	// startTraffic begins synthetic traffic from empty windows and waits
+	// briefly for a first sample of every route, so the next evaluation, which
+	// may be the all-clear that precedes a fault, judges observed traffic.
+	startTraffic := func() {
+		if prober == nil {
+			if len(trafficFailures) > 0 {
+				if err := encoder.Encode(map[string]any{"synthetic_traffic_load_failures": trafficFailures}); err != nil {
+					fmt.Fprintln(stderr, err)
+				}
+			}
+			return
+		}
+		prober.Reset()
+		prober.Start(runCtx)
+		warm := prober.WaitWarm(runCtx, *syntheticWarmup)
+		if err := encoder.Encode(map[string]any{
+			"synthetic_traffic": prober.Summary(), "synthetic_traffic_warm": warm,
+			"synthetic_traffic_load_failures": trafficFailures,
+		}); err != nil {
+			fmt.Fprintln(stderr, err)
+		}
+	}
+	stopTraffic := func() {
+		if prober != nil {
+			prober.Stop()
+			prober.Reset()
+		}
+	}
 	if !desired.Paused {
 		kubernetesCache.Start(runCtx)
 		cacheStarted = true
 		if err := kubernetesCache.WaitForSync(runCtx); err != nil {
 			return fmt.Errorf("sync Kubernetes informer cache: %w", err)
 		}
+		startTraffic()
 		if err := controller.Step(runCtx, time.Now().UTC(), nil); err != nil {
 			if runCtx.Err() != nil {
 				return nil
@@ -349,6 +399,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			fmt.Fprintf(stderr, "resume observation of namespace %s: %v\n", *namespace, syncErr)
 			return nil
 		}
+		startTraffic()
 		kubernetesCache.TakeEvents()
 		applied = desired
 		if err := encoder.Encode(applied.Record()); err != nil {
@@ -402,6 +453,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			}
 			desired = change
 			if desired.Paused {
+				// A redeploying application would fail synthetic requests;
+				// resume starts again from empty windows.
+				stopTraffic()
 				kubernetesCache.Stop()
 				kubernetesCache.TakeEvents()
 				applied = desired
