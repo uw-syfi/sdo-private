@@ -383,3 +383,34 @@ Goal: keep ONE SDO controller running across the rounds of a pipeline (the paper
 
 - **Responder Jobs of earlier incidents coexist** in the controller namespace until their TTL. In persistent mode the receipt's live-Job consistency check ignores Jobs of other incidents; the durable request/result pair is still required to be unique.
 - **Merged `vic/perf/controller-api-rate`** (`0fcd065`, `1643124`: QPS 50 / burst 100, one cached-resourceVersion state update, and the `ErrEffectNotDurable` guard) into this branch before the live check, as the coordinator asked. The merge was clean: it touched `controller.go`, `effects.go`, `broker_effects.go`, and `state_store.go`, while this branch touched `controller.go` only in a new method. Go tests pass for `runtime`, `core`, and `sdk`.
+
+## Program integration: persistent controller + variants, sequence, fresh reflection
+
+Branch `vic/exp/program-integration`, merge of `vic/feat/persistent-controller` (28c99f3, which already contains `vic/perf/controller-api-rate`). No SREGym runs and no image rebuilds were started for this entry.
+
+### Conflict resolution
+
+- **Both CLI flags survive.** The driver keeps `--reflection-session {resume,fresh}` and `--persistent-controller`.
+  - **Bug found in the merge:** the persistent path builds its own `RuntimeConfig` and did not pass `reflection_session`. A persistent run configured with `reflection_session = "fresh"` would have silently resumed. It now passes the mode; `test_persistent_driver_reports_resolution_without_strict_receipt_or_job_cleanup` is parametrized over both modes and failed before the fix.
+- **`ControllerInstallConfig`** keeps `reflection_session` next to `controller_namespace` and `reuse_existing`. The broker args carry `--reflection-session` and `--responder-turn-log`, so the install fingerprint (a hash of the rendered Job) covers the reflection mode: a persistent controller installed with a different mode is replaced, not reused. The fingerprint-mismatch test covers this case.
+- **Receipts.** `_production_receipt` keeps the incident-scoped signature from persistent mode (`incident_id`, other incidents' Jobs tolerated) and the `_same_session_reflection` helper from fresh reflection. Deferred persistent receipts therefore report `reflection_session_mode` and `same_session_reflection` the same way per-problem receipts do.
+- **Submodule.** `third_party/sregym` points at `38cbf4c7`, a merge of `ed505f3d` (namespace preservation, `SREGYM_PRESERVE_NAMESPACE_LABEL`) into `f0160350` (missing-ConfigMap variants), on submodule branch `vic/exp/program-integration`. It merged cleanly (different files). It is not pushed.
+
+### Config choices
+
+- **Persistent mode is the production shape** for the multi-stage SDO experiments. The paper's controller is long-running, and the sequence/variants questions (cost over a sequence, warm path on similar incidents) are about one controller accumulating memory. So `sdo_codex_luna_variants.toml` and `sdo_codex_luna_sequence.toml` now set `persistent_controller = true` in place, and their defaults equal `sdo_codex_luna_persistent.toml`'s. Neither had been run yet, so no earlier result changes meaning.
+  - Rejected: separate `_persistent` copies next to per-problem variants/sequence configs. That doubles the configs with no planned per-problem arm; the per-problem shape stays measurable through `sdo_codex_luna_reuse.toml`.
+  - All four sequence faults and all three variants are Hotel Reservation problems in `hotel-reservation`, so one controller (`hotel-reservation-sdo`) serves every stage. The pre-injection lifecycle fingerprint is the deployed topology, which faults do not change, so the controller is reused across different faults.
+- **Persistent reuse configs.** `sdo_codex_luna_persistent.toml` (from the persistent branch) is the persistent counterpart of `sdo_codex_luna_reuse.toml` and differs only in `persistent_controller` and the pipeline name; a test pins that. I added `sdo_codex_luna_persistent_fresh.toml`, the persistent counterpart of `sdo_codex_luna_reuse_fresh.toml` (adds only `reflection_session = "fresh"`). I kept the existing file name instead of renaming it to `..._reuse_persistent`, because the live run on `vic/feat/persistent-controller` uses it.
+- **Codex baselines** (`codex_luna_*`) have no controller and are unchanged.
+- Every config keeps `judge_model_id = "codex-gpt-6-luna"`; the config tests assert it for every resolved stage.
+
+### Analysis fix for persistent mode
+
+- The controller's per-turn usage log (`sdo_runtime/usage/controller-turns.jsonl`) lives on the controller PVC. With one controller per pipeline it accumulates every incident, and each stage exports the whole file. `incident_cost.py` summed it as the stage's reflection turn time, which would double-count in persistent mode.
+  - It now counts only records whose `cwd` is the incident worktree of the receipt's `incident_id`. The broker runs reflection in that worktree, and the directory name comes from the new `sdo.operational_memory.worktrees.incident_worktree_dirname` (extracted from `WorktreeManager.path_for`, unchanged behaviour).
+  - Receipts without an `incident_id` keep the old unfiltered sum. Token columns already come from the per-incident receipt and were unaffected.
+
+### Test-suite fix
+
+- The three `TestGrepProperties` Hypothesis tests (legacy crucible grep tool) now use `deadline=None`. Each example creates a temp directory, writes a file, patches the cwd, and compiles an arbitrary regex, so per-example wall time follows filesystem and machine load. Under load that exceeded the default 200 ms deadline. Example counts are unchanged; the file runs in about 5 s.

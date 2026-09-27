@@ -7,7 +7,10 @@
 #   stage 2: mongodb-geo and mongodb-rate both lose their init-script ConfigMaps.
 # Question: does SDO's warm path fire for a similar-but-not-identical incident,
 # and is the response still correct? Env and agent settings are copied from
-# sdo_codex_luna_reuse.toml. Baseline: codex_luna_variants_baseline.toml.
+# sdo_codex_luna_persistent.toml: ONE long-running controller in
+# hotel-reservation-sdo serves every stage (the production shape), and each
+# stage's strict receipt is written after its reflection drains.
+# Baseline: codex_luna_variants_baseline.toml.
 
 [pipeline]
 name = "sdo-codex-luna-variants"
@@ -43,6 +46,7 @@ controller_image = "sdo-controller:v0.1.0"
 responder_image = "sdo-sregym-responder:v0.1.0"
 validator_image = "sdo-detector-validator:v0.1.0"
 credentials_secret = "sdo-agent-credentials"
+persistent_controller = true
 
 [[stages]]
 name = "original-geo"

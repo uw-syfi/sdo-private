@@ -2,7 +2,10 @@
 # each again (A B C D A B C D), answered by SDO with Codex gpt-6-luna. Stage 0
 # starts cold from a fresh application workspace; every later stage chains the
 # workspace, so round 2 sees the detectors, playbooks, and outcomes learned in
-# round 1. Env and agent settings are copied from sdo_codex_luna_reuse.toml.
+# round 1. Env and agent settings are copied from sdo_codex_luna_persistent.toml:
+# ONE long-running controller in hotel-reservation-sdo serves all eight stages
+# (the production shape), and each stage's strict receipt is written after its
+# reflection drains (next stage or pipeline teardown).
 # Baseline: codex_luna_sequence_baseline.toml (lists all eight runs).
 #
 # The faults are those of sdo_codex_four_e2e.toml; all four are registered
@@ -42,6 +45,7 @@ controller_image = "sdo-controller:v0.1.0"
 responder_image = "sdo-sregym-responder:v0.1.0"
 validator_image = "sdo-detector-validator:v0.1.0"
 credentials_secret = "sdo-agent-credentials"
+persistent_controller = true
 
 [[stages]]
 name = "r1-readiness-probe"

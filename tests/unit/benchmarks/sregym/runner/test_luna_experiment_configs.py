@@ -1,4 +1,10 @@
-"""The luna variants, sequence, fresh-reflection, and repeat experiments reuse the luna reuse settings exactly."""
+"""The luna variants, sequence, persistent, fresh, and repeat experiments reuse the luna reuse settings.
+
+The variants and sequence pipelines run in persistent-controller mode (one
+long-running controller per application), so they copy the persistent reuse
+config's defaults; that config differs from the per-problem reuse config only
+in ``persistent_controller``.
+"""
 
 from __future__ import annotations
 
@@ -40,8 +46,10 @@ def _toml(name: str) -> dict:
 
 
 @pytest.mark.parametrize(("name", "problems"), sorted(PIPELINES.items()))
-def test_pipeline_copies_luna_defaults_and_chains_one_hotel_workspace(name: str, problems: list[str]) -> None:
-    assert _toml(name)["defaults"] == _toml("sdo_codex_luna_reuse.toml")["defaults"]
+def test_pipeline_copies_luna_persistent_defaults_and_chains_one_hotel_workspace(
+    name: str, problems: list[str]
+) -> None:
+    assert _toml(name)["defaults"] == _toml("sdo_codex_luna_persistent.toml")["defaults"]
 
     config = load_pipeline_config(EXPERIMENTS / name)
     resolved = [merge_stage_config(config.defaults, stage.runner_overrides) for stage in config.stages]
@@ -50,6 +58,7 @@ def test_pipeline_copies_luna_defaults_and_chains_one_hotel_workspace(name: str,
     assert all(stage.agent == "sdo_codex" and stage.model == "gpt-6-luna" for stage in resolved)
     assert all(stage.app_filter == "hotel_reservation" and stage.deploy_from_source for stage in resolved)
     assert all(stage.env.judge_model_id == "codex-gpt-6-luna" for stage in resolved)
+    assert all(stage.agent_config["sdo_codex"]["persistent_controller"] is True for stage in resolved)
     assert [stage.chain_application_workspace for stage in config.stages] == [False] + [True] * (len(problems) - 1)
     assert not any(stage.chain_kb for stage in config.stages)
 
@@ -73,16 +82,43 @@ def test_codex_baseline_differs_from_luna_baseline_only_in_problems_and_repeat(
     assert config.env.judge_model_id == "codex-gpt-6-luna"
 
 
-def test_fresh_reflection_arm_differs_from_luna_reuse_only_in_reflection_session() -> None:
-    fresh = _toml("sdo_codex_luna_reuse_fresh.toml")
+def test_persistent_reuse_differs_from_luna_reuse_only_in_persistent_controller() -> None:
+    persistent = _toml("sdo_codex_luna_persistent.toml")
     reference = _toml("sdo_codex_luna_reuse.toml")
 
+    assert persistent["defaults"]["agent_config"]["sdo_codex"].pop("persistent_controller") is True
+    assert persistent["pipeline"].pop("name") == "sdo-codex-luna-persistent"
+    reference["pipeline"].pop("name")
+    assert persistent == reference
+
+
+@pytest.mark.parametrize(
+    ("name", "reference_name", "pipeline_name", "persistent"),
+    [
+        ("sdo_codex_luna_reuse_fresh.toml", "sdo_codex_luna_reuse.toml", "sdo-codex-luna-reuse-fresh", False),
+        (
+            "sdo_codex_luna_persistent_fresh.toml",
+            "sdo_codex_luna_persistent.toml",
+            "sdo-codex-luna-persistent-fresh",
+            True,
+        ),
+    ],
+)
+def test_fresh_reflection_arm_differs_from_its_reference_only_in_reflection_session(
+    name: str, reference_name: str, pipeline_name: str, persistent: bool
+) -> None:
+    fresh = _toml(name)
+    reference = _toml(reference_name)
+
     assert fresh["defaults"]["agent_config"]["sdo_codex"].pop("reflection_session") == "fresh"
-    assert fresh["pipeline"].pop("name") == "sdo-codex-luna-reuse-fresh"
+    assert fresh["pipeline"].pop("name") == pipeline_name
     reference["pipeline"].pop("name")
     assert fresh == reference
 
-    config = load_pipeline_config(EXPERIMENTS / "sdo_codex_luna_reuse_fresh.toml")
+    config = load_pipeline_config(EXPERIMENTS / name)
     resolved = [merge_stage_config(config.defaults, stage.runner_overrides) for stage in config.stages]
     assert all(stage.env.judge_model_id == "codex-gpt-6-luna" for stage in resolved)
     assert all(stage.agent_config["sdo_codex"]["reflection_session"] == "fresh" for stage in resolved)
+    assert all(
+        bool(stage.agent_config["sdo_codex"].get("persistent_controller", False)) is persistent for stage in resolved
+    )
