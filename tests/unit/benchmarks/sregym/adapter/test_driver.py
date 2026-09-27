@@ -1374,6 +1374,27 @@ def test_health_objective_never_requires_endpoints_for_external_name_services() 
     assert ("Service", "jaeger") in [(resource.kind, resource.name) for resource in context.active_resources]
 
 
+def test_deployed_lifecycle_fingerprint_ignores_resource_order_and_tracks_topology() -> None:
+    from benchmarks.sregym.adapter.driver import deployed_lifecycle
+
+    def runner_for(items: list[dict[str, object]]):
+        def fake_runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(args, 0, json.dumps({"items": items}), "")
+
+        return fake_runner
+
+    frontend = {"kind": "Deployment", "metadata": {"name": "frontend"}}
+    geo = {"kind": "Deployment", "metadata": {"name": "mongodb-geo"}}
+
+    first = deployed_lifecycle("hotel-reservation", command_runner=runner_for([frontend, geo]))
+    reordered = deployed_lifecycle("hotel-reservation", command_runner=runner_for([geo, frontend]))
+    shrunk = deployed_lifecycle("hotel-reservation", command_runner=runner_for([frontend]))
+
+    assert first.context == _deployed_lifecycle_context("hotel-reservation", command_runner=runner_for([frontend, geo]))
+    assert first.fingerprint == reordered.fingerprint
+    assert first.fingerprint != shrunk.fingerprint
+
+
 def test_exported_runtime_artifacts_cover_responder_sessions_and_usage_logs() -> None:
     import posixpath
 

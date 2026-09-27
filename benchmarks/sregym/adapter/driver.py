@@ -416,6 +416,47 @@ def _lifecycle_fingerprint(context: DeployedLifecycleContext) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
+@dataclass(frozen=True)
+class DeployedLifecycle:
+    """The deployed lifecycle context and the fingerprint a persistent controller is reused under."""
+
+    context: DeployedLifecycleContext
+    fingerprint: str
+
+
+def deployed_lifecycle(namespace: str, *, command_runner: CommandRunner = subprocess.run) -> DeployedLifecycle:
+    context = _deployed_lifecycle_context(namespace, command_runner=command_runner)
+    return DeployedLifecycle(context=context, fingerprint=_lifecycle_fingerprint(context))
+
+
+def run_or_reuse_lifecycle(
+    repository: Path,
+    *,
+    application: str,
+    context: DeployedLifecycleContext,
+    provider: str,
+    model: str,
+) -> bool:
+    """Reuse a still-valid lifecycle handoff, or run a fresh model-backed lifecycle; return whether it was reused."""
+
+    reused = reuse_initial_lifecycle_if_valid(
+        repository,
+        application=application,
+        health_objective=context.health_objective,
+        active_resources=context.active_resources,
+    )
+    if not reused:
+        lifecycle_type = ClaudeLifecycleBackend if provider == "claude" else CodexLifecycleBackend
+        run_initial_lifecycle(
+            repository,
+            application=application,
+            health_objective=context.health_objective,
+            active_resources=context.active_resources,
+            backend=lifecycle_type(model=model),
+        )
+    return reused
+
+
 @contextlib.contextmanager
 def _environment(name: str, value: str | None) -> Iterator[None]:
     previous = os.environ.get(name)
@@ -471,21 +512,13 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
     def lifecycle() -> bool:
         # Host-side lifecycle keeps the benchmark's agent access path.
         with _environment("KUBECONFIG", ambient_kubeconfig):
-            reused = reuse_initial_lifecycle_if_valid(
+            reused = run_or_reuse_lifecycle(
                 repository,
                 application=application,
-                health_objective=lifecycle_context.health_objective,
-                active_resources=lifecycle_context.active_resources,
+                context=lifecycle_context,
+                provider=args.provider,
+                model=args.model,
             )
-            if not reused:
-                lifecycle_type = ClaudeLifecycleBackend if args.provider == "claude" else CodexLifecycleBackend
-                run_initial_lifecycle(
-                    repository,
-                    application=application,
-                    health_objective=lifecycle_context.health_objective,
-                    active_resources=lifecycle_context.active_resources,
-                    backend=lifecycle_type(model=args.model),
-                )
         if args.logs_dir:
             persist_lifecycle_seed(repository, Path(args.logs_dir))
         return reused
