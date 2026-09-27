@@ -684,6 +684,7 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - This corrects the first version of this note (in `5e709c1`), which suggested lowering CPU requests.
 
 ### fresh3 rerun (post-fix, luna-w1): pass
+- **Takeaways** (added in Step 3): warm TTM 21.5 s sits in the SDO warm range of 15.0–21.5 s under the heaviest load of the six A/B runs, so load did not skew the arm. See 3.1 for the pooled A/B and 3.3 for tokens (its stage 0 reflection is 656K, 0 on the repeat).
 
 - **Run:** `20260927_205746_pipeline_sdo-codex-luna-persistent-fresh`, 20:57–21:15Z; load 17–38 (another project's test workers early on).
 - **Stage 0:** D+/M+. TTD 13.1 s, TTM 73.3 s (raw including judge 94.5 s, last mutation 59.2 s). Responder 404K tokens, reflection 656K.
@@ -726,6 +727,7 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - Also requests (model turns) per incident.
 
 ### Codex x5, post-fix (luna-w2): 5/5 pass
+- **Takeaways** (added in Step 3): Codex is reliable on this problem but slow and variable (TTM 54–134 s), and every attempt is slower than every SDO warm repeat (15–21.5 s). n=5, and the variance is the agent's own behaviour. It is the Codex baseline for 3.1 and 3.3.
 
 - **Run:** `20260927_205946_codex`, 20:59–21:22Z. Problem `missing_configmap_hotel_reservation`, all five attempts D+/M+. This is the counted Codex baseline for the persistent A/B. The pre-fix `superseded_prefix_20260927_195049_codex` stays supplementary only.
 
@@ -746,6 +748,7 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
 - **Rate limits:** no error events and no limit-reached flags. The weekly window was at 88% at 21:21Z.
 
 ### codex_variants (luna-w4, moved from w2): 2/3 pass
+- **Takeaways** (added in Step 3): Codex handles single-database variants at about the same speed as SDO starting cold, but failed the compound variant through a cleanup slip after a red-herring diagnosis. One run; see 3.2.
 
 - **Run:** `20260927_210409_codex`, 21:04–21:27Z.
 
@@ -792,6 +795,7 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - No playbook needs a verb the responder RBAC does not grant. The Step 0 rule held in all six runs, and requests are probed with python3 urllib.
 
 ### sdo_variants (luna-w1): 3/3 pass
+- **Takeaways** (added in Step 3): memory generalized from the base fault to a compound variant (stage 2: 33.9 s, 216K raw tokens, reflection skipped), but a family-level match gave no speedup on its first occurrence. One run; see 3.2 and 3.3.
 
 - **Run:** `20260927_211548_pipeline_sdo-codex-luna-variants`, 21:15–21:38Z, load 17–43.
 
@@ -1131,3 +1135,27 @@ Variants cumulative break-even was not reached within 3 stages (incident-only ga
   - Default the persistent controller to fresh reflection sessions, subject to a larger-n confirmation.
   - Look at trimming the first responder's context: its 574K cached input is about 1.9× Codex, which points to the controller's incident prompt.
   - Measure break-even directly with a longer same-incident run in the next round, instead of projecting it.
+
+### 3.4 Step 3 summary
+
+- **Valid, counted runs:**
+  - SDO: persistent reuse ×3, fresh ×3 and variants ×1, plus the partial sequence (stopped by the user, 2 of 8 stages).
+  - Codex: x5 (post-fix), variants ×1 and sequence ×1.
+- **Excluded** (named with a prefix in the logs):
+  - `invalid_`: runs contaminated by the shared kubeconfig.
+  - `superseded_prefix_`: the Codex x5 from before the conductor fix; supplementary only.
+  - `stopped_`: runs stopped for the conductor fix or by the user.
+  - `sdobug_`: fresh3 before the whitespace fix.
+  - The smoke runs.
+- **Headline (judge-free TTM):** SDO repeat incidents take 18.3 s [15.0–21.5] against Codex's 91.7 s [54.3–134.1], about 5× faster, with ranges that do not overlap. First incidents are on par (101.3 vs 91.7 s).
+- **Correctness:** SDO passed every incident it attempted (17/17 stages across A/B, variants and the partial sequence). Codex passed 11/16, with every failure tracing to one distractor pattern.
+- **Cost:** a warm repeat costs about 0.6× a Codex attempt. A first incident costs about 3.5–4× (responder about 1.9×, plus reflection). Weighted break-even needs about 4–12 exact repeats, or about 18–38 including the 1.77M-token lifecycle.
+- **Reflection mode:** reuse and fresh are equal on speed and memory quality. Fresh is about 27% cheaper weighted (low confidence).
+- **Open items for the next round** (after the 2026-10-03 quota reset):
+  - rerun the full sequence pair;
+  - replicate variants at n=3;
+  - measure break-even directly with a long same-incident run;
+  - set `AGENT_REASONING_EFFORT=medium` explicitly for Codex;
+  - use 1 control plane + 1 worker kind clusters;
+  - export receipts and rollouts per stage;
+  - fix the controller's unbounded closure retry.
