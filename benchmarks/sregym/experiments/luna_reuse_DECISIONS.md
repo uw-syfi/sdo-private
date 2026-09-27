@@ -642,12 +642,13 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
 
 | Run | Cluster | TTD | TTM (headline) | raw incl. judge | no_judge | last_mut |
 |---|---|---|---|---|---|---|
-| reuse1 | w0 | 28.0 / 13.7 | 106.8 / 30.8 | 130.7 / 37.5 | 106.8 / 21.3 | 39.2 / 30.8 |
+| reuse1 | w0 | 28.0 / 13.7 | 106.8 / 21.3 | 130.7 / 37.5 | 106.8 / 21.3 | 39.2 / 19.2 |
 | fresh1 | w0 | 51.3 / 9.2 | 177.2 / 15.0 | 204.0 / 36.6 | 177.2 / 9.9 | 126.2 / 15.0 |
 | reuse2 | w1 | 26.3 / 12.4 | 71.9 / 17.7 | 90.3 / 35.1 | 71.9 / 12.9 | 48.4 / 17.7 |
-| fresh2 | w2 | 25.2 / 6.6 | 77.8 / 23.8 | 93.0 / 32.3 | 77.8 / 14.7 | 38.8 / 23.8 |
-| reuse3 | w2 | 32.1 / 12.4 | 101.0 / 17.9 | 126.0 / 28.5 | 101.0 / 12.5 | 59.7 / 17.9 |
+| fresh2 | w2 | 25.2 / 6.6 | 77.8 / 16.2 | 93.0 / 32.3 | 77.8 / 14.7 | 38.8 / 16.2 |
+| reuse3 | w2 | 32.1 / 12.4 | 101.0 / 17.9 | 126.0 / 28.5 | 101.0 / 12.5 | 52.6 / 17.9 |
 
+  *Corrected in the Step 3 write-up:* reuse1, fresh2 and reuse3 were first computed before `kubectl rollout status` was excluded from mutations, which pushed their `last_mut` values up. reuse1's stage 1 TTM becomes 21.3 s (was 30.8 s) and fresh2's 16.2 s (was 23.8 s). The "reuse1's 21.3 s became 30.8 s" example above no longer holds: reuse1's `last_mut` (19.2 s) is below its judge-excluded time. The floor still matters for Codex.
   Pre-fix Codex x5 (supplementary): TTD 36.7, 27.3, 34.6, 37.7, 37.4; TTM 74.9, 53.9, 79.8, –, 69.4 (4 passed, mean 69.5); raw 80.8, 73.0, 85.7, –, 76.2.
 
 ### Relaunch after the conductor and whitespace fixes (20:57Z)
@@ -983,3 +984,46 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - The one-time lifecycle, from the audit's breakdown, is about 482K weighted ($0.048).
 - **Not verified live:** no Codex or Claude run was spent (weekly quota at about 90%). agentshim's e2e suite was skipped for 0.7.0, and recorded-stream fixtures cover the parsing instead.
 
+
+## Step 3 results
+
+### 3.1 Replication: reuse vs fresh reflection, persistent controller (n=3 per arm, 2 stages)
+
+The problem is `missing_configmap_hotel_reservation` in both stages. Stage 0 is the first incident; stage 1 repeats it with memory. All 12 stages passed both oracles, and every stage 1 fired the warm path.
+
+| Run | Cluster | Load (1-min, min–max, mean) | S0 TTD | S0 TTM | S0 raw | S1 TTD | S1 TTM | S1 raw | S1 incident resolution |
+|---|---|---|---|---|---|---|---|---|---|
+| reuse1 `182519` | w0 | 4–11 (6) | 28.0 | 106.8 | 130.7 | 13.7 | 21.3 | 37.5 | 86.4 |
+| reuse2 `195104` | w1 | 8–27 (15) | 26.3 | 71.9 | 90.3 | 12.4 | 17.7 | 35.1 | 85.0 |
+| reuse3 `200727` | w2 | 8–20 (13) | 32.1 | 101.0 | 126.0 | 12.4 | 17.9 | 28.5 | 85.1 |
+| fresh1 `184719` | w0 | 3–11 (7) | 51.3 | 177.2 | 204.0 | 9.2 | 15.0 | 36.6 | 84.1 |
+| fresh2 `195127` | w2 | 8–27 (15) | 25.2 | 77.8 | 93.0 | 6.6 | 16.2 | 32.3 | 81.6 |
+| fresh3 `205746` | w1 | 16–43 (24) | 13.1 | 73.3 | 94.5 | 8.8 | 21.5 | 36.8 | 90.2 |
+
+All times are in seconds. Summary, as mean [min–max] with the standard deviation:
+
+| Arm | S0 TTD | S0 TTM | S1 TTD | S1 TTM | S1 raw incl. judge |
+|---|---|---|---|---|---|
+| reuse | 28.8 [26.3–32.1] sd 2.9 | 93.2 [71.9–106.8] sd 18.7 | 12.8 [12.4–13.7] sd 0.7 | 19.0 [17.7–21.3] sd 2.0 | 33.7 [28.5–37.5] |
+| fresh | 29.8 [13.1–51.3] sd 19.5 | 109.4 [73.3–177.2] sd 58.7 | 8.2 [6.6–9.2] sd 1.4 | 17.5 [15.0–21.5] sd 3.4 | 35.2 [32.3–36.8] |
+| SDO pooled (n=6) | 29.3 sd 12.5 | 101.3 [71.9–177.2] sd 40.0 | 10.5 sd 2.7 | **18.3 [15.0–21.5] sd 2.6** | 34.5 |
+| Codex x5 post-fix (n=5, memoryless) | 38.7 [30.1–48.9] sd 9.3 | **91.7 [54.3–134.1] sd 38.1** | – | – | 102.5 raw |
+
+**Fairness and load**
+- **Warm TTM does not track host load.** The stage 1 TTM stays within 15.0–21.5 s from the quietest run (fresh1, mean load 7) to the busiest (fresh3, mean 24, peak 43).
+- **Codex at load peaks:** its slowest attempts, 3 and 4, coincided with load peaks, but per-call model time and kubectl read latency did not change. The extra time came from a second repair round (see its entry).
+- **No sign of clusters affecting timings:** each arm ran on all three clusters (reuse: w0, w1, w2; fresh: w0, w2, w1).
+- **No rate-limit events anywhere.** The raised load threshold (40) was reached once, briefly (43 at 21:12Z, while other projects' test suites were running).
+
+**Takeaways**
+- **What the data shows:**
+  - With memory, SDO's repeat-incident TTM is **18.3 s (15.0–21.5) against Codex's 91.7 s (54.3–134.1)**. That is about 5× faster on the mean and about 2.5× faster than Codex's best attempt. Every SDO repeat beats every Codex attempt.
+  - Repeat TTD is 10.5 s against 38.7 s.
+  - A first incident without memory is on par with Codex: SDO 101.3 s vs Codex 91.7 s TTM.
+  - Reuse vs fresh reflection makes **no measurable difference** to repeat-incident speed (19.0 vs 17.5 s TTM). Fresh reflection's stage 1 TTD is slightly lower (8.2 vs 12.8 s), within noise at n=3.
+- **Confidence:** high for SDO warm vs Codex: n=6 vs 5, and the ranges do not overlap (worst SDO 21.5 s against best Codex 54.3 s). Low for reuse vs fresh (n=3 each, differences under 1 sd). Stage 0 is noisy on both arms (sd about 40 s). Every result is a single problem, `missing_configmap`.
+- **Implications for SDO:**
+  - This supports the core claim that verified operational memory turns a repeat incident into a fast playbook replay.
+  - The reflection session mode can be chosen for cost, since speed does not distinguish them. The Step 3 token tables decide it.
+  - The judge-free headline matters: raw times including the judge (34.5 vs 102.5 s) inflate SDO's warm time by about 16 s of grading wait.
+- **Next action:** pick the reflection mode on tokens (3.3). Extend the warm vs cold comparison to other fault types, which the sequence rerun does.
