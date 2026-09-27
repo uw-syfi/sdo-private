@@ -19,7 +19,7 @@ application_workspace = "persistent"
 require_strict_receipt = true
 
 [defaults.env]
-judge_model_id = "codex-gpt-5.4"
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
 worker_cpu_limit = "3"
 reuse_cluster = true
 cleanup_defer_timeout_seconds = 1800

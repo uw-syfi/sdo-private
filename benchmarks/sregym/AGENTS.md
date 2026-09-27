@@ -28,3 +28,7 @@ Crucible's orchestrator, judge, benchmark-oracle recovery, and private knowledge
 - Put reusable production lifecycle, responder, contracts, and operational-memory behavior under `sdo/`.
 - Keep benchmark verdicts, oracle answers, hidden fault identity, and injection metadata out of production requests, detectors, memory, and prompts.
 - Keep changes to the external harness in `third_party/sregym/`; do not copy its implementation into first-party packages.
+
+## Grading
+
+- Every experiment config uses the SREGym judge `judge_model_id = "codex-gpt-6-luna"`. The Codex CLI judge backend (`third_party/sregym/llm_backend/codex_cli_backend.py`) runs it at `xhigh` reasoning by default (`JUDGE_REASONING_EFFORT`). Use the same judge for every arm of a comparison.
