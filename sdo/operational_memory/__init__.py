@@ -7,6 +7,7 @@ from sdo.operational_memory.broker_service import (
     ClosureReceipt,
     ControllerRolloutExpectation,
     ControllerRolloutRecord,
+    TopologyReview,
 )
 from sdo.operational_memory.commit_broker import CommandProposalValidator, CommitBroker
 from sdo.operational_memory.models import ArtifactOwner, OutcomeClassification, OutcomeRecord
@@ -40,4 +41,5 @@ __all__ = [
     "OutcomeRecord",
     "SandboxResult",
     "SandboxRunner",
+    "TopologyReview",
 ]

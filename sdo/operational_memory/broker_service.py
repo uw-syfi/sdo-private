@@ -42,7 +42,25 @@ class ReflectionProposal(Protocol):
     proposed_changes: list[str]
 
 
+class TopologyReview(BaseModel):
+    """The broker's own comparison of arch.md's topology with the current source."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    architecture_topology_fingerprint: str = Field(min_length=1)
+    source_topology_fingerprint: str = Field(min_length=1)
+    stale_memory_detected: bool
+
+
 class OutcomeReflector(Protocol):
+    """Learns from one verified incident outcome.
+
+    A call without ``validation_feedback`` is the first attempt and resumes the
+    responder's own session (``session_id``). A call with feedback retries a
+    proposal the broker rejected; it runs in a short fresh session that sees
+    only ``rejected_proposal_diff``, the feedback and the original request.
+    """
+
     def should_reflect(
         self,
         outcome: OutcomeRecord,
@@ -61,6 +79,8 @@ class OutcomeReflector(Protocol):
         history: list[OutcomeRecord],
         outcome_commit: str,
         validation_feedback: str | None = None,
+        topology_review: TopologyReview | None = None,
+        rejected_proposal_diff: str | None = None,
     ) -> ReflectionProposal: ...
 
 
@@ -139,6 +159,9 @@ class BrokerLedger(BaseModel):
     outcome_commit: str | None = None
     reflection_started: bool = False
     reflection_attempts: int = 0
+    # Attempts after a validation rejection run in a fresh session rather than
+    # resuming the responder session; defaulted for ledgers written earlier.
+    reflection_fresh_retry_attempts: int = 0
     reflection_backend_completed: bool = False
     reflection_summary: str | None = None
     reflection_learning_decision: Literal["updated", "no_change"] | None = None
@@ -462,6 +485,7 @@ class BrokerService:
             self._save(ledger)
             return ledger
         changed_paths = self.broker.proposal_changed_paths(worktree)
+        retry_feedback = ledger.reflection_validation_error
         if ledger.reflection_started and not ledger.reflection_backend_completed:
             if changed_paths:
                 self._rollback_incomplete_reflection(worktree)
@@ -491,9 +515,13 @@ class BrokerService:
                 outcome=outcome,
                 history=outcomes,
                 outcome_commit=ledger.outcome_commit or "",
-                validation_feedback=ledger.reflection_validation_error,
+                validation_feedback=retry_feedback,
+                topology_review=self._topology_review(ledger),
+                rejected_proposal_diff=self._rejected_reflection_diff(ledger) if retry_feedback else None,
             )
             ledger.reflection_attempts += 1
+            if retry_feedback:
+                ledger.reflection_fresh_retry_attempts += 1
             for key, value in turn.usage.items():
                 ledger.reflection_usage[key] = ledger.reflection_usage.get(key, 0) + value
             ledger.reflection_backend_completed = True
@@ -507,9 +535,7 @@ class BrokerService:
         if changed_paths:
             if ledger.reflection_learning_decision != "updated":
                 error = "reflection changed files but did not declare learning_decision=updated"
-                ledger.reflection_backend_completed = False
-                ledger.reflection_validation_error = error
-                self._save(ledger)
+                self._reject_reflection(ledger, worktree, error)
                 raise BrokerServiceError(error)
             detector_paths = sorted(
                 path
@@ -525,9 +551,7 @@ class BrokerService:
                     "successful confirmed incident reflection must include a sharp fault-specific detector update "
                     "under .sdo/diagnostics/detectors/incidents/ and register it in the detector manifest"
                 )
-                ledger.reflection_backend_completed = False
-                ledger.reflection_validation_error = error
-                self._save(ledger)
+                self._reject_reflection(ledger, worktree, error)
                 raise BrokerServiceError(error)
             try:
                 reflection = self.broker.commit_proposal(
@@ -536,9 +560,7 @@ class BrokerService:
                     phase="reflection",
                 )
             except (CommitBrokerError, MemoryValidationError) as exc:
-                ledger.reflection_backend_completed = False
-                ledger.reflection_validation_error = str(exc)
-                self._save(ledger)
+                self._reject_reflection(ledger, worktree, str(exc))
                 raise BrokerServiceError(
                     f"reflection proposal failed isolated validation and must be regenerated: {exc}"
                 ) from exc
@@ -553,14 +575,66 @@ class BrokerService:
         else:
             if ledger.reflection_learning_decision != "no_change" or not ledger.reflection_no_change_reason:
                 error = "reflection made no changes without declaring learning_decision=no_change and a concrete reason"
-                ledger.reflection_backend_completed = False
-                ledger.reflection_validation_error = error
-                self._save(ledger)
+                self._reject_reflection(ledger, worktree, error)
                 raise BrokerServiceError(error)
             return self._commit_noop_reflection(ledger, worktree, clear_error=True)
         ledger.reflection_completed = True
         self._save(ledger)
         return ledger
+
+    def _reject_reflection(self, ledger: BrokerLedger, worktree: Path, error: str) -> None:
+        """Persist a rejection so the next attempt can retry from the rejected diff.
+
+        The diff is written before the ledger so a retry never sees the error
+        without the proposal it describes; the next attempt rolls the worktree
+        back and starts a fresh session from this diff.
+        """
+
+        diff_path = self._rejected_reflection_diff_path(ledger.incident_id)
+        try:
+            diff = self._proposal_diff(worktree)
+        except CommitBrokerError as exc:
+            # The diff only shortens the retry; never let it mask the rejection.
+            diff = f"(rejected proposal diff unavailable: {exc})\n"
+        temporary = diff_path.with_suffix(".tmp")
+        temporary.write_text(diff, encoding="utf-8")
+        os.replace(temporary, diff_path)
+        ledger.reflection_backend_completed = False
+        ledger.reflection_validation_error = error
+        self._save(ledger)
+
+    def _rejected_reflection_diff(self, ledger: BrokerLedger) -> str | None:
+        path = self._rejected_reflection_diff_path(ledger.incident_id)
+        return path.read_text(encoding="utf-8") if path.is_file() else None
+
+    def _rejected_reflection_diff_path(self, incident_id: str) -> Path:
+        return self._ledger_path(incident_id).with_suffix(".reflection-rejected.diff")
+
+    def _proposal_diff(self, worktree: Path) -> str:
+        """Diff every committed, staged, dirty and untracked change against the target head."""
+
+        changed_paths = self.broker.proposal_changed_paths(worktree)
+        if not changed_paths:
+            return ""
+        target_head = self.broker._git(self.target_repository, "rev-parse", "HEAD").strip()
+        index = self.state_root / f"diff-index-{os.getpid()}"
+        env = {**os.environ, "GIT_INDEX_FILE": str(index), "GIT_LITERAL_PATHSPECS": "1"}
+        try:
+            self.broker._git(worktree, "read-tree", target_head, env=env)
+            self.broker._git(worktree, "add", "--all", "--", *changed_paths, env=env)
+            return self.broker._git(worktree, "diff", "--cached", "--no-color", target_head, "--", env=env)
+        finally:
+            index.unlink(missing_ok=True)
+
+    @staticmethod
+    def _topology_review(ledger: BrokerLedger) -> TopologyReview | None:
+        if not ledger.architecture_topology_fingerprint or not ledger.source_topology_fingerprint:
+            return None
+        return TopologyReview(
+            architecture_topology_fingerprint=ledger.architecture_topology_fingerprint,
+            source_topology_fingerprint=ledger.source_topology_fingerprint,
+            stale_memory_detected=ledger.stale_memory_detected,
+        )
 
     def _commit_noop_reflection(
         self,
