@@ -138,6 +138,9 @@ class FakeOps:
             receipt["completed"] = False
         return receipt
 
+    def export_runtime_artifacts(self, config: Any, artifacts_dir: Path) -> dict[str, str | None]:
+        return {"directory": None, "error": None}
+
     def export_controller_logs(self, control_namespace: str, artifacts_dir: Path) -> None:
         pass
 

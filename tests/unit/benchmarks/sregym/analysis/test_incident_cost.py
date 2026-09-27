@@ -930,3 +930,23 @@ def test_a_fresh_reflection_takes_its_breakdown_from_its_own_rollout(tmp_path: P
     assert only.reflection == TokenUsage(
         input_tokens=300, cached_input_tokens=200, output_tokens=30, reasoning_output_tokens=8, requests=2
     )
+
+
+def test_a_stage_stopped_before_its_drain_keeps_responder_tokens_from_its_stage_end_evidence(tmp_path: Path) -> None:
+    root = tmp_path / "20260927_000000_pipeline_sdo-codex-luna-sequence"
+    responder = _usage(500, 10, cached=400)
+    stage = _sdo_stage(
+        root, 0, "first", PROBLEM_A, responder=responder, reflection=_usage(0, 0), warm=False, incident_detectors=1
+    )
+    run = stage / "runs" / f"000000_{PROBLEM_A}" / "worker_0" / "results" / "sdo_codex" / PROBLEM_A / "run_1"
+    # The pipeline stopped before the next stage drained this incident: no strict receipt.
+    (run / "sdo_production_receipt_strict.json").unlink()
+    resolution = {"incident_id": "incident-0", "responder_session_id": "session-0", "incident_resolution_seconds": 42.0}
+    (run / "sdo_incident_resolution.json").write_text(json.dumps(resolution), encoding="utf-8")
+    rollout = run / "sdo_runtime" / "codex" / "sessions" / "2026" / "09" / "27" / "rollout-x-session-0.jsonl"
+    _token_turns(rollout, [[responder]])
+
+    (only,) = load_sdo_pipeline(root)
+
+    assert only.responder == replace(TokenUsage.from_mapping(responder), requests=1)
+    assert only.incident_resolution_seconds == 42.0

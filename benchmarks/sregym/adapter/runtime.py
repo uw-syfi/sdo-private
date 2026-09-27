@@ -708,3 +708,9 @@ def collect_production_receipt(config: RuntimeConfig, incident_id: str, artifact
 
 def export_controller_logs(control_namespace: str, artifacts_dir: Path | None) -> dict[str, str | None]:
     return _export_controller_logs(control_namespace, artifacts_dir)
+
+
+def export_runtime_artifacts(control_namespace: str, artifacts_dir: Path | None) -> dict[str, str | None]:
+    """Copy the controller PVC's usage logs and agent transcripts; requires the repository sync pod."""
+
+    return _export_runtime_artifacts(control_namespace, artifacts_dir)

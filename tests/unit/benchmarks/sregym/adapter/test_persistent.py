@@ -89,6 +89,7 @@ class FakeOps:
     # Incidents whose responder reported a non-completed status.
     incomplete: set[str] = field(default_factory=set)
     polls_until_reflected: dict[str, int] = field(default_factory=dict)
+    stage_evidence_error: str | None = None
 
     def controller_pod(self, control_namespace: str) -> ControllerPod | None:
         return self.pods.get(control_namespace)
@@ -188,6 +189,16 @@ class FakeOps:
         receipt["artifacts_dir"] = str(artifacts_dir)
         receipt["completed"] = incident_id not in self.incomplete
         return receipt
+
+    def export_runtime_artifacts(self, config: RuntimeConfig, artifacts_dir: Path) -> dict[str, str | None]:
+        self.events.append(("stage_evidence", config.control_namespace))
+        if self.stage_evidence_error is not None:
+            return {"directory": None, "error": self.stage_evidence_error}
+        # The responder's rollout and usage exist once the incident is verified.
+        rollout = artifacts_dir / "sdo_runtime" / "codex" / "sessions" / f"rollout-responder-{self.incidents}.jsonl"
+        rollout.parent.mkdir(parents=True, exist_ok=True)
+        rollout.write_bytes(b'{"type":"session_meta"}\n')
+        return {"directory": str(artifacts_dir / "sdo_runtime"), "error": None}
 
     def export_controller_logs(self, control_namespace: str, artifacts_dir: Path) -> None:
         self.events.append(("logs", control_namespace))
@@ -511,3 +522,55 @@ def test_a_permanently_failed_closure_ends_the_drain_with_the_broker_error(tmp_p
     # The controller log is evidence of the rejected closure.
     assert ops.events.count(("logs", "hotel-sdo")) == 2
     assert ("delete", "hotel-sdo") in ops.events
+
+
+def test_each_stage_exports_its_runtime_evidence_when_it_ends(tmp_path: Path) -> None:
+    ops = FakeOps()
+
+    resolution = _run(tmp_path, ops, "s0", [])
+
+    receipt_dir = tmp_path / "s0" / "agent"
+    # The responder's tokens survive a pipeline stopped before this incident drains.
+    assert (receipt_dir / "sdo_runtime" / "codex" / "sessions" / "rollout-responder-1.jsonl").is_file()
+    evidence = resolution["stage_end_runtime_artifacts"]
+    assert evidence["error"] is None
+    assert evidence["scope"] == "stage-end snapshot; the drained strict receipt supersedes it"
+    order = [event[0] for event in ops.events]
+    # Exported after verified recovery, so it never delays the fault or the responder.
+    assert order.index("paused") < order.index("stage_evidence")
+    recorded = json.loads((receipt_dir / RESOLUTION_FILENAME).read_text(encoding="utf-8"))
+    assert recorded["stage_end_runtime_artifacts"]["error"] is None
+
+
+def test_a_failed_stage_end_export_is_recorded_and_does_not_fail_the_stage(tmp_path: Path) -> None:
+    ops = FakeOps(stage_evidence_error="kubectl exec failed: pod not ready")
+
+    resolution = _run(tmp_path, ops, "s0", [])
+
+    assert resolution["stage_end_runtime_artifacts"]["error"] == "kubectl exec failed: pod not ready"
+    assert resolution["incident_resolution_seconds"] == 40.0
+
+
+def test_a_drained_receipt_is_published_as_soon_as_the_next_stage_drains_it(tmp_path: Path) -> None:
+    # A pipeline stopped during stage 1 must keep stage 0's strict receipt and tokens.
+    staging = tmp_path / ".runtime" / "sdo_codex" / "anon_abc"
+    ops = FakeOps()
+    _run(tmp_path, ops, "s0", [], receipt_dir=staging)
+    run_dir = tmp_path / "pipeline" / "stage_0" / "results" / "sdo_codex" / "problem-1" / "run_1"
+    run_dir.parent.mkdir(parents=True)
+    staging.rename(run_dir)
+    ops.reflectable.add("incident-1")
+
+    _run(tmp_path, ops, "s1", [])
+
+    receipt = json.loads((run_dir / STRICT_RECEIPT_FILENAME).read_text(encoding="utf-8"))
+    assert receipt["incident_id"] == "incident-1"
+    assert "anon_abc" not in (run_dir / STRICT_RECEIPT_FILENAME).read_text(encoding="utf-8")
+    assert (run_dir / "sdo_runtime" / "codex" / "sessions" / "rollout-incident-1.jsonl").is_file()
+    assert (run_dir / "sdo_runtime" / "usage" / "controller-turns.jsonl").is_file()
+    assert not staging.exists()
+    # Teardown publishes nothing twice.
+    ops.reflectable.add("incident-2")
+    state_path = tmp_path / "sdo_persistent_controller.json"
+    assert teardown(state_path, ops=ops, clock=_clock(ops)) == []
+    assert run_dir / STRICT_RECEIPT_FILENAME not in publish_deferred_receipts(state_path, tmp_path / "pipeline")

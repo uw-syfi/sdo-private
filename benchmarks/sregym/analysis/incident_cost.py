@@ -90,6 +90,7 @@ except ModuleNotFoundError:  # Python 3.10
 
 WARM_PROMPT_MARKER = "Warm path: validated incident memory matches this incident."
 RECEIPT_NAME = "sdo_production_receipt_strict.json"
+RESOLUTION_NAME = "sdo_incident_resolution.json"
 LIFECYCLE_USAGE_NAME = "sdo_turn_usage.jsonl"
 _RENAMED_STAGE = re.compile(r"\.\d{8}_\d{6}$")
 _STAGE_DIR = re.compile(r"^stage_(\d+)_(.+)$")
@@ -892,6 +893,22 @@ def pipeline_stage_dirs(pipeline_dir: Path) -> list[tuple[int, str, Path]]:
     return sorted(stages)
 
 
+def _stage_end_record(results: Path) -> dict[str, Any]:
+    """The resolution record of a stage whose strict receipt never came (a pipeline stopped before its drain).
+
+    It names the incident and the responder session, so the stage-end
+    ``sdo_runtime/`` snapshot still yields the responder's tokens. Reflection
+    usage is unknown without the receipt.
+    """
+
+    records = sorted(results.rglob(RESOLUTION_NAME))
+    if not records:
+        return {}
+    record = json.loads(records[-1].read_text(encoding="utf-8"))
+    keys = ("incident_id", "responder_session_id", "incident_resolution_seconds")
+    return {key: record[key] for key in keys if key in record} if isinstance(record, dict) else {}
+
+
 def load_sdo_pipeline(pipeline_dir: Path) -> list[SdoStage]:
     stages: list[SdoStage] = []
     for index, name, stage_dir in pipeline_stage_dirs(pipeline_dir):
@@ -899,7 +916,9 @@ def load_sdo_pipeline(pipeline_dir: Path) -> list[SdoStage]:
         memory = memory_size(stage_dir / "application_workspace")
         for problem_id, results in _problem_results_dirs(stage_dir):
             receipts = sorted(results.rglob(RECEIPT_NAME))
-            receipt: dict[str, Any] = json.loads(receipts[-1].read_text(encoding="utf-8")) if receipts else {}
+            receipt: dict[str, Any] = (
+                json.loads(receipts[-1].read_text(encoding="utf-8")) if receipts else _stage_end_record(results)
+            )
             reuse = receipt.get("memory_reuse") if isinstance(receipt.get("memory_reuse"), dict) else {}
             phases = receipt.get("phase_timings_seconds") or {}
             incident_id = receipt.get("incident_id")

@@ -1180,3 +1180,18 @@ Coordinator-directed, 2026-09-27. Four harness items from 3.4, each test-first, 
   - Exiting the controller on the permanent failure in persistent mode: the supervisor would relaunch it into the same durable failed state, and the drain already ends on the state. Only `--exit-after-closure` exits.
   - Dropping the closure to unblock new incidents: rejected. It would lose the only record of an unrecorded outcome. New incidents stay blocked until an operator acts, which is the conservative choice.
 - **Not changed:** workspace preparation and acknowledgment keep their immediate retry. They are idempotent broker operations with no validation gate, and neither has been seen to fail permanently.
+
+### 3.4-b: per-stage export of receipts, rollouts and usage
+
+- **The gap.** SREGym publishes a stage's staging tree when the stage ends, before its drain. Problem N's strict receipt and drain-time `sdo_runtime/` evidence were written into the recreated staging dir when problem N+1 drained it, but were copied into the published run only by `teardown --publish-root` at pipeline end. `sdo_sequence` was stopped mid-stage 2, so teardown never ran, and stages 0 and 1 had no tokens.
+- **Decision 1: publish each drained receipt as soon as it is drained.** `run_persistent_stage` calls `publish_deferred_receipts(state_path, state_path.parent)` right after the previous incident's drain, before this stage's fault injection. That is the same root and the same call the teardown uses. Publication moves the files, so teardown never publishes a file twice. A publication `OSError` is logged and left to teardown to retry. The strict receipt is still built only from the drained, acknowledged incident, so deferred-receipt correctness is unchanged.
+  - Timing: the copy takes milliseconds and falls in `inventory_and_lifecycle`, before injection, so outside TTD and TTM.
+- **Decision 2: snapshot the runtime evidence at stage end.** After verified health, the pause and the controller-log export, the adapter exports the controller PVC's usage logs and agent transcripts into the stage's receipt dir, recorded as `stage_end_runtime_artifacts` (`directory`, `error`, `scope`) in `sdo_incident_resolution.json`. This keeps the responder's tokens even when the pipeline stops before the next drain.
+  - It is diagnostic: an export failure is recorded and never fails the stage. It runs after the responder has submitted and the controller verified health, so it adds nothing to TTD or TTM, only a few seconds of stage wall clock.
+  - The repository sync pod it needs is left running, and the drain that follows re-applies the same pod and removes it. Stopping it would have the next drain race a terminating pod of the same name (`_delete_repository_sync` does not wait).
+  - The snapshot may hold a partial reflection transcript. The drained evidence overwrites it at publication, and the strict receipt stays the source of truth.
+  - The resolution now also records `responder_session_id`, and `incident_cost` falls back to the resolution record for a stage with no strict receipt. Such a stage reports responder tokens and resolution time, while its reflection tokens stay unknown.
+- **Alternatives considered:**
+  - Publishing from the runner after each stage: rejected. The runner would need a new CLI round-trip, and a stop during stage N+1 would still lose stage N's receipt, which is drained at the start of N+1.
+  - Writing strict receipts at stage end: rejected. The receipt needs the finished reflection and the acknowledged closure.
+- `.agents/skills/analyze-experiment/references/trajectory-schema.md` documents the new fields, the early publication and the analysis fallback.

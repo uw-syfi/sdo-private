@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import sys
 import time
 import uuid
@@ -40,6 +41,7 @@ from benchmarks.sregym.adapter.runtime import (
     RuntimeConfig,
     collect_production_receipt,
     export_controller_logs,
+    export_runtime_artifacts,
     install_persistent_controller,
     validate_production_receipt,
 )
@@ -71,6 +73,7 @@ CONTROLLER_LOGS_SUBDIR = Path(RUNTIME_ARTIFACTS_DIRNAME) / "controller_logs"
 POLL_SECONDS = 1.0
 MAINTENANCE_ACK_TIMEOUT_SECONDS = 600.0
 DRAIN_TIMEOUT_SECONDS = 3600.0
+STAGE_END_EVIDENCE_SCOPE = "stage-end snapshot; the drained strict receipt supersedes it"
 _ZERO_TIME = "0001-01-01T00:00:00Z"
 
 
@@ -202,6 +205,8 @@ class ClusterOps(Protocol):
 
     def collect_receipt(self, config: RuntimeConfig, incident_id: str, artifacts_dir: Path) -> dict[str, Any]: ...
 
+    def export_runtime_artifacts(self, config: RuntimeConfig, artifacts_dir: Path) -> dict[str, str | None]: ...
+
     def export_controller_logs(self, control_namespace: str, artifacts_dir: Path) -> None: ...
 
 
@@ -271,6 +276,19 @@ class KubectlClusterOps:
         finally:
             stop_repository_sync(config)
 
+    def export_runtime_artifacts(self, config: RuntimeConfig, artifacts_dir: Path) -> dict[str, str | None]:
+        """Snapshot usage logs and transcripts at stage end; diagnostic, so errors are returned.
+
+        The repository sync pod is left running: the drain that follows applies
+        the same pod and removes it, so no stage waits on a terminating pod.
+        """
+
+        try:
+            start_repository_sync(config)
+            return export_runtime_artifacts(config.control_namespace, artifacts_dir)
+        except (ControllerInstallError, OSError, subprocess.SubprocessError) as exc:
+            return {"directory": None, "error": f"{type(exc).__name__}: {exc}"}
+
     def export_controller_logs(self, control_namespace: str, artifacts_dir: Path) -> None:
         export_controller_logs(control_namespace, artifacts_dir)
 
@@ -335,6 +353,9 @@ def run_persistent_stage(
         )
         record.pending = None
         state.save(inputs.state_path)
+        # Publish the drained receipt now, so a pipeline stopped during this
+        # stage keeps the previous stage's strict receipt and token evidence.
+        _publish_drained_receipts(inputs.state_path)
     reusable = (
         record is not None
         and pod is not None
@@ -390,6 +411,8 @@ def run_persistent_stage(
     _wait_for_maintenance_ack(ops, control, paused_generation, clock)
     paused_ready = clock.monotonic()
     ops.export_controller_logs(control, inputs.receipt_dir)
+    stage_evidence: dict[str, Any] = dict(ops.export_runtime_artifacts(config, inputs.receipt_dir))
+    stage_evidence["scope"] = STAGE_END_EVIDENCE_SCOPE
     closure = verified.closure or {}
     raw_result = closure.get("result")
     result: dict[str, Any] = raw_result if isinstance(raw_result, dict) else {}
@@ -399,6 +422,8 @@ def run_persistent_stage(
         "namespace": inputs.namespace,
         "confirmed_root_causes": result.get("confirmed_root_causes", []),
         "repair_actions": result.get("repair_actions", []),
+        # Names the responder's rollout in the stage-end evidence.
+        "responder_session_id": result.get("responder_session_id"),
         "lifecycle_reused": lifecycle_reused,
         "lifecycle_validation": validation_report(inputs.validation_cache),
         "fault_injection_deferred": True,
@@ -430,6 +455,7 @@ def run_persistent_stage(
             "driver_total_before_submission": paused_ready - started,
         },
     }
+    resolution["stage_end_runtime_artifacts"] = stage_evidence
     resolution.update(_resolution_timings(closure))
     record.pending = PendingIncident(
         incident_id=verified.incident_id,
@@ -440,7 +466,16 @@ def run_persistent_stage(
         stage_receipt={
             key: value
             for key, value in resolution.items()
-            if key not in {"schema_version", "confirmed_root_causes", "repair_actions", "namespace", "incident_id"}
+            if key
+            not in {
+                "schema_version",
+                "confirmed_root_causes",
+                "repair_actions",
+                "namespace",
+                "incident_id",
+                "responder_session_id",
+                "stage_end_runtime_artifacts",
+            }
         },
     )
     record.served_stages.append(inputs.stage_label)
@@ -536,6 +571,16 @@ def teardown(state_path: Path, *, ops: ClusterOps, clock: Clock | None = None) -
             state.controllers.pop(namespace, None)
             state.save(state_path)
     return errors
+
+
+def _publish_drained_receipts(state_path: Path) -> None:
+    """Publish every drained receipt into the pipeline's results; teardown retries what fails."""
+
+    try:
+        for path in publish_deferred_receipts(state_path, state_path.parent):
+            logger.info("published drained artifact %s", path)
+    except OSError as exc:
+        logger.warning("could not publish drained receipts yet: %s", exc)
 
 
 def publish_deferred_receipts(state_path: Path, results_root: Path) -> list[Path]:
