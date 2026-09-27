@@ -567,6 +567,7 @@ class BrokerService:
                 outcome.classification == OutcomeClassification.SUCCESS
                 and outcome.confirmed_root_causes
                 and not detector_paths
+                and not self._learned_incident_detector_fired(closure)
             ):
                 error = (
                     "successful confirmed incident reflection must include a sharp fault-specific detector update "
@@ -602,6 +603,24 @@ class BrokerService:
         ledger.reflection_completed = True
         self._save(ledger)
         return ledger
+
+    def _learned_incident_detector_fired(self, closure: BrokerClosure) -> bool:
+        """Whether an already-registered responder-owned incident detector raised a finding.
+
+        Such an incident already has its sharp detector, so a reflection may
+        refine only the playbook instead of making a cosmetic detector edit.
+        """
+
+        try:
+            manifest = MemoryRepository(self.target_repository).diagnostics()
+        except (MemoryRepositoryError, ValueError):
+            return False
+        incident_detectors = {
+            detector.id
+            for detector in manifest.detectors
+            if detector.detector_class == "incident" and detector.owner == ArtifactOwner.RESPONDER
+        }
+        return any(finding.detector_id in incident_detectors for finding in closure.request.findings)
 
     @staticmethod
     def _exact_match_noop_reason(

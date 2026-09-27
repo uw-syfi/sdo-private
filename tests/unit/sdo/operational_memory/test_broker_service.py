@@ -280,6 +280,14 @@ def _closure(worktree: Path, base_commit: str) -> BrokerClosure:
     )
 
 
+def _unlearned_closure(worktree: Path, base_commit: str) -> BrokerClosure:
+    """A closure whose finding came from no registered incident detector."""
+
+    closure = _closure(worktree, base_commit)
+    findings = [finding.model_copy(update={"detector_id": "health-objective"}) for finding in closure.request.findings]
+    return closure.model_copy(update={"request": closure.request.model_copy(update={"findings": findings})})
+
+
 def _service(target: Path, worktrees: Path, validator: AcceptRepairValidator, **kwargs: object) -> BrokerService:
     broker = CommitBroker(
         target,
@@ -563,7 +571,7 @@ def test_semantically_incomplete_reflection_is_rolled_back_and_retried(tmp_path:
         reflector=SessionReflector(backend),
     )
     workspace = service.prepare_incident("inc-20260709-0001")
-    closure = _closure(workspace.path, workspace.base_commit)
+    closure = _unlearned_closure(workspace.path, workspace.base_commit)
 
     with pytest.raises(BrokerServiceError, match="sharp fault-specific detector"):
         service.process_closure(closure)
@@ -605,7 +613,7 @@ def test_bounded_invalid_reflection_records_explicit_no_change_and_allows_closur
         max_reflection_attempts=1,
     )
     workspace = service.prepare_incident("inc-20260709-0001")
-    closure = _closure(workspace.path, workspace.base_commit)
+    closure = _unlearned_closure(workspace.path, workspace.base_commit)
 
     with pytest.raises(BrokerServiceError, match="sharp fault-specific detector"):
         service.process_closure(closure)
@@ -1038,3 +1046,39 @@ def test_non_exact_or_unproven_warm_success_still_runs_full_reflection(
     state = service.completion_state("inc-20260709-0001")
     assert len(backend.calls) == 1
     assert state.reflection_skipped_reason is None
+
+
+class PlaybookOnlyBackend(RecordingSessionBackend):
+    def _reflect(self, *, session_id: str, worktree: Path, prompt: str, idempotency_key: str) -> ReflectionTurn:
+        del prompt
+        playbook = worktree / ".sdo" / "playbooks" / "missing-configmap" / "README.md"
+        playbook.write_text(
+            playbook.read_text(encoding="utf-8") + "\nRun `kubectl -n <NAMESPACE> get configmap geo-config`.\n",
+            encoding="utf-8",
+        )
+        self.calls.append((session_id, idempotency_key))
+        return ReflectionTurn(
+            summary="sharper verification", learning_decision="updated", proposed_changes=[str(playbook)]
+        )
+
+
+def test_playbook_only_reflection_is_accepted_when_a_learned_incident_detector_fired(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = PlaybookOnlyBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    receipt = service.process_closure(_closure(workspace.path, workspace.base_commit))
+
+    state = service.completion_state("inc-20260709-0001")
+    assert len(backend.calls) == 1
+    assert receipt.reflection_commit is not None
+    assert state.accepted_detector_paths == []
+    assert state.controller_update_required is False
+    assert "get configmap geo-config" in (target / ".sdo" / "playbooks" / "missing-configmap" / "README.md").read_text(
+        encoding="utf-8"
+    )
