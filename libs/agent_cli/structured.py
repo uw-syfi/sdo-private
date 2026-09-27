@@ -21,6 +21,7 @@ Access levels:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import sys
@@ -51,6 +52,8 @@ if TYPE_CHECKING:
     from agentshim import AgentEvent, CommandExecutor, Provider, ProviderUsage
 
 AgentProvider = Literal["codex", "claude"]
+logger = logging.getLogger(__name__)
+
 AccessMode = Literal["read-only", "workspace-write", "danger-full-access"]
 
 AGENT_PROVIDERS: tuple[AgentProvider, ...] = ("codex", "claude")
@@ -272,6 +275,8 @@ def _codex_turn_home(sandbox: CodexSandboxConfig) -> Iterator[Path]:
     try:
         yield home
     finally:
+        if auth is not None:
+            _keep_refreshed_login(home / "auth.json", auth)
         shutil.rmtree(home, ignore_errors=True)
 
 
@@ -297,7 +302,29 @@ def _codex_auth_file() -> Path | None:
     )
 
 
+def _keep_refreshed_login(copy: Path, original: Path) -> None:
+    """Write a login Codex refreshed during the turn back to the user's home.
+
+    Codex rotates ChatGPT refresh tokens, so discarding the refreshed copy
+    would leave the original holding a revoked token.
+    """
+    try:
+        refreshed = copy.read_bytes()
+        if refreshed == original.read_bytes():
+            return
+        staged = original.with_name(f".{original.name}.{os.getpid()}.sdo")
+        staged.unlink(missing_ok=True)
+        _write_private(staged, refreshed)
+        staged.replace(original)
+    except OSError:
+        logger.warning("could not keep the Codex login refreshed during a turn", exc_info=True)
+
+
 def _copy_private(source: Path, target: Path) -> None:
+    _write_private(target, source.read_bytes())
+
+
+def _write_private(target: Path, content: bytes) -> None:
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "wb") as handle:
-        handle.write(source.read_bytes())
+        handle.write(content)

@@ -6,6 +6,7 @@ each combination actually asks the CLI for, and how failures surface.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shlex
@@ -148,6 +149,35 @@ class TestCodexGatewayHome:
         assert home.is_absolute()
         assert home.parent == codex_login.homes_root
         assert home != codex_login.auth.parent
+
+    @pytest.mark.parametrize("succeeds", [True, False])
+    def test_a_login_refreshed_during_the_turn_is_kept(
+        self, tmp_path: Path, codex_login: FakeCodexLogin, *, succeeds: bool
+    ) -> None:
+        """Codex rotates refresh tokens, so dropping the copy would log the user out."""
+
+        def refresh_then_respond(request: CommandRequest) -> Any:
+            (Path(request.env["CODEX_HOME"]) / "auth.json").write_text('{"tokens": "rotated"}', encoding="utf-8")
+            return reply("codex", {"answer": "ok"}, session_id="s-1") if succeeds else failure(stderr="boom")
+
+        agent = ScriptedAgent(refresh_then_respond)
+        with contextlib.suppress(StructuredTurnError):
+            run_structured_turn(
+                "codex",
+                "prompt",
+                output_schema=_SCHEMA,
+                cwd=tmp_path,
+                access="workspace-write",
+                executor=agent.executor,
+            )
+
+        assert codex_login.auth.read_text(encoding="utf-8") == '{"tokens": "rotated"}'
+        assert codex_login.auth.stat().st_mode & 0o777 == 0o600
+
+    def test_an_unchanged_login_is_not_rewritten(self, tmp_path: Path, codex_login: FakeCodexLogin) -> None:
+        before = codex_login.auth.stat().st_mtime_ns
+        self._run_capturing(tmp_path, reply("codex", {"answer": "ok"}, session_id="s-1"))
+        assert codex_login.auth.stat().st_mtime_ns == before
 
     def test_the_private_home_is_outside_the_workspace_and_tmp(
         self, tmp_path: Path, codex_login: FakeCodexLogin
