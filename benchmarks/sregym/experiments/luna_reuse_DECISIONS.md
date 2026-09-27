@@ -460,3 +460,18 @@ Branch `vic/exp/program-integration`, merge of `vic/feat/persistent-controller` 
 - `201fea0` merged cleanly. Its teardown publishes the drained strict receipt and controller log from the orphaned staging directory into the run directory SREGym already published.
 - **Gap found:** the drain also exports the controller PVC's runtime evidence (`sdo_runtime/usage/*.jsonl`, Codex/Claude transcripts) into that staging directory, and it was not published. The persistent stage itself exports only controller logs, so published runs had no `controller-turns.jsonl` or rollouts. `incident_cost.py` would have reported no reflection turn time and no warm-prompt evidence for persistent stages.
 - **Fix:** `publish_deferred_receipts` also moves every file under the staging `sdo_runtime/` into the run directory, byte for byte. Only the receipts and controller logs get the opaque-ID rewrite. The published usage log is cumulative, and the per-incident `cwd` filter from `15efd16` then scopes it to the stage's incident. Responder rollouts were already scoped by `responder_session_id`. `test_deferred_receipts_are_published_into_the_run_the_harness_already_published` asserts the usage log and a transcript are published and the staging directory is removed.
+
+## Timed replication, variants, and sequence (program integration on main)
+
+Owner: autonomous agent. Every decision below lists what was chosen, the alternatives, and why.
+
+### Step 0: keep learned playbooks within the responder's RBAC (`24a01b8`)
+
+- **Root cause.** The stage-0 reflection's `verify.sh` ran `kubectl -n "$NAMESPACE" exec deployment/<frontend> -- wget ...`. The responder Role has no `pods/exec`. The reflection prompt itself asked for "a `kubectl exec` or `curl` against the entrypoint", so the model followed the prompt.
+- **Decision: do not widen RBAC.** The prompt now lists what the responder may run (get/describe/logs/watch, ConfigMap create/apply/patch, workload patch and `rollout restart`, delete pod, delete NetworkPolicy) and what it cannot (`kubectl exec`, `port-forward`, `attach`, `cp`). The representative-request example became a `python3` urllib call to `http://<SERVICE>.<NAMESPACE>.svc:<PORT>/`, because the responder image has python3 but no curl or wget.
+  - Alternative rejected: suggesting curl. It is not in the image, and adding it changes images for no gain.
+- **Decision: the validator checks only changed playbook files.** `MemoryValidator` runs on every proposal, including outcome-only appends. A check over all playbooks would make every later outcome append fail in a repository that already holds an exec playbook. That is the same "untouched legacy" rule the incident-persistence check uses.
+  - Alternative rejected: checking every playbook. It is stricter, but it can brick an existing memory.
+- **Decision: match a kubectl invocation whose subcommand, after at most four flag or value tokens on the same command, is one of the four verbs.** A verb directly followed by a backtick is prose (`` `kubectl exec` ``), so a playbook may still say what not to do. `kubectl debug` (ephemeral containers, also not granted) is not included: the task named four verbs, and no run has produced it.
+  - Alternative rejected: a plain substring match. It rejects prose and names such as `deployment/exec-proxy`.
+- **The verb list is one constant** (`RESPONDER_FORBIDDEN_KUBECTL_VERBS`) that feeds both the prompt and the validator. A contract test asserts that the responder Role in `controller/runtime/deploy/rbac.yaml` grants none of `pods/exec`, `pods/portforward` or `pods/attach`. `sdo-memory-check` prints the fix.
