@@ -11,47 +11,53 @@ import (
 )
 
 // Watch is the watch kind the controller runtime emits when synthetic probe
-// results may change a route's verdict. Traffic detectors declare it so they
-// are evaluated as soon as probes fail or recover, not on their interval.
+// results may change a scenario's verdict. Traffic detectors declare it so
+// they are evaluated as soon as probes fail or recover, not on their interval.
 var Watch = sdk.WatchKind{APIVersion: APIVersion, Kind: "SyntheticTraffic"}
 
-// RouteObservations are one route's recent samples, oldest first.
-type RouteObservations struct {
-	RouteID string   `json:"route_id"`
-	Samples []Sample `json:"samples"`
-	// Qualified reports whether the route has succeeded at least once since
-	// observation began. A route that never succeeded is not a health signal:
-	// the mix may name a path this deployment does not serve.
+// ScenarioObservations are one scenario's recent samples, oldest first.
+type ScenarioObservations struct {
+	Scenario Descriptor `json:"scenario"`
+	Samples  []Sample   `json:"samples"`
+	// Qualified reports whether the scenario has succeeded at least once
+	// since observation began. A scenario that never succeeded is not a
+	// health signal: its generator may not match this deployment.
 	Qualified bool `json:"qualified"`
+	// Invalid counts iterations whose requests could not be built or broke a
+	// safety rule; LastInvalid explains the latest one.
+	Invalid     int    `json:"invalid,omitempty"`
+	LastInvalid string `json:"lastInvalid,omitempty"`
 }
 
-// Window is what the runtime has observed for one mix at ObservedAt.
+// Window is what the prober has observed for one workload at ObservedAt.
 type Window struct {
-	Mix        Mix                 `json:"mix"`
-	ObservedAt time.Time           `json:"observed_at"`
-	Routes     []RouteObservations `json:"routes"`
-	// LoadError is set when the runtime could not load the mix.
-	LoadError string `json:"load_error,omitempty"`
+	Workload   Workload               `json:"workload"`
+	ObservedAt time.Time              `json:"observedAt"`
+	Scenarios  []ScenarioObservations `json:"scenarios"`
+	// Skipped counts arrivals dropped because MaxInFlight iterations were running.
+	Skipped int `json:"skipped,omitempty"`
+	// LoadError is set when the workload could not be loaded or run.
+	LoadError string `json:"loadError,omitempty"`
 }
 
 // Source is implemented by detection contexts that carry synthetic-traffic
 // observations. The controller runtime's snapshots implement it.
 type Source interface {
-	TrafficWindow(mix string) (Window, bool)
+	TrafficWindow(workload string) (Window, bool)
 }
 
-// WindowFrom returns the observations of mix, when the context carries them.
-func WindowFrom(ctx sdk.DetectionContext, mix string) (Window, bool) {
+// WindowFrom returns the observations of workload, when the context carries them.
+func WindowFrom(ctx sdk.DetectionContext, workload string) (Window, bool) {
 	source, ok := ctx.(Source)
 	if !ok {
 		return Window{}, false
 	}
-	return source.TrafficWindow(mix)
+	return source.TrafficWindow(workload)
 }
 
-// Verdict is one route's SLO judgement over its recent samples.
-type Verdict struct {
-	RouteID     string
+// SLOVerdict is one scenario's SLO judgement over its recent samples.
+type SLOVerdict struct {
+	ScenarioID  string
 	Evaluated   bool
 	Healthy     bool
 	Samples     int
@@ -62,21 +68,22 @@ type Verdict struct {
 	Latency     time.Duration
 	SLO         SLO
 	Violations  []string
-	// StatusCounts counts samples by HTTP status, "transport" for failures
-	// with no response, and "timeout".
+	// StatusCounts counts samples by last HTTP status, "transport" for
+	// failures with no response, and "timeout".
 	StatusCounts   map[string]int
 	RecentFailures []Sample
 	Span           time.Duration
 }
 
-// Evaluate judges samples (oldest first) of one route at now. Samples older
-// than the SLO's maxAge are ignored, only the latest window samples count, and
-// fewer than minSamples leaves the route unevaluated, which is healthy.
-func Evaluate(routeID string, slo SLO, samples []Sample, now time.Time) Verdict {
-	verdict := Verdict{RouteID: routeID, Healthy: true, SLO: slo, StatusCounts: map[string]int{}}
+// Evaluate judges samples (oldest first) of one scenario at now. Invalid
+// samples and samples older than the SLO's maxAge are ignored, only the latest
+// window samples count, and fewer than minSamples leaves the scenario
+// unevaluated, which is healthy.
+func Evaluate(scenarioID string, slo SLO, samples []Sample, now time.Time) SLOVerdict {
+	verdict := SLOVerdict{ScenarioID: scenarioID, Healthy: true, SLO: slo, StatusCounts: map[string]int{}}
 	recent := make([]Sample, 0, len(samples))
 	for _, sample := range samples {
-		if now.Sub(sample.At) <= slo.MaxAge.Duration() {
+		if sample.Outcome != OutcomeInvalid && now.Sub(sample.At) <= slo.MaxAge.Duration() {
 			recent = append(recent, sample)
 		}
 	}
@@ -133,6 +140,19 @@ func Evaluate(routeID string, slo SLO, samples []Sample, now time.Time) Verdict 
 	}
 	verdict.Healthy = len(verdict.Violations) == 0
 	return verdict
+}
+
+// Judge evaluates every qualified scenario of window at its ObservedAt.
+func Judge(window Window) []SLOVerdict {
+	verdicts := make([]SLOVerdict, 0, len(window.Scenarios))
+	for _, observed := range window.Scenarios {
+		if !observed.Qualified {
+			continue
+		}
+		id := observed.Scenario.ID
+		verdicts = append(verdicts, Evaluate(id, window.Workload.ScenarioSLO(id), observed.Samples, window.ObservedAt))
+	}
+	return verdicts
 }
 
 // percentile uses the nearest-rank method.

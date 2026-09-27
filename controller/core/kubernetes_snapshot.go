@@ -129,13 +129,13 @@ type DetectionSnapshot struct {
 	EndpointSliceList []discoveryv1.EndpointSlice
 	NetworkPolicyList []networkingv1.NetworkPolicy
 	EventList         []corev1.Event
-	// TrafficWindows holds synthetic-traffic observations by mix name.
+	// TrafficWindows holds synthetic-traffic observations by workload name.
 	TrafficWindows map[string]traffic.Window
 }
 
 // TrafficWindow implements traffic.Source.
-func (s DetectionSnapshot) TrafficWindow(mix string) (traffic.Window, bool) {
-	window, ok := s.TrafficWindows[mix]
+func (s DetectionSnapshot) TrafficWindow(workload string) (traffic.Window, bool) {
+	window, ok := s.TrafficWindows[workload]
 	return window, ok
 }
 

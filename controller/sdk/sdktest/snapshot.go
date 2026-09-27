@@ -23,13 +23,13 @@ type Snapshot struct {
 	EndpointSliceList []discoveryv1.EndpointSlice
 	NetworkPolicyList []networkingv1.NetworkPolicy
 	EventList         []corev1.Event
-	// Traffic holds synthetic-traffic observations by mix name.
+	// Traffic holds synthetic-traffic observations by workload name.
 	Traffic map[string]traffic.Window
 }
 
 // TrafficWindow implements traffic.Source.
-func (s Snapshot) TrafficWindow(mix string) (traffic.Window, bool) {
-	window, ok := s.Traffic[mix]
+func (s Snapshot) TrafficWindow(workload string) (traffic.Window, bool) {
+	window, ok := s.Traffic[workload]
 	return window, ok
 }
 
