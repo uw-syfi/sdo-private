@@ -59,7 +59,11 @@ def submit_solution(
     if phase == "mitigation":
         # The conductor drops (while acknowledging) any submit that arrives
         # while diagnosis is still being graded, so wait for the stage to open.
-        _wait_for_stage(base, {"mitigation"}, opener=opener)
+        # A problem that already ended accepted one mitigation; a repeated call
+        # returns at once instead of waiting for a stage that never reopens.
+        stage = _wait_for_stage(base, {"mitigation", *TERMINAL_STAGES}, opener=opener)
+        if stage in TERMINAL_STAGES:
+            return {"mitigation": {"status": "already_submitted"}, "done": {"status": stage}}
     payload = json.dumps({"solution": solution}).encode()
     phase_request = urllib.request.Request(
         f"{base}/submit",

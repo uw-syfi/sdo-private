@@ -101,3 +101,20 @@ def test_submission_bridge_rejects_unacknowledged_autonomous_diagnosis() -> None
 
     with pytest.raises(SubmissionBridgeError, match="not acknowledged"):
         submit_solution("answer", phase="diagnosis", api_base="http://conductor:8123", opener=opener)
+
+
+@pytest.mark.parametrize("terminal_stage", ["done", "awaiting_cleanup"])
+def test_repeated_mitigation_after_the_problem_ended_returns_at_once_without_resubmitting(terminal_stage: str) -> None:
+    """A second mitigation call must not block for the submission timeout waiting for a stage that never reopens."""
+
+    requests = []
+
+    def opener(request, timeout: int):
+        requests.append(request.full_url.rsplit("/", 1)[-1])
+        assert request.full_url.endswith("/status"), "a finished problem must not receive another submit"
+        return Response({"stage": terminal_stage})
+
+    result = submit_solution("configmap restored again", phase="mitigation", api_base="http://c:8123", opener=opener)
+
+    assert requests == ["status"]
+    assert result == {"mitigation": {"status": "already_submitted"}, "done": {"status": terminal_stage}}
