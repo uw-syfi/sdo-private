@@ -661,3 +661,23 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - SDO runs on w0 and w1 and Codex on w1 and w2, so each arm is spread across clusters.
 - **Load:** 37.7 at launch, from another project's test workers (`vibesys`), not from our lanes. The coordinator asked to launch now. I record per-run load and will drop to 2 lanes if the load stays above about 24 once those workers finish.
 - **The TTD/TTM analysis change is offline** and does not touch the harness the runs use.
+
+### Scale-up to 5 lanes (coordinator-directed, 21:02Z)
+
+- **Why:** `docker stats` shows each luna cluster uses about 0.3–2 cores and 9–14 GB while running, and the app has almost no user load. The host has 64 cores, 185 GB available and 9 TB free disk.
+- **Decision: add lanes `luna-w3` and `luna-w4`, and move queued items onto them. Runs in flight are not disturbed.**
+  - The clusters are created by the same harness bootstrap on first use: `SREGYM_WORKER_ID_OFFSET=3` and `4` give cluster `luna-w<id>`, Calico with enforced NetworkPolicy, `worker_cpu_limit = "3"` and cluster reuse (both from the configs), the same preloaded SDO images, the per-cluster keyed baseline file and the per-cluster fault scratch dir.
+  - Each lane has its own ports (API 8000+id, MCP 9954+id, agent proxy 16443+id, all free when checked) and its own agent kubeconfig (`-p<port>`), with the kubeconfig guard and the cluster lock.
+  - `codex_sequence` moved from w1 (it was queued after sdo_variants) to w3, as label `codex_sequence_w3`, starting 21:02:38.
+  - `codex_variants` moved from w2 (queued after Codex x5) to w4, as label `codex_variants_w4`, starting 90 s later.
+  - **Mechanism:** `run.sh` now returns `rc=moved` for a label with a file in `scratchpad/skip/`. It was swapped in atomically (a new inode), so running `run.sh` processes kept the old script. The original lanes log a "stop" after their last real item. This is expected and not a failure.
+  - Alternatives: killing and relaunching lanes 1 and 2 would disturb in-flight runs; waiting for them to finish would delay the queue by about an hour.
+- **Load threshold raised from 24 to 40 (1-minute load).** Most load comes from the Codex CLI and host processes, some of them another project's. Load is still logged per run (`.load`, `queue.events`).
+- **Fairness check, re-evaluated as runs finish:**
+  - Compare the SDO warm (stage 1) TTM from the higher-load lanes against the earlier 15.0–30.8 s, and the Codex TTM against the pre-fix Codex x5 (53.9–79.8 s).
+  - `scratchpad/check_ratelimit.sh` scans harness logs and post-relaunch rollouts for 429, "rate limit", `usage_limit` and retry signals.
+  - If any appear, drop one lane and log it. There were none at 21:03Z.
+- **Follow-up for the next queue, not this one:**
+  - Make the kind clusters 1 control plane plus 1 worker instead of 3 workers.
+  - Lower pod CPU requests to fractional values (50–100m) while keeping limits generous, so pods can burst during restarts.
+  - Together these let many more lanes fit. The manifests are unchanged mid-queue for consistency.
