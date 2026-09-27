@@ -142,12 +142,20 @@ class DiagnosticsManifest(MemoryModel):
         return self
 
 
-#: Where the health judge stores traffic mixes, one ``<name>.yaml`` per mix.
-TRAFFIC_MIX_DIRECTORY = ".sdo/diagnostics/traffic"
-#: Mirrors ``controller/sdk/traffic``: the Go runtime is the executor, this
-#: model is the commit-time gate, and both must accept the same documents.
+#: Synthetic traffic lives under ``.sdo/diagnostics/traffic/``: Go generators
+#: (``generators/``, with responder-owned ``generators/incident/``) and
+#: workload profiles (``workloads/<name>.yaml``; responders add only
+#: ``incident-*`` workloads). ``controller/sdk/traffic`` executes them; the
+#: workload model below mirrors its validation as the commit-time gate.
+TRAFFIC_DIRECTORY = ".sdo/diagnostics/traffic"
+TRAFFIC_GENERATORS_DIRECTORY = f"{TRAFFIC_DIRECTORY}/generators"
+TRAFFIC_INCIDENT_GENERATORS_DIRECTORY = f"{TRAFFIC_GENERATORS_DIRECTORY}/incident"
+TRAFFIC_WORKLOAD_DIRECTORY = f"{TRAFFIC_DIRECTORY}/workloads"
+TRAFFIC_INCIDENT_WORKLOAD_PREFIX = "incident-"
 TRAFFIC_MAX_RATE_PER_SECOND = 20.0
-TRAFFIC_MAX_TIMEOUT_SECONDS = 30.0
+TRAFFIC_MAX_TIMEOUT_SECONDS = 10.0
+TRAFFIC_MAX_ITERATION_TIMEOUT_SECONDS = 30.0
+TRAFFIC_MAX_BURST_SECONDS = 60.0
 _GO_DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)")
 _GO_DURATION_SECONDS = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "ms": 1e-3, "s": 1.0, "m": 60.0, "h": 3600.0}
 _DNS_LABEL = r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
@@ -166,64 +174,8 @@ class TrafficModel(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
-class TrafficTarget(TrafficModel):
-    service: str = Field(pattern=_DNS_LABEL)
-    port: int = Field(ge=1, le=65535)
-    scheme: Literal["http", "https"] = "http"
-
-
-class TrafficRequest(TrafficModel):
-    method: Literal["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]
-    path: str
-    query: dict[str, str] = Field(default_factory=dict)
-    headers: dict[str, str] = Field(default_factory=dict)
-    body: str = ""
-
-    @field_validator("method", mode="before")
-    @classmethod
-    def normalize_method(cls, value: object) -> object:
-        return value.upper() if isinstance(value, str) else value
-
-    @field_validator("path")
-    @classmethod
-    def validate_path(cls, value: str) -> str:
-        if (
-            not value.startswith("/")
-            or value.startswith("//")
-            or "://" in value
-            or any(character in value for character in "?# \t\r\n")
-        ):
-            raise ValueError(f"path {value!r} must be an absolute path without a host, query, or fragment")
-        return value
-
-    @field_validator("headers")
-    @classmethod
-    def validate_headers(cls, value: dict[str, str]) -> dict[str, str]:
-        if any(name.lower() == "host" for name in value):
-            raise ValueError("headers may not override Host")
-        return value
-
-    def mentions(self, marker: str) -> bool:
-        return marker in self.body or any(
-            marker in key or marker in value for values in (self.query, self.headers) for key, value in values.items()
-        )
-
-
-class TrafficExpect(TrafficModel):
-    status: list[int] = Field(default_factory=list)
-    body_contains: str = Field(default="", alias="bodyContains")
-
-    @field_validator("status")
-    @classmethod
-    def validate_status(cls, value: list[int]) -> list[int]:
-        for status in value:
-            if not 100 <= status <= 599:
-                raise ValueError(f"expected status {status} is not an HTTP status")
-        return value
-
-
 class TrafficSLO(TrafficModel):
-    """Per-route service-level objective; unset fields inherit the mix, then defaults."""
+    """Per-scenario service-level objective; unset fields inherit the workload, then defaults."""
 
     window: int | None = Field(default=None, ge=1, le=100)
     min_samples: int | None = Field(default=None, ge=1, alias="minSamples")
@@ -241,7 +193,7 @@ class TrafficSLO(TrafficModel):
         return value
 
 
-#: Defaults applied by ``controller/sdk/traffic`` when a mix leaves them unset.
+#: Defaults applied by ``controller/sdk/traffic`` when a workload leaves them unset.
 TRAFFIC_DEFAULT_SLO = TrafficSLO(
     window=5,
     min_samples=3,
@@ -259,81 +211,63 @@ def _merge_slo(base: TrafficSLO, override: TrafficSLO | None) -> TrafficSLO:
     return base.model_copy(update=override.model_dump(exclude_none=True))
 
 
-class TrafficRoute(TrafficRequest):
+class TrafficWorkloadScenario(TrafficModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]{0,62}$")
     weight: int = Field(default=1, ge=1, le=100)
-    timeout: str | None = None
-    expect: TrafficExpect = Field(default_factory=TrafficExpect)
-    mutates: bool = False
-    data_policy: Literal["idempotent", "self-cleaning"] | None = Field(default=None, alias="dataPolicy")
-    synthetic_marker: str | None = Field(default=None, alias="syntheticMarker")
-    cleanup: TrafficRequest | None = None
     slo: TrafficSLO | None = None
 
-    @model_validator(mode="after")
-    def validate_data_policy(self) -> TrafficRoute:
-        if self.timeout is not None and not 0 < go_duration_seconds(self.timeout) <= TRAFFIC_MAX_TIMEOUT_SECONDS:
-            raise ValueError(f"route {self.id!r}: timeout must be in (0, 30s]")
-        if not self.mutates:
-            if self.data_policy is not None or self.synthetic_marker is not None or self.cleanup is not None:
-                raise ValueError(
-                    f"route {self.id!r}: dataPolicy, syntheticMarker, and cleanup apply only to mutating routes"
-                )
-            return self
-        if self.data_policy is None:
-            raise ValueError(f"route {self.id!r}: a mutating route needs dataPolicy idempotent or self-cleaning")
-        if not self.synthetic_marker or not self.synthetic_marker.strip():
-            raise ValueError(f"route {self.id!r}: a mutating route needs a syntheticMarker naming its synthetic data")
-        if not self.mentions(self.synthetic_marker):
-            raise ValueError(
-                f"route {self.id!r}: syntheticMarker {self.synthetic_marker!r} must appear in the route's query, "
-                "body, or headers"
-            )
-        if self.data_policy == "self-cleaning":
-            if self.cleanup is None:
-                raise ValueError(f"route {self.id!r}: a self-cleaning route needs a cleanup request")
-            if not self.cleanup.mentions(self.synthetic_marker):
-                raise ValueError(f"route {self.id!r}: cleanup must target the syntheticMarker")
-        elif self.cleanup is not None:
-            raise ValueError(f"route {self.id!r}: cleanup applies only to dataPolicy self-cleaning")
-        return self
 
+class TrafficWorkload(TrafficModel):
+    """A workload profile: which generator scenarios run, how often, and against which SLO.
 
-class TrafficMix(TrafficModel):
-    """Health-judge-owned synthetic traffic for one served entrypoint.
-
-    Stored at ``.sdo/diagnostics/traffic/<name>.yaml`` and executed by the
-    controller runtime; see ``controller/sdk/traffic`` for the semantics.
+    Stored at ``.sdo/diagnostics/traffic/workloads/<name>.yaml``. A
+    ``health-probe`` runs continuously and feeds traffic health detectors; a
+    ``verify-burst`` runs for a few seconds on demand to verify a repair; a
+    ``journey`` runs on demand for a bounded time.
     """
 
     api_version: Literal["sdo.dev/v1alpha1"] = Field(alias="apiVersion")
-    kind: Literal["TrafficMix"]
+    kind: Literal["TrafficWorkload"]
     name: str = Field(pattern=_DNS_LABEL)
     description: str = ""
-    target: TrafficTarget
+    purpose: Literal["health-probe", "verify-burst", "journey"]
+    arrival: Literal["uniform", "poisson"] = "uniform"
     rate_per_second: float = Field(default=4.0, gt=0, le=TRAFFIC_MAX_RATE_PER_SECOND, alias="ratePerSecond")
+    duration: str | None = None
     timeout: str = "2s"
+    iteration_timeout: str = Field(default="10s", alias="iterationTimeout")
+    seed: int | None = Field(default=None, ge=0, lt=2**64)
     slo: TrafficSLO = Field(default_factory=TrafficSLO)
-    routes: list[TrafficRoute] = Field(min_length=1)
+    scenarios: list[TrafficWorkloadScenario] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_routes(self) -> TrafficMix:
-        if not 0 < go_duration_seconds(self.timeout) <= TRAFFIC_MAX_TIMEOUT_SECONDS:
-            raise ValueError("timeout must be in (0, 30s]")
-        ids = [route.id for route in self.routes]
-        duplicates = sorted({route_id for route_id in ids if ids.count(route_id) > 1})
+    def validate_profile(self) -> TrafficWorkload:
+        if self.purpose == "health-probe":
+            if self.duration is not None:
+                raise ValueError("a health-probe runs continuously and takes no duration")
+        elif self.duration is None or not 0 < go_duration_seconds(self.duration) <= TRAFFIC_MAX_BURST_SECONDS:
+            raise ValueError(f"a {self.purpose} workload needs a duration in (0, 60s]")
+        timeout = go_duration_seconds(self.timeout)
+        if not 0 < timeout <= TRAFFIC_MAX_TIMEOUT_SECONDS:
+            raise ValueError("timeout must be in (0, 10s]")
+        if not timeout <= go_duration_seconds(self.iteration_timeout) <= TRAFFIC_MAX_ITERATION_TIMEOUT_SECONDS:
+            raise ValueError("iterationTimeout must be in [timeout, 30s]")
+        ids = [scenario.id for scenario in self.scenarios]
+        duplicates = sorted({scenario_id for scenario_id in ids if ids.count(scenario_id) > 1})
         if duplicates:
-            raise ValueError(f"duplicate route id(s): {', '.join(duplicates)}")
-        if all(route.mutates for route in self.routes):
-            raise ValueError("at least one read route (mutates: false) is required")
-        for route in self.routes:
-            slo = self.route_slo(route)
+            raise ValueError(f"scenario(s) listed twice: {', '.join(duplicates)}")
+        for scenario in self.scenarios:
+            slo = self.scenario_slo(scenario.id)
             if slo.min_samples is not None and slo.window is not None and slo.min_samples > slo.window:
-                raise ValueError(f"route {route.id!r}: slo minSamples must not exceed window")
+                raise ValueError(f"scenario {scenario.id!r}: slo minSamples must not exceed window")
         return self
 
-    def route_slo(self, route: TrafficRoute) -> TrafficSLO:
-        return _merge_slo(_merge_slo(TRAFFIC_DEFAULT_SLO, self.slo), route.slo)
+    def scenario_slo(self, scenario_id: str) -> TrafficSLO:
+        slo = _merge_slo(TRAFFIC_DEFAULT_SLO, self.slo)
+        for scenario in self.scenarios:
+            if scenario.id == scenario_id:
+                slo = _merge_slo(slo, scenario.slo)
+        return slo
 
 
 class OutcomeClassification(str, Enum):

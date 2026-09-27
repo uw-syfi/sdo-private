@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING
 
 from sdo.operational_memory.models import (
     INCIDENT_DETECTOR_MAX_FIRING,
-    TRAFFIC_MIX_DIRECTORY,
+    TRAFFIC_DIRECTORY,
+    TRAFFIC_INCIDENT_GENERATORS_DIRECTORY,
+    TRAFFIC_INCIDENT_WORKLOAD_PREFIX,
+    TRAFFIC_WORKLOAD_DIRECTORY,
     ArtifactOwner,
     ValidatorNetworkPolicyCanary,
 )
@@ -68,7 +71,7 @@ class MemoryValidator:
             architecture = repository.architecture()
             playbooks = repository.playbooks()
             repository.diagnostics()
-            repository.traffic_mixes()
+            repository.traffic_workloads()
             repository.outcomes()
         except MemoryRepositoryError as exc:
             raise MemoryValidationError(str(exc)) from exc
@@ -131,14 +134,22 @@ class MemoryValidator:
             }
         if actor == ArtifactOwner.CONTROLLER:
             return value == ".sdo/outcomes.jsonl"
+        incident_traffic = value.startswith(
+            (
+                f"{TRAFFIC_INCIDENT_GENERATORS_DIRECTORY}/",
+                f"{TRAFFIC_WORKLOAD_DIRECTORY}/{TRAFFIC_INCIDENT_WORKLOAD_PREFIX}",
+            )
+        )
         if actor == ArtifactOwner.HEALTH_JUDGE:
-            return value == ".sdo/diagnostics/manifest.yaml" or value.startswith(
-                (".sdo/diagnostics/detectors/health/", f"{TRAFFIC_MIX_DIRECTORY}/")
+            return value == ".sdo/diagnostics/manifest.yaml" or (
+                value.startswith((".sdo/diagnostics/detectors/health/", f"{TRAFFIC_DIRECTORY}/"))
+                and not incident_traffic
             )
         if actor == ArtifactOwner.RESPONDER:
             return (
                 value.startswith((".sdo/playbooks/", ".sdo/diagnostics/detectors/incidents/"))
                 or value == ".sdo/diagnostics/manifest.yaml"
+                or incident_traffic
             )
         return False
 

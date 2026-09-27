@@ -151,9 +151,7 @@ def write_generated_traffic(workspace_path: Path, *, module_path: str) -> bool:
         for name, document in sorted(workloads.items())
     )
     source = (
-        "package generated\n\nimport (\n"
-        + "\n".join(imports)
-        + "\n)\n\n"
+        "package generated\n\nimport (\n" + "\n".join(imports) + "\n)\n\n"
         "// TrafficCatalog is every scenario the application's generators provide.\n"
         "func TrafficCatalog() traffic.Catalog {\n" + catalog + "\treturn catalog\n}\n\n"
         "// TrafficWorkloads are the workload profiles, as JSON, by name.\n"

@@ -15,7 +15,7 @@ from sdo.operational_memory.models import (
     GoalMetadata,
     OutcomeRecord,
     PlaybookMetadata,
-    TrafficMix,
+    TrafficWorkload,
 )
 
 MetadataT = TypeVar("MetadataT", bound=BaseModel)
@@ -89,22 +89,38 @@ class MemoryRepository:
                 raise MemoryRepositoryError(f"detector {detector.id!r} package must contain a Go file")
         return manifest
 
-    def traffic_mixes(self) -> list[TrafficMix]:
-        """Health-judge traffic mixes under ``.sdo/diagnostics/traffic/``, sorted by name."""
+    def traffic_workloads(self) -> list[TrafficWorkload]:
+        """Traffic workload profiles under ``.sdo/diagnostics/traffic/workloads/``, sorted by name.
 
-        directory = self.memory_root / "diagnostics" / "traffic"
-        mixes: list[TrafficMix] = []
-        for path in sorted(directory.glob("*.yaml")) if directory.is_dir() else []:
+        The traffic directory holds only the ``generators`` Go packages and
+        the ``workloads`` profiles.
+        """
+
+        traffic = self.memory_root / "diagnostics" / "traffic"
+        if not traffic.is_dir():
+            return []
+        for entry in sorted(traffic.iterdir()):
+            if entry.name not in {"generators", "workloads"} or not entry.is_dir():
+                raise MemoryRepositoryError(
+                    f"{entry.relative_to(self.memory_root).as_posix()}: traffic/ holds only generators/ and workloads/"
+                )
+        workloads: list[TrafficWorkload] = []
+        directory = traffic / "workloads"
+        for path in sorted(directory.iterdir()) if directory.is_dir() else []:
             relative = path.relative_to(self.memory_root).as_posix()
             self._contained(path, label=relative)
+            if path.suffix != ".yaml" or not path.is_file():
+                raise MemoryRepositoryError(f"{relative}: traffic workloads are <name>.yaml files")
             try:
-                mix = TrafficMix.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+                workload = TrafficWorkload.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
             except (OSError, yaml.YAMLError, ValidationError) as exc:
-                raise MemoryRepositoryError(f"invalid traffic mix {relative}: {exc}") from exc
-            if mix.name != path.stem:
-                raise MemoryRepositoryError(f"traffic mix {relative}: name {mix.name!r} must match its file name")
-            mixes.append(mix)
-        return mixes
+                raise MemoryRepositoryError(f"invalid traffic workload {relative}: {exc}") from exc
+            if workload.name != path.stem:
+                raise MemoryRepositoryError(
+                    f"traffic workload {relative}: name {workload.name!r} must match its file name"
+                )
+            workloads.append(workload)
+        return workloads
 
     def outcomes(self) -> list[OutcomeRecord]:
         path = self.memory_root / "outcomes.jsonl"
