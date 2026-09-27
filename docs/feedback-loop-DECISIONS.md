@@ -1,0 +1,146 @@
+# Robust incident feedback loop: decisions
+
+Branch `vic/feat/robust-feedback-loop`. Each entry records the decision, the
+alternatives considered, and why. Entries marked **user-directed** restate a
+direction from the user; the rest were made autonomously.
+
+## Verified facts (before design)
+
+- **Decoys.** `third_party/sregym/sregym/service/apps/hotel_reservation.py`
+  `deploy()` creates `failure-admin-geo` and `failure-admin-rate` with the
+  revoke/remove-admin Mongo scripts. Its docstring says they are not mounted,
+  but with the default `mount_failure_scripts=True` it also JSON-patches
+  `mongodb-geo` and `mongodb-rate` to mount them at `/scripts`. Either way they
+  exist before the fault is injected, so a diff against the pre-fault healthy
+  state never contains them.
+- **Closure gate.** `controller/runtime/controller.go` `maybeCloseIncident`
+  closes only after the responder finished and every health detector's latest
+  evaluation since responder completion is clear; `ClearThreshold` (2 in
+  production) is applied per finding by `FindingStateTracker`.
+- **Responder sandbox.** `sdo/agent_runtime/responder/codex.py` runs the
+  responder with `access="danger-full-access"`, which `libs/agent_cli/structured.py`
+  maps to `CodexSandboxConfig(mode="danger-full-access")` with no
+  `excluded_commands`. The `sdo detector check` exemption exists only for
+  `workspace-write` turns (deployer/health judge authoring). A new responder
+  command therefore needs no sandbox exemption, and `structured.py` (being
+  edited by other agents) does not need to change.
+- **Submission before closure.** The benchmark adapter tells the responder to
+  run `python3 -m benchmarks.sregym.adapter.submission mitigation ...` after
+  "your own verification" (`benchmarks/sregym/adapter/runtime.py`
+  `_responder_instructions`); nothing ties that to live detector state.
+- **Baseline gate.** `benchmarks/sregym/adapter/fault_gate.py` injects the
+  fault only after the controller logs an evaluation with no active finding,
+  so the controller itself observes a healthy state right before injection.
+
+## Decisions
+
+### D1. Synthetic-traffic health detectors are the top priority (user-directed)
+
+- **Decision.** Item 3 (generic symptom health detectors) moves first and is
+  reshaped around end-to-end synthetic traffic: a source-grounded,
+  health-judge-owned endpoint mix, low continuous rate, per-route sliding
+  window SLOs with firing/clearing persistence, deterministic Go on
+  `controller/sdk`. The same signal is the trigger and the acceptance test
+  for `sdo incident status` (item 2). Structural checks stay as cheap
+  complements.
+- **Why.** User direction. Structural detectors cannot tell a correct fix from
+  a decoy "fix"; user-visible requests can.
+
+### D2. Source layout (user-directed)
+
+- **Decision.** Generic machinery in `controller/sdk/traffic`; execution in
+  `controller/runtime` (or a `controller/cmd/prober` binary); app knowledge
+  only in `.sdo/diagnostics/traffic/` and health detectors in the manifest;
+  schema in `models.py`, checks in `validation.py`, authoring in the judge
+  prompt; hotel routes only in test fixtures.
+- **Deviation.** Ownership of `.sdo/diagnostics/traffic/` is enforced in
+  `MemoryValidator._actor_owns`, which the commit broker calls, rather than in
+  `commit_broker.py` itself. That is where every other path ownership rule
+  lives, so the broker enforces it without a second table.
+
+### D3. Ground testing in one app and one decoy problem (user-directed)
+
+- **Decision.** Test on hotel-reservation with
+  `wrong_service_selector_hotel_reservation` and the `failure-admin-*` decoys
+  only; drop the other three sequence faults this round. Unit tests cover this
+  case plus generic no-false-positive cases; the code stays generic.
+- **Evaluation plan.** First-encounter pass rate on this problem, SDO vs
+  Codex, n>=3 each, in the fast loop after the quota decision.
+
+### D4. First cut: in-process prober in the controller runtime (superseded by D9)
+
+- **Decision.** The first implementation probes from a goroutine pool inside
+  the controller runtime and exposes per-route sample windows to detectors via
+  the detection context; detectors never make requests in `Detect`.
+- **Alternatives.** HTTP inside `Detect` (blocks the loop, not deterministic
+  over replays); a separate prober pod (extra pod in the app's view, more
+  RBAC).
+- **Why.** No blocking of the loop, no extra pod to perturb the "all pods
+  running" oracle, and a notify path for fast detection. Superseded by the
+  user-approved isolation requirement in D9; the SDK windows, SLO evaluation
+  and detector are reused unchanged.
+
+### D5. Probe hygiene
+
+- Keep-alives disabled so a changed Service selector is visible on every
+  probe rather than hidden behind a live connection.
+- A route is judged only after it has succeeded once (qualification), so a
+  wrong route in the mix can never fire; a 5 s warm-up precedes the first
+  all-clear evaluation so the fault gate's baseline already contains samples.
+- Windows reset on maintenance pause/resume.
+- Probe results enqueue an evaluation only while a route has failures in its
+  window, so a healthy app costs no extra evaluations.
+
+### D6. SLO defaults
+
+- Window 5 samples, min 3, max age 30 s, error rate >= 50 %, timeout rate
+  >= 50 %, p90 <= 1.5 s, 4 req/s per mix (hard max 20), 2 s timeout.
+- **Why.** At 4 req/s over 4 routes each route gets ~1 sample/s, so 3 failed
+  samples fire in ~3–4 s plus firing persistence, and clearing takes ~4–6 s,
+  inside the 5–10 s target, while one blip (1/5) never fires.
+
+### D7. Per-port TCP reachability deferred
+
+- **Why.** Apps with same-namespace-only NetworkPolicies would make a
+  controller-namespace reachability check fire falsely. End-to-end routes plus
+  the ready-endpoints check already cover the selector fault. The
+  `servicehealth` ready-endpoints detector is the always-on zero-knowledge floor.
+
+### D8. Mixes are optional and validated when present
+
+- Apps that serve no HTTP get only the endpoint detector. Python and Go
+  validators mirror each other; a parity test loads the shared hotel fixture
+  in both. Generic registrations are appended as marked manifest blocks so a
+  refresh replaces exactly them and never touches responder-owned entries.
+- No sandbox exemption is needed for new responder commands: the responder
+  runs `danger-full-access`.
+
+### D9. Generators in Go, workloads in YAML, isolated prober (user-approved)
+
+- **Decision.** Replace the YAML route mix with:
+  1. Go endpoint/scenario generators behind an SDK interface in
+     `controller/sdk/traffic` (`Build(ctx, rng, state) -> Request`,
+     `Check(resp) -> Verdict`, chained with shared state), declaring the
+     services they depend on (for localization), a side-effect class (read,
+     idempotent write, write-with-cleanup) and an optional fault class they
+     must detect. Helpers make a simple generated GET about one line. They
+     live in `.sdo/diagnostics/traffic/generators/` and are authored by the
+     health judge.
+  2. The engine owns scheduling, arrival, rate caps, timeouts, latency
+     measurement, SLO windows and persistence; randomness and time come only
+     from a seeded rng and the engine clock so failing probes replay exactly.
+  3. Workload profiles stay YAML in
+     `.sdo/diagnostics/traffic/workloads/<name>.yaml` with purpose
+     `health-probe`, `verify-burst` or `journey`.
+  4. Generators run in a separate prober process/pod with egress only to the
+     app namespace, no API credentials, resource limits and crash isolation;
+     the controller reads results; `controller/runtime` stays transport-neutral.
+  5. Validation reuses the detector toolchain; the lifecycle runs the live
+     healthy/decoy/fault checks.
+  6. Health judge owns generators and health workloads; responders may add
+     incident-scoped ones after verified outcomes.
+  7. The `servicehealth` endpoint floor stays.
+- **Why.** User-approved design. Go generators express multi-step flows and
+  generated parameters that YAML cannot, while the engine keeps all timing and
+  load under deterministic control; process isolation keeps app-authored code
+  away from the controller's credentials.
