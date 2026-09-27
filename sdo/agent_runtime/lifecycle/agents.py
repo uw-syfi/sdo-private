@@ -524,6 +524,9 @@ def _command_escapes_repository(
         if task_outputs is not None and task_outputs.allows(raw_path):
             continue
         candidate = Path(raw_path)
+        # ``Path`` keeps ``..`` segments, so ``<repository>/../x`` would look contained.
+        if ".." in candidate.parts:
+            return True
         if candidate == repository or repository in candidate.parents:
             continue
         if any(candidate == root or root in candidate.parents for root in _SYSTEM_COMMAND_ROOTS):

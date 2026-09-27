@@ -889,6 +889,17 @@ def test_repository_audit_still_rejects_external_path_after_git_object_path(tmp_
     )
 
 
+@pytest.mark.parametrize(
+    "path",
+    ["{repo}/../../etc/passwd", "{repo}/sub/../../outside.txt", "/usr/bin/../../etc/shadow"],
+)
+def test_repository_audit_rejects_parent_segments_inside_absolute_paths(tmp_path: Path, path: str) -> None:
+    """A path that starts inside an allowed root can still climb out of it."""
+    repository = _repository(tmp_path)
+
+    assert _command_escapes_repository(f"cat {path.format(repo=repository)}", repository)
+
+
 _CLAUDE_SESSION = "0931c4c1-3ff3-4137-b72d-a1993ddb2cd3"
 _CLAUDE_TASK_OUTPUT = f"/tmp/claude-1000/-tmp-sdo-lifecycle-application/{_CLAUDE_SESSION}/tasks/b7k2x9q1.output"
 
