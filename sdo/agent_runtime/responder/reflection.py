@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, cast
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from libs.agent_cli.structured import AgentProvider, StructuredTurnError, run_structured_turn, turn_usage
-from sdo.operational_memory import OutcomeClassification, OutcomeRecord
+from sdo.operational_memory import OutcomeClassification, OutcomeRecord, TopologyReview
+from sdo.operational_memory.detector_sdk import DETECTOR_SDK_REFERENCE
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -78,8 +79,119 @@ class StatefulResponderBackend(Protocol):
         idempotency_key: str,
     ) -> ReflectionTurn: ...
 
+    def fresh(
+        self,
+        *,
+        worktree: Path,
+        prompt: str,
+        idempotency_key: str,
+    ) -> ReflectionTurn: ...
+
+
+#: Upper bound on the rejected diff quoted into a retry prompt.
+_MAX_REJECTED_DIFF_CHARS = 48_000
+
+_INCIDENT_DETECTOR_SKELETON = """Incident detector layout (an existing incident detector under
+`.sdo/diagnostics/detectors/incidents/` is the closest concrete example; do not explore SDK source):
+- files `.sdo/diagnostics/detectors/incidents/<snake_name>/detector.go` and `detector_test.go`, `package <snake_name>`,
+  `func New() sdk.Detector`, table tests built on `sdktest.Snapshot` with one matching and one near-miss case.
+- `Spec()` returns `sdk.DetectorSpec{ID: "<incident-detector-id>", Class: sdk.DetectorClassIncident,
+  Owner: sdk.DetectorOwnerResponder, Description: "...", Watches: []sdk.WatchKind{{APIVersion: "apps/v1",
+  Kind: "Deployment"}}, Interval: 30 * time.Second, Persistence: sdk.PersistencePolicy{Firing: 2, Clearing: 2},
+  Batching: sdk.BatchingPolicy{Severity: sdk.SeverityCritical, Debounce: 500 * time.Millisecond},
+  Playbooks: []string{".sdo/playbooks/<playbook>/README.md"}, OriginatingIncident: "<incident id>",
+  OriginatingCommit: "<outcome commit>"}`; every field must equal its manifest entry.
+- manifest entry under `detectors:` in `.sdo/diagnostics/manifest.yaml`: `id`, `package:
+  ./detectors/incidents/<snake_name>`, `constructor: New`, `class: incident`, `owner: responder`, `watches`
+  (`apiVersion`, `kind`), `interval`, `persistence` (`firing`, `clearing`), `batching` (`severity`, `debounce`),
+  `possiblePlaybooks`, `originatingIncident`, and `originatingCommit`.
+"""
+
+
+def _topology_facts(review: TopologyReview | None) -> str:
+    if review is None:
+        return (
+            "Topology review: the broker has no topology comparison for this incident; do not recompute one. "
+            "Never edit deployer-owned architecture.\n"
+        )
+    status = (
+        "arch.md no longer matches the current source; say so in the reflection summary and confirm each resource "
+        "name you reuse from arch.md in the source file that defines it"
+        if review.stale_memory_detected
+        else "arch.md matches the current source, so its resource names are current"
+    )
+    return (
+        "Broker-computed topology review (authoritative; do not recompute fingerprints or compare arch.md with the "
+        "source yourself):\n"
+        f"- arch.md topology fingerprint: {review.architecture_topology_fingerprint}\n"
+        f"- current source topology fingerprint: {review.source_topology_fingerprint}\n"
+        f"- stale_memory_detected: {str(review.stale_memory_detected).lower()} ({status}).\n"
+        "Never edit deployer-owned architecture.\n"
+    )
+
+
+_SELF_CHECK_RULES = (
+    "Self-check scope: validate only the incident detector you added or changed, with "
+    "`python3 -m controller.builder.check_cli draft-test --app . --detector-id <incident-detector-id>`. "
+    "Do not run the health detector's tests, `go test ./...`, or the full `check_cli test`: the broker's isolated "
+    "validator runs the complete suite after you return. Do not `git commit`, `git add`, or `git stash`; leave "
+    "your edits uncommitted in the worktree, because the broker commits accepted memory. Do not read "
+    "`.sdo/lifecycle-provenance.yaml`; it is large lifecycle evidence that reflection does not need.\n"
+)
+
+
+def _learning_request(
+    *,
+    outcome: OutcomeRecord,
+    history: list[OutcomeRecord],
+    outcome_commit: str,
+    topology_review: TopologyReview | None,
+) -> str:
+    """The structured reflection request shared by first attempts and retries."""
+
+    return (
+        f"Outcome commit: {outcome_commit}\n"
+        "Edit only responder-owned `.sdo/playbooks/`, "
+        "`.sdo/diagnostics/detectors/incidents/` (the directory name is exactly the plural `incidents`), and "
+        "the corresponding responder-owned detector entries in `.sdo/diagnostics/manifest.yaml`; "
+        "never edit goal.md, health detectors, or outcomes.jsonl. "
+        "Generalize roles with placeholders and ground structural changes in the supplied history. Create a "
+        "sharp fault-specific playbook for the confirmed cause, with deterministic diagnosis, repair, and "
+        "independent verification steps. When the confirmed cause exposes a stable low-noise Kubernetes "
+        "signature, add a fault-specific incident detector immediately and include both a matching test and a "
+        "near-miss test. Register it with owner responder, class incident, originatingIncident set to this "
+        "incident, and originatingCommit set to the authoritative outcome commit. Preserve every existing health "
+        "detector and shared manifest field.\n"
+        "Return learning_decision=updated when you edit memory. Use learning_decision=no_change only when no "
+        "safe reusable signature or playbook improvement exists, leave proposed_changes empty, and provide a "
+        "specific no_change_reason grounded in this incident. Never claim files were changed unless they exist "
+        "in the worktree.\n"
+        "Apply classification-aware learning: false-positive refinement must tighten an over-broad signature and "
+        "add a regression near-miss; false-negative refinement must add or widen a signature with a reproducing "
+        "test; repeated success may only generalize fields supported by history.\n\n"
+        f"{_topology_facts(topology_review)}\n"
+        f"{_SELF_CHECK_RULES}\n"
+        f"{DETECTOR_SDK_REFERENCE}\n"
+        f"{_INCIDENT_DETECTOR_SKELETON}\n"
+        f"Required action for this {outcome.classification.value} outcome: "
+        f"{_classification_directive(outcome.classification)}\n\n"
+        f"Current outcome:\n{outcome.model_dump_json(indent=2)}\n\n"
+        f"Outcome history:\n{json.dumps([record.model_dump(mode='json') for record in history], indent=2)}\n"
+    )
+
+
+def _bounded_diff(diff: str | None) -> str:
+    if not diff or not diff.strip():
+        return "(the rejected proposal changed no files, or its diff is unavailable)\n"
+    if len(diff) <= _MAX_REJECTED_DIFF_CHARS:
+        return diff if diff.endswith("\n") else diff + "\n"
+    omitted = len(diff) - _MAX_REJECTED_DIFF_CHARS
+    return f"{diff[:_MAX_REJECTED_DIFF_CHARS]}\n[... diff truncated: {omitted} more characters omitted ...]\n"
+
 
 class SessionReflector:
+    """Reflect on a verified outcome: same session first, a short fresh session on retry."""
+
     def __init__(self, backend: StatefulResponderBackend) -> None:
         self.backend = backend
 
@@ -105,52 +217,50 @@ class SessionReflector:
         history: list[OutcomeRecord],
         outcome_commit: str,
         validation_feedback: str | None = None,
+        topology_review: TopologyReview | None = None,
+        rejected_proposal_diff: str | None = None,
     ) -> ReflectionTurn:
-        feedback = (
-            "The prior reflection proposal was rejected by the isolated validator. Correct every reported "
-            f"error before returning a replacement proposal:\n{validation_feedback}\n\n"
-            if validation_feedback
-            else ""
+        request = _learning_request(
+            outcome=outcome,
+            history=history,
+            outcome_commit=outcome_commit,
+            topology_review=topology_review,
         )
+        idempotency_key = f"reflection:{incident_id}:{outcome_commit}"
+        if validation_feedback:
+            # Re-sending the responder transcript on every model request is the
+            # dominant retry cost, and the rejected diff plus the validator's
+            # error is all the retry needs from the first attempt.
+            prompt = (
+                "You are correcting an operational-memory proposal that SDO's isolated validator rejected. The "
+                "controller has independently verified incident closure and committed its authoritative outcome; "
+                "the responder's session transcript is intentionally not available.\n\n"
+                f"Validator error:\n{validation_feedback}\n\n"
+                "The rejected proposal was rolled back, so the worktree is clean at the accepted outcome commit. "
+                "Rejected proposal diff against that commit (reapply what was valid, fix every reported error):\n"
+                f"```diff\n{_bounded_diff(rejected_proposal_diff)}```\n\n"
+                f"Original reflection request:\n{request}"
+            )
+            return self.backend.fresh(worktree=worktree, prompt=prompt, idempotency_key=idempotency_key)
         prompt = (
             "The controller has independently verified incident closure and committed its authoritative outcome.\n"
-            f"Outcome commit: {outcome_commit}\n"
-            "Reflect using the same incident context. Edit only responder-owned `.sdo/playbooks/`, "
-            "`.sdo/diagnostics/detectors/incidents/` (the directory name is exactly the plural `incidents`), and "
-            "the corresponding responder-owned detector entries in `.sdo/diagnostics/manifest.yaml`; "
-            "never edit goal.md, health detectors, or outcomes.jsonl. "
-            "Generalize roles with placeholders and ground structural changes in the supplied history. Create a "
-            "sharp fault-specific playbook for the confirmed cause, with deterministic diagnosis, repair, and "
-            "independent verification steps. When the confirmed cause exposes a stable low-noise Kubernetes "
-            "signature, add a fault-specific incident detector immediately and include both a matching test and a "
-            "near-miss test. Register it with owner responder, class incident, originatingIncident set to this "
-            "incident, and originatingCommit set to the authoritative outcome commit. Preserve every existing health "
-            "detector and shared manifest field.\n"
-            "Return learning_decision=updated when you edit memory. Use learning_decision=no_change only when no "
-            "safe reusable signature or playbook improvement exists, leave proposed_changes empty, and provide a "
-            "specific no_change_reason grounded in this incident. Never claim files were changed unless they exist "
-            "in the worktree.\n"
-            "Apply classification-aware learning: false-positive refinement must tighten an over-broad signature and "
-            "add a regression near-miss; false-negative refinement must add or widen a signature with a reproducing "
-            "test; repeated success may only generalize fields supported by history. Compare arch.md's topology "
-            "fingerprint and resource table with the current source before reusing names, and call out stale memory "
-            "in the reflection summary without editing deployer-owned architecture.\n\n"
-            f"Required action for this {outcome.classification.value} outcome: "
-            f"{_classification_directive(outcome.classification)}\n\n"
-            f"{feedback}"
-            f"Current outcome:\n{outcome.model_dump_json(indent=2)}\n\n"
-            f"Outcome history:\n{json.dumps([record.model_dump(mode='json') for record in history], indent=2)}\n"
+            "Reflect using the same incident context.\n"
+            f"{request}"
         )
         return self.backend.resume(
             session_id=session_id,
             worktree=worktree,
             prompt=prompt,
-            idempotency_key=f"reflection:{incident_id}:{outcome_commit}",
+            idempotency_key=idempotency_key,
         )
 
 
 class CodexSessionBackend:
-    """Resume the responder's own Codex session to reflect on its outcome."""
+    """Resume the responder's own Codex session to reflect on its outcome.
+
+    Validation retries use :meth:`fresh` instead, so they never re-send the
+    responder transcript.
+    """
 
     provider: ClassVar[AgentProvider] = "codex"
 
@@ -174,6 +284,27 @@ class CodexSessionBackend:
         worktree: Path,
         prompt: str,
         idempotency_key: str,
+    ) -> ReflectionTurn:
+        return self._turn(worktree=worktree, prompt=prompt, idempotency_key=idempotency_key, session_id=session_id)
+
+    def fresh(
+        self,
+        *,
+        worktree: Path,
+        prompt: str,
+        idempotency_key: str,
+    ) -> ReflectionTurn:
+        """Run a new session in the incident worktree; used for validation retries."""
+
+        return self._turn(worktree=worktree, prompt=prompt, idempotency_key=idempotency_key, session_id=None)
+
+    def _turn(
+        self,
+        *,
+        worktree: Path,
+        prompt: str,
+        idempotency_key: str,
+        session_id: str | None,
     ) -> ReflectionTurn:
         try:
             turn = run_structured_turn(

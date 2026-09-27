@@ -1,6 +1,10 @@
 """Install the deterministic SDO controller into Kubernetes."""
 
 from sdo.controller_install.kubernetes import (
+    CLAUDE_CONFIG_PATH,
+    CODEX_HOME_PATH,
+    RUNTIME_STATE_ROOT,
+    RUNTIME_USAGE_ROOT,
     ControllerInstallConfig,
     ControllerInstallError,
     ControllerInstallExtension,
@@ -12,6 +16,10 @@ from sdo.controller_install.kubernetes import (
 )
 
 __all__ = [
+    "CLAUDE_CONFIG_PATH",
+    "CODEX_HOME_PATH",
+    "RUNTIME_STATE_ROOT",
+    "RUNTIME_USAGE_ROOT",
     "ControllerInstallConfig",
     "ControllerInstallError",
     "ControllerInstallExtension",

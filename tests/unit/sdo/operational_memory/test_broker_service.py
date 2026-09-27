@@ -78,6 +78,19 @@ class RecordingSessionBackend:
         prompt: str,
         idempotency_key: str,
     ) -> ReflectionTurn:
+        return self._reflect(session_id=session_id, worktree=worktree, prompt=prompt, idempotency_key=idempotency_key)
+
+    def fresh(self, *, worktree: Path, prompt: str, idempotency_key: str) -> ReflectionTurn:
+        return self._reflect(session_id="fresh", worktree=worktree, prompt=prompt, idempotency_key=idempotency_key)
+
+    def _reflect(
+        self,
+        *,
+        session_id: str,
+        worktree: Path,
+        prompt: str,
+        idempotency_key: str,
+    ) -> ReflectionTurn:
         outcomes = MemoryRepository(worktree).outcomes()
         assert outcomes
         assert outcomes[-1].incident_id in prompt
@@ -132,6 +145,7 @@ class PlaybookOnlyThenCorrectBackend(RecordingSessionBackend):
     def __init__(self) -> None:
         super().__init__()
         self.attempts = 0
+        self.fresh_prompts: list[str] = []
 
     def resume(
         self,
@@ -142,6 +156,7 @@ class PlaybookOnlyThenCorrectBackend(RecordingSessionBackend):
         idempotency_key: str,
     ) -> ReflectionTurn:
         self.attempts += 1
+        self.calls.append((session_id, idempotency_key))
         if self.attempts == 1:
             playbook = worktree / ".sdo" / "playbooks" / "missing-configmap" / "README.md"
             playbook.write_text(
@@ -158,16 +173,16 @@ class PlaybookOnlyThenCorrectBackend(RecordingSessionBackend):
                 learning_decision="updated",
                 proposed_changes=[str(playbook), str(wrong)],
             )
+        raise AssertionError("a retry after validation failure must not resume the responder session")
+
+    def fresh(self, *, worktree: Path, prompt: str, idempotency_key: str) -> ReflectionTurn:
+        self.attempts += 1
+        self.fresh_prompts.append(prompt)
         assert "First incomplete attempt." not in (
             worktree / ".sdo" / "playbooks" / "missing-configmap" / "README.md"
         ).read_text(encoding="utf-8")
         assert not (worktree / ".sdo" / "diagnostics" / "detectors" / "incident").exists()
-        return super().resume(
-            session_id=session_id,
-            worktree=worktree,
-            prompt=prompt,
-            idempotency_key=idempotency_key,
-        )
+        return super().fresh(worktree=worktree, prompt=prompt, idempotency_key=idempotency_key)
 
 
 class FailBeforeEditOnceBackend(RecordingSessionBackend):
@@ -550,9 +565,23 @@ def test_semantically_incomplete_reflection_is_rolled_back_and_retried(tmp_path:
     state = service.completion_state("inc-20260709-0001")
     assert state.reflection_backend_completed is False
     assert state.reflection_validation_error
+    assert state.reflection_fresh_retry_attempts == 0
     receipt = service.process_closure(closure)
     assert receipt.reflection_commit is not None
     assert backend.attempts == 2
+    # Attempt 1 resumed the responder session; the retry was a short fresh
+    # session carrying only the rejected diff, the validator error and the
+    # original structured request.
+    assert backend.calls[0][0] == "019c-session-0001"
+    assert backend.calls[1][0] == "fresh"
+    (retry_prompt,) = backend.fresh_prompts
+    assert state.reflection_validation_error in retry_prompt
+    assert "First incomplete attempt." in retry_prompt
+    assert ".sdo/diagnostics/detectors/incident/wrong.go" in retry_prompt
+    assert "Outcome commit:" in retry_prompt
+    state = service.completion_state("inc-20260709-0001")
+    assert state.reflection_attempts == 2
+    assert state.reflection_fresh_retry_attempts == 1
 
 
 def test_bounded_invalid_reflection_records_explicit_no_change_and_allows_closure(tmp_path: Path) -> None:
@@ -861,3 +890,33 @@ def test_session_backend_requests_the_strict_reflection_schema(monkeypatch: pyte
     )
 
     assert seen["schema"] == reflection.reflection_output_schema()
+
+
+class PromptCapturingNoChangeBackend(NoChangeSessionBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.prompts: list[str] = []
+
+    def resume(self, *, session_id: str, worktree: Path, prompt: str, idempotency_key: str) -> ReflectionTurn:
+        self.prompts.append(prompt)
+        return super().resume(session_id=session_id, worktree=worktree, prompt=prompt, idempotency_key=idempotency_key)
+
+
+def test_reflection_prompt_carries_the_broker_computed_topology_review(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = PromptCapturingNoChangeBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    service.process_closure(_closure(workspace.path, workspace.base_commit))
+
+    state = service.completion_state("inc-20260709-0001")
+    (prompt,) = backend.prompts
+    assert state.source_topology_fingerprint
+    assert f"arch.md topology fingerprint: {state.architecture_topology_fingerprint}" in prompt
+    assert f"current source topology fingerprint: {state.source_topology_fingerprint}" in prompt
+    assert "stale_memory_detected: true" in prompt

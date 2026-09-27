@@ -7,6 +7,7 @@ from sdo.operational_memory.broker_service import (
     ClosureReceipt,
     ControllerRolloutExpectation,
     ControllerRolloutRecord,
+    TopologyReview,
 )
 from sdo.operational_memory.commit_broker import (
     BROKER_AUTHOR_EMAIL,
@@ -47,4 +48,5 @@ __all__ = [
     "OutcomeRecord",
     "SandboxResult",
     "SandboxRunner",
+    "TopologyReview",
 ]
