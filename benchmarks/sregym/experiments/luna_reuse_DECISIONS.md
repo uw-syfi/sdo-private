@@ -564,3 +564,16 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
     - `cluster_lock`: an exclusive host-wide lock per cluster, held for the worker's lifetime. Ports, proxy, agent kubeconfig path and fault scratch directory all derive from the same worker ID, so no two lanes can resolve to the same kubeconfig, socket or temp path without the second failing at start.
     - Fault-injector backups move from fixed `/tmp/<service>_modified.yaml` paths to `/tmp/sregym-<cluster>/`. Two clusters injecting the readiness-probe fault at once could otherwise apply each other's original manifest, and the fault would silently not happen.
 - **Next: a two-lane Codex smoke run checks isolation before going back to three lanes.** Smoke runs are isolation checks only and are not counted as baseline samples, which keeps the planned 5-attempt design.
+
+### Isolation smoke run and relaunch (code `91b0080`, SREGym `b4275585`)
+
+- **Cleanup first.** The stopped SDO pipelines left controllers running in the preserved `hotel-reservation-sdo` namespaces on luna-w0 and luna-w2. A leftover controller would repair a Codex run's injected fault, so both namespaces were deleted before any relaunch.
+- **Smoke run: two Codex single attempts (`codex_luna_baseline.toml`) ran concurrently on luna-w1 (`20260927_194247_codex`) and luna-w2 (`20260927_194253_codex`).**
+  - Each conductor's guard logged `…-p16444 verified: port 16444 reaches only luna-w1` and `…-p16445 … luna-w2`, both at lane start and immediately before fault injection.
+  - Every node name in each agent's own command output belongs to its own cluster: luna-w1-worker2/3 only, and luna-w2-worker/worker2/worker3 only.
+  - Isolation confirmed. These two runs are not counted as baseline samples.
+- **Relaunched three lanes with the same assignment:**
+  - w0: codex_x5, then sdo_sequence.
+  - w1: reuse2, then fresh3, then codex_sequence.
+  - w2: fresh2, then reuse3, then sdo_variants, then codex_variants.
+- **Every valid run from here on uses the main checkout at `91b0080` with SREGym `b4275585`.** reuse1 and fresh1 ran at `8c83a04` with SREGym `38cbf4c7`. The only differences are harness isolation and analysis code, which do not affect a single-cluster run, and the images are unchanged.
