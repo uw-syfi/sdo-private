@@ -36,7 +36,11 @@ type KubernetesJobDispatcher struct {
 	RepositoryPVCSubPath string
 	CredentialsSecret    string
 	Environment          map[string]string
-	PollInterval         time.Duration
+	// DispatchEnvironment adds values known only at dispatch time, such as
+	// the synthetic-traffic prober's address. It overrides Environment but
+	// never the controller-managed names.
+	DispatchEnvironment func(context.Context) map[string]string
+	PollInterval        time.Duration
 }
 
 func (d KubernetesJobDispatcher) Dispatch(ctx context.Context, request IncidentRequest) (IncidentResult, error) {
@@ -178,7 +182,7 @@ func (d KubernetesJobDispatcher) ensureJob(
 							{Name: "SDO_REQUEST_CONFIGMAP", Value: requestName},
 							{Name: "SDO_RESULT_CONFIGMAP", Value: resultName},
 							{Name: "SDO_NAMESPACE", Value: d.Namespace},
-						}, responderEnvironment(d.Environment)...),
+						}, responderEnvironment(d.environment(ctx))...),
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "request", MountPath: "/sdo/request", ReadOnly: true},
 							{Name: "repository", MountPath: d.RepositoryMountPath, SubPath: d.RepositoryPVCSubPath},
@@ -221,6 +225,19 @@ func (d KubernetesJobDispatcher) ensureJob(
 		return fmt.Errorf("create responder Job: %w", err)
 	}
 	return nil
+}
+
+func (d KubernetesJobDispatcher) environment(ctx context.Context) map[string]string {
+	values := make(map[string]string, len(d.Environment))
+	for name, value := range d.Environment {
+		values[name] = value
+	}
+	if d.DispatchEnvironment != nil {
+		for name, value := range d.DispatchEnvironment(ctx) {
+			values[name] = value
+		}
+	}
+	return values
 }
 
 func responderEnvironment(values map[string]string) []corev1.EnvVar {

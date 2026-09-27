@@ -58,6 +58,33 @@ func StaticProberURL(url string) func(context.Context, bool) (string, error) {
 	return func(context.Context, bool) (string, error) { return url, nil }
 }
 
+// ProberURLEnvironment names the responder environment variable that carries
+// the prober's API address, which `sdo incident status` uses for its verify
+// burst.
+const ProberURLEnvironment = "SDO_PROBER_URL"
+
+// proberEnvironmentTimeout bounds how long dispatch may spend locating the
+// prober; normally its address is already cached.
+const proberEnvironmentTimeout = 2 * time.Second
+
+// ProberEnvironment resolves the prober address at dispatch time. Without a
+// prober, or when it cannot be resolved, the responder gets nothing and
+// falls back to its own verification; dispatch never waits on the prober.
+func ProberEnvironment(address func(context.Context, bool) (string, error)) func(context.Context) map[string]string {
+	return func(ctx context.Context) map[string]string {
+		if address == nil {
+			return nil
+		}
+		resolveCtx, cancel := context.WithTimeout(ctx, proberEnvironmentTimeout)
+		defer cancel()
+		resolved, err := address(resolveCtx, false)
+		if err != nil || resolved == "" {
+			return nil
+		}
+		return map[string]string{ProberURLEnvironment: resolved}
+	}
+}
+
 func (c HTTPProberClient) do(ctx context.Context, method string, path string, body any, into any) error {
 	response, err := c.send(ctx, method, path, body, false)
 	if err != nil && ctx.Err() == nil {

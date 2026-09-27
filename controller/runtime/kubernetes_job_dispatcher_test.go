@@ -158,6 +158,33 @@ func containsEnvironment(environment []corev1.EnvVar, name string, value string)
 	return false
 }
 
+func TestKubernetesJobDispatcherAddsDispatchTimeEnvironment(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	request := goldenRequest(t)
+	dispatcher := KubernetesJobDispatcher{
+		Client: client, Namespace: "demo", Image: "sdo-responder:test", Command: []string{"/responder"},
+		ServiceAccount: "sdo-responder", RepositoryPVC: "application-repository", CredentialsSecret: "sdo-codex",
+		RepositoryMountPath: "/workspace", PollInterval: time.Millisecond,
+		Environment: map[string]string{"SDO_SREGYM_API_BASE": "http://bridge:18000"},
+		DispatchEnvironment: func(context.Context) map[string]string {
+			return map[string]string{"SDO_PROBER_URL": "http://10.0.0.7:8080", "SDO_NAMESPACE": "hijacked"}
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _, _ = dispatcher.Dispatch(ctx, request) }()
+	container := awaitJob(t, client, IncidentJobName(request.IncidentID)).Spec.Template.Spec.Containers[0]
+	if !containsEnvironment(container.Env, "SDO_PROBER_URL", "http://10.0.0.7:8080") {
+		t.Fatalf("dispatch-time environment was not propagated: %#v", container.Env)
+	}
+	if !containsEnvironment(container.Env, "SDO_SREGYM_API_BASE", "http://bridge:18000") {
+		t.Fatalf("static environment was lost: %#v", container.Env)
+	}
+	if containsEnvironment(container.Env, "SDO_NAMESPACE", "hijacked") {
+		t.Fatalf("dispatch-time environment must not override controller-managed names: %#v", container.Env)
+	}
+}
+
 func TestKubernetesJobDispatcherReturnsFailedJob(t *testing.T) {
 	client := fake.NewSimpleClientset()
 	request := goldenRequest(t)

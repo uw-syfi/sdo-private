@@ -284,3 +284,17 @@ func TestProberPodEnsureReusesAMatchingProberAndReplacesAStaleOne(t *testing.T) 
 		t.Fatalf("the prober NetworkPolicy must exist: %v", err)
 	}
 }
+
+func TestProberEnvironmentTellsTheResponderWhereToVerify(t *testing.T) {
+	environment := ProberEnvironment(StaticProberURL("http://10.0.0.7:8080"))(context.Background())
+	if environment[ProberURLEnvironment] != "http://10.0.0.7:8080" || len(environment) != 1 {
+		t.Fatalf("responder must receive the prober URL: %v", environment)
+	}
+	if got := ProberEnvironment(nil)(context.Background()); len(got) != 0 {
+		t.Fatalf("without synthetic traffic the responder gets no prober URL: %v", got)
+	}
+	unreachable := func(context.Context, bool) (string, error) { return "", context.DeadlineExceeded }
+	if got := ProberEnvironment(unreachable)(context.Background()); len(got) != 0 {
+		t.Fatalf("an unresolvable prober must not block dispatch: %v", got)
+	}
+}

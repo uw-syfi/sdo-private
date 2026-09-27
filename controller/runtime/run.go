@@ -215,10 +215,12 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	}
 	trafficWorkloads := TrafficWorkloadNames(detectors)
 	var proberAPI ProberAPI
+	var proberAddress func(context.Context, bool) (string, error)
 	switch {
 	case !*syntheticTraffic || len(trafficWorkloads) == 0:
 	case *proberURL != "":
-		proberAPI = HTTPProberClient{BaseURL: StaticProberURL(*proberURL)}
+		proberAddress = StaticProberURL(*proberURL)
+		proberAPI = HTTPProberClient{BaseURL: proberAddress}
 	case *proberBinary != "":
 		image := *proberImage
 		if image == "" {
@@ -229,7 +231,8 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			RepositoryPVC: *repositoryPVC, RepositoryMountPath: *repositoryMountPath,
 			RepositoryPVCSubPath: *repositoryPVCSubPath, Binary: *proberBinary,
 		}
-		proberAPI = HTTPProberClient{BaseURL: pod.Address}
+		proberAddress = pod.Address
+		proberAPI = HTTPProberClient{BaseURL: proberAddress}
 	}
 	trafficObserver := NewTrafficObserver(proberAPI, trafficWorkloads, func() { kubernetesCache.Notify(traffic.Watch) }, 0)
 	var snapshotProvider SnapshotProvider = kubernetesCache
@@ -245,14 +248,18 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	var dispatcher Dispatcher
 	switch *dispatcherMode {
 	case "local":
-		dispatcher = SubprocessDispatcher{Argv: argv, Timeout: *responseTimeout}
+		var environment []string
+		if proberAPI != nil && *proberURL != "" {
+			environment = append(environment, ProberURLEnvironment+"="+*proberURL)
+		}
+		dispatcher = SubprocessDispatcher{Argv: argv, Env: environment, Timeout: *responseTimeout}
 	case "job":
 		dispatcher = KubernetesJobDispatcher{
 			Client: bootstrapProvider.Client, Namespace: *controlNamespace, Image: *responderImage,
 			Command: argv, ServiceAccount: "sdo-responder", RepositoryPVC: *repositoryPVC,
 			RepositoryMountPath: *repositoryMountPath, RepositoryPVCSubPath: *repositoryPVCSubPath,
 			CredentialsSecret: *credentialsSecret, PollInterval: time.Second,
-			Environment: jobEnvironment,
+			Environment: jobEnvironment, DispatchEnvironment: ProberEnvironment(proberAddress),
 		}
 	default:
 		return fmt.Errorf("unsupported dispatcher mode %q", *dispatcherMode)
