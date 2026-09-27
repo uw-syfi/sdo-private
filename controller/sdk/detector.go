@@ -107,6 +107,15 @@ type Finding struct {
 	Metadata          map[string]any       `json:"metadata,omitempty"`
 }
 
+// ServiceExpectsEndpoints reports whether Kubernetes can back a Service with
+// Endpoints, EndpointSlices, or selected pods. ExternalName Services are DNS
+// aliases: Kubernetes never gives them endpoints, even when a selector is left
+// over from a type change. A detector must not report an ExternalName Service
+// for missing ready endpoints or pods.
+func ServiceExpectsEndpoints(service corev1.Service) bool {
+	return service.Spec.Type != corev1.ServiceTypeExternalName
+}
+
 // ConfigMapReference describes a ConfigMap consumed by a Deployment pod
 // template. Optional references do not make an absent ConfigMap a fault.
 type ConfigMapReference struct {

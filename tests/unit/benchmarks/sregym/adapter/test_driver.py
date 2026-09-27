@@ -203,6 +203,12 @@ def test_local_conductor_is_routed_through_narrow_in_cluster_relay() -> None:
     assert _relay_target_api_base("http://localhost:8123/") == "http://localhost:8123"
 
 
+def test_wildcard_bound_conductor_is_local_and_routed_through_relay() -> None:
+    """SREGym's main.py defaults API_HOSTNAME to the 0.0.0.0 bind address."""
+    assert _in_cluster_api_base("http://0.0.0.0:8000") == "http://sdo-sregym-bridge:8000"
+    assert _relay_target_api_base("http://0.0.0.0:8000") == "http://0.0.0.0:8000"
+
+
 def test_health_objective_names_only_resources_deployed_in_the_runtime_namespace() -> None:
     payload = {
         "items": [
@@ -1119,3 +1125,223 @@ def test_runner_honors_temporary_sregym_checkout(monkeypatch, tmp_path: Path) ->
     finally:
         monkeypatch.delenv("SDO_SREGYM_DIR", raising=False)
         importlib.reload(runner)
+
+
+def test_deferred_problem_starts_fault_gate_after_lifecycle_and_before_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    events: list[str] = []
+
+    class FakeGate:
+        timings = {"controller_baseline_wait": 30.0, "fault_injection_request": 1.0}
+
+        def __init__(self, namespace: str, api_base: str) -> None:
+            assert (namespace, api_base) == ("demo", "http://localhost:8000")
+
+        def start(self) -> None:
+            events.append("gate-start")
+
+        def join(self) -> None:
+            events.append("gate-join")
+
+    monkeypatch.setenv("SREGYM_DEFER_CLEANUP", "1")
+    monkeypatch.setattr(driver, "get_api_base", lambda: "http://localhost:8000")
+    monkeypatch.setattr(driver, "poll_stage_sync", lambda *_args, **_kwargs: "awaiting_fault_injection")
+    monkeypatch.setattr(driver, "get_app_info", lambda *_args: {"app_name": "demo", "namespace": "demo"})
+    monkeypatch.setattr(driver, "_application_repository", lambda: tmp_path)
+    monkeypatch.setattr(
+        driver,
+        "_deployed_lifecycle_context",
+        lambda *_args, **_kwargs: driver.DeployedLifecycleContext(health_objective="healthy", active_resources=[]),
+    )
+    monkeypatch.setattr(driver, "reuse_initial_lifecycle_if_valid", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(driver, "run_initial_lifecycle", lambda *_args, **_kwargs: events.append("lifecycle"))
+    monkeypatch.setattr(driver, "_FaultGate", FakeGate)
+    monkeypatch.setattr(driver, "run_production_runtime", lambda _config: events.append("runtime") or {})
+
+    result = driver._run(driver._parse_args([]))
+
+    assert events == ["lifecycle", "gate-start", "runtime", "gate-join"]
+    assert result["fault_injection_deferred"] is True
+    assert result["fault_gate_timings_seconds"] == FakeGate.timings
+
+
+def test_driver_records_host_turn_usage_beside_run_artifacts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SDO_TURN_USAGE_LOG", raising=False)
+    driver._configure_turn_usage_log(str(tmp_path))
+    assert os.environ["SDO_TURN_USAGE_LOG"] == str(tmp_path / "sdo_turn_usage.jsonl")
+
+    monkeypatch.setenv("SDO_TURN_USAGE_LOG", "/elsewhere.jsonl")
+    driver._configure_turn_usage_log(str(tmp_path))
+    assert os.environ["SDO_TURN_USAGE_LOG"] == "/elsewhere.jsonl"
+
+
+def _pod_runtime_archive(tmp_path: Path) -> bytes:
+    import tarfile
+
+    source = tmp_path / "pod-runtime"
+    (source / "usage").mkdir(parents=True)
+    (source / "usage" / "controller-turns.jsonl").write_text('{"model_requests": 3}\n', encoding="utf-8")
+    rollout = source / "codex" / "sessions" / "2026" / "09" / "27" / "rollout-2026-09-27T00-00-00-s-1.jsonl"
+    rollout.parent.mkdir(parents=True)
+    rollout.write_text('{"type": "session_meta"}\n', encoding="utf-8")
+    archive = tmp_path / "runtime.tar"
+    with tarfile.open(archive, "w") as bundle:
+        bundle.add(source / "usage", arcname="usage")
+        bundle.add(source / "codex" / "sessions", arcname="codex/sessions")
+    return archive.read_bytes()
+
+
+def test_runtime_exports_pod_usage_logs_and_codex_rollouts_into_run_artifacts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import benchmarks.sregym.adapter.runtime as runtime
+
+    archive = _pod_runtime_archive(tmp_path)
+    real_run = subprocess.run
+    pod_commands: list[list[str]] = []
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        if args[0] == "kubectl":
+            pod_commands.append(args)
+            return subprocess.CompletedProcess(args, 0, archive, b"")
+        return real_run(args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_run)
+    artifacts = tmp_path / "results"
+
+    summary = runtime._export_runtime_artifacts("demo", artifacts)
+
+    exported = artifacts / "sdo_runtime"
+    assert summary == {"directory": str(exported), "error": None}
+    assert (exported / "usage" / "controller-turns.jsonl").read_text(encoding="utf-8") == '{"model_requests": 3}\n'
+    assert (exported / "codex" / "sessions" / "2026" / "09" / "27" / "rollout-2026-09-27T00-00-00-s-1.jsonl").is_file()
+    (command,) = pod_commands
+    assert command[:6] == ["kubectl", "--namespace", "demo", "exec", "sdo-repository-sync", "--"]
+    script = command[-1]
+    assert "/workspace/.sdo-runtime" in script
+    assert "usage" in script
+    assert "codex/sessions" in script
+    # Credentials in the Codex and Claude homes are never exported.
+    assert "auth.json" not in script
+    assert ".credentials" not in script
+
+
+def test_runtime_artifact_export_failure_never_fails_the_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import benchmarks.sregym.adapter.runtime as runtime
+
+    def fake_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(args, 1, b"", b"pod not found")
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_run)
+
+    summary = runtime._export_runtime_artifacts("demo", tmp_path)
+
+    assert summary["directory"] is None
+    assert "pod not found" in str(summary["error"])
+
+
+def test_runtime_artifact_export_without_a_destination_is_skipped(tmp_path: Path) -> None:
+    import benchmarks.sregym.adapter.runtime as runtime
+
+    assert runtime._export_runtime_artifacts("demo", None) == {"directory": None, "error": "no artifacts directory"}
+
+
+def test_receipt_reflection_telemetry_distinguishes_fresh_retries_from_same_session() -> None:
+    import benchmarks.sregym.adapter.runtime as runtime
+
+    telemetry = runtime._reflection_telemetry(
+        {"responder_session_id": "s-1", "reflection_attempts": 2, "reflection_fresh_retry_attempts": 1}
+    )
+    assert telemetry == {
+        "reflection_attempts": 2,
+        "reflection_fresh_retry_attempts": 1,
+        "reflection_skipped_reason": None,
+    }
+    assert runtime._reflection_telemetry({}) == {
+        "reflection_attempts": 0,
+        "reflection_fresh_retry_attempts": 0,
+        "reflection_skipped_reason": None,
+    }
+
+
+def test_receipt_reports_a_deterministically_skipped_reflection() -> None:
+    import benchmarks.sregym.adapter.runtime as runtime
+
+    telemetry = runtime._reflection_telemetry(
+        {"reflection_attempts": 0, "reflection_skipped_reason": "repeated exact-match success: ..."}
+    )
+
+    assert telemetry["reflection_attempts"] == 0
+    assert telemetry["reflection_skipped_reason"] == "repeated exact-match success: ..."
+
+
+def test_driver_exports_runtime_artifacts_beside_the_receipt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    configs: list[RuntimeConfig] = []
+    monkeypatch.setenv("SREGYM_DEFER_CLEANUP", "1")
+    monkeypatch.setattr(driver, "get_api_base", lambda: "http://localhost:8000")
+    monkeypatch.setattr(driver, "poll_stage_sync", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(driver, "get_app_info", lambda *_args, **_kwargs: {"app_name": "demo", "namespace": "demo"})
+    monkeypatch.setattr(driver, "_application_repository", lambda: tmp_path / "application")
+    monkeypatch.setattr(
+        driver,
+        "_deployed_lifecycle_context",
+        lambda *_args, **_kwargs: driver.DeployedLifecycleContext(health_objective="healthy", active_resources=[]),
+    )
+    monkeypatch.setattr(driver, "reuse_initial_lifecycle_if_valid", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(driver, "persist_lifecycle_seed", lambda *_args, **_kwargs: None)
+
+    def fake_runtime(config: RuntimeConfig) -> dict[str, bool]:
+        configs.append(config)
+        return {"completed": True}
+
+    monkeypatch.setattr(driver, "run_production_runtime", fake_runtime)
+    logs = tmp_path / "logs"
+
+    driver._run(driver._parse_args(["--logs-dir", str(logs)]))
+
+    assert configs[0].artifacts_dir == _receipt_directory(str(logs), tmp_path / "application")
+
+
+def test_health_objective_never_requires_endpoints_for_external_name_services() -> None:
+    payload = {
+        "items": [
+            {"kind": "Deployment", "metadata": {"name": "frontend"}},
+            {"kind": "Service", "metadata": {"name": "frontend"}, "spec": {"selector": {"app": "frontend"}}},
+            {"kind": "Service", "metadata": {"name": "jaeger"}, "spec": {"type": "ExternalName"}},
+        ]
+    }
+
+    def fake_runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    context = _deployed_lifecycle_context("hotel-reservation", command_runner=fake_runner)
+
+    assert "the deployed Services named frontend expose ready endpoints" in context.health_objective
+    assert "Services named frontend, jaeger" not in context.health_objective
+    assert (
+        "the ExternalName Services named jaeger are DNS aliases with no endpoints and must not be required to "
+        "have ready endpoints" in context.health_objective
+    )
+    assert ("Service", "jaeger") in [(resource.kind, resource.name) for resource in context.active_resources]
+
+
+def test_exported_runtime_artifacts_cover_responder_sessions_and_usage_logs() -> None:
+    import posixpath
+
+    import benchmarks.sregym.adapter.runtime as runtime
+    from sdo.controller_install import CODEX_HOME_PATH, RUNTIME_STATE_ROOT
+    from sdo.controller_install.kubernetes import RESPONDER_TURN_USAGE_LOG
+
+    exported = set(runtime._EXPORTED_RUNTIME_PATHS)
+    # Responder Jobs run Codex with CODEX_HOME on the workspace PVC, so their
+    # session rollouts (every shell command and model request) are exported.
+    assert posixpath.relpath(f"{CODEX_HOME_PATH}/sessions", RUNTIME_STATE_ROOT) in exported
+    assert posixpath.relpath(posixpath.dirname(RESPONDER_TURN_USAGE_LOG), RUNTIME_STATE_ROOT) in exported

@@ -1,0 +1,119 @@
+"""Benchmark-only gate that injects a deferred SREGym fault into a monitored app.
+
+SDO operates an application continuously: it deploys, judges health, and
+installs its controller before anything goes wrong. The gate reproduces that
+order inside SREGym by asking the conductor to inject the fault only after the
+controller has evaluated its detectors once with no active finding.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Protocol
+
+from benchmarks.sregym.protocol import request_with_retry
+
+if TYPE_CHECKING:
+    import subprocess
+    from collections.abc import Callable
+
+INJECT_FAULT_ENDPOINT = "/inject_fault"
+AWAITING_FAULT_INJECTION = "awaiting_fault_injection"
+BASELINE_TIMEOUT_SECONDS = 1800
+BASELINE_POLL_SECONDS = 1.0
+
+
+class FaultGateError(RuntimeError):
+    """Raised when the fault cannot be injected into a monitored baseline."""
+
+
+class KubectlRunner(Protocol):
+    def __call__(self, args: list[str], *, namespace: str, check: bool) -> subprocess.CompletedProcess[str]: ...
+
+
+def controller_active_findings(controller_logs: str) -> list[str] | None:
+    """Return the active rule IDs of the latest controller evaluation, or None before any evaluation."""
+
+    latest: list[str] | None = None
+    for line in controller_logs.splitlines():
+        try:
+            payload: Any = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or "controller_iteration" not in payload:
+            continue
+        findings = payload.get("findings") or []
+        latest = [
+            str(finding.get("rule_id"))
+            for finding in (findings if isinstance(findings, list) else [])
+            if isinstance(finding, dict) and finding.get("status") == "active"
+        ]
+    return latest
+
+
+def controller_baseline_clear(controller_logs: str) -> bool:
+    """Return whether the latest controller evaluation reported no active finding."""
+
+    return controller_active_findings(controller_logs) == []
+
+
+def request_fault_injection(api_base: str) -> None:
+    """Ask the conductor to inject the deferred fault and open the incident."""
+
+    response = request_with_retry("POST", f"{api_base.rstrip('/')}{INJECT_FAULT_ENDPOINT}", max_retries=2, timeout=300)
+    stage = response.json().get("stage")
+    if stage in (None, AWAITING_FAULT_INJECTION):
+        raise FaultGateError(f"conductor did not open an incident stage after injection (stage={stage!r})")
+
+
+def inject_fault_after_controller_baseline(
+    namespace: str,
+    *,
+    inject: Callable[[], None],
+    kubectl_runner: KubectlRunner,
+    not_before: datetime,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    timeout_seconds: float = BASELINE_TIMEOUT_SECONDS,
+) -> dict[str, float]:
+    """Wait for an all-clear evaluation from a controller Job created at or after
+    ``not_before`` (never a previous round's Job), then inject exactly once."""
+
+    started = monotonic()
+    deadline = started + timeout_seconds
+    last_error = "controller Job has not produced an evaluation"
+    while monotonic() < deadline:
+        if not _current_controller_job(namespace, kubectl_runner, not_before):
+            last_error = "current controller Job has not been created"
+            sleep(BASELINE_POLL_SECONDS)
+            continue
+        completed = kubectl_runner(["logs", "job/sdo-controller-run", "--tail=200"], namespace=namespace, check=False)
+        active = controller_active_findings(completed.stdout) if completed.returncode == 0 else None
+        if active:
+            last_error = f"latest controller evaluation has active findings {sorted(set(active))}"
+        if active == []:
+            baseline_ready = monotonic()
+            inject()
+            return {
+                "controller_baseline_wait": baseline_ready - started,
+                "fault_injection_request": monotonic() - baseline_ready,
+            }
+        if completed.returncode != 0:
+            last_error = (completed.stderr or completed.stdout or "").strip() or last_error
+        sleep(BASELINE_POLL_SECONDS)
+    raise FaultGateError(f"controller did not report an all-clear baseline within {timeout_seconds:.0f}s: {last_error}")
+
+
+def _current_controller_job(namespace: str, kubectl_runner: KubectlRunner, not_before: datetime) -> bool:
+    completed = kubectl_runner(["get", "job/sdo-controller-run", "-o", "json"], namespace=namespace, check=False)
+    if completed.returncode != 0:
+        return False
+    try:
+        created = json.loads(completed.stdout)["metadata"]["creationTimestamp"]
+        created_at = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError):
+        return False
+    # creationTimestamp has one-second resolution.
+    return created_at >= not_before.replace(microsecond=0)

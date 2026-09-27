@@ -19,6 +19,7 @@ from libs.agent_cli.structured import (
     StructuredTurnTimeout,
     run_structured_turn,
 )
+from sdo.operational_memory import DETECTOR_SDK_REFERENCE
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -50,16 +51,30 @@ class ActiveTopologyResourceDTO(BaseModel):
 
 
 class DeployerDraft(BaseModel):
+    """Structured deployer output.
+
+    The resource inventory is deliberately absent: it is a deterministic controller
+    fact derived from tracked manifests, so the controller attaches it instead of
+    asking the model to transcribe it.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     source_commit: str = Field(min_length=1)
     topology_fingerprint: str = Field(min_length=64, max_length=64)
-    resources: list[TopologyResourceDTO]
     architecture_summary_markdown: str = Field(min_length=20)
 
 
-class DeployerAssessment(DeployerDraft):
+class DeployerHandoff(DeployerDraft):
+    """A deployer draft attributed to the fresh agent session that produced it."""
+
     session_id: str = Field(min_length=1)
+
+
+class DeployerAssessment(DeployerHandoff):
+    """A published deployer handoff with the controller-derived resource inventory."""
+
+    resources: list[TopologyResourceDTO]
 
 
 class HealthJudgeDraft(BaseModel):
@@ -101,7 +116,7 @@ class LifecycleAgentBackend(Protocol):
         repository: Path,
         application: str,
         correction_feedback: str | None,
-    ) -> DeployerAssessment: ...
+    ) -> DeployerHandoff: ...
 
     def run_health_judge(
         self,
@@ -130,31 +145,6 @@ class WorkspaceHealthJudgeBackend(Protocol):
         correction_feedback: str | None,
         active_resources: list[ActiveTopologyResourceDTO] | None = None,
     ) -> HealthJudgeWorkspaceArtifact: ...
-
-
-_DETECTOR_SDK_REFERENCE = """Trusted controller/sdk API reference (do not search outside the application checkout):
-
-- import path `sdo.dev/controller/sdk`; test helper import path `sdo.dev/controller/sdk/sdktest`.
-- `type Detector interface { Spec() DetectorSpec; Detect(context.Context, DetectionContext) ([]Finding, error) }`.
-- `DetectionContext` exposes `Namespace() string`, `ConfigMaps() []corev1.ConfigMap`,
-  `Services() []corev1.Service`, `Pods() []corev1.Pod`, `Deployments() []appsv1.Deployment`,
-  `ReplicaSets() []appsv1.ReplicaSet`, `Endpoints() []corev1.Endpoints`,
-  `EndpointSlices() []discoveryv1.EndpointSlice`, `NetworkPolicies() []networkingv1.NetworkPolicy`,
-  `Events() []corev1.Event`, `ReadyEndpointCountForService(namespace, service string) int`,
-  `PodsForService(namespace, service string) []corev1.Pod`, and
-  `RecentEventsFor(namespace, kind, name string) []corev1.Event`.
-- `sdk.ConfigMapReferencesForDeployment(appsv1.Deployment) []sdk.ConfigMapReference` returns sorted,
-  deduplicated volume, projected-volume, envFrom, and env ConfigMap references; each reference has `Name string`
-  and `Optional bool`.
-- `sdk.Finding` has string fields `RuleID`, `Summary`, `Evidence`, and `Fingerprint`; enum fields `Status` and
-  `Severity`; `PrimaryResource sdk.ObjectRef`; `RelatedResources []sdk.ObjectRef`; `Playbooks []string`;
-  `ParameterBindings map[string]sdk.ObjectRef`; and `Metadata map[string]any`. Use `sdk.FindingActive`,
-  `sdk.SeverityCritical`, and stable fingerprints. In particular, never use `map[string]string` for Metadata.
-- `sdk.ObjectRef` fields are `APIVersion`, `Kind`, `Namespace`, and `Name`.
-- `sdktest.Snapshot` implements DetectionContext. Its fields are `NamespaceName`, `ConfigMapList`, `ServiceList`,
-  `PodList`, `DeploymentList`, `ReplicaSetList`, `EndpointList`, `EndpointSliceList`, `NetworkPolicyList`, and
-  `EventList`.
-"""
 
 
 _ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9_.$~*?{}-])(/[A-Za-z0-9_./*?{}$@%+=:,~-]+)")
@@ -239,18 +229,18 @@ class CodexLifecycleBackend:
         repository: Path,
         application: str,
         correction_feedback: str | None,
-    ) -> DeployerAssessment:
+    ) -> DeployerHandoff:
         feedback = correction_feedback or "No prior attempt; inspect the source from first principles."
         prompt = f"""You are the SDO deployer for application {application!r}.
 
 This is a fresh, independent, read-only session. Inspect the Git repository and its tracked deployment artifacts.
-Return a structured source-grounded inventory and a complete architecture summary that names every source-backed
-component, its selectors and dependencies, configuration inputs, images, and build/deployment relationships. In
-architecture_summary_markdown, mention every resource name from the trusted controller feedback verbatim, including
-low-level data stores and observability resources; do not collapse named resources into categories. Do not edit any
-file and do not infer resources absent from tracked source. The controller will independently compare your source
-commit, topology fingerprint, complete resource inventory, and summary coverage with deterministic repository
-inspection.
+Return a complete source-grounded architecture summary that names every source-backed component, its selectors and
+dependencies, configuration inputs, images, and build/deployment relationships. In architecture_summary_markdown,
+mention every resource name from the trusted controller feedback verbatim, including low-level data stores and
+observability resources; do not collapse named resources into categories. Do not edit any file and do not infer
+resources absent from tracked source. The response has no resource inventory field: the controller attaches the
+deterministic inventory from tracked manifests itself. The controller will independently compare your source commit,
+topology fingerprint, and summary coverage with deterministic repository inspection.
 
 Repository isolation is part of the evidence contract. Inspect only the current application checkout. Never use
 `..`, an absolute path outside this checkout, a sibling experiment, a package cache, or another SDO source tree.
@@ -265,7 +255,7 @@ Correction feedback from the prior fresh attempt:
 {feedback}
 """
         draft, session_id = self._execute(repository, prompt, DeployerDraft)
-        return DeployerAssessment(**draft.model_dump(), session_id=session_id)
+        return DeployerHandoff(**draft.model_dump(), session_id=session_id)
 
     def run_health_judge(
         self,
@@ -313,7 +303,7 @@ Author deterministic Go detector code and deterministic Go tests using only sdo.
 DetectionContext snapshot methods and Kubernetes API types already available to SDO diagnostics. Use the trusted
 SDK reference below; the application checkout is intentionally not expected to contain the controller SDK.
 
-{_DETECTOR_SDK_REFERENCE}
+{DETECTOR_SDK_REFERENCE}
 
 Repository isolation is part of the evidence contract. Inspect only the current application checkout. Never use
 `..`, an absolute path outside this checkout, a sibling experiment, a package cache, or another SDO source tree.
@@ -419,7 +409,7 @@ validate the resulting files after your session ends; your self-check is not acc
 The deployer assessment above is trusted and complete. Do not rediscover topology with repository-wide `find` or
 `grep`; inspect the current detector files first and open only source manifests named in that assessment when needed.
 
-{_DETECTOR_SDK_REFERENCE}
+{DETECTOR_SDK_REFERENCE}
 
 The detector must remain package objective, export New() sdk.Detector, and copy the exact objective digest above into
 healthObjectiveDigest. Its Spec is controller-owned and already present in detector.go; preserve it. Never read

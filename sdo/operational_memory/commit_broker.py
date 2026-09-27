@@ -13,6 +13,10 @@ if TYPE_CHECKING:
     from sdo.operational_memory.models import ArtifactOwner, ValidatorNetworkPolicyCanary
 
 
+BROKER_AUTHOR_EMAIL = "sdo-commit-broker@localhost"
+VALIDATION_PASSED_TRAILER = "SDO-Validation: passed"
+
+
 class CommitBrokerError(RuntimeError):
     """Raised when the transactional memory commit cannot complete."""
 
@@ -192,14 +196,14 @@ class CommitBroker:
             f"SDO-Incident: {incident_id}\n"
             f"SDO-Actor: {actor}\n"
             f"SDO-Phase: {phase}\n"
-            "SDO-Validation: passed"
+            f"{VALIDATION_PASSED_TRAILER}"
         )
         env = {
             **os.environ,
             "GIT_AUTHOR_NAME": "SDO Commit Broker",
-            "GIT_AUTHOR_EMAIL": "sdo-commit-broker@localhost",
+            "GIT_AUTHOR_EMAIL": BROKER_AUTHOR_EMAIL,
             "GIT_COMMITTER_NAME": "SDO Commit Broker",
-            "GIT_COMMITTER_EMAIL": "sdo-commit-broker@localhost",
+            "GIT_COMMITTER_EMAIL": BROKER_AUTHOR_EMAIL,
         }
         commit_args = ["commit"]
         if allow_empty:

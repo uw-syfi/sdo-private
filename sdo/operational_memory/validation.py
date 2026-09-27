@@ -5,15 +5,21 @@ import subprocess
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
-from sdo.operational_memory.models import ArtifactOwner, ValidatorNetworkPolicyCanary
+from sdo.operational_memory.models import INCIDENT_DETECTOR_MAX_FIRING, ArtifactOwner, ValidatorNetworkPolicyCanary
 from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
 from sdo.operational_memory.sandbox import ContainerSandboxRunner
 
 if TYPE_CHECKING:
     from sdo.operational_memory.sandbox import SandboxRunner
 
+#: Every playbook body must contain at least one role placeholder matching this pattern.
 PLACEHOLDER_RE = re.compile(r"<[A-Z][A-Z0-9_]+>")
+#: Index that must link every ``.sdo/playbooks/<fault-class>/README.md``.
+PLAYBOOK_INDEX_PATH = PurePosixPath(".sdo/playbooks/README.md")
+#: Required extension of files under ``.sdo/playbooks/<fault-class>/scripts/``.
+PLAYBOOK_SCRIPT_SUFFIX = ".sh"
 MARKDOWN_LINK_RE = re.compile(r"\[[^]]+\]\(([^)]+)\)")
+SPEC_PROVENANCE_RE = re.compile(r'\b(OriginatingIncident|OriginatingCommit)\s*:\s*("(?:[^"\\]|\\.)*"|`[^`]*`)')
 
 
 class MemoryValidationError(ValueError):
@@ -64,6 +70,18 @@ class MemoryValidator:
         self._validate_playbooks(repository)
         self._validate_detector_classes(repository)
         self._validate_detector_ownership(
+            repository,
+            actor=actor,
+            changed_paths=normalized,
+            baseline_root=baseline_root,
+        )
+        self._validate_incident_provenance(
+            repository,
+            actor=actor,
+            changed_paths=normalized,
+            baseline_root=baseline_root,
+        )
+        self._validate_incident_persistence(
             repository,
             actor=actor,
             changed_paths=normalized,
@@ -120,10 +138,10 @@ class MemoryValidator:
 
     @staticmethod
     def _validate_playbooks(repository: MemoryRepository) -> None:
-        playbook_root = repository.memory_root / "playbooks"
-        index_path = playbook_root / "README.md"
+        index_path = repository.app_root / PLAYBOOK_INDEX_PATH
+        playbook_root = index_path.parent
         if not index_path.is_file():
-            raise MemoryValidationError("playbook index .sdo/playbooks/README.md is required")
+            raise MemoryValidationError(f"playbook index {PLAYBOOK_INDEX_PATH} is required")
         index = index_path.read_text(encoding="utf-8")
         linked: set[Path] = set()
         for raw_target in MARKDOWN_LINK_RE.findall(index):
@@ -157,8 +175,10 @@ class MemoryValidator:
         for script in playbook_root.glob("*/scripts/*"):
             if not script.is_file():
                 continue
-            if script.suffix != ".sh":
-                raise MemoryValidationError(f"playbook scripts must use the .sh extension: {script}")
+            if script.suffix != PLAYBOOK_SCRIPT_SUFFIX:
+                raise MemoryValidationError(
+                    f"playbook scripts must use the {PLAYBOOK_SCRIPT_SUFFIX} extension: {script}"
+                )
             completed = subprocess.run(
                 ["bash", "-n", str(script)],
                 check=False,
@@ -239,6 +259,87 @@ class MemoryValidator:
             )
 
     @staticmethod
+    def _validate_incident_provenance(
+        repository: MemoryRepository,
+        *,
+        actor: ArtifactOwner,
+        changed_paths: list[PurePosixPath],
+        baseline_root: Path | None,
+    ) -> None:
+        """Reject responder edits that rewrite an existing incident detector's provenance.
+
+        ``originatingIncident`` and ``originatingCommit`` record the incident and
+        outcome that first taught a detector. Refinements keep them; rewriting
+        them erases the true origin and needlessly changes the detector tree.
+        """
+
+        if actor != ArtifactOwner.RESPONDER or baseline_root is None:
+            return
+        if not any(path.as_posix().startswith(".sdo/diagnostics/") for path in changed_paths):
+            return
+        baseline_repository = MemoryRepository(baseline_root)
+        try:
+            baseline = baseline_repository.diagnostics()
+        except MemoryRepositoryError:
+            return
+        candidate = {detector.id: detector for detector in repository.diagnostics().detectors}
+        for detector in baseline.detectors:
+            if detector.detector_class != "incident":
+                continue
+            current = candidate.get(detector.id)
+            if current is not None and (
+                current.originating_incident != detector.originating_incident
+                or current.originating_commit != detector.originating_commit
+            ):
+                raise MemoryValidationError(
+                    f"responder may not rewrite provenance (originatingIncident/originatingCommit) of existing "
+                    f"incident detector {detector.id!r}"
+                )
+            package = detector.package.removeprefix("./")
+            before = _spec_provenance(baseline_repository.memory_root / "diagnostics" / package)
+            after = _spec_provenance(repository.memory_root / "diagnostics" / package)
+            if before and after and before != after:
+                raise MemoryValidationError(
+                    f"responder may not rewrite provenance (OriginatingIncident/OriginatingCommit) in the Spec() of "
+                    f"existing incident detector {detector.id!r}"
+                )
+
+    @staticmethod
+    def _validate_incident_persistence(
+        repository: MemoryRepository,
+        *,
+        actor: ArtifactOwner,
+        changed_paths: list[PurePosixPath],
+        baseline_root: Path | None,
+    ) -> None:
+        """Require a new or changed incident detector registration to fire on its first match.
+
+        A delayed incident detector lags the health detectors that trigger
+        dispatch, so its playbook is not surfaced for the incident it encodes.
+        Untouched legacy registrations are left alone so an unrelated
+        playbook-only proposal is never rejected for memory it did not change.
+        """
+
+        if actor != ArtifactOwner.RESPONDER or baseline_root is None:
+            return
+        if PurePosixPath(".sdo/diagnostics/manifest.yaml") not in changed_paths:
+            return
+        try:
+            baseline = {detector.id: detector for detector in MemoryRepository(baseline_root).diagnostics().detectors}
+        except MemoryRepositoryError:
+            baseline = {}
+        for detector in repository.diagnostics().detectors:
+            if detector.detector_class != "incident" or detector.persistence.firing <= INCIDENT_DETECTOR_MAX_FIRING:
+                continue
+            if baseline.get(detector.id) == detector:
+                continue
+            raise MemoryValidationError(
+                f"incident detector {detector.id!r}: persistence.firing must be {INCIDENT_DETECTOR_MAX_FIRING} "
+                f"(got {detector.persistence.firing}) for a new or changed incident detector, in the manifest and "
+                "its Spec(); a learned fault signature must fire on its first match"
+            )
+
+    @staticmethod
     def _validate_outcomes_append_only(
         repository: MemoryRepository,
         *,
@@ -261,3 +362,17 @@ class MemoryValidator:
             details = completed.stderr.strip() or completed.stdout.strip() or "diagnostic checks failed"
             raise MemoryValidationError(details)
         return completed.network_policy_canaries
+
+
+def _spec_provenance(package: Path) -> dict[str, str]:
+    """Originating* string literals declared in a detector package's Go sources."""
+
+    values: dict[str, str] = {}
+    if not package.is_dir():
+        return values
+    for source in sorted(package.glob("*.go")):
+        if source.name.endswith("_test.go"):
+            continue
+        for field, literal in SPEC_PROVENANCE_RE.findall(source.read_text(encoding="utf-8", errors="replace")):
+            values.setdefault(field, literal)
+    return values

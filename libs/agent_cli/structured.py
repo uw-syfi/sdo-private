@@ -26,11 +26,13 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from agentshim import (
     AgentShimError,
@@ -67,6 +69,15 @@ DETECTOR_GATEWAY_COMMAND = "sdo detector check"
 #: ``$XDG_CACHE_HOME/sdo/codex-homes`` (``~/.cache/sdo/codex-homes``). It must
 #: be outside the workspace and the system temp dir.
 CODEX_HOME_ROOT_ENV = "SDO_CODEX_HOME_ROOT"
+# Optional JSONL file that receives one token-accounting record per turn.
+TURN_USAGE_LOG_ENV = "SDO_TURN_USAGE_LOG"
+
+#: How ``StructuredTurn.model_requests`` was measured. agentshim reports one
+#: ``turn`` per ``codex exec`` run, so Codex requests are counted from the
+#: session rollout's ``token_count`` events (one per model response); Claude
+#: reports its agentic turns (``num_turns``), one per model request.
+CODEX_ROLLOUT_REQUEST_SOURCE = "codex-rollout-token-count"
+CLAUDE_TURNS_REQUEST_SOURCE = "claude-num-turns"
 
 #: Environment variables that authenticate Codex without an ``auth.json``.
 _CODEX_API_KEY_ENV = ("CODEX_API_KEY", "OPENAI_API_KEY")
@@ -104,20 +115,52 @@ class StructuredTurn:
         usage: Token and cost accounting reported by the provider.
         shell_commands: Every shell command the agent started, in order, for
             confinement audits.
+        tool_calls: Tool calls of every kind the agent started.
+        model_requests: Model requests this turn made, or ``None`` when the
+            provider does not expose them (see ``model_requests_source``).
+        model_requests_source: How ``model_requests`` was measured.
+        resumed: Whether the turn resumed an existing session.
     """
 
     output_json: str
     session_id: str
     usage: ProviderUsage
     shell_commands: tuple[str, ...] = field(default=())
+    tool_calls: int = 0
+    model_requests: int | None = None
+    model_requests_source: str | None = None
+    resumed: bool = False
+
+
+def turn_usage(turn: StructuredTurn) -> dict[str, int | float]:
+    """Flatten one turn's provider accounting into the SDO usage record shape."""
+
+    tokens = turn.usage.tokens
+    usage: dict[str, int | float] = {
+        "llm_calls": tokens.turns,
+        "input_tokens": tokens.input_tokens,
+        "output_tokens": tokens.output_tokens,
+        "cached_input_tokens": tokens.cached_input_tokens,
+        "cache_write_input_tokens": tokens.cache_write_input_tokens,
+        "reasoning_output_tokens": tokens.reasoning_output_tokens,
+    }
+    if turn.usage.total_cost_usd is not None:
+        usage["total_cost_usd"] = turn.usage.total_cost_usd
+    if turn.model_requests is not None:
+        usage["model_requests"] = turn.model_requests
+    return usage
 
 
 @dataclass
 class _ShellCommandRecorder:
     commands: list[str] = field(default_factory=list[str])
+    tool_calls: int = 0
 
     def on_event(self, event: AgentEvent) -> None:
-        if not isinstance(event, ToolCall) or event.tool not in _SHELL_TOOLS:
+        if not isinstance(event, ToolCall):
+            return
+        self.tool_calls += 1
+        if event.tool not in _SHELL_TOOLS:
             return
         if isinstance(event.args, Mapping):
             command = event.args.get("command")
@@ -162,6 +205,7 @@ def run_structured_turn(
 
     workspace = Path(cwd).resolve()
     recorder = _ShellCommandRecorder()
+    started = time.monotonic()
     try:
         with ExitStack() as turn_scope:
             selected, extra_args, extra_env = _provider_for(provider, access, workspace, turn_scope)
@@ -176,6 +220,8 @@ def run_structured_turn(
             session = agent.start_session(cwd=str(workspace), timeout=timeout_seconds)
             if resume_session_id is not None and not session.adopt(resume_session_id):
                 raise StructuredTurnError(f"{provider} cannot resume session {resume_session_id!r}")
+            codex_home = _codex_session_home(extra_env) if provider == "codex" else None
+            requests_before = _codex_model_requests(codex_home, resume_session_id)
             schema_dir = turn_scope.enter_context(tempfile.TemporaryDirectory(prefix="sdo-structured-turn-"))
             result = session.turn(
                 TurnRequest(
@@ -185,6 +231,9 @@ def run_structured_turn(
                     extra_args=extra_args,
                 )
             )
+            # Read the rollout now: a workspace-write Codex home is deleted
+            # when the turn scope closes.
+            requests_after = _codex_model_requests(codex_home, result.session_id or resume_session_id)
     except CliTimeoutError as exc:
         raise StructuredTurnTimeout(exc.timeout) from exc
     except CliExitError as exc:
@@ -201,12 +250,111 @@ def run_structured_turn(
     session_id = result.session_id or resume_session_id
     if not session_id:
         raise StructuredTurnError(f"{provider} turn did not report a session id")
-    return StructuredTurn(
+    model_requests: int | None = None
+    model_requests_source: str | None = None
+    if provider == "claude" and result.usage.tokens.turns > 0:
+        model_requests, model_requests_source = result.usage.tokens.turns, CLAUDE_TURNS_REQUEST_SOURCE
+    elif requests_after is not None and requests_after >= (requests_before or 0):
+        model_requests = requests_after - (requests_before or 0)
+        model_requests_source = CODEX_ROLLOUT_REQUEST_SOURCE
+    turn = StructuredTurn(
         output_json=json.dumps(structured_output),
         session_id=session_id,
         usage=result.usage,
         shell_commands=tuple(recorder.commands),
+        tool_calls=recorder.tool_calls,
+        model_requests=model_requests,
+        model_requests_source=model_requests_source,
+        resumed=resume_session_id is not None,
     )
+    _append_turn_usage(provider, model, workspace, turn, time.monotonic() - started)
+    return turn
+
+
+def _append_turn_usage(
+    provider: AgentProvider, model: str | None, workspace: Path, turn: StructuredTurn, duration_seconds: float
+) -> None:
+    """Append one accounting record when ``SDO_TURN_USAGE_LOG`` names a file."""
+
+    path = os.environ.get(TURN_USAGE_LOG_ENV, "").strip()
+    if not path:
+        return
+    record = {
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "provider": provider,
+        "model": model,
+        "cwd": str(workspace),
+        "session_id": turn.session_id,
+        "resumed": turn.resumed,
+        "duration_seconds": duration_seconds,
+        "model_requests": turn.model_requests,
+        "model_requests_source": turn.model_requests_source,
+        "tool_calls": turn.tool_calls,
+        "shell_commands": len(turn.shell_commands),
+        "shell_command_lines": [_bounded_command(command) for command in turn.shell_commands],
+        "usage": turn_usage(turn),
+    }
+    log = Path(path).expanduser()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+#: Upper bound on one shell command recorded in the usage log.
+_MAX_LOGGED_COMMAND_CHARS = 2_000
+
+
+def _bounded_command(command: str) -> str:
+    if len(command) <= _MAX_LOGGED_COMMAND_CHARS:
+        return command
+    return f"{command[:_MAX_LOGGED_COMMAND_CHARS]}... [{len(command) - _MAX_LOGGED_COMMAND_CHARS} chars omitted]"
+
+
+def _codex_session_home(extra_env: Mapping[str, str]) -> Path:
+    """The ``CODEX_HOME`` a Codex turn records its session rollout under."""
+
+    home = extra_env.get("CODEX_HOME") or os.environ.get("CODEX_HOME") or str(Path.home() / ".codex")
+    return Path(home).expanduser()
+
+
+def _codex_model_requests(home: Path | None, session_id: str | None) -> int | None:
+    """Count model responses recorded in a Codex session's rollout files.
+
+    Codex writes one ``token_count`` event carrying usage after every model
+    response; events without usage (rate-limit updates) are not requests.
+    Returns ``None`` when the rollout cannot be found or read.
+    """
+
+    if home is None or not session_id:
+        return None
+    sessions = home / "sessions"
+    try:
+        rollouts = sorted(sessions.rglob(f"rollout-*{session_id}.jsonl")) if sessions.is_dir() else []
+        if not rollouts:
+            return None
+        count = 0
+        for rollout in rollouts:
+            with rollout.open(encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if '"token_count"' in line and _is_model_response_token_count(line):
+                        count += 1
+    except OSError:
+        return None
+    return count
+
+
+def _is_model_response_token_count(line: str) -> bool:
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(record, dict):
+        return False
+    payload = cast("dict[str, object]", record).get("payload")
+    if not isinstance(payload, dict):
+        return False
+    fields = cast("dict[str, object]", payload)
+    return fields.get("type") == "token_count" and fields.get("info") is not None
 
 
 def _provider_for(

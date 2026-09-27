@@ -7,7 +7,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from agentshim.providers.codex import CodexSandboxConfig, parse_sandbox
@@ -18,6 +18,8 @@ from sdo.agent_runtime.lifecycle.agents import (
     ClaudeTaskOutputs,
     CodexLifecycleBackend,
     DeployerAssessment,
+    DeployerDraft,
+    DeployerHandoff,
     HealthJudgeArtifact,
     HealthJudgeWorkspaceArtifact,
     LifecycleAgentError,
@@ -221,6 +223,56 @@ def test_initial_lifecycle_uses_fresh_structured_agents_and_three_bounded_judge_
         encoding="utf-8"
     )
     assert '{APIVersion: "v1", Kind: "ConfigMap"}' in detector_source
+
+
+def test_controller_attaches_deterministic_inventory_to_the_deployer_handoff(tmp_path: Path) -> None:
+    """The deployer summarizes; it does not transcribe the controller-derived inventory.
+
+    Codex deployers repeatedly returned ``resources: []`` for a 136-resource inventory
+    and spent a whole retry session copying it back verbatim.
+    """
+    repository = _repository(tmp_path)
+
+    class SummaryOnlyBackend(RecordingBackend):
+        def run_deployer(
+            self,
+            *,
+            repository: Path,
+            application: str,
+            correction_feedback: str | None,
+        ) -> DeployerHandoff:
+            self.deployer_calls.append(correction_feedback)
+            raw = _deployer_assessment({"repository": str(repository), "application": application})
+            return DeployerHandoff(
+                session_id=f"deployer-{len(self.deployer_calls)}",
+                source_commit=str(raw["source_commit"]),
+                topology_fingerprint=str(raw["topology_fingerprint"]),
+                architecture_summary_markdown=(
+                    "# Architecture\n\nThe example Deployment serves traffic through the example Service."
+                ),
+            )
+
+    backend = SummaryOnlyBackend()
+
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective="Deployment example and Service example must remain available.",
+        backend=backend,
+        validator=PassingValidator(),
+    )
+
+    assert len(backend.deployer_calls) == 1
+    assert "controller attaches the resource inventory" in str(backend.deployer_calls[0])
+    provenance = __import__("yaml").safe_load((repository / ".sdo/lifecycle-provenance.yaml").read_text())
+    expected = _deployer_assessment({"repository": str(repository), "application": "example"})
+    assert provenance["deployer"]["resources"] == expected["resources"]
+    assert provenance["deployer"]["session_id"] == "deployer-1"
+
+
+def test_deployer_output_schema_omits_the_controller_owned_inventory() -> None:
+    assert "resources" not in DeployerDraft.model_json_schema()["properties"]
+    assert "resources" in DeployerAssessment.model_json_schema()["properties"]
 
 
 def test_initial_lifecycle_allows_judge_to_edit_and_self_check_an_isolated_workspace(tmp_path: Path) -> None:
@@ -459,6 +511,87 @@ def test_existing_model_backed_lifecycle_is_reused_only_while_source_topology_ma
     )
 
 
+_CONFIGMAP_MANIFEST = """apiVersion: v1
+kind: ConfigMap
+metadata: {name: example-script, namespace: demo}
+data: {init.sh: "echo ok"}
+"""
+
+
+def _commit_source(repository: Path, name: str, content: str, *, broker: bool) -> None:
+    (repository / name).write_text(content, encoding="utf-8")
+    _git(repository, "add", name)
+    if broker:
+        _git(
+            repository,
+            "-c",
+            "user.name=SDO Commit Broker",
+            "-c",
+            "user.email=sdo-commit-broker@localhost",
+            "commit",
+            "-q",
+            "-m",
+            "sdo(incident-1): validated operational memory\n\n"
+            "SDO-Incident: incident-1\nSDO-Actor: responder\nSDO-Phase: outcome\nSDO-Validation: passed",
+        )
+    else:
+        _git(repository, "commit", "-q", "-m", "operator source change")
+
+
+def _lifecycle_repository(tmp_path: Path, objective: str) -> Path:
+    repository = _repository(tmp_path)
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective=objective,
+        backend=RecordingBackend(),
+        validator=PassingValidator(),
+        judge_rounds=3,
+    )
+    return repository
+
+
+def test_lifecycle_is_reused_after_validated_sdo_source_change_that_keeps_judged_topology(tmp_path: Path) -> None:
+    objective = "Deployment example and Service example must remain available."
+    repository = _lifecycle_repository(tmp_path, objective)
+    _commit_source(repository, "configmap.yaml", _CONFIGMAP_MANIFEST, broker=True)
+
+    assert reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=PassingValidator(),
+    )
+    assert _git(repository, "worktree", "list").count("\n") == 0
+
+
+def test_lifecycle_is_not_reused_after_unvalidated_source_change(tmp_path: Path) -> None:
+    objective = "Deployment example and Service example must remain available."
+    repository = _lifecycle_repository(tmp_path, objective)
+    _commit_source(repository, "configmap.yaml", _CONFIGMAP_MANIFEST, broker=False)
+
+    assert not reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=PassingValidator(),
+    )
+
+
+def test_lifecycle_is_not_reused_after_validated_sdo_change_to_judged_topology(tmp_path: Path) -> None:
+    objective = "Deployment example and Service example must remain available."
+    repository = _lifecycle_repository(tmp_path, objective)
+    relabeled = (repository / "deploy.yaml").read_text(encoding="utf-8").replace("app: example", "app: example-v2")
+    _commit_source(repository, "deploy.yaml", relabeled, broker=True)
+
+    assert not reuse_initial_lifecycle_if_valid(
+        repository,
+        application="example",
+        health_objective=objective,
+        validator=PassingValidator(),
+    )
+
+
 def test_lifecycle_reuse_skips_identical_independent_validation_with_attestation(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     objective = "Deployment example and Service example must remain available."
@@ -671,6 +804,40 @@ def test_lifecycle_retries_failed_validation_within_the_same_judge_round(
     ]
 
 
+def test_lifecycle_correction_feedback_keeps_go_test_failures_next_to_toolchain_noise(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    backend = RecordingBackend()
+    violation = (
+        'detector "health-objective" reported ExternalName Service sdo-externalname-check/jaeger '
+        "only when it had no ready endpoints or pods"
+    )
+
+    class GoTestFailureValidator(PassingValidator):
+        def run(self, app_root: Path) -> SandboxResult:
+            result = super().run(app_root)
+            if len(self.runs) == 1:
+                return SandboxResult(
+                    returncode=1,
+                    stdout=f"--- FAIL: TestHealthDetectorsExemptExternalNameServices\n    {violation}\n",
+                    stderr="go: downloading k8s.io/api v0.30.3\n",
+                )
+            return result
+
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective="Deployment example and Service example must remain available.",
+        backend=backend,
+        validator=GoTestFailureValidator(),
+        judge_rounds=1,
+        judge_corrections_per_round=2,
+    )
+
+    feedback = str(backend.judge_calls[1][2])
+    assert violation in feedback
+    assert "go: downloading" in feedback
+
+
 def test_lifecycle_enforces_immutable_health_registration_around_judge_authored_checks(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
 
@@ -777,13 +944,15 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
     repository = _repository(tmp_path)
     raw = _deployer_assessment({"repository": str(repository), "application": "example"})
 
+    schemas: list[dict[str, object]] = []
+
     def respond(request: CommandRequest) -> FakeRun:
         schema = turn_schema(request)
+        schemas.append(schema)
         if "architecture_summary_markdown" in schema["properties"]:
             output = {
                 "source_commit": raw["source_commit"],
                 "topology_fingerprint": raw["topology_fingerprint"],
-                "resources": raw["resources"],
                 "architecture_summary_markdown": "# Architecture\n\nExample Deployment and Service.",
             }
         else:
@@ -809,7 +978,10 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
         repository=repository,
         application="example",
         health_objective="Deployment example and Service example must remain available.",
-        deployer=deployer,
+        deployer=DeployerAssessment(
+            **deployer.model_dump(),
+            resources=[TopologyResourceDTO.model_validate(item) for item in raw["resources"]],
+        ),
         round_index=1,
         previous=None,
         correction_feedback=None,
@@ -822,6 +994,8 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
     assert all("resume" not in argv for argv in agent.argvs)
     assert all(parse_sandbox(argv) == CodexSandboxConfig(mode="read-only") for argv in agent.argvs)
     assert all("--output-schema" in argv and "--json" in argv for argv in agent.argvs)
+    assert "resources" not in cast("dict[str, object]", schemas[0]["properties"])
+    assert "controller attaches the deterministic inventory" in prompts[0].replace("\n", " ")
     assert "copy every resource required by the objective exactly from the deployer handoff" in prompts[1]
     assert "Trusted controller/sdk API reference" in prompts[1]
     assert "Inspect only the current application checkout" in prompts[1]
@@ -857,7 +1031,6 @@ def test_codex_backend_rejects_sessions_that_read_outside_application_repository
             {
                 "source_commit": raw["source_commit"],
                 "topology_fingerprint": raw["topology_fingerprint"],
-                "resources": raw["resources"],
                 "architecture_summary_markdown": "# Architecture\n\nExample Deployment and Service.",
             },
             session_id="fresh-session",
@@ -991,7 +1164,6 @@ def test_claude_backend_accepts_session_that_reads_its_own_background_task_outpu
             {
                 "source_commit": raw["source_commit"],
                 "topology_fingerprint": raw["topology_fingerprint"],
-                "resources": raw["resources"],
                 "architecture_summary_markdown": "# Architecture\n\nExample Deployment and Service.",
             },
             session_id="claude-session",
@@ -1020,7 +1192,6 @@ def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_fee
             output = {
                 "source_commit": raw["source_commit"],
                 "topology_fingerprint": raw["topology_fingerprint"],
-                "resources": raw["resources"],
                 "architecture_summary_markdown": "# Architecture\n\nExample Deployment and Service.",
             }
         else:

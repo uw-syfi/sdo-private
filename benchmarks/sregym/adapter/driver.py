@@ -10,13 +10,21 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from benchmarks.sregym.adapter.fault_gate import (
+    AWAITING_FAULT_INJECTION,
+    FaultGateError,
+    inject_fault_after_controller_baseline,
+    request_fault_injection,
+)
 from benchmarks.sregym.adapter.runtime import RuntimeConfig, run_production_runtime
 from benchmarks.sregym.adapter.submission import submit_solution
 from benchmarks.sregym.protocol.conductor import (
@@ -34,6 +42,7 @@ from sdo.agent_runtime.lifecycle import (
     reuse_initial_lifecycle_if_valid,
     run_initial_lifecycle,
 )
+from sdo.controller_install import kubectl
 
 logger = logging.getLogger(__name__)
 
@@ -206,14 +215,14 @@ def _application_repository() -> Path:
 
 def _in_cluster_api_base(api_base: str) -> str:
     parsed = urlsplit(api_base)
-    if parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+    if parsed.hostname not in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
         return api_base.rstrip("/")
     return urlunsplit(("http", "sdo-sregym-bridge:8000", parsed.path.rstrip("/"), "", ""))
 
 
 def _relay_target_api_base(api_base: str) -> str | None:
     parsed = urlsplit(api_base)
-    if parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+    if parsed.hostname not in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
         return None
     return api_base.rstrip("/")
 
@@ -265,7 +274,21 @@ def _deployed_lifecycle_context(
         )
 
     deployments = names("Deployment")
-    services = names("Service")
+    all_services = names("Service")
+    # ExternalName Services are DNS aliases: Kubernetes never gives them endpoints.
+    external_name_services = sorted(
+        {
+            str(item["metadata"]["name"])
+            for item in items
+            if isinstance(item, dict)
+            and item.get("kind") == "Service"
+            and isinstance(item.get("metadata"), dict)
+            and item["metadata"].get("name")
+            and isinstance(item.get("spec"), dict)
+            and item["spec"].get("type") == "ExternalName"
+        }
+    )
+    services = [name for name in all_services if name not in external_name_services]
     if not deployments:
         raise RuntimeError(f"no deployed Deployments found in SREGym namespace {namespace!r}")
     service_clause = (
@@ -273,6 +296,11 @@ def _deployed_lifecycle_context(
         if services
         else "the deployed workload remains reachable through its declared interfaces"
     )
+    if external_name_services:
+        service_clause += (
+            f"; the ExternalName Services named {', '.join(external_name_services)} are DNS aliases with no "
+            "endpoints and must not be required to have ready endpoints"
+        )
     health_objective = (
         f"The deployed Deployments named {', '.join(deployments)} remain available; {service_clause}; "
         "required non-optional ConfigMap volume references remain present; and representative requests succeed."
@@ -310,16 +338,70 @@ def _deployed_health_objective(
     return _deployed_lifecycle_context(namespace, command_runner=command_runner).health_objective
 
 
+# The agent CLI layer appends one accounting record per turn to this file.
+TURN_USAGE_LOG_ENV = "SDO_TURN_USAGE_LOG"
+
+
+def _configure_turn_usage_log(logs_dir: str | None) -> None:
+    """Account host-side agent turns (lifecycle) beside the run's artifacts."""
+
+    if logs_dir and not os.environ.get(TURN_USAGE_LOG_ENV, "").strip():
+        os.environ[TURN_USAGE_LOG_ENV] = str(Path(logs_dir) / "sdo_turn_usage.jsonl")
+
+
+class _FaultGate:
+    """Inject the deferred benchmark fault once the installed controller is watching."""
+
+    def __init__(self, namespace: str, api_base: str) -> None:
+        self._namespace = namespace
+        self._api_base = api_base
+        self._error: BaseException | None = None
+        self.timings: dict[str, float] = {}
+        self._thread = threading.Thread(target=self._run, name="sdo-fault-gate", daemon=True)
+        self._not_before = datetime.now(timezone.utc)
+
+    def start(self) -> None:
+        self._not_before = datetime.now(timezone.utc)
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            self.timings = inject_fault_after_controller_baseline(
+                self._namespace,
+                inject=lambda: request_fault_injection(self._api_base),
+                kubectl_runner=kubectl,
+                not_before=self._not_before,
+            )
+            logger.info("benchmark fault injected after controller baseline: %s", self.timings)
+        except BaseException as exc:  # surfaced to the driver by join()
+            logger.exception("benchmark fault gate failed")
+            self._error = exc
+
+    def join(self) -> None:
+        self._thread.join(timeout=5)
+        if self._error is not None:
+            raise FaultGateError(f"deferred fault was not injected: {self._error}") from self._error
+        if not self.timings:
+            raise FaultGateError("controller completed before the deferred fault was injected")
+
+
 def _run(args: argparse.Namespace) -> dict[str, Any]:
     started = time.monotonic()
     if os.getenv("SREGYM_DEFER_CLEANUP", "").strip() != "1":
         raise RuntimeError("sdo_codex requires defer_cleanup: true in the SREGym agent registry")
     api_base = get_api_base()
     logger.info("SDO agent backend: %s/%s", args.backend, args.provider)
-    poll_stage_sync(api_base, wait_for=READY_STAGES, timeout=300, on_timeout="raise")
+    initial_stage = poll_stage_sync(
+        api_base,
+        wait_for=READY_STAGES | {AWAITING_FAULT_INJECTION},
+        timeout=300,
+        on_timeout="raise",
+    )
+    fault_deferred = initial_stage == AWAITING_FAULT_INJECTION
     conductor_ready = time.monotonic()
     app_info = get_app_info(api_base)
     repository = _application_repository()
+    _configure_turn_usage_log(args.logs_dir)
     application = str(app_info.get("app_name") or repository.name)
     namespace = str(app_info.get("namespace") or "default")
     lifecycle_context = _deployed_lifecycle_context(namespace)
@@ -345,6 +427,9 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     trusted_kubeconfig = os.getenv("SREGYM_BASE_KUBECONFIG", "").strip()
     if trusted_kubeconfig:
         os.environ["KUBECONFIG"] = trusted_kubeconfig
+    gate = _FaultGate(namespace, api_base) if fault_deferred else None
+    if gate is not None:
+        gate.start()
     receipt = run_production_runtime(
         RuntimeConfig(
             repository=repository,
@@ -361,10 +446,16 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             agent_provider=args.provider,
             submission_api_base=_in_cluster_api_base(api_base),
             submission_relay_target_base=_relay_target_api_base(api_base),
+            artifacts_dir=_receipt_directory(args.logs_dir, repository),
         )
     )
     runtime_ready = time.monotonic()
+    if gate is not None:
+        gate.join()
     receipt["lifecycle_reused"] = lifecycle_reused
+    receipt["fault_injection_deferred"] = fault_deferred
+    if gate is not None:
+        receipt["fault_gate_timings_seconds"] = gate.timings
     receipt["driver_phase_timings_seconds"] = {
         "conductor_wait": conductor_ready - started,
         "inventory_and_lifecycle": lifecycle_ready - conductor_ready,

@@ -10,5 +10,6 @@ agents:
     kickoff_env:
       PYTHONUNBUFFERED: "1"
     defer_cleanup: true
+    defer_fault_injection: true
     wait_for_natural_exit: true
     container_isolation: false

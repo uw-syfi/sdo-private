@@ -18,13 +18,21 @@ from sdo.agent_runtime.lifecycle.agents import (
     ActiveTopologyResourceDTO,
     CodexLifecycleBackend,
     DeployerAssessment,
+    DeployerHandoff,
     HealthJudgeArtifact,
     HealthJudgeWorkspaceArtifact,
     LifecycleAgentBackend,
     LifecycleAgentError,
+    TopologyResourceDTO,
     WorkspaceHealthJudgeBackend,
 )
-from sdo.operational_memory import ContainerSandboxRunner, SandboxResult, SandboxRunner
+from sdo.operational_memory import (
+    BROKER_AUTHOR_EMAIL,
+    VALIDATION_PASSED_TRAILER,
+    ContainerSandboxRunner,
+    SandboxResult,
+    SandboxRunner,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +184,9 @@ def reuse_initial_lifecycle_if_valid(
                 return False
         expected = _deployer_assessment({"repository": str(root), "application": application})
         current_deployer = deployer.model_copy(update={"source_commit": str(expected["source_commit"])})
-        if _validate_deployer_assessment(root, current_deployer):
+        if _validate_deployer_assessment(root, current_deployer) and not _deployer_survives_validated_sdo_changes(
+            root, deployer, health_objective=health_objective
+        ):
             return False
         session_ids = [deployer.session_id, *(attempt.session_id for attempt in attempts)]
         if len(session_ids) != len(set(session_ids)):
@@ -220,6 +230,63 @@ def reuse_initial_lifecycle_if_valid(
         return False
 
 
+def _deployer_survives_validated_sdo_changes(
+    root: Path,
+    deployer: DeployerAssessment,
+    *,
+    health_objective: str,
+) -> bool:
+    """Keep a lifecycle handoff across source changes SDO itself validated.
+
+    An incident outcome may commit a source repair, such as restoring a missing
+    manifest. That drift does not invalidate the deployer and health judge when
+    every source-changing commit since the handoff is a broker-validated SDO
+    commit, the deployer assessment still holds at its recorded commit, and the
+    health judge's derived input is unchanged at HEAD.
+    """
+
+    base = deployer.source_commit
+    try:
+        _git(root, "merge-base", "--is-ancestor", base, "HEAD")
+        source_commits = _git(root, "rev-list", f"{base}..HEAD", "--", ".", ":(exclude).sdo").split()
+        for commit in source_commits:
+            author = _git(root, "log", "-1", "--format=%ae", commit)
+            message = _git(root, "log", "-1", "--format=%B", commit)
+            if author != BROKER_AUTHOR_EMAIL or VALIDATION_PASSED_TRAILER not in message.splitlines():
+                return False
+        with tempfile.TemporaryDirectory(prefix="sdo-lifecycle-handoff-") as scratch:
+            checkout = Path(scratch) / "source"
+            _git(root, "worktree", "add", "--detach", "--quiet", str(checkout), base)
+            try:
+                if _validate_deployer_assessment(checkout, deployer):
+                    return False
+            finally:
+                _git(root, "worktree", "remove", "--force", str(checkout))
+        current = _deployer_assessment({"repository": str(root), "application": root.name})
+    except LifecycleError:
+        return False
+
+    def judged(resources: object) -> dict[str, object]:
+        plan = _judge_assessment(
+            {
+                "health_objective": health_objective,
+                "deployer_assessment": {"resources": resources, "source_commit": ""},
+            }
+        )
+        plan.pop("source_commit", None)
+        return plan
+
+    recorded = [resource.model_dump(mode="json") for resource in deployer.resources]
+    if judged(recorded) != judged(current["resources"]):
+        return False
+    logger.info(
+        "reusing lifecycle handoff across %d validated SDO source commit(s) since %s",
+        len(source_commits),
+        base[:12],
+    )
+    return True
+
+
 def run_initial_lifecycle(
     app_root: Path,
     *,
@@ -244,8 +311,10 @@ def run_initial_lifecycle(
     trusted_source_facts = _deployer_assessment({"repository": str(root), "application": application})
     trusted_resources = cast("list[dict[str, object]]", trusted_source_facts["resources"])
     required_resource_names = ", ".join(sorted(repr(str(resource["name"])) for resource in trusted_resources))
+    trusted_inventory = [TopologyResourceDTO.model_validate(resource) for resource in trusted_resources]
     trusted_source_feedback = (
-        "Trusted controller-derived source facts. Copy source_commit, topology_fingerprint, and resources exactly. "
+        "Trusted controller-derived source facts. Copy source_commit and topology_fingerprint exactly. The "
+        "controller attaches the resource inventory below to your handoff; do not return it. "
         "The architecture_summary_markdown must mention every resource name verbatim, including low-level data "
         f"stores and observability resources. Required names: {required_resource_names}. Use repository inspection "
         "to describe their relationships:\n" + json.dumps(trusted_source_facts, indent=2, sort_keys=True)
@@ -254,11 +323,12 @@ def run_initial_lifecycle(
     deployer_errors: list[str] = []
     for attempt_index in range(1, deployer_attempts + 1):
         try:
-            candidate = selected_backend.run_deployer(
+            handoff = selected_backend.run_deployer(
                 repository=root,
                 application=application,
                 correction_feedback=deployer_feedback,
             )
+            candidate = _attach_trusted_inventory(handoff, trusted_inventory)
             validation_errors = _validate_deployer_assessment(root, candidate)
         except (LifecycleAgentError, ValueError) as exc:
             validation_errors = [str(exc)]
@@ -359,7 +429,11 @@ def run_initial_lifecycle(
                         validator=selected_validator,
                     )
                 if validation.returncode != 0:
-                    details = validation.stderr.strip() or validation.stdout.strip() or "detector validation failed"
+                    # Go reports test failures on stdout; stderr may hold only toolchain noise.
+                    details = (
+                        "\n".join(stream.strip() for stream in (validation.stderr, validation.stdout) if stream.strip())
+                        or "detector validation failed"
+                    )
                     errors.append(details)
             previous = artifact
             last_errors = errors
@@ -415,6 +489,13 @@ def run_initial_lifecycle(
         architecture_summary_markdown=deployer.architecture_summary_markdown,
         lifecycle_provenance=provenance,
     )
+
+
+def _attach_trusted_inventory(handoff: DeployerHandoff, inventory: list[TopologyResourceDTO]) -> DeployerAssessment:
+    """Make the source resource inventory a controller fact, not model output."""
+
+    fields = handoff.model_dump(include=set(DeployerHandoff.model_fields))
+    return DeployerAssessment(**fields, resources=inventory)
 
 
 def _deployer_assessment(payload: dict[str, object]) -> dict[str, object]:

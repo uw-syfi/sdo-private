@@ -132,14 +132,18 @@ type IncidentResult struct {
 }
 
 type IncidentClosure struct {
-	Request              IncidentRequest      `json:"request"`
-	Result               *IncidentResult      `json:"result,omitempty"`
-	DispatchError        string               `json:"dispatch_error,omitempty"`
-	FinalDetectorStates  []DetectorEvaluation `json:"final_detector_states"`
-	DetectedAt           time.Time            `json:"detected_at"`
-	DispatchedAt         time.Time            `json:"dispatched_at"`
-	ResponderCompletedAt time.Time            `json:"responder_completed_at"`
-	VerifiedAt           time.Time            `json:"verified_at"`
+	Request             IncidentRequest      `json:"request"`
+	Result              *IncidentResult      `json:"result,omitempty"`
+	DispatchError       string               `json:"dispatch_error,omitempty"`
+	FinalDetectorStates []DetectorEvaluation `json:"final_detector_states"`
+	// IncidentDetectorStates is the latest post-response evaluation of each
+	// non-health detector that raised a finding in this incident. It is
+	// learning evidence for the broker, not a closure gate.
+	IncidentDetectorStates []DetectorEvaluation `json:"incident_detector_states,omitempty"`
+	DetectedAt             time.Time            `json:"detected_at"`
+	DispatchedAt           time.Time            `json:"dispatched_at"`
+	ResponderCompletedAt   time.Time            `json:"responder_completed_at"`
+	VerifiedAt             time.Time            `json:"verified_at"`
 }
 
 func (request IncidentRequest) Validate() error {

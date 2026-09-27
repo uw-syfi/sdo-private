@@ -66,7 +66,7 @@ def _target_candidates(target_base: str, *, gateway: str | None) -> tuple[str, .
     """Map a host-loopback target to safe, GET-probed host-network candidates."""
 
     parsed = urlsplit(target_base)
-    if parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+    if parsed.hostname not in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
         return (target_base.rstrip("/"),)
 
     def replace_host(host: str) -> str:

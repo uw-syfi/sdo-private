@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
+import posixpath
+import shlex
 import subprocess
 import time
 from dataclasses import dataclass
@@ -17,6 +20,10 @@ from benchmarks.sregym.protocol import (
     validate_production_receipt as validate_receipt_contract,
 )
 from sdo.controller_install import (
+    CLAUDE_CONFIG_PATH,
+    CODEX_HOME_PATH,
+    RUNTIME_STATE_ROOT,
+    RUNTIME_USAGE_ROOT,
     ControllerInstallConfig,
     ControllerInstallError,
     ControllerInstallResult,
@@ -29,6 +36,22 @@ from sdo.controller_install import (
 )
 from sdo.operational_memory import ControllerRolloutRecord
 
+logger = logging.getLogger(__name__)
+
+#: Runtime evidence copied from the workspace PVC into the run's results: the
+#: per-turn usage logs and the agent session transcripts (Codex rollouts,
+#: Claude projects). Paths are relative to ``RUNTIME_STATE_ROOT``; the homes'
+#: credential files are deliberately excluded.
+_EXPORTED_RUNTIME_PATHS = tuple(
+    posixpath.relpath(path, RUNTIME_STATE_ROOT)
+    for path in (
+        RUNTIME_USAGE_ROOT,
+        f"{CODEX_HOME_PATH}/sessions",
+        f"{CLAUDE_CONFIG_PATH}/projects",
+    )
+)
+RUNTIME_ARTIFACTS_DIRNAME = "sdo_runtime"
+
 
 @dataclass(frozen=True)
 class RuntimeConfig(ControllerInstallConfig):
@@ -38,6 +61,8 @@ class RuntimeConfig(ControllerInstallConfig):
     submission_relay_target_base: str | None = None
     allow_test_lifecycle: bool = False
     wait_for_completion: bool = True
+    # Where the run's results live; pod-side runtime evidence is exported here.
+    artifacts_dir: Path | None = None
 
 
 def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle: bool = False) -> None:
@@ -74,12 +99,18 @@ class _SREGymRuntimeExtension:
         _wait_for_submission_bridge(self.config)
 
     def complete(self, config: ControllerInstallConfig, result: ControllerInstallResult) -> dict[str, Any]:
+        # Export before building the receipt so the evidence survives a receipt failure.
+        runtime_artifacts = _export_runtime_artifacts(self.config.namespace, self.config.artifacts_dir)
         receipt = _production_receipt(self.config, result.controller_logs)
+        receipt["runtime_artifacts"] = runtime_artifacts
         validate_production_receipt(receipt, allow_test_lifecycle=self.config.allow_test_lifecycle)
         print("SDO_PRODUCTION_RECEIPT=" + json.dumps(receipt, sort_keys=True))
         return receipt
 
     def cleanup(self, config: ControllerInstallConfig) -> None:
+        # Cleanup also runs after a failed controller Job, when logs matter most.
+        if self.config.wait_for_completion:
+            _export_controller_logs(self.config.namespace, self.config.artifacts_dir)
         _delete_submission_bridge(self.config)
 
 
@@ -105,7 +136,7 @@ def _responder_instructions() -> str:
         "SREGym submission transport is available. After evidence-based diagnosis, run "
         "`python3 -m benchmarks.sregym.adapter.submission diagnosis '<diagnosis>'`; after repair and your own "
         "verification, run `python3 -m benchmarks.sregym.adapter.submission mitigation '<mitigation>'`. The latter "
-        "also sends the autonomous done signal and waits for deferred diagnosis grading. Treat every response as "
+        "also sends the autonomous done signal and waits for benchmark grading. Treat every response as "
         "benchmark transport or grading, never as health evidence: the controller alone determines closure from "
         "live detectors. Do not begin repair until diagnosis is acknowledged. Before mitigation, wait for every "
         "affected rollout to finish, require desired, updated, ready, and available replicas to agree, require each "
@@ -217,6 +248,113 @@ def _delete_submission_bridge(config: RuntimeConfig) -> None:
     )
 
 
+def _export_runtime_artifacts(namespace: str, artifacts_dir: Path | None) -> dict[str, str | None]:
+    """Copy pod-side usage logs and agent transcripts into the run's results.
+
+    This is diagnostic evidence, so a failure is recorded and never fails the run.
+    """
+
+    if artifacts_dir is None:
+        return {"directory": None, "error": "no artifacts directory"}
+    candidates = " ".join(shlex.quote(path) for path in _EXPORTED_RUNTIME_PATHS)
+    script = (
+        f"cd {shlex.quote(RUNTIME_STATE_ROOT)} 2>/dev/null || exit 0; set --; "
+        f'for path in {candidates}; do [ -e "$path" ] && set -- "$@" "$path"; done; '
+        '[ "$#" -eq 0 ] && exit 0; exec tar -cf - "$@"'
+    )
+    exported = subprocess.run(
+        ["kubectl", "--namespace", namespace, "exec", "sdo-repository-sync", "--", "sh", "-c", script],
+        check=False,
+        capture_output=True,
+    )
+    if exported.returncode != 0:
+        error = exported.stderr.decode(errors="replace").strip() or f"exit {exported.returncode}"
+        logger.warning("could not export SDO runtime artifacts: %s", error)
+        return {"directory": None, "error": f"kubectl exec failed: {error}"}
+    destination = artifacts_dir / RUNTIME_ARTIFACTS_DIRNAME
+    destination.mkdir(parents=True, exist_ok=True)
+    if exported.stdout:
+        extracted = subprocess.run(
+            ["tar", "-C", str(destination), "-xf", "-"],
+            input=exported.stdout,
+            check=False,
+            capture_output=True,
+        )
+        if extracted.returncode != 0:
+            error = extracted.stderr.decode(errors="replace").strip() or f"exit {extracted.returncode}"
+            logger.warning("could not unpack SDO runtime artifacts: %s", error)
+            return {"directory": None, "error": f"tar extraction failed: {error}"}
+    return {"directory": str(destination), "error": None}
+
+
+CONTROLLER_LOGS_DIRNAME = "controller_logs"
+_CONTROLLER_JOB_SELECTOR = "job-name=sdo-controller-run"
+
+
+def _export_controller_logs(namespace: str, artifacts_dir: Path | None) -> dict[str, str | None]:
+    """Write each controller Job pod's timestamped logs into the run's results.
+
+    The controller's evaluation stream carries no timestamps of its own, so
+    ``kubectl logs --timestamps`` is what lets a run be reconstructed. This is
+    diagnostic evidence: a failure is recorded beside the logs and never raised.
+    """
+
+    if artifacts_dir is None:
+        return {"directory": None, "error": "no artifacts directory"}
+    destination = artifacts_dir / RUNTIME_ARTIFACTS_DIRNAME / CONTROLLER_LOGS_DIRNAME
+    errors: list[str] = []
+    try:
+        destination.mkdir(parents=True, exist_ok=True)
+        pods = kubectl(
+            ["get", "pods", "--selector", _CONTROLLER_JOB_SELECTOR, "-o", "jsonpath={.items[*].metadata.name}"],
+            namespace=namespace,
+            check=False,
+        )
+        names = pods.stdout.split() if pods.returncode == 0 else []
+        if pods.returncode != 0:
+            errors.append(f"list controller pods: {pods.stderr.strip() or f'exit {pods.returncode}'}")
+        elif not names:
+            errors.append(f"no controller pods match {_CONTROLLER_JOB_SELECTOR}")
+        for name in names:
+            logs = kubectl(
+                ["logs", f"pod/{name}", "--all-containers=true", "--timestamps=true"],
+                namespace=namespace,
+                check=False,
+            )
+            if logs.returncode != 0:
+                errors.append(f"logs pod/{name}: {logs.stderr.strip() or f'exit {logs.returncode}'}")
+                continue
+            (destination / f"{name}.log").write_text(logs.stdout, encoding="utf-8")
+    except (OSError, subprocess.SubprocessError, ControllerInstallError) as exc:
+        errors.append(f"{type(exc).__name__}: {exc}")
+    if not errors:
+        return {"directory": str(destination), "error": None}
+    error = "; ".join(errors)
+    logger.warning("could not export SDO controller logs: %s", error)
+    try:
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / "export_error.txt").write_text(error + "\n", encoding="utf-8")
+    except OSError:
+        return {"directory": None, "error": error}
+    return {"directory": str(destination), "error": error}
+
+
+def _reflection_telemetry(ledger: dict[str, Any]) -> dict[str, int | str | None]:
+    """Reflection attempts and, when the broker skipped the LLM turn, why.
+
+    Retries after a validation rejection run in a fresh session. A repeated
+    exact-match success records a deterministic no-op reflection with zero
+    attempts and a ``reflection_skipped_reason``.
+    """
+
+    skipped = ledger.get("reflection_skipped_reason")
+    return {
+        "reflection_attempts": int(ledger.get("reflection_attempts") or 0),
+        "reflection_fresh_retry_attempts": int(ledger.get("reflection_fresh_retry_attempts") or 0),
+        "reflection_skipped_reason": skipped if isinstance(skipped, str) and skipped else None,
+    }
+
+
 def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str, Any]:
     # Logs remain useful diagnostics, but are intentionally not authoritative:
     # Kubernetes may garbage-collect a failed or even successful retry Pod.
@@ -301,8 +439,11 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         "responder_session_id": ledger.get("responder_session_id"),
         "same_session_reflection": bool(ledger.get("responder_session_id") and ledger.get("reflection_commit")),
         "detector_clear": detector_clear,
+        "incident_detector_states": closure.get("incident_detector_states", []),
         "independent_verification": result.get("verification_evidence", []),
         "usage": result.get("usage", {}),
+        "reflection_usage": ledger.get("reflection_usage", {}),
+        **_reflection_telemetry(ledger),
         "phase_timings_seconds": _phase_timings(closure, recorded_at),
         "memory_reuse": _memory_reuse_summary(closure, result),
         "validator_network_policy_canaries": ledger.get("validator_network_policy_canaries", []),

@@ -1,5 +1,6 @@
 """SREGym conductor and submission protocol helpers."""
 
+from benchmarks.sregym.protocol._http import request_with_retry
 from benchmarks.sregym.protocol.benchmark import BenchmarkResult, Oracle, Stage
 from benchmarks.sregym.protocol.conductor import (
     get_api_base,
@@ -37,6 +38,7 @@ __all__ = [
     "get_problem_id",
     "poll_stage",
     "poll_stage_sync",
+    "request_with_retry",
     "signal_cleanup",
     "submit_to_benchmark",
     "validate_production_receipt",

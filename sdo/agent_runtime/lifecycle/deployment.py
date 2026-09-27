@@ -83,7 +83,7 @@ class _DeploymentAttemptDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     deployed: bool
-    source_commit: str | None = None
+    source_commit: str | None
     summary: str = Field(min_length=1)
 
 
@@ -134,7 +134,8 @@ Feedback from the independent verifier for the previous bounded attempt:
 Commit every accepted source or deployment-artifact change to Git. The commit message must contain the exact trailer
 "{_DEPLOYMENT_ROLE_TRAILER}" so the SDO can attribute it to this role. Report source_commit as the full current HEAD
 only after the commit and rollout succeed. If deployment does not succeed, set deployed to false, explain the
-failure in summary, and do not claim an uncommitted revision. Return only the requested structured result.
+failure in summary, and set source_commit to null rather than claim an uncommitted revision. Return only the
+requested structured result.
 """
         draft, session_id = self._execute(repository, prompt)
         return DeploymentAttempt(

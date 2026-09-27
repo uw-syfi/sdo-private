@@ -78,7 +78,7 @@ func TestControllerIntegrationInformerPersistenceAndRestart(t *testing.T) {
 	if err := cache.WaitForSync(ctx); err != nil {
 		t.Fatalf("wait for sync: %v", err)
 	}
-	drainWatchEvents(cache.Events())
+	drainWatchEvents(cache)
 	start := time.Unix(0, 0)
 	dispatcher := &recordingDispatcher{requests: make(chan IncidentRequest, 1)}
 	controller, err := NewController(testControllerConfig(), []sdk.Detector{detector}, cache, dispatcher, start)
@@ -97,8 +97,8 @@ func TestControllerIntegrationInformerPersistenceAndRestart(t *testing.T) {
 	if err := client.CoreV1().ConfigMaps("demo").Delete(ctx, "renamed-settings", metav1.DeleteOptions{}); err != nil {
 		t.Fatalf("delete ConfigMap: %v", err)
 	}
-	event := awaitEventValue(t, cache.Events())
-	if err := controller.Step(ctx, start.Add(100*time.Millisecond), &event); err != nil {
+	events := awaitEventValue(t, cache)
+	if err := controller.StepEvents(ctx, start.Add(100*time.Millisecond), events); err != nil {
 		t.Fatalf("first firing: %v", err)
 	}
 	assertNoRequest(t, dispatcher.requests)
@@ -149,8 +149,8 @@ func TestControllerIntegrationInformerPersistenceAndRestart(t *testing.T) {
 	}, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("restore ConfigMap: %v", err)
 	}
-	clearEvent := awaitEventValue(t, cache.Events())
-	if err := restored.Step(ctx, start.Add(2200*time.Millisecond), &clearEvent); err != nil {
+	clearEvents := awaitEventValue(t, cache)
+	if err := restored.StepEvents(ctx, start.Add(2200*time.Millisecond), clearEvents); err != nil {
 		t.Fatalf("first clear: %v", err)
 	}
 	if err := restored.Step(ctx, start.Add(3200*time.Millisecond), nil); err != nil {
@@ -161,13 +161,13 @@ func TestControllerIntegrationInformerPersistenceAndRestart(t *testing.T) {
 	}
 }
 
-func awaitEventValue(t *testing.T, events <-chan sdk.WatchKind) sdk.WatchKind {
+func awaitEventValue(t *testing.T, cache *KubernetesCache) []sdk.WatchKind {
 	t.Helper()
 	select {
-	case event := <-events:
-		return event
+	case <-cache.Notifications():
+		return cache.TakeEvents()
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for informer event")
-		return sdk.WatchKind{}
+		return nil
 	}
 }

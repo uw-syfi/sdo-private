@@ -82,6 +82,13 @@ def test_local_target_candidates_include_desktop_and_linux_gateways() -> None:
     )
 
 
+def test_wildcard_bound_target_is_treated_as_host_loopback() -> None:
+    assert _target_candidates("http://0.0.0.0:8000", gateway="172.19.0.1") == (
+        "http://host.docker.internal:8000",
+        "http://172.19.0.1:8000",
+    )
+
+
 def test_target_resolver_probes_with_get_then_caches_one_post_target() -> None:
     calls: list[tuple[str, str]] = []
 

@@ -45,7 +45,7 @@ def _wait_for_stage(
         if stage in expected:
             return str(stage)
         time.sleep(STAGE_POLL_INTERVAL_SECONDS)
-    raise SubmissionBridgeError(f"SREGym did not reach one of {sorted(expected)} after submission")
+    raise SubmissionBridgeError(f"SREGym did not reach one of {sorted(expected)}")
 
 
 def submit_solution(
@@ -56,6 +56,10 @@ def submit_solution(
     opener: Opener = urllib.request.urlopen,
 ) -> dict[str, Any]:
     base = api_base.rstrip("/")
+    if phase == "mitigation":
+        # The conductor drops (while acknowledging) any submit that arrives
+        # while diagnosis is still being graded, so wait for the stage to open.
+        _wait_for_stage(base, {"mitigation"}, opener=opener)
     payload = json.dumps({"solution": solution}).encode()
     phase_request = urllib.request.Request(
         f"{base}/submit",
@@ -73,7 +77,8 @@ def submit_solution(
     if status not in {"200", "ok", "acknowledged"}:
         raise SubmissionBridgeError(f"SREGym {phase} submission was not acknowledged")
     if phase == "diagnosis":
-        _wait_for_stage(base, {"mitigation", "done"}, opener=opener)
+        # Like any SREGym agent, proceed on acknowledgement; grading runs
+        # asynchronously while the responder repairs.
         return result
     terminal_stage = _wait_for_stage(base, set(TERMINAL_STAGES), opener=opener)
     done = {"status": terminal_stage}

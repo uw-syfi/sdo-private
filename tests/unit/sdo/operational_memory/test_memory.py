@@ -20,6 +20,7 @@ from sdo.operational_memory.sandbox import KubernetesJobSandboxRunner, LocalSand
 from sdo.operational_memory.validation import MemoryValidationError, MemoryValidator
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -301,6 +302,136 @@ def test_validator_prevents_cross_owner_detector_and_dependency_edits(tmp_path: 
             changed_paths=[".sdo/outcomes.jsonl"],
             baseline_root=baseline,
         )
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        (".sdo/diagnostics/manifest.yaml", "originatingIncident: incident-seed", "originatingIncident: incident-2"),
+        (".sdo/diagnostics/manifest.yaml", "originatingCommit: abc123", "originatingCommit: def456"),
+        (
+            ".sdo/diagnostics/detectors/incidents/missing_configmap/detector.go",
+            'OriginatingIncident: "incident-seed"',
+            'OriginatingIncident: "incident-2"',
+        ),
+        (
+            ".sdo/diagnostics/detectors/incidents/missing_configmap/detector.go",
+            'OriginatingCommit: "abc123"',
+            'OriginatingCommit: "def456"',
+        ),
+    ],
+)
+def test_validator_rejects_rewritten_incident_detector_provenance(
+    tmp_path: Path, path: str, old: str, new: str
+) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_memory(baseline)
+    shutil.copytree(baseline, candidate)
+    target = candidate / path
+    assert old in target.read_text(encoding="utf-8")
+    target.write_text(target.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+
+    with pytest.raises(MemoryValidationError, match="provenance"):
+        MemoryValidator(run_diagnostics=False).validate(
+            candidate,
+            actor=ArtifactOwner.RESPONDER,
+            changed_paths=[path],
+            baseline_root=baseline,
+        )
+
+
+def test_validator_accepts_refinements_that_keep_incident_detector_provenance(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_memory(baseline)
+    shutil.copytree(baseline, candidate)
+    manifest = candidate / ".sdo" / "diagnostics" / "manifest.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("interval: 1m", "interval: 30s").replace("firing: 2", "firing: 1"),
+        encoding="utf-8",
+    )
+    detector = candidate / ".sdo" / "diagnostics" / "detectors" / "incidents" / "missing_configmap" / "detector.go"
+    detector.write_text(
+        detector.read_text(encoding="utf-8").replace("Interval: time.Minute", "Interval: 30 * time.Second"),
+        encoding="utf-8",
+    )
+
+    MemoryValidator(run_diagnostics=False).validate(
+        candidate,
+        actor=ArtifactOwner.RESPONDER,
+        changed_paths=[
+            ".sdo/diagnostics/manifest.yaml",
+            ".sdo/diagnostics/detectors/incidents/missing_configmap/detector.go",
+        ],
+        baseline_root=baseline,
+    )
+
+
+_NEW_INCIDENT_DETECTOR = """  - id: missing-secret
+    package: ./detectors/incidents/missing_configmap
+    constructor: New
+    class: incident
+    owner: responder
+    watches:
+      - apiVersion: v1
+        kind: Pod
+    interval: 30s
+    persistence:
+      firing: {firing}
+      clearing: 2
+    batching:
+      severity: critical
+      debounce: 500ms
+    possiblePlaybooks: []
+    originatingIncident: incident-2
+    originatingCommit: def456
+"""
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        pytest.param(lambda text: text + _NEW_INCIDENT_DETECTOR.format(firing=2), id="new-detector"),
+        pytest.param(lambda text: text.replace("interval: 1m", "interval: 30s"), id="refined-detector"),
+    ],
+)
+def test_validator_rejects_new_or_changed_incident_detector_with_delayed_firing(
+    tmp_path: Path, edit: Callable[[str], str]
+) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_memory(baseline)
+    shutil.copytree(baseline, candidate)
+    manifest = candidate / ".sdo" / "diagnostics" / "manifest.yaml"
+    manifest.write_text(edit(manifest.read_text(encoding="utf-8")), encoding="utf-8")
+
+    with pytest.raises(MemoryValidationError, match="persistence.firing must be 1"):
+        MemoryValidator(run_diagnostics=False).validate(
+            candidate,
+            actor=ArtifactOwner.RESPONDER,
+            changed_paths=[".sdo/diagnostics/manifest.yaml"],
+            baseline_root=baseline,
+        )
+
+
+def test_validator_accepts_prompt_incident_detector_and_untouched_legacy_persistence(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline"
+    candidate = tmp_path / "candidate"
+    _write_memory(baseline)
+    shutil.copytree(baseline, candidate)
+    manifest = candidate / ".sdo" / "diagnostics" / "manifest.yaml"
+    # The fixture's existing detector keeps its legacy firing: 2; only new or changed ones must fire promptly.
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + _NEW_INCIDENT_DETECTOR.format(firing=1), encoding="utf-8"
+    )
+
+    MemoryValidator(run_diagnostics=False).validate(
+        candidate,
+        actor=ArtifactOwner.RESPONDER,
+        changed_paths=[".sdo/diagnostics/manifest.yaml"],
+        baseline_root=baseline,
+    )
 
 
 def test_validator_rejects_symlinks_and_invalid_shell(tmp_path: Path) -> None:

@@ -1,0 +1,23 @@
+# Memoryless stock Codex baseline for the SDO luna reuse comparison
+# (sdo_codex_luna_reuse.toml). Run it once per attempt, each in a new log dir.
+# Everything that affects grading or timing matches the SDO arm: model,
+# source-backed hotel deployment, judge, worker CPU limit, and kind cluster.
+
+[runner]
+agent = "codex"
+model = "gpt-6-luna"
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+enable_summary = false
+no_inject_summary = true
+problems = ["missing_configmap_hotel_reservation"]
+
+[runner.env]
+judge_model_id = "codex-gpt-6-astra"
+worker_cpu_limit = "3"
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+docker_builder = "sdo-example"

@@ -7,7 +7,13 @@ import pytest
 
 from sdo.agent_runtime.responder.broker_cli import _memory_validator, _production_reflector
 from sdo.agent_runtime.responder.reflection import ReflectionTurn, SessionReflector, _classification_directive
-from sdo.contracts import DetectorEvaluationStatus, IncidentRequest, IncidentResult
+from sdo.contracts import (
+    DetectorEvaluation,
+    DetectorEvaluationStatus,
+    IncidentRequest,
+    IncidentResult,
+    PriorOutcomeEvidence,
+)
 from sdo.operational_memory.broker_service import (
     BrokerClosure,
     BrokerService,
@@ -78,6 +84,19 @@ class RecordingSessionBackend:
         prompt: str,
         idempotency_key: str,
     ) -> ReflectionTurn:
+        return self._reflect(session_id=session_id, worktree=worktree, prompt=prompt, idempotency_key=idempotency_key)
+
+    def fresh(self, *, worktree: Path, prompt: str, idempotency_key: str) -> ReflectionTurn:
+        return self._reflect(session_id="fresh", worktree=worktree, prompt=prompt, idempotency_key=idempotency_key)
+
+    def _reflect(
+        self,
+        *,
+        session_id: str,
+        worktree: Path,
+        prompt: str,
+        idempotency_key: str,
+    ) -> ReflectionTurn:
         outcomes = MemoryRepository(worktree).outcomes()
         assert outcomes
         assert outcomes[-1].incident_id in prompt
@@ -132,6 +151,7 @@ class PlaybookOnlyThenCorrectBackend(RecordingSessionBackend):
     def __init__(self) -> None:
         super().__init__()
         self.attempts = 0
+        self.fresh_prompts: list[str] = []
 
     def resume(
         self,
@@ -142,6 +162,7 @@ class PlaybookOnlyThenCorrectBackend(RecordingSessionBackend):
         idempotency_key: str,
     ) -> ReflectionTurn:
         self.attempts += 1
+        self.calls.append((session_id, idempotency_key))
         if self.attempts == 1:
             playbook = worktree / ".sdo" / "playbooks" / "missing-configmap" / "README.md"
             playbook.write_text(
@@ -158,16 +179,16 @@ class PlaybookOnlyThenCorrectBackend(RecordingSessionBackend):
                 learning_decision="updated",
                 proposed_changes=[str(playbook), str(wrong)],
             )
+        raise AssertionError("a retry after validation failure must not resume the responder session")
+
+    def fresh(self, *, worktree: Path, prompt: str, idempotency_key: str) -> ReflectionTurn:
+        self.attempts += 1
+        self.fresh_prompts.append(prompt)
         assert "First incomplete attempt." not in (
             worktree / ".sdo" / "playbooks" / "missing-configmap" / "README.md"
         ).read_text(encoding="utf-8")
         assert not (worktree / ".sdo" / "diagnostics" / "detectors" / "incident").exists()
-        return super().resume(
-            session_id=session_id,
-            worktree=worktree,
-            prompt=prompt,
-            idempotency_key=idempotency_key,
-        )
+        return super().fresh(worktree=worktree, prompt=prompt, idempotency_key=idempotency_key)
 
 
 class FailBeforeEditOnceBackend(RecordingSessionBackend):
@@ -257,6 +278,14 @@ def _closure(worktree: Path, base_commit: str) -> BrokerClosure:
         responder_completed_at=datetime(2026, 7, 9, 18, 5, tzinfo=timezone.utc),
         verified_at=datetime(2026, 7, 9, 18, 6, tzinfo=timezone.utc),
     )
+
+
+def _unlearned_closure(worktree: Path, base_commit: str) -> BrokerClosure:
+    """A closure whose finding came from no registered incident detector."""
+
+    closure = _closure(worktree, base_commit)
+    findings = [finding.model_copy(update={"detector_id": "health-objective"}) for finding in closure.request.findings]
+    return closure.model_copy(update={"request": closure.request.model_copy(update={"findings": findings})})
 
 
 def _service(target: Path, worktrees: Path, validator: AcceptRepairValidator, **kwargs: object) -> BrokerService:
@@ -542,7 +571,7 @@ def test_semantically_incomplete_reflection_is_rolled_back_and_retried(tmp_path:
         reflector=SessionReflector(backend),
     )
     workspace = service.prepare_incident("inc-20260709-0001")
-    closure = _closure(workspace.path, workspace.base_commit)
+    closure = _unlearned_closure(workspace.path, workspace.base_commit)
 
     with pytest.raises(BrokerServiceError, match="sharp fault-specific detector"):
         service.process_closure(closure)
@@ -550,9 +579,23 @@ def test_semantically_incomplete_reflection_is_rolled_back_and_retried(tmp_path:
     state = service.completion_state("inc-20260709-0001")
     assert state.reflection_backend_completed is False
     assert state.reflection_validation_error
+    assert state.reflection_fresh_retry_attempts == 0
     receipt = service.process_closure(closure)
     assert receipt.reflection_commit is not None
     assert backend.attempts == 2
+    # Attempt 1 resumed the responder session; the retry was a short fresh
+    # session carrying only the rejected diff, the validator error and the
+    # original structured request.
+    assert backend.calls[0][0] == "019c-session-0001"
+    assert backend.calls[1][0] == "fresh"
+    (retry_prompt,) = backend.fresh_prompts
+    assert state.reflection_validation_error in retry_prompt
+    assert "First incomplete attempt." in retry_prompt
+    assert ".sdo/diagnostics/detectors/incident/wrong.go" in retry_prompt
+    assert "Outcome commit:" in retry_prompt
+    state = service.completion_state("inc-20260709-0001")
+    assert state.reflection_attempts == 2
+    assert state.reflection_fresh_retry_attempts == 1
 
 
 def test_bounded_invalid_reflection_records_explicit_no_change_and_allows_closure(tmp_path: Path) -> None:
@@ -570,7 +613,7 @@ def test_bounded_invalid_reflection_records_explicit_no_change_and_allows_closur
         max_reflection_attempts=1,
     )
     workspace = service.prepare_incident("inc-20260709-0001")
-    closure = _closure(workspace.path, workspace.base_commit)
+    closure = _unlearned_closure(workspace.path, workspace.base_commit)
 
     with pytest.raises(BrokerServiceError, match="sharp fault-specific detector"):
         service.process_closure(closure)
@@ -770,3 +813,319 @@ def test_mitigation_time_memory_edits_are_rejected_before_health_verification(tm
         service.process_closure(_closure(workspace.path, workspace.base_commit))
 
     assert _git(target, "log", "--format=%B").count("SDO-Phase: proposal") == 0
+
+
+class MeteredNoChangeBackend(NoChangeSessionBackend):
+    def resume(self, **kwargs: object) -> ReflectionTurn:  # type: ignore[override]
+        turn = super().resume(**kwargs)  # type: ignore[arg-type]
+        return turn.with_usage({"llm_calls": 1, "input_tokens": 1200, "output_tokens": 80})
+
+
+def test_reflection_token_usage_is_recorded_in_the_durable_ledger(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    service = _service(
+        target,
+        worktrees,
+        AcceptRepairValidator(),
+        reflector=SessionReflector(MeteredNoChangeBackend()),
+    )
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    service.process_closure(_closure(workspace.path, workspace.base_commit))
+
+    state = service.completion_state("inc-20260709-0001")
+    assert state.reflection_usage == {"llm_calls": 1, "input_tokens": 1200, "output_tokens": 80}
+
+
+def test_session_backend_attaches_provider_usage_to_reflection_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentshim import ProviderUsage, TokenUsage
+
+    from libs.agent_cli.structured import StructuredTurn
+    from sdo.agent_runtime.responder import reflection
+
+    def fake_turn(*_args: object, **_kwargs: object) -> StructuredTurn:
+        return StructuredTurn(
+            output_json='{"summary": "s", "learning_decision": "no_change", "no_change_reason": "r", '
+            '"proposed_changes": []}',
+            session_id="session",
+            usage=ProviderUsage(tokens=TokenUsage(input_tokens=10, output_tokens=2, cached_input_tokens=4, turns=1)),
+        )
+
+    monkeypatch.setattr(reflection, "run_structured_turn", fake_turn)
+
+    turn = reflection.CodexSessionBackend(model="m").resume(
+        session_id="session", worktree=Path("."), prompt="p", idempotency_key="k"
+    )
+
+    assert turn.usage["input_tokens"] == 10
+    assert turn.usage["cached_input_tokens"] == 4
+    assert turn.usage["llm_calls"] == 1
+
+
+def test_reflection_output_schema_is_strict_structured_output_compatible() -> None:
+    """OpenAI strict schemas reject optional properties: every key must be required."""
+    from sdo.agent_runtime.responder.reflection import reflection_output_schema
+
+    schema = reflection_output_schema()
+
+    assert sorted(schema["required"]) == sorted(schema["properties"])
+    assert schema["additionalProperties"] is False
+    assert all("default" not in prop for prop in schema["properties"].values())
+    updated = ReflectionTurn.model_validate(
+        {"summary": "s", "learning_decision": "updated", "no_change_reason": None, "proposed_changes": ["p"]}
+    )
+    assert updated.no_change_reason is None
+
+
+def test_session_backend_requests_the_strict_reflection_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentshim import ProviderUsage
+
+    from libs.agent_cli.structured import StructuredTurn
+    from sdo.agent_runtime.responder import reflection
+
+    seen: dict[str, object] = {}
+
+    def fake_turn(*_args: object, **kwargs: object) -> StructuredTurn:
+        seen["schema"] = kwargs["output_schema"]
+        return StructuredTurn(
+            output_json='{"summary": "s", "learning_decision": "no_change", "no_change_reason": "r", '
+            '"proposed_changes": []}',
+            session_id="session",
+            usage=ProviderUsage(),
+        )
+
+    monkeypatch.setattr(reflection, "run_structured_turn", fake_turn)
+    reflection.CodexSessionBackend(model="m").resume(
+        session_id="session", worktree=Path("."), prompt="p", idempotency_key="k"
+    )
+
+    assert seen["schema"] == reflection.reflection_output_schema()
+
+
+class PromptCapturingNoChangeBackend(NoChangeSessionBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.prompts: list[str] = []
+
+    def resume(self, *, session_id: str, worktree: Path, prompt: str, idempotency_key: str) -> ReflectionTurn:
+        self.prompts.append(prompt)
+        return super().resume(session_id=session_id, worktree=worktree, prompt=prompt, idempotency_key=idempotency_key)
+
+
+def test_reflection_prompt_carries_the_broker_computed_topology_review(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = PromptCapturingNoChangeBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    service.process_closure(_closure(workspace.path, workspace.base_commit))
+
+    state = service.completion_state("inc-20260709-0001")
+    (prompt,) = backend.prompts
+    assert state.source_topology_fingerprint
+    assert f"arch.md topology fingerprint: {state.architecture_topology_fingerprint}" in prompt
+    assert f"current source topology fingerprint: {state.source_topology_fingerprint}" in prompt
+    assert "stale_memory_detected: true" in prompt
+
+
+class MustNotReflectBackend(RecordingSessionBackend):
+    def _reflect(self, **_kwargs: object) -> ReflectionTurn:  # type: ignore[override]
+        raise AssertionError("a repeated exact-match success must not run an LLM reflection turn")
+
+
+def _exact_match_outcome(match_reason: str = "exact-fingerprint") -> PriorOutcomeEvidence:
+    return PriorOutcomeEvidence(
+        incident_id="inc-20260701-0001",
+        match_reason=match_reason,  # type: ignore[arg-type]
+        root_cause_summaries=["geo referenced an absent required ConfigMap"],
+        repair_action_summaries=["restored geo-config"],
+        applied_playbooks=[".sdo/playbooks/missing-configmap/README.md"],
+        source_commit="1111111111111111111111111111111111111111",
+        exact_source_match=True,
+    )
+
+
+def _own_playbook(target: Path) -> None:
+    """Register the fixture playbook in its incident detector's possiblePlaybooks."""
+
+    manifest = target / ".sdo" / "diagnostics" / "manifest.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "possiblePlaybooks: []", "possiblePlaybooks: [.sdo/playbooks/missing-configmap/README.md]"
+        ),
+        encoding="utf-8",
+    )
+
+
+def _warm_closure(
+    worktree: Path,
+    base_commit: str,
+    *,
+    match_reason: str = "exact-fingerprint",
+    incident_status: DetectorEvaluationStatus | None = DetectorEvaluationStatus.CLEAR,
+    repair_success: bool = True,
+    applied_playbook: bool = True,
+    incident_detector_fired: bool = True,
+) -> BrokerClosure:
+    closure = _closure(worktree, base_commit)
+    request = closure.request.model_copy(update={"relevant_outcomes": [_exact_match_outcome(match_reason)]})
+    if not incident_detector_fired:
+        # Only the health detector fired at dispatch; the learned incident detector had not.
+        findings = [finding.model_copy(update={"detector_id": "health-objective"}) for finding in request.findings]
+        request = request.model_copy(update={"findings": findings, "surfaced_playbooks": []})
+    assert closure.result is not None
+    actions = [action.model_copy(update={"success": repair_success}) for action in closure.result.repair_actions]
+    result = closure.result.model_copy(
+        update={
+            "repair_actions": actions,
+            "applied_playbooks": closure.result.applied_playbooks if applied_playbook else [],
+        }
+    )
+    incident_states = (
+        []
+        if incident_status is None
+        else [
+            DetectorEvaluation(
+                detector_id="missing-configmap",
+                evaluated_at=datetime(2026, 7, 9, 18, 5, 30, tzinfo=timezone.utc),
+                status=incident_status,
+                fingerprints=[] if incident_status == DetectorEvaluationStatus.CLEAR else ["hotel-reservation/geo"],
+            )
+        ]
+    )
+    return closure.model_copy(
+        update={
+            "request": request,
+            "result": result,
+            "incident_detector_states": incident_states,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("variant", "expected_state"),
+    [
+        ({}, "missing-configmap clear after the response"),
+        ({"incident_status": None}, "missing-configmap not evaluated after the response"),
+        (
+            {"incident_detector_fired": False, "incident_status": None},
+            "missing-configmap not evaluated after the response",
+        ),
+    ],
+)
+def test_repeated_exact_match_success_records_deterministic_noop_reflection(
+    tmp_path: Path, variant: dict[str, object], expected_state: str
+) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _own_playbook(target)
+    _init_repository(target)
+    diagnostics_before = _git(target, "rev-parse", "HEAD:.sdo/diagnostics")
+    backend = MustNotReflectBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    receipt = service.process_closure(
+        _warm_closure(workspace.path, workspace.base_commit, **variant)  # type: ignore[arg-type]
+    )
+
+    state = service.completion_state("inc-20260709-0001")
+    assert backend.calls == []
+    assert state.reflection_attempts == 0
+    assert state.reflection_usage == {}
+    assert state.reflection_completed is True
+    reason = state.reflection_skipped_reason
+    assert reason is not None
+    assert reason.startswith("repeated exact-match success: prior verified outcome(s) inc-20260701-0001")
+    assert ".sdo/playbooks/missing-configmap/README.md (detector missing-configmap" in reason
+    fired = variant.get("incident_detector_fired", True)
+    assert ("fired at dispatch" if fired else "had not fired at dispatch") in reason
+    assert "the controller verified health" in reason
+    assert expected_state in reason
+    assert state.reflection_learning_decision == "no_change"
+    assert state.reflection_no_change_reason == reason
+    assert state.accepted_detector_paths == []
+    assert state.controller_update_required is False
+    assert receipt.reflection_commit is not None
+    assert "SDO-Phase: reflection" in _git(target, "show", "-s", "--format=%B", receipt.reflection_commit)
+    assert _git(target, "rev-parse", "HEAD:.sdo/diagnostics") == diagnostics_before
+    assert MemoryRepository(target).outcomes()[-1].classification == OutcomeClassification.SUCCESS
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        {"match_reason": "detector-rule-resource-kind"},
+        {"incident_status": DetectorEvaluationStatus.FIRING},
+        {"incident_detector_fired": False, "incident_status": DetectorEvaluationStatus.FIRING},
+        {"repair_success": False},
+        {"applied_playbook": False},
+        {"owned": False},
+    ],
+)
+def test_non_exact_or_unproven_warm_success_still_runs_full_reflection(
+    tmp_path: Path, variant: dict[str, object]
+) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    variant = dict(variant)
+    if variant.pop("owned", True):
+        _own_playbook(target)
+    _init_repository(target)
+    backend = RecordingSessionBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    service.process_closure(_warm_closure(workspace.path, workspace.base_commit, **variant))  # type: ignore[arg-type]
+
+    state = service.completion_state("inc-20260709-0001")
+    assert len(backend.calls) == 1
+    assert state.reflection_skipped_reason is None
+
+
+class PlaybookOnlyBackend(RecordingSessionBackend):
+    def _reflect(self, *, session_id: str, worktree: Path, prompt: str, idempotency_key: str) -> ReflectionTurn:
+        del prompt
+        playbook = worktree / ".sdo" / "playbooks" / "missing-configmap" / "README.md"
+        playbook.write_text(
+            playbook.read_text(encoding="utf-8") + "\nRun `kubectl -n <NAMESPACE> get configmap geo-config`.\n",
+            encoding="utf-8",
+        )
+        self.calls.append((session_id, idempotency_key))
+        return ReflectionTurn(
+            summary="sharper verification", learning_decision="updated", proposed_changes=[str(playbook)]
+        )
+
+
+def test_playbook_only_reflection_is_accepted_when_a_learned_incident_detector_fired(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = PlaybookOnlyBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    receipt = service.process_closure(_closure(workspace.path, workspace.base_commit))
+
+    state = service.completion_state("inc-20260709-0001")
+    assert len(backend.calls) == 1
+    assert receipt.reflection_commit is not None
+    assert state.accepted_detector_paths == []
+    assert state.controller_update_required is False
+    assert "get configmap geo-config" in (target / ".sdo" / "playbooks" / "missing-configmap" / "README.md").read_text(
+        encoding="utf-8"
+    )

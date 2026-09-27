@@ -21,7 +21,7 @@ Path: `.sdo/lifecycle-provenance.yaml`
 
 Expected sections:
 
-- `deployer`: session ID, source commit, topology fingerprint, resource inventory, and architecture summary.
+- `deployer`: session ID, source commit, topology fingerprint, resource inventory, and architecture summary. The model returns only the commit, fingerprint, and summary; the controller attaches the resource inventory deterministically from tracked manifests, so the inventory is a controller fact rather than model output.
 - `active_topology` (when supplied by the deployment adapter): sorted kind/name references for the deployed source variant and required non-optional ConfigMap dependencies.
 - `health_judge`: the accepted final detector artifact.
 - `health_judge_rounds`: ordered structured attempts with distinct session IDs, round numbers, objective digest, covered resources, source, and tests.
@@ -62,7 +62,7 @@ Broker state is stored under the repository's Git common directory, normally in 
 git -C <application-worktree> rev-parse --git-common-dir
 ```
 
-Ledger fields can include proposal processing state; optional proposal commit; mandatory outcome, reflection, and validator-evidence commits; responder session ID; accepted detector paths; closure and acknowledgement state; network-policy canaries; topology fingerprints; and controller-update rollout records. Under `recorded-actions`, a missing proposal commit is valid only when the result and outcome contain a successful structured repair action. Require incident IDs and commit hashes to agree with the receipt and outcome.
+Ledger fields can include proposal processing state; optional proposal commit; mandatory outcome, reflection, and validator-evidence commits; responder session ID; accepted detector paths; closure and acknowledgement state; network-policy canaries; topology fingerprints; and controller-update rollout records. `reflection_attempts` counts reflection turns; `reflection_fresh_retry_attempts` (default 0 in older ledgers) counts the subset that retried a validator-rejected proposal in a fresh session instead of resuming the responder session. The rejected proposal's diff is kept beside the ledger as `<sha256(incident_id)>.reflection-rejected.diff`. `reflection_skipped_reason` (null in older ledgers) is set when the broker recorded a deterministic no-op reflection without an LLM turn: a repeated exact-match success where the warm rule held (a prior verified outcome matched by `exact-fingerprint` and surfaced a playbook listed in the `possiblePlaybooks` of a registered responder-owned incident detector, fired or not), the responder applied that playbook, every repair action and verification passed, the controller verified health, and that detector was not firing in its latest post-response evaluation (no post-response evaluation is accepted). The reason names the prior incident(s), each playbook with its detector, whether the detector had fired at dispatch, how the playbook surfaced (`active-finding`, `surfaced`, `prior-outcome-applied`, `detector-learned-from-exact-prior`), and each detector's post-response state (`clear after the response` or `not evaluated after the response`). Such a ledger has `reflection_attempts=0`, empty `reflection_usage`, `reflection_learning_decision=no_change` with the same text as `reflection_no_change_reason`, an empty attributable reflection commit, and no accepted detector paths or controller rollout. The closure's `incident_detector_states` (absent in older ledgers) holds the latest post-response evaluation of each non-health detector that raised a finding; it is learning evidence, not a closure gate. Under `recorded-actions`, a missing proposal commit is valid only when the result and outcome contain a successful structured repair action. Require incident IDs and commit hashes to agree with the receipt and outcome.
 
 ## Strict production receipt
 
@@ -74,12 +74,14 @@ The current receipt schema is `sdo.production-receipt/v1`. It summarizes durable
 - production job dispatch and responder-job correlation;
 - repair policy and structured repair actions; either a proposal commit or, under `recorded-actions`, at least one successful action;
 - outcome, reflection, and validator-evidence commits;
-- responder usage plus phase timings that separate operational recovery from post-recovery learning and receipt work;
+- responder usage (`usage`) and reflection usage summed over reflection attempts (`reflection_usage`, from the broker ledger; it includes `model_requests` when the provider exposes it), `reflection_attempts`, `reflection_fresh_retry_attempts`, and `reflection_skipped_reason` (non-null for a deterministic no-op reflection that ran no LLM turn), plus phase timings that separate operational recovery from post-recovery learning and receipt work;
 - compact memory-reuse evidence: candidate count, match reasons, applied-playbook count, and warm-path status;
 - driver timings for conductor readiness, inventory/lifecycle work, production runtime, and benchmark submission, plus whether lifecycle memory was reused; `incident_resolution_seconds` is strictly detection through independently verified health, while the receipt lists pre-incident lifecycle and post-recovery learning as excluded time;
+- `fault_injection_deferred` and `fault_gate_timings_seconds` (`controller_baseline_wait`, `fault_injection_request`) when the conductor deferred injection until the SDO controller reported an all-clear evaluation; in that mode lifecycle and controller install happen before the fault and sit outside TTM;
 - whether executable detector validation ran; unchanged diagnostics may skip the Kubernetes validator and carry `validator_skipped_reason=unchanged-diagnostics` with no fresh canaries;
-- same-session reflection and independent verification;
-- final detector clearing and network-policy canaries;
+- same-session reflection and independent verification; `same_session_reflection` means the first reflection attempt resumed the responder session (it stays true for a deterministic no-op reflection, which still records a reflection commit; check `reflection_skipped_reason`), while any retry after a validation rejection runs fresh (see `reflection_fresh_retry_attempts`);
+- `runtime_artifacts`: `{directory, error}` for the pod-side runtime evidence exported beside the receipt (see below); a non-null `error` means the export failed, not the run;
+- final detector clearing (`detector_clear`, health detectors when any exist), the post-response `incident_detector_states`, and network-policy canaries;
 - acknowledgement, cleanup, and remaining worktrees;
 - accepted detector paths and any correlated controller-update rollout;
 - lifecycle provenance and topology freshness.
@@ -101,11 +103,22 @@ third_party/sregym/logs/<run-or-pipeline>/
     └── problem_runs/<problem-id>/
         ├── results_*.csv
         ├── agent/
-        │   └── sdo_production_receipt_strict.json
+        │   ├── sdo_production_receipt_strict.json
+        │   ├── sdo_turn_usage.jsonl        # host-side lifecycle turns
+        │   └── sdo_runtime/                # exported from the workspace PVC
+        │       ├── usage/controller-turns.jsonl   # broker + reflection turns
+        │       ├── usage/responder-turns.jsonl    # responder Job turns
+        │       ├── codex/sessions/YYYY/MM/DD/rollout-*-<session>.jsonl
+        │       ├── claude/projects/...            # Claude provider only
+        │       └── controller_logs/<pod>.log      # kubectl logs --timestamps of each sdo-controller-run pod
         └── <harness and agent logs>
 ```
 
-Result CSVs may flatten stage results into fields such as `Diagnosis.success` and `Mitigation.success`. Require explicit true values and inspect `agent_error`; missing or malformed values are not success.
+`controller_logs/` is written by the adapter's cleanup, so it also exists after a failed controller Job; an export failure is recorded in `controller_logs/export_error.txt` instead of failing the run. Each controller evaluation line (`controller_iteration`, `findings`) carries no timestamp of its own; use the `kubectl` timestamp prefix. The broker ledger's `closure.request.detector_history` is frozen when the incident opens and compacted to the last 12 evaluations, so evaluations after dispatch appear only in these logs.
+
+Every structured agent turn appends one JSONL record to the file named by `SDO_TURN_USAGE_LOG`: host-side lifecycle turns to `sdo_turn_usage.jsonl` in the run's agent log directory, and in-cluster turns to `/workspace/.sdo-runtime/usage/{controller,responder}-turns.jsonl` on the workspace PVC, which the adapter exports to `agent/sdo_runtime/usage/` before building the receipt. Each record has `recorded_at`, `provider`, `model`, `cwd`, `session_id`, `resumed`, `duration_seconds`, `tool_calls`, `shell_commands` (count), `shell_command_lines` (the commands in order, each capped at 2,000 chars; absent in older logs), `model_requests`, `model_requests_source`, and `usage` (`llm_calls`, token counts, and `model_requests` when known). `llm_calls` is agentshim's turn count: always 1 per Codex `exec` run, but Claude's agentic turns. `model_requests` is the per-request count: for Codex, `token_count` events with usage that this turn added to its session rollout (`model_requests_source=codex-rollout-token-count`); for Claude, its reported turns (`claude-num-turns`); `null` when the rollout could not be read. Cross-check against the exported Codex rollouts, whose `event_msg`/`token_count` entries carry per-request `last_token_usage`; a resumed session's rollout also contains the earlier turns. Responder Jobs run Codex with `CODEX_HOME=/workspace/.sdo-runtime/codex`, so responder rollouts are exported under `agent/sdo_runtime/codex/sessions/` beside the reflection's (same session file when reflection resumed it).
+
+Result CSVs may flatten stage results into fields such as `Diagnosis.success` and `Mitigation.success`. They also carry conductor wall-clock epochs `fault_injected_at`, `diagnosis_submitted_at`, and `mitigation_submitted_at` (recorded when the agent's `/submit` request arrives, before API retries or oracles) and, for agents with `defer_fault_injection`, `fault_injection_deferred_seconds`. `mitigation_submitted_at - fault_injected_at` is the agent-neutral incident time; `TTM` additionally includes diagnosis judging and the mitigation oracle. Require explicit true values and inspect `agent_error`; missing or malformed values are not success.
 
 ## Agent trajectories
 

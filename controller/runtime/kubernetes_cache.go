@@ -18,21 +18,29 @@ import (
 	"sdo.dev/controller/sdk"
 )
 
-const defaultEventBuffer = 256
-
 type KubernetesCacheConfig struct {
 	Namespace          string
 	Client             kubernetes.Interface
 	StateConfigMapName string
-	EventBuffer        int
 }
 
+// KubernetesCache coalesces informer notifications into a set of pending watch
+// kinds. A watch kind carries no object identity, so N queued events of one
+// kind trigger exactly the detectors that a single event would. Coalescing
+// keeps every kind that changed since the last TakeEvents call deliverable
+// regardless of how slowly the controller loop drains them: a bounded FIFO
+// would either drop kinds on overflow or delay a ConfigMap delete behind a
+// backlog of unrelated Pod events.
 type KubernetesCache struct {
 	config    KubernetesCacheConfig
 	factory   informers.SharedInformerFactory
 	informers map[string]cache.SharedIndexInformer
-	events    chan sdk.WatchKind
 	startOnce sync.Once
+
+	mu      sync.Mutex
+	pending map[string]sdk.WatchKind
+	order   []string
+	notify  chan struct{}
 }
 
 func NewKubernetesCache(config KubernetesCacheConfig, detectors []sdk.Detector) (*KubernetesCache, error) {
@@ -42,13 +50,10 @@ func NewKubernetesCache(config KubernetesCacheConfig, detectors []sdk.Detector) 
 	if config.Client == nil {
 		return nil, fmt.Errorf("Kubernetes client is required")
 	}
-	if config.EventBuffer <= 0 {
-		config.EventBuffer = defaultEventBuffer
-	}
 	factory := informers.NewSharedInformerFactoryWithOptions(config.Client, 0, informers.WithNamespace(config.Namespace))
 	result := &KubernetesCache{
 		config: config, factory: factory, informers: make(map[string]cache.SharedIndexInformer),
-		events: make(chan sdk.WatchKind, config.EventBuffer),
+		pending: make(map[string]sdk.WatchKind), notify: make(chan struct{}, 1),
 	}
 	declared := make(map[string]sdk.WatchKind)
 	for _, detector := range detectors {
@@ -94,8 +99,38 @@ func (c *KubernetesCache) WaitForSync(ctx context.Context) error {
 	return nil
 }
 
-func (c *KubernetesCache) Events() <-chan sdk.WatchKind {
-	return c.events
+// Notifications signals that at least one watched kind changed since the last
+// TakeEvents call. Multiple changes share one pending signal.
+func (c *KubernetesCache) Notifications() <-chan struct{} {
+	return c.notify
+}
+
+// TakeEvents returns and clears every watched kind that changed since the
+// previous call, in first-observed order.
+func (c *KubernetesCache) TakeEvents() []sdk.WatchKind {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	events := make([]sdk.WatchKind, 0, len(c.order))
+	for _, key := range c.order {
+		events = append(events, c.pending[key])
+	}
+	c.pending = make(map[string]sdk.WatchKind)
+	c.order = nil
+	return events
+}
+
+func (c *KubernetesCache) enqueue(watch sdk.WatchKind) {
+	key := watch.APIVersion + "/" + watch.Kind + "/" + watch.Namespace
+	c.mu.Lock()
+	if _, exists := c.pending[key]; !exists {
+		c.pending[key] = watch
+		c.order = append(c.order, key)
+	}
+	c.mu.Unlock()
+	select {
+	case c.notify <- struct{}{}:
+	default:
+	}
 }
 
 func (c *KubernetesCache) Snapshot(context.Context) (sdk.DetectionContext, error) {
@@ -135,10 +170,7 @@ func (c *KubernetesCache) eventHandler(watch sdk.WatchKind) cache.ResourceEventH
 		if watch.Kind == "ConfigMap" && objectName(object) == c.config.StateConfigMapName {
 			return
 		}
-		select {
-		case c.events <- watch:
-		default:
-		}
+		c.enqueue(watch)
 	}
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: emit,
