@@ -1119,3 +1119,45 @@ def test_runner_honors_temporary_sregym_checkout(monkeypatch, tmp_path: Path) ->
     finally:
         monkeypatch.delenv("SDO_SREGYM_DIR", raising=False)
         importlib.reload(runner)
+
+
+def test_deferred_problem_starts_fault_gate_after_lifecycle_and_before_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    events: list[str] = []
+
+    class FakeGate:
+        timings = {"controller_baseline_wait": 30.0, "fault_injection_request": 1.0}
+
+        def __init__(self, namespace: str, api_base: str) -> None:
+            assert (namespace, api_base) == ("demo", "http://localhost:8000")
+
+        def start(self) -> None:
+            events.append("gate-start")
+
+        def join(self) -> None:
+            events.append("gate-join")
+
+    monkeypatch.setenv("SREGYM_DEFER_CLEANUP", "1")
+    monkeypatch.setattr(driver, "get_api_base", lambda: "http://localhost:8000")
+    monkeypatch.setattr(driver, "poll_stage_sync", lambda *_args, **_kwargs: "awaiting_fault_injection")
+    monkeypatch.setattr(driver, "get_app_info", lambda *_args: {"app_name": "demo", "namespace": "demo"})
+    monkeypatch.setattr(driver, "_application_repository", lambda: tmp_path)
+    monkeypatch.setattr(
+        driver,
+        "_deployed_lifecycle_context",
+        lambda *_args, **_kwargs: driver.DeployedLifecycleContext(health_objective="healthy", active_resources=[]),
+    )
+    monkeypatch.setattr(driver, "reuse_initial_lifecycle_if_valid", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(driver, "run_initial_lifecycle", lambda *_args, **_kwargs: events.append("lifecycle"))
+    monkeypatch.setattr(driver, "_FaultGate", FakeGate)
+    monkeypatch.setattr(driver, "run_production_runtime", lambda _config: events.append("runtime") or {})
+
+    result = driver._run(driver._parse_args([]))
+
+    assert events == ["lifecycle", "gate-start", "runtime", "gate-join"]
+    assert result["fault_injection_deferred"] is True
+    assert result["fault_gate_timings_seconds"] == FakeGate.timings
