@@ -2,7 +2,10 @@
 
 FROM golang:1.24.5-bookworm@sha256:ef8c5c733079ac219c77edab604c425d748c740d8699530ea6aced9de79aea40 AS go-runtime
 WORKDIR /opt/sdo
-ENV GOCACHE=/go/build-cache
+# The validator runtime has no C compiler, so Go builds there with cgo off.
+# Build cache keys include the cgo setting: seed with the same setting.
+ENV GOCACHE=/go/build-cache \
+    CGO_ENABLED=0
 COPY controller/sdk ./controller/sdk
 COPY controller/core ./controller/core
 COPY controller/runtime ./controller/runtime
