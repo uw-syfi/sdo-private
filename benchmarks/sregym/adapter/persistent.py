@@ -43,7 +43,7 @@ from benchmarks.sregym.adapter.runtime import (
     install_persistent_controller,
     validate_production_receipt,
 )
-from sdo.agent_runtime.lifecycle.validation_cache import validation_report
+from sdo.agent_runtime.lifecycle import validation_report
 from sdo.controller_install import (
     CONTROLLER_JOB_NAME,
     ControllerInstallError,
@@ -56,7 +56,7 @@ from sdo.controller_install import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from sdo.agent_runtime.lifecycle.validation_cache import LifecycleValidationCache
+    from sdo.agent_runtime.lifecycle import LifecycleValidationCache
 
 logger = logging.getLogger(__name__)
 

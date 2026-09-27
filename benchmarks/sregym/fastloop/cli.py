@@ -143,9 +143,13 @@ def _free_port() -> int:
 
 
 def _sdo_agent(args: argparse.Namespace, environment: FastloopEnvironment, results_dir: Path) -> IncidentAgent:
-    from benchmarks.sregym.adapter.driver import deployed_lifecycle, run_or_reuse_lifecycle
-    from benchmarks.sregym.adapter.persistent import KubectlClusterOps, control_namespace_for
-    from benchmarks.sregym.adapter.runtime import RuntimeConfig
+    from benchmarks.sregym.adapter import (
+        KubectlClusterOps,
+        RuntimeConfig,
+        control_namespace_for,
+        deployed_lifecycle,
+        run_or_reuse_lifecycle,
+    )
     from benchmarks.sregym.fastloop.sdo_agent import SdoAgentSettings, SdoPersistentAgent
     from sdo.agent_runtime.lifecycle import LifecycleValidationCache
 
@@ -391,7 +395,7 @@ def _summary(args: argparse.Namespace) -> int:
 
 
 def _down(args: argparse.Namespace) -> int:
-    from benchmarks.sregym.adapter.persistent import KubectlClusterOps, teardown
+    from benchmarks.sregym.adapter import KubectlClusterOps, teardown
 
     environment = FastloopEnvironment.load(args.run_dir.resolve())
     os.environ["KUBECONFIG"] = str(environment.kubeconfig)

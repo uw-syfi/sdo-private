@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from benchmarks.sregym.adapter.persistent import (
+from benchmarks.sregym.adapter import (
     REJECTED_RECEIPT_FILENAME,
     STRICT_RECEIPT_FILENAME,
     Clock,
@@ -37,8 +37,7 @@ from sdo.controller_install import ControllerInstallError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from benchmarks.sregym.adapter.driver import DeployedLifecycle, DeployedLifecycleContext
-    from benchmarks.sregym.adapter.runtime import RuntimeConfig
+    from benchmarks.sregym.adapter import DeployedLifecycle, DeployedLifecycleContext, RuntimeConfig
     from sdo.agent_runtime.lifecycle import LifecycleValidationCache
 
 
