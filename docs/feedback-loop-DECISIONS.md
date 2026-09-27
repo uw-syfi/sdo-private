@@ -167,11 +167,12 @@ direction from the user; the rest were made autonomously.
 
 ### D11. Static import and call guard for generators
 
-- **Decision.** The builder rejects generator imports outside an allowlist
-  (the SDK traffic package plus pure stdlib such as `strings`, `strconv`,
-  `fmt`, `net/url`, `encoding/json`, `time` for durations). It also rejects
-  `math/rand` calls other than through the engine rng, and wall-clock reads
-  (`time.Now`, `time.Since`).
+- **Decision.** The builder rejects generator imports outside an allowlist:
+  the SDK traffic package plus pure stdlib (`bytes`, `context`, `encoding/*`,
+  `errors`, `fmt`, `math`, `math/rand/v2`, `net/url`, `regexp`, `sort`,
+  `strconv`, `strings`, `time`, and similar). It also rejects `rand.X` calls
+  other than the `Rand` type, and `time.Now`, `Since`, `Until`, `Sleep`,
+  `After`, `Tick`, and the timer and ticker constructors.
 - **Why.** Exact replay needs every source of randomness and time to come from
   the engine. It is defence in depth on top of the pod isolation, and it is
   cheap to check.
@@ -205,9 +206,12 @@ direction from the user; the rest were made autonomously.
 
 ### D14. Verify-burst seeding
 
-- **Decision.** Each burst derives its iterations from the workload seed plus
-  a monotonically increasing burst offset. Bursts replay exactly, and
-  consecutive bursts do not repeat the same parameters.
+- **Decision.** A full burst uses the workload's seed. A burst restricted to
+  an incident's failing scenarios uses that seed XOR a hash of the sorted
+  scenario IDs. Both replay exactly from the seed and iteration in the
+  evidence, and the restricted burst keeps the workload's total rate.
+- **Why.** Deterministic replay matters more than parameter variety across
+  repeated bursts. The steady probe already covers variety.
 
 ### Smoke results (no LLM, throwaway kind `sdo-smoke`, 3 runs)
 
