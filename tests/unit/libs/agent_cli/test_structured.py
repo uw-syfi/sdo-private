@@ -26,6 +26,7 @@ from libs.agent_cli.structured import (
     StructuredTurnError,
     StructuredTurnTimeout,
     run_structured_turn,
+    turn_usage,
 )
 from tests.structured_turns import FakeCodexLogin, ScriptedAgent, failure, fake_codex_login, reply
 
@@ -418,3 +419,75 @@ def test_turns_write_no_usage_log_unless_configured(tmp_path: Path, monkeypatch:
     monkeypatch.delenv(TURN_USAGE_LOG_ENV, raising=False)
     _run("codex", tmp_path)
     assert not list(tmp_path.rglob("*.jsonl"))
+
+
+def _token_count(info: dict[str, Any] | None) -> str:
+    return json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": info}}) + "\n"
+
+
+def _append_rollout(home: Path, session_id: str, requests: int) -> Path:
+    rollout = home / "sessions" / "2026" / "09" / "27" / f"rollout-2026-09-27T00-00-00-{session_id}.jsonl"
+    rollout.parent.mkdir(parents=True, exist_ok=True)
+    with rollout.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"type": "session_meta", "payload": {"id": session_id}}) + "\n")
+        # Rate-limit-only updates carry no usage and are not model requests.
+        handle.write(_token_count(None))
+        for _ in range(requests):
+            handle.write(_token_count({"last_token_usage": {"input_tokens": 10}}))
+    return rollout
+
+
+def test_codex_usage_log_counts_model_requests_added_by_this_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex_login: FakeCodexLogin
+) -> None:
+    log = tmp_path / "turns.jsonl"
+    monkeypatch.setenv(TURN_USAGE_LOG_ENV, str(log))
+    home = codex_login.auth.parent
+    _append_rollout(home, "s-1", requests=3)
+
+    def respond(_request: CommandRequest) -> FakeRun:
+        _append_rollout(home, "s-1", requests=2)
+        return reply("codex", {"answer": "ok"}, session_id="s-1", commands=["ls", "pwd"])
+
+    agent = ScriptedAgent(respond)
+    turn = run_structured_turn(
+        "codex",
+        "prompt",
+        output_schema=_SCHEMA,
+        cwd=tmp_path,
+        access="danger-full-access",
+        resume_session_id="s-1",
+        executor=agent.executor,
+    )
+
+    assert turn.model_requests == 2
+    assert turn_usage(turn)["model_requests"] == 2
+    (record,) = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert record["resumed"] is True
+    assert record["model_requests"] == 2
+    assert record["model_requests_source"] == "codex-rollout-token-count"
+    assert record["tool_calls"] == 2
+    assert record["usage"]["model_requests"] == 2
+
+
+def test_codex_usage_log_records_an_unknown_request_count_without_a_rollout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log = tmp_path / "turns.jsonl"
+    monkeypatch.setenv(TURN_USAGE_LOG_ENV, str(log))
+
+    turn, _ = _run("codex", tmp_path, access="danger-full-access")
+
+    assert turn.model_requests is None
+    assert "model_requests" not in turn_usage(turn)
+    (record,) = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert record["resumed"] is False
+    assert record["model_requests"] is None
+    assert record["model_requests_source"] is None
+
+
+def test_claude_model_requests_are_its_reported_agentic_turns(tmp_path: Path) -> None:
+    turn, _ = _run("claude", tmp_path)
+
+    assert turn.model_requests == turn.usage.tokens.turns
+    assert turn_usage(turn)["model_requests"] == turn.usage.tokens.turns

@@ -17,12 +17,20 @@ class ControllerInstallError(RuntimeError):
     """Raised when the in-cluster SDO controller cannot be installed or completed."""
 
 
-CODEX_HOME_PATH = "/workspace/.sdo-runtime/codex"
-CLAUDE_CONFIG_PATH = "/workspace/.sdo-runtime/claude"
-RUNTIME_BUILD_ROOT = "/workspace/.sdo-runtime/build"
+RUNTIME_STATE_ROOT = "/workspace/.sdo-runtime"
+CODEX_HOME_PATH = f"{RUNTIME_STATE_ROOT}/codex"
+CLAUDE_CONFIG_PATH = f"{RUNTIME_STATE_ROOT}/claude"
+RUNTIME_BUILD_ROOT = f"{RUNTIME_STATE_ROOT}/build"
 RUNTIME_TMPDIR = f"{RUNTIME_BUILD_ROOT}/tmp"
 RUNTIME_GO_TMPDIR = f"{RUNTIME_BUILD_ROOT}/go-tmp"
 RUNTIME_GO_CACHE = f"{RUNTIME_BUILD_ROOT}/go-cache"
+#: Per-turn agent usage logs (``SDO_TURN_USAGE_LOG``) on the workspace PVC. The
+#: controller pod hosts the broker and its reflection turns; responder Jobs
+#: append to their own file so concurrent pods never share one writer.
+RUNTIME_USAGE_ROOT = f"{RUNTIME_STATE_ROOT}/usage"
+CONTROLLER_TURN_USAGE_LOG = f"{RUNTIME_USAGE_ROOT}/controller-turns.jsonl"
+RESPONDER_TURN_USAGE_LOG = f"{RUNTIME_USAGE_ROOT}/responder-turns.jsonl"
+TURN_USAGE_LOG_ENV = "SDO_TURN_USAGE_LOG"
 
 
 @dataclass(frozen=True)
@@ -127,6 +135,7 @@ def controller_resources(
         f"--responder-env=CLAUDE_CONFIG_DIR={CLAUDE_CONFIG_PATH}",
         f"--responder-env=SDO_RESPONDER_MODEL={config.model}",
         f"--responder-env=SDO_AGENT_PROVIDER={config.agent_provider}",
+        f"--responder-env={TURN_USAGE_LOG_ENV}={RESPONDER_TURN_USAGE_LOG}",
         "--broker-arg=-m",
         "--broker-arg=sdo.agent_runtime.responder.broker_cli",
         "--broker-arg=--proposal-command",
@@ -245,6 +254,7 @@ def controller_resources(
                                     {"name": "TMPDIR", "value": RUNTIME_TMPDIR},
                                     {"name": "GOTMPDIR", "value": RUNTIME_GO_TMPDIR},
                                     {"name": "GOCACHE", "value": RUNTIME_GO_CACHE},
+                                    {"name": TURN_USAGE_LOG_ENV, "value": CONTROLLER_TURN_USAGE_LOG},
                                     {"name": "SDO_CONTROLLER_JOB", "value": "sdo-controller-run"},
                                     {
                                         "name": "SDO_CONTROLLER_POD_UID",

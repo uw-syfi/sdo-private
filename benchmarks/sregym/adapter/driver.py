@@ -446,6 +446,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             agent_provider=args.provider,
             submission_api_base=_in_cluster_api_base(api_base),
             submission_relay_target_base=_relay_target_api_base(api_base),
+            artifacts_dir=_receipt_directory(args.logs_dir, repository),
         )
     )
     runtime_ready = time.monotonic()

@@ -50,3 +50,17 @@ def test_production_runtime_module_has_no_benchmark_dependency() -> None:
 
     assert "SREGYM" not in contents
     assert "PRODUCTION_RECEIPT" not in contents
+
+
+def test_broker_and_responder_pods_log_per_turn_usage_on_the_workspace_pvc() -> None:
+    controller = next(resource for resource in controller_resources(_config()) if resource["kind"] == "Job")
+    container = controller["spec"]["template"]["spec"]["containers"][0]
+    args = container["args"]
+
+    # The broker, and so every reflection turn, runs inside the controller pod.
+    assert {
+        "name": "SDO_TURN_USAGE_LOG",
+        "value": "/workspace/.sdo-runtime/usage/controller-turns.jsonl",
+    } in container["env"]
+    assert "--responder-env=SDO_TURN_USAGE_LOG=/workspace/.sdo-runtime/usage/responder-turns.jsonl" in args
+    assert {"name": "repository", "mountPath": "/workspace"} in container["volumeMounts"]

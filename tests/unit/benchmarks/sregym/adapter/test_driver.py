@@ -1181,6 +1181,116 @@ def test_driver_records_host_turn_usage_beside_run_artifacts(monkeypatch: pytest
     assert os.environ["SDO_TURN_USAGE_LOG"] == "/elsewhere.jsonl"
 
 
+def _pod_runtime_archive(tmp_path: Path) -> bytes:
+    import tarfile
+
+    source = tmp_path / "pod-runtime"
+    (source / "usage").mkdir(parents=True)
+    (source / "usage" / "controller-turns.jsonl").write_text('{"model_requests": 3}\n', encoding="utf-8")
+    rollout = source / "codex" / "sessions" / "2026" / "09" / "27" / "rollout-2026-09-27T00-00-00-s-1.jsonl"
+    rollout.parent.mkdir(parents=True)
+    rollout.write_text('{"type": "session_meta"}\n', encoding="utf-8")
+    archive = tmp_path / "runtime.tar"
+    with tarfile.open(archive, "w") as bundle:
+        bundle.add(source / "usage", arcname="usage")
+        bundle.add(source / "codex" / "sessions", arcname="codex/sessions")
+    return archive.read_bytes()
+
+
+def test_runtime_exports_pod_usage_logs_and_codex_rollouts_into_run_artifacts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import benchmarks.sregym.adapter.runtime as runtime
+
+    archive = _pod_runtime_archive(tmp_path)
+    real_run = subprocess.run
+    pod_commands: list[list[str]] = []
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        if args[0] == "kubectl":
+            pod_commands.append(args)
+            return subprocess.CompletedProcess(args, 0, archive, b"")
+        return real_run(args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_run)
+    artifacts = tmp_path / "results"
+
+    summary = runtime._export_runtime_artifacts("demo", artifacts)
+
+    exported = artifacts / "sdo_runtime"
+    assert summary == {"directory": str(exported), "error": None}
+    assert (exported / "usage" / "controller-turns.jsonl").read_text(encoding="utf-8") == '{"model_requests": 3}\n'
+    assert (exported / "codex" / "sessions" / "2026" / "09" / "27" / "rollout-2026-09-27T00-00-00-s-1.jsonl").is_file()
+    (command,) = pod_commands
+    assert command[:6] == ["kubectl", "--namespace", "demo", "exec", "sdo-repository-sync", "--"]
+    script = command[-1]
+    assert "/workspace/.sdo-runtime" in script
+    assert "usage" in script
+    assert "codex/sessions" in script
+    # Credentials in the Codex and Claude homes are never exported.
+    assert "auth.json" not in script
+    assert ".credentials" not in script
+
+
+def test_runtime_artifact_export_failure_never_fails_the_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import benchmarks.sregym.adapter.runtime as runtime
+
+    def fake_run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(args, 1, b"", b"pod not found")
+
+    monkeypatch.setattr(runtime.subprocess, "run", fake_run)
+
+    summary = runtime._export_runtime_artifacts("demo", tmp_path)
+
+    assert summary["directory"] is None
+    assert "pod not found" in str(summary["error"])
+
+
+def test_runtime_artifact_export_without_a_destination_is_skipped(tmp_path: Path) -> None:
+    import benchmarks.sregym.adapter.runtime as runtime
+
+    assert runtime._export_runtime_artifacts("demo", None) == {"directory": None, "error": "no artifacts directory"}
+
+
+def test_receipt_reflection_telemetry_distinguishes_fresh_retries_from_same_session() -> None:
+    import benchmarks.sregym.adapter.runtime as runtime
+
+    telemetry = runtime._reflection_telemetry(
+        {"responder_session_id": "s-1", "reflection_attempts": 2, "reflection_fresh_retry_attempts": 1}
+    )
+    assert telemetry == {"reflection_attempts": 2, "reflection_fresh_retry_attempts": 1}
+    assert runtime._reflection_telemetry({}) == {"reflection_attempts": 0, "reflection_fresh_retry_attempts": 0}
+
+
+def test_driver_exports_runtime_artifacts_beside_the_receipt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    configs: list[RuntimeConfig] = []
+    monkeypatch.setenv("SREGYM_DEFER_CLEANUP", "1")
+    monkeypatch.setattr(driver, "get_api_base", lambda: "http://localhost:8000")
+    monkeypatch.setattr(driver, "poll_stage_sync", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(driver, "get_app_info", lambda *_args, **_kwargs: {"app_name": "demo", "namespace": "demo"})
+    monkeypatch.setattr(driver, "_application_repository", lambda: tmp_path / "application")
+    monkeypatch.setattr(
+        driver,
+        "_deployed_lifecycle_context",
+        lambda *_args, **_kwargs: driver.DeployedLifecycleContext(health_objective="healthy", active_resources=[]),
+    )
+    monkeypatch.setattr(driver, "reuse_initial_lifecycle_if_valid", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(driver, "persist_lifecycle_seed", lambda *_args, **_kwargs: None)
+
+    def fake_runtime(config: RuntimeConfig) -> dict[str, bool]:
+        configs.append(config)
+        return {"completed": True}
+
+    monkeypatch.setattr(driver, "run_production_runtime", fake_runtime)
+    logs = tmp_path / "logs"
+
+    driver._run(driver._parse_args(["--logs-dir", str(logs)]))
+
+    assert configs[0].artifacts_dir == _receipt_directory(str(logs), tmp_path / "application")
+
+
 def test_health_objective_never_requires_endpoints_for_external_name_services() -> None:
     payload = {
         "items": [
