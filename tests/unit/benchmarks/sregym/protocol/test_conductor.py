@@ -276,3 +276,13 @@ class TestSignalCleanup:
         with patch("benchmarks.sregym.protocol.conductor.requests.post", return_value=resp) as mock_post:
             signal_cleanup("http://localhost:8000")
         assert mock_post.call_args.kwargs.get("timeout") is not None
+
+    def test_waits_out_a_synchronous_teardown(self) -> None:
+        """``POST /cleanup`` returns only after recovery, namespace deletion and
+        reconciliation (about 70 s for Hotel Reservation), so a 60 s client
+        timeout reported a spurious failure on every persistent stage."""
+
+        resp = MagicMock(status_code=200, text="")
+        with patch("benchmarks.sregym.protocol.conductor.requests.post", return_value=resp) as mock_post:
+            signal_cleanup("http://localhost:8000")
+        assert mock_post.call_args.kwargs["timeout"] >= 600

@@ -24,7 +24,7 @@ import logging
 import os
 import random
 import time
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 import httpx
 import requests
@@ -250,15 +250,22 @@ def get_planned_stages(api_base: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+# The conductor answers ``POST /cleanup`` only after fault recovery, app
+# teardown and reconciliation (about 70 s for Hotel Reservation), and its own
+# watchdog forces cleanup after 600 s by default.
+CLEANUP_REQUEST_TIMEOUT_SECONDS: Final = 900
+
+
 def signal_cleanup(api_base: str) -> None:
     """Best-effort ``POST /cleanup`` — never raises.
 
     Used by deferred-teardown agents (e.g. crucible) to release the
     conductor's teardown gate.  Cleanup failure must not mask the driver's
-    real exit path.
+    real exit path.  The request waits out the synchronous teardown so a
+    successful cleanup is not logged as a failure.
     """
     try:
-        resp = requests.post(f"{api_base}{CLEANUP_ENDPOINT}", timeout=60)
+        resp = requests.post(f"{api_base}{CLEANUP_ENDPOINT}", timeout=CLEANUP_REQUEST_TIMEOUT_SECONDS)
         logger.info("POST /cleanup -> status=%s body=%s", resp.status_code, resp.text[:200])
     except Exception as e:
         logger.warning("POST /cleanup failed: %s", e)

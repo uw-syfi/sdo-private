@@ -579,6 +579,25 @@ def test_deferred_diagnosis_grading_is_opt_in_and_reaches_the_conductor(tmp_path
     assert disabled.env.defer_diagnosis_grading is False
 
 
+def test_fast_namespace_teardown_is_opt_in_and_reaches_the_conductor(tmp_path: Path) -> None:
+    assert "SREGYM_FAST_NAMESPACE_TEARDOWN" not in config_to_env(ExperimentConfig(), project_root=tmp_path)
+    toml = _write_toml(
+        tmp_path,
+        """
+        [runner.env]
+        fast_namespace_teardown = true
+    """,
+    )
+    config = load_experiment_config(toml)
+
+    assert config_to_env(config, project_root=tmp_path)["SREGYM_FAST_NAMESPACE_TEARDOWN"] == "1"
+    snapshot = tmp_path / "snapshot.toml"
+    snapshot.write_text(_serialize_config(config))
+    assert load_experiment_config(snapshot).env.fast_namespace_teardown is True
+    disabled = resolve_config(config, env_overrides={"SREGYM_FAST_NAMESPACE_TEARDOWN": "0"})
+    assert disabled.env.fast_namespace_teardown is False
+
+
 def test_deploy_from_source_env_override_enables() -> None:
     config = ExperimentConfig(deploy_from_source=False)
     resolved = resolve_config(config, env_overrides={"SREGYM_DEPLOY_FROM_SOURCE": "1"})
