@@ -8,8 +8,8 @@ every SDO stage:
   the receipt's ``incident_resolution_seconds`` (neither includes reflection);
 - the judge-excluded time: the primary time minus the conductor's diagnosis
   grading wait (``fault_injected_at + TTL - diagnosis_submitted_at``, when the
-  mitigation stage opened), because a mitigation POST cannot land before the
-  mitigation stage opens; and when the agent issued its first state-changing
+  mitigation stage opened; zero for ``diagnosis_grading_deferred`` runs), because
+  a mitigation POST cannot land before the mitigation stage opens; and when the agent issued its first state-changing
   command (``applied_s``, from the exported Codex rollout), for both arms;
 - oracle verdicts (diagnosis and mitigation);
 - responder ("incident") tokens, reflection tokens and reflection wall time in
@@ -244,6 +244,10 @@ def read_verdict(results_dir: Path) -> Verdict | None:
             if injected is not None and diagnosed is not None and ttl is not None
             else None
         )
+        if _truthy(row.get("diagnosis_grading_deferred")) is True:
+            # defer_diagnosis_grading opens the mitigation stage at the diagnosis POST and grades
+            # it in the background, so the mitigation POST never waits on the judge.
+            grading_wait = 0.0
         return Verdict(
             diagnosis=_truthy(row.get("Diagnosis.success")),
             mitigation=_truthy(row.get("Mitigation.success")),

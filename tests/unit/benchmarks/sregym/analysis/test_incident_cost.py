@@ -309,6 +309,29 @@ def test_judge_excluded_time_subtracts_the_diagnosis_grading_wait(tmp_path: Path
     assert verdict.judge_excluded_seconds == pytest.approx(79.0)
 
 
+@pytest.mark.parametrize("ttl", [15.0, None])
+def test_deferred_diagnosis_grading_has_no_grading_wait(tmp_path: Path, ttl: float | None) -> None:
+    # With defer_diagnosis_grading the mitigation stage opens at the diagnosis POST, so the
+    # mitigation POST never sits behind the judge, whatever the TTL column says.
+    row: dict[str, object] = {
+        "Diagnosis.success": "True",
+        "Mitigation.success": "True",
+        "fault_injected_at": 1000.0,
+        "diagnosis_submitted_at": 1020.0,
+        "mitigation_submitted_at": 1096.0,
+        "diagnosis_grading_deferred": "True",
+    }
+    if ttl is not None:
+        row["TTL"] = ttl
+    _timing_csv(tmp_path, **row)
+
+    verdict = read_verdict(tmp_path)
+
+    assert verdict is not None
+    assert verdict.grading_wait_seconds == 0.0
+    assert verdict.judge_excluded_seconds == pytest.approx(96.0)
+
+
 def test_judge_excluded_time_is_unknown_without_stage_timestamps(tmp_path: Path) -> None:
     _timing_csv(
         tmp_path,
