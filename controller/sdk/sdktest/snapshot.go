@@ -8,6 +8,8 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/labels"
+
+	"sdo.dev/controller/sdk/traffic"
 )
 
 type Snapshot struct {
@@ -21,6 +23,14 @@ type Snapshot struct {
 	EndpointSliceList []discoveryv1.EndpointSlice
 	NetworkPolicyList []networkingv1.NetworkPolicy
 	EventList         []corev1.Event
+	// Traffic holds synthetic-traffic observations by mix name.
+	Traffic map[string]traffic.Window
+}
+
+// TrafficWindow implements traffic.Source.
+func (s Snapshot) TrafficWindow(mix string) (traffic.Window, bool) {
+	window, ok := s.Traffic[mix]
+	return window, ok
 }
 
 func (s Snapshot) Namespace() string {
