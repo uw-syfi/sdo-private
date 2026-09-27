@@ -5,13 +5,13 @@ import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_structured_turn
 from sdo.contracts import DetectorEvaluation, DetectorEvaluationStatus, Finding, IncidentRequest, IncidentResult
 from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
-from sdo.operational_memory.warm_path import warm_incident_findings
+from sdo.operational_memory.warm_path import WarmPlaybookMatch, warm_playbook_matches
 
 if TYPE_CHECKING:
     from agentshim import CommandExecutor
@@ -192,7 +192,28 @@ class WarmPlaybook:
     path: str
     text: str
     scripts: tuple[tuple[str, str], ...]
-    findings: tuple[Finding, ...]
+    match: WarmPlaybookMatch
+
+    def __post_init__(self) -> None:
+        if self.path != self.match.path:
+            raise ValueError("warm playbook path must equal its match path")
+
+    @property
+    def findings(self) -> tuple[Finding, ...]:
+        return self.match.findings
+
+    def precondition_script(self) -> str | None:
+        """The playbook's diagnose (preferred) or verify script, for a not-yet-fired detector's sanity check."""
+
+        for keyword in _PRECONDITION_SCRIPT_KEYWORDS:
+            for script_path, _text in self.scripts:
+                if keyword in PurePosixPath(script_path).stem.lower():
+                    return script_path
+        return None
+
+
+#: Script-name keywords, in preference order, for the one sanity check of a not-yet-fired detector.
+_PRECONDITION_SCRIPT_KEYWORDS = ("diagnose", "check", "verify")
 
 
 def _bounded(text: str, limit: int) -> str:
@@ -211,26 +232,24 @@ def _contained_file(worktree: Path, relative: str, root: Path) -> Path | None:
 
 
 def warm_playbooks(request: IncidentRequest) -> list[WarmPlaybook]:
-    """Playbooks of exact-match incident-detector findings, read from the incident worktree."""
+    """Warm incident-detector-owned playbooks for an exact-match incident, read from the incident worktree."""
 
     worktree = Path(request.repository_worktree)
     try:
         manifest = MemoryRepository(worktree).diagnostics()
-    except (MemoryRepositoryError, OSError):
+    except (MemoryRepositoryError, OSError, ValueError):
         return []
-    findings = warm_incident_findings(request, manifest)
-    if not findings:
-        return []
+    matches = warm_playbook_matches(request, manifest)
     playbook_root = (worktree / ".sdo" / "playbooks").resolve()
-    by_path: dict[str, list[Finding]] = {}
-    for finding in findings:
-        for path in finding.playbooks:
-            by_path.setdefault(path, []).append(finding)
     playbooks: list[WarmPlaybook] = []
-    for path, path_findings in sorted(by_path.items()):
-        readme = _contained_file(worktree, path, playbook_root)
+    seen: set[str] = set()
+    for match in matches:
+        if match.path in seen:
+            continue
+        readme = _contained_file(worktree, match.path, playbook_root)
         if readme is None:
             continue
+        seen.add(match.path)
         scripts: list[tuple[str, str]] = []
         budget = _WARM_SCRIPTS_MAX_CHARS
         for script in sorted((readme.parent / "scripts").glob("*.sh")):
@@ -241,10 +260,10 @@ def warm_playbooks(request: IncidentRequest) -> list[WarmPlaybook]:
             scripts.append((script.relative_to(worktree.resolve()).as_posix(), text))
         playbooks.append(
             WarmPlaybook(
-                path=path,
+                path=match.path,
                 text=_bounded(readme.read_text(encoding="utf-8", errors="replace"), _WARM_PLAYBOOK_MAX_CHARS),
                 scripts=tuple(scripts),
-                findings=tuple(path_findings),
+                match=match,
             )
         )
     return playbooks
@@ -309,14 +328,44 @@ def _cold_instructions() -> str:
     )
 
 
-def _warm_instructions(playbooks: list[WarmPlaybook]) -> str:
-    findings = sorted(
-        {
-            f"{finding.detector_id} ({finding.fingerprint or finding.rule_id})"
-            for playbook in playbooks
-            for finding in playbook.findings
-        }
+def _fired_evidence(playbook: WarmPlaybook) -> str:
+    findings = ", ".join(
+        sorted({f"{finding.detector_id} ({finding.fingerprint or finding.rule_id})" for finding in playbook.findings})
     )
+    return (
+        f"- `{playbook.path}`: the finding(s) {findings} come from its validated incident detector. That evidence "
+        "already establishes the playbook's preconditions: do not re-diagnose them. The sanity check confirms the "
+        "specific finding evidence is still live (for example the missing resource is still absent and the "
+        "affected workload still fails); it replaces the playbook's own diagnosis steps.\n"
+    )
+
+
+def _pending_evidence(playbook: WarmPlaybook, namespace: str) -> str:
+    detector = playbook.match.detector
+    kinds = ", ".join(sorted({f"{watch.kind} ({watch.api_version})" for watch in detector.watches}))
+    watched = f"the detector's watched resources ({kinds})" if kinds else "the resources the playbook names"
+    script = playbook.precondition_script()
+    script_step = (
+        f" Run `{script}` inside that check with the incident's values; a verify script is expected to fail "
+        "before the repair, and its failure must point at the playbook's fault."
+        if script is not None
+        else ""
+    )
+    return (
+        f"- `{playbook.path}`: owned by the registered incident detector `{detector.id}`, which has not fired for "
+        "this incident, so no incident-detector evidence exists yet. The sanity check must confirm the playbook's "
+        f"preconditions itself: inspect {watched} in namespace `{namespace}` "
+        "(plus the pods and recent events of the affected workload) against the preconditions the playbook "
+        f"states.{script_step}\n"
+    )
+
+
+def _warm_instructions(playbooks: list[WarmPlaybook], namespace: str) -> str:
+    evidence = "".join(
+        _fired_evidence(playbook) if playbook.match.detector_fired else _pending_evidence(playbook, namespace)
+        for playbook in playbooks
+    )
+    priors = sorted({incident for playbook in playbooks for incident in playbook.match.prior_incidents})
     sections = []
     for playbook in playbooks:
         section = f"--- Playbook `{playbook.path}` (inlined; do not re-read it) ---\n{playbook.text.rstrip()}\n"
@@ -325,26 +374,23 @@ def _warm_instructions(playbooks: list[WarmPlaybook]) -> str:
         sections.append(section)
     return (
         "Warm path: validated incident memory matches this incident. "
-        f"The finding(s) {', '.join(findings)} come from a responder-owned incident detector that SDO's commit "
-        "broker validated (matching and near-miss tests) and learned from a prior independently verified success, "
-        "and a prior verified outcome matches this incident by exact fingerprint. The validated incident detector's "
-        "evidence already establishes the playbook's preconditions: do not re-diagnose them, do not re-read the "
-        "playbook, and do not explore the repository or cluster beyond what the steps below need.\n"
+        f"The prior verified outcome(s) {', '.join(priors)} match this incident by exact fingerprint, and each "
+        "playbook below is owned by a responder-owned incident detector that SDO's commit broker validated "
+        "(matching and near-miss tests) and learned from a prior independently verified success. Do not re-read "
+        "the playbook, and do not explore the repository or cluster beyond what the steps below need.\n"
+        f"Playbook evidence:\n{evidence}"
         "Fast procedure:\n"
-        "1. Run one combined sanity check: a single shell command that confirms the specific finding evidence is "
-        "still live (for example the missing resource is still absent and the affected workload still fails). It "
-        "replaces the playbook's own diagnosis steps.\n"
+        "1. Run one combined sanity check: a single shell command covering the evidence above.\n"
         "2. If it agrees, submit the diagnosis through any configured environment-specific channel, then apply the "
         "playbook's repair exactly (use its scripts when present). After restoring a missing ConfigMap or Secret "
         "that a pod failed to mount, delete the stuck pods or rollout-restart their workload instead of waiting "
         "for the kubelet mount backoff.\n"
         "3. Run the playbook's verification once, then submit mitigation through any configured channel and return "
-        "the IncidentResult, listing the applied playbook.\n"
-        "Fall back to a full investigation only if the sanity check contradicts the finding, the repair fails, or "
-        "the verification fails; then treat relevant_outcomes as hypotheses and confirm assumptions against live "
-        "state. Investigate any other active finding the playbook's fault does not explain normally.\n\n"
-        + "\n".join(sections)
-        + "\n"
+        "the IncidentResult, listing the applied playbook's path exactly as shown above in applied_playbooks.\n"
+        "Fall back to a full investigation only if the sanity check contradicts the playbook's preconditions, the "
+        "repair fails, or the verification fails; then treat relevant_outcomes as hypotheses and confirm "
+        "assumptions against live state. Investigate any other active finding the playbook's fault does not "
+        "explain normally.\n\n" + "\n".join(sections) + "\n"
     )
 
 
@@ -354,7 +400,7 @@ def _responder_prompt(request: IncidentRequest) -> str:
         f"\nAdditional environment-specific instructions:\n{extra_instructions}\n" if extra_instructions else ""
     )
     playbooks = warm_playbooks(request)
-    strategy = _warm_instructions(playbooks) if playbooks else _cold_instructions()
+    strategy = _warm_instructions(playbooks, request.namespace) if playbooks else _cold_instructions()
     return (
         f"You are the SDO incident responder for incident {request.incident_id}.\n\n"
         "Work autonomously in the supplied repository and Kubernetes namespace to resolve every triggering finding. "

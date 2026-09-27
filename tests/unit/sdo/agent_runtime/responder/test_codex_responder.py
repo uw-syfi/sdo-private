@@ -171,8 +171,40 @@ def _warm_request(worktree: Path, *, match_reason: str = "exact-fingerprint") ->
     )
 
 
+INCIDENT_PLAYBOOK = ".sdo/playbooks/missing-configmap/README.md"
+
+
+def _own_playbook(worktree: Path) -> None:
+    """Register the fixture playbook in its incident detector's possiblePlaybooks."""
+
+    manifest = worktree / ".sdo" / "diagnostics" / "manifest.yaml"
+    text = manifest.read_text(encoding="utf-8")
+    manifest.write_text(
+        text.replace("possiblePlaybooks: []", f"possiblePlaybooks: [{INCIDENT_PLAYBOOK}]"), encoding="utf-8"
+    )
+
+
+def _not_yet_fired_request(worktree: Path, *, prior_incident: str = "incident-seed") -> IncidentRequest:
+    """Only the health detector fired; the incident detector learned from the exact prior has not."""
+
+    request = _warm_request(worktree)
+    health = request.findings[0].model_copy(
+        update={
+            "detector_id": "health-objective",
+            "rule_id": "required-configmap-missing",
+            "playbooks": [".sdo/playbooks/health-objective/README.md"],
+            "fingerprint": "health-objective/required-configmap-missing/hotel-reservation/geo-config",
+        }
+    )
+    prior = request.relevant_outcomes[0].model_copy(
+        update={"incident_id": prior_incident, "applied_playbooks": [".sdo/playbooks/health-objective/README.md"]}
+    )
+    return request.model_copy(update={"findings": [health], "surfaced_playbooks": [], "relevant_outcomes": [prior]})
+
+
 def test_exact_match_on_incident_detector_inlines_playbook_and_fast_procedure(tmp_path: Path) -> None:
     _write_memory(tmp_path)
+    _own_playbook(tmp_path)
     scripts = tmp_path / ".sdo" / "playbooks" / "missing-configmap" / "scripts"
     scripts.mkdir()
     (scripts / "verify.sh").write_text('#!/bin/sh\nkubectl -n "$1" get configmap geo-config\n', encoding="utf-8")
@@ -186,21 +218,55 @@ def test_exact_match_on_incident_detector_inlines_playbook_and_fast_procedure(tm
     assert "already establishes the playbook's preconditions" in prompt
     assert "one combined sanity check" in prompt
     assert "replaces the playbook's own diagnosis steps" in prompt
+    assert "has not fired" not in prompt
     assert "full investigation only if" in prompt
     assert "Confirm a surfaced playbook against live state before applying it" not in prompt
 
 
-def test_cold_prompt_is_unchanged_without_exact_incident_detector_match(tmp_path: Path) -> None:
+def test_registered_but_not_fired_incident_detector_gets_precondition_sanity_check(tmp_path: Path) -> None:
     _write_memory(tmp_path)
-    cold_requests = [
-        IncidentRequest.model_validate_json(_fixture("incident_request.json")).model_copy(
-            update={"repository_worktree": str(tmp_path)}
+    _own_playbook(tmp_path)
+    manifest = tmp_path / ".sdo" / "diagnostics" / "manifest.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "watches: []", "watches:\n      - apiVersion: apps/v1\n        kind: Deployment"
         ),
-        _warm_request(tmp_path, match_reason="detector-rule-resource-kind"),
+        encoding="utf-8",
+    )
+    scripts = tmp_path / ".sdo" / "playbooks" / "missing-configmap" / "scripts"
+    scripts.mkdir()
+    (scripts / "repair.sh").write_text('#!/bin/sh\nkubectl apply -f "$1"\n', encoding="utf-8")
+    (scripts / "verify.sh").write_text('#!/bin/sh\nkubectl -n "$1" get configmap "$2"\n', encoding="utf-8")
+
+    prompt = _responder_prompt(_not_yet_fired_request(tmp_path))
+
+    assert "Warm path" in prompt
+    assert f"`{INCIDENT_PLAYBOOK}`: owned by the registered incident detector `missing-configmap`" in prompt
+    assert "has not fired for this incident, so no incident-detector evidence exists yet" in prompt
+    assert "Deployment (apps/v1)" in prompt
+    assert "namespace `hotel-reservation`" in prompt
+    assert "Run `.sdo/playbooks/missing-configmap/scripts/verify.sh` inside that check" in prompt
+    assert "one combined sanity check" in prompt
+    assert "contradicts the playbook's preconditions" in prompt
+    assert "already establishes the playbook's preconditions" not in prompt
+    assert "Confirm a surfaced playbook against live state before applying it" not in prompt
+
+
+def test_cold_prompt_is_unchanged_without_exact_incident_detector_match(tmp_path: Path) -> None:
+    unregistered = tmp_path / "unregistered"
+    registered = tmp_path / "registered"
+    _write_memory(unregistered)
+    _write_memory(registered)
+    _own_playbook(registered)
+    no_prior = IncidentRequest.model_validate_json(_fixture("incident_request.json")).model_copy(
+        update={"repository_worktree": str(registered)}
+    )
+    cold_requests = [
+        no_prior,
+        _warm_request(registered, match_reason="detector-rule-resource-kind"),
+        _warm_request(unregistered),
+        _not_yet_fired_request(registered, prior_incident="unrelated-incident"),
     ]
-    health_only = _warm_request(tmp_path)
-    health_only.findings[0].detector_id = "health-objective"
-    cold_requests.append(health_only)
 
     for request in cold_requests:
         prompt = _responder_prompt(request)
@@ -211,6 +277,7 @@ def test_cold_prompt_is_unchanged_without_exact_incident_detector_match(tmp_path
 
 def test_warm_path_requires_the_incident_playbook_to_exist(tmp_path: Path) -> None:
     _write_memory(tmp_path)
+    _own_playbook(tmp_path)
     (tmp_path / ".sdo" / "playbooks" / "missing-configmap" / "README.md").unlink()
 
     prompt = _responder_prompt(_warm_request(tmp_path))
@@ -220,6 +287,7 @@ def test_warm_path_requires_the_incident_playbook_to_exist(tmp_path: Path) -> No
 
 def test_warm_path_caps_inlined_playbook_text(tmp_path: Path) -> None:
     _write_memory(tmp_path)
+    _own_playbook(tmp_path)
     playbook = tmp_path / ".sdo" / "playbooks" / "missing-configmap" / "README.md"
     playbook.write_text(playbook.read_text(encoding="utf-8") + "x" * 50_000 + "TAIL-MARKER\n", encoding="utf-8")
 
