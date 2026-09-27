@@ -21,6 +21,13 @@ if TYPE_CHECKING:
 
 INJECTED = datetime(2026, 9, 27, 12, 0, 0, tzinfo=timezone.utc)
 DETECTED = INJECTED + timedelta(seconds=9)
+VERIFIED = DETECTED + timedelta(seconds=60)
+RECEIPT_RECORDED = VERIFIED + timedelta(seconds=12)
+ROOT_CAUSES = [{"summary": "mongo-geo-script ConfigMap is missing"}]
+REPAIRS = [
+    {"summary": "failed attempt", "success": False, "completed_at": "2026-09-27T12:00:50Z"},
+    {"summary": "restored ConfigMap", "success": True, "completed_at": "2026-09-27T12:00:30Z"},
+]
 
 
 def _receipt(incident_id: str, *, warm: bool) -> dict[str, Any]:
@@ -31,7 +38,15 @@ def _receipt(incident_id: str, *, warm: bool) -> dict[str, Any]:
         "reflection_attempts": 0 if warm else 1,
         "reflection_skipped_reason": "repeated exact-match success" if warm else None,
         "memory_reuse": {"warm_path": warm, "match_reasons": ["exact-fingerprint"] if warm else []},
-        "phase_timings_seconds": {"operational_recovery": 60.0},
+        "confirmed_root_causes": ROOT_CAUSES,
+        "repair_actions": REPAIRS,
+        "recorded_at": RECEIPT_RECORDED.isoformat(),
+        # As the runtime receipt derives them from the broker closure's timestamps.
+        "phase_timings_seconds": {
+            "operational_recovery": (VERIFIED - DETECTED).total_seconds(),
+            "post_recovery_learning_and_receipt": (RECEIPT_RECORDED - VERIFIED).total_seconds(),
+            "total": (RECEIPT_RECORDED - DETECTED).total_seconds(),
+        },
     }
 
 
@@ -43,6 +58,8 @@ class FakeOps:
     states: dict[str, dict[str, Any]] = field(default_factory=dict)
     logs: dict[str, list[str]] = field(default_factory=dict)
     reject_receipts: bool = False
+    #: Reflection finishes before the driver's first poll sees the verified closure.
+    reflect_before_first_poll: bool = False
 
     def controller_pod(self, control_namespace: str) -> ControllerPod | None:
         return self.pods.get(control_namespace)
@@ -72,20 +89,23 @@ class FakeOps:
             json.dumps({"controller_maintenance": mode, "maintenance_generation": generation})
         )
 
+    def _reflect(self, control_namespace: str, incident_id: str) -> None:
+        state = self.states[control_namespace]
+        state.pop("pending_closure", None)
+        state["last_acknowledged_incident_id"] = incident_id
+        self.logs[control_namespace].extend(
+            [
+                json.dumps({"controller_closure_restart": incident_id}),
+                json.dumps({"controller_supervisor": "relaunch", "launches": 1}),
+                json.dumps({"controller_maintenance": "paused", "maintenance_generation": "relaunched"}),
+            ]
+        )
+
     def runtime_state(self, control_namespace: str) -> dict[str, Any]:
         state = self.states[control_namespace]
         closure = state.get("pending_closure")
         if isinstance(closure, dict) and closure.get("reflect_on_next_poll"):
-            incident_id = closure["request"]["incident_id"]
-            state.pop("pending_closure")
-            state["last_acknowledged_incident_id"] = incident_id
-            self.logs[control_namespace].extend(
-                [
-                    json.dumps({"controller_closure_restart": incident_id}),
-                    json.dumps({"controller_supervisor": "relaunch", "launches": 1}),
-                    json.dumps({"controller_maintenance": "paused", "maintenance_generation": "relaunched"}),
-                ]
-            )
+            self._reflect(control_namespace, closure["request"]["incident_id"])
         elif isinstance(closure, dict):
             closure["reflect_on_next_poll"] = True
         return state
@@ -99,19 +119,16 @@ class FakeOps:
         inject()
         self.incidents += 1
         incident_id = f"incident-{self.incidents}"
+        if self.reflect_before_first_poll:
+            self._reflect(control_namespace, incident_id)
+            return {"controller_baseline_wait": 1.5, "fault_injection_request": 6.0}
         self.states[control_namespace]["pending_closure"] = {
             "request": {"incident_id": incident_id},
-            "result": {
-                "confirmed_root_causes": [{"summary": "mongo-geo-script ConfigMap is missing"}],
-                "repair_actions": [
-                    {"summary": "failed attempt", "success": False, "completed_at": "2026-09-27T12:00:50Z"},
-                    {"summary": "restored ConfigMap", "success": True, "completed_at": "2026-09-27T12:00:30Z"},
-                ],
-            },
+            "result": {"confirmed_root_causes": ROOT_CAUSES, "repair_actions": REPAIRS},
             "detected_at": DETECTED.isoformat(),
             "dispatched_at": DETECTED.isoformat(),
             "responder_completed_at": (DETECTED + timedelta(seconds=40)).isoformat(),
-            "verified_at": (DETECTED + timedelta(seconds=60)).isoformat(),
+            "verified_at": VERIFIED.isoformat(),
         }
         return {"controller_baseline_wait": 1.5, "fault_injection_request": 6.0}
 
@@ -199,7 +216,7 @@ def test_first_incident_installs_once_and_reports_resolution_from_controller_evi
     assert outcome.detected_at == DETECTED
     # Only successful repairs count as the mitigation.
     assert outcome.mitigation_applied_at == datetime(2026, 9, 27, 12, 0, 30, tzinfo=timezone.utc)
-    assert outcome.resolved_at == DETECTED + timedelta(seconds=60)
+    assert outcome.resolved_at == VERIFIED
     assert outcome.diagnosis == "mongo-geo-script ConfigMap is missing"
     assert outcome.mitigation == "restored ConfigMap"
     assert outcome.baseline_gate_seconds == pytest.approx(1.5)
@@ -266,3 +283,30 @@ def test_a_cached_lifecycle_validation_is_recorded(tmp_path: Path) -> None:
     outcome = agent.resolve(0, "p", _inject)
 
     assert outcome.lifecycle_validation_source == "validation-cache"
+
+
+def test_a_closure_missed_between_polls_takes_its_times_from_the_receipt(tmp_path: Path) -> None:
+    ops, calls = FakeOps(reflect_before_first_poll=True), []
+    agent = _agent(tmp_path, ops, calls)
+
+    resolved = agent.resolve(0, "missing_configmap_hotel_reservation", _inject)
+    assert (resolved.detected_at, resolved.resolved_at) == (None, None)
+    learned = agent.learn(resolved)
+
+    assert learned.detected_at == DETECTED
+    assert learned.resolved_at == VERIFIED
+    assert learned.mitigation_applied_at == datetime(2026, 9, 27, 12, 0, 30, tzinfo=timezone.utc)
+    assert learned.diagnosis == "mongo-geo-script ConfigMap is missing"
+    assert learned.mitigation == "restored ConfigMap"
+
+
+def test_times_seen_at_verification_are_not_replaced_by_the_receipt(tmp_path: Path) -> None:
+    ops, calls = FakeOps(), []
+    agent = _agent(tmp_path, ops, calls)
+    resolved = agent.resolve(0, "p", _inject)
+    earlier = resolved.with_learning(detected_at=DETECTED - timedelta(seconds=1))
+
+    learned = agent.learn(earlier)
+
+    assert learned.detected_at == DETECTED - timedelta(seconds=1)
+    assert learned.resolved_at == VERIFIED

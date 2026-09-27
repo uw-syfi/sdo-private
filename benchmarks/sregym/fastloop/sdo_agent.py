@@ -66,6 +66,35 @@ def _timestamp(value: object) -> datetime | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def _last_successful_repair(repairs: object) -> datetime | None:
+    completions = [
+        completed
+        for item in (repairs if isinstance(repairs, list) else [])
+        if isinstance(item, dict) and item.get("success") is True
+        for completed in [_timestamp(item.get("completed_at"))]
+        if completed is not None
+    ]
+    return max(completions) if completions else None
+
+
+def _receipt_closure_times(receipt: dict[str, Any]) -> tuple[datetime | None, datetime | None]:
+    """Detection and verification times, recovered from the receipt's ``recorded_at`` and phase timings.
+
+    The runtime receipt derives ``total`` and ``post_recovery_learning_and_receipt``
+    from the broker closure's ``detected_at`` and ``verified_at``, so this is exact.
+    """
+
+    recorded = _timestamp(receipt.get("recorded_at"))
+    phases = receipt.get("phase_timings_seconds")
+    if recorded is None or not isinstance(phases, dict):
+        return None, None
+    total = phases.get("total")
+    learning = phases.get("post_recovery_learning_and_receipt")
+    detected = recorded - timedelta(seconds=float(total)) if isinstance(total, (int, float)) else None
+    verified = recorded - timedelta(seconds=float(learning)) if isinstance(learning, (int, float)) else None
+    return detected, verified
+
+
 def _summaries(items: object, *, successful_only: bool = False) -> str:
     if not isinstance(items, list):
         return ""
@@ -137,20 +166,13 @@ class SdoPersistentAgent:
             else None
         )
         repairs = resolution.get("repair_actions")
-        completions = [
-            completed
-            for item in (repairs if isinstance(repairs, list) else [])
-            if isinstance(item, dict) and item.get("success") is True
-            for completed in [_timestamp(item.get("completed_at"))]
-            if completed is not None
-        ]
         gate = resolution.get("fault_gate_timings_seconds") or {}
         costs = resolution.get("pre_injection_costs_seconds") or {}
         controller = resolution.get("persistent_controller") or {}
         return AgentOutcome(
             injection=windows[0],
             detected_at=detected,
-            mitigation_applied_at=max(completions) if completions else None,
+            mitigation_applied_at=_last_successful_repair(repairs),
             resolved_at=verified,
             diagnosis=_summaries(resolution.get("confirmed_root_causes")),
             mitigation=_summaries(repairs, successful_only=True),
@@ -194,7 +216,15 @@ class SdoPersistentAgent:
         memory = memory if isinstance(memory, dict) else {}
         attempts = receipt.get("reflection_attempts")
         skipped = receipt.get("reflection_skipped_reason")
+        # When reflection finished between polls the driver never saw the closure; the receipt has it.
+        detected, verified = _receipt_closure_times(receipt)
         return outcome.with_learning(
+            detected_at=outcome.detected_at or detected,
+            mitigation_applied_at=outcome.mitigation_applied_at
+            or _last_successful_repair(receipt.get("repair_actions")),
+            resolved_at=outcome.resolved_at or verified,
+            diagnosis=outcome.diagnosis or _summaries(receipt.get("confirmed_root_causes")),
+            mitigation=outcome.mitigation or _summaries(receipt.get("repair_actions"), successful_only=True),
             reflection_seconds=self._clock.monotonic() - started,
             responder_tokens=TokenCounts.from_usage(receipt.get("usage")),
             reflection_tokens=TokenCounts.from_usage(receipt.get("reflection_usage")),
