@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from benchmarks.sregym.adapter.persistent import (
+    REJECTED_RECEIPT_FILENAME,
     RESOLUTION_FILENAME,
     STRICT_RECEIPT_FILENAME,
     Clock,
@@ -16,6 +17,7 @@ from benchmarks.sregym.adapter.persistent import (
     PersistentState,
     StageInputs,
     control_namespace_for,
+    publish_deferred_receipts,
     run_persistent_stage,
     teardown,
 )
@@ -84,6 +86,8 @@ class FakeOps:
     # Reflection completes only for incidents listed here, which lets a test
     # prove that a stage returns before its reflection finishes.
     reflectable: set[str] = field(default_factory=set)
+    # Incidents whose responder reported a non-completed status.
+    incomplete: set[str] = field(default_factory=set)
     polls_until_reflected: dict[str, int] = field(default_factory=dict)
 
     def controller_pod(self, control_namespace: str) -> ControllerPod | None:
@@ -173,10 +177,16 @@ class FakeOps:
 
     def collect_receipt(self, config: RuntimeConfig, incident_id: str, artifacts_dir: Path) -> dict[str, Any]:
         self.events.append(("receipt", incident_id, str(config.repository)))
-        return _receipt(incident_id)
+        receipt = _receipt(incident_id)
+        receipt["artifacts_dir"] = str(artifacts_dir)
+        receipt["completed"] = incident_id not in self.incomplete
+        return receipt
 
     def export_controller_logs(self, control_namespace: str, artifacts_dir: Path) -> None:
         self.events.append(("logs", control_namespace))
+        log = artifacts_dir / "sdo_runtime" / "controller_logs" / "sdo-controller-run-1.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text(self.controller_logs(control_namespace) + "\n", encoding="utf-8")
 
 
 def _clock(ops: FakeOps) -> Clock:
@@ -213,6 +223,7 @@ def _inputs(
     namespace: str = "hotel",
     application: str = "Hotel Reservation",
     fingerprint: str = "topology-1",
+    receipt_dir: Path | None = None,
 ) -> StageInputs:
     return StageInputs(
         stage_label=stage,
@@ -220,7 +231,7 @@ def _inputs(
         namespace=namespace,
         lifecycle_fingerprint=fingerprint,
         runtime_config=_config(tmp_path, namespace, stage),
-        receipt_dir=tmp_path / stage / "agent",
+        receipt_dir=receipt_dir or tmp_path / stage / "agent",
         state_path=tmp_path / "sdo_persistent_controller.json",
         verification_timeout_seconds=30,
     )
@@ -386,3 +397,48 @@ def test_teardown_drains_the_last_incident_and_stops_every_controller(tmp_path: 
     receipt = json.loads((tmp_path / "s0" / "agent" / STRICT_RECEIPT_FILENAME).read_text(encoding="utf-8"))
     assert receipt["reflection_drain"]["drained_by"] == "pipeline-teardown"
     assert PersistentState.load(tmp_path / "sdo_persistent_controller.json").controllers == {}
+
+
+def test_deferred_receipts_are_published_into_the_run_the_harness_already_published(tmp_path: Path) -> None:
+    # SREGym moves the staging tree to results/<agent>/<problem>/run_N when the
+    # stage ends, before the drain can write the strict receipt.
+    staging = tmp_path / ".runtime" / "sdo_codex" / "anon_abc"
+    ops = FakeOps()
+    _run(tmp_path, ops, "s0", [], receipt_dir=staging)
+    run_dir = tmp_path / "pipeline" / "stage_0" / "results" / "sdo_codex" / "problem-1" / "run_1"
+    run_dir.parent.mkdir(parents=True)
+    staging.rename(run_dir)
+    ops.reflectable.add("incident-1")
+    state_path = tmp_path / "sdo_persistent_controller.json"
+
+    assert teardown(state_path, ops=ops, clock=_clock(ops)) == []
+    published = publish_deferred_receipts(state_path, tmp_path / "pipeline")
+
+    receipt_path = run_dir / STRICT_RECEIPT_FILENAME
+    assert receipt_path in published
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["incident_id"] == "incident-1"
+    # The same opaque-id canonicalization the harness applies at publication.
+    assert "anon_abc" not in receipt_path.read_text(encoding="utf-8")
+    assert receipt["artifacts_dir"].endswith("problem-1")
+    assert (run_dir / "sdo_runtime" / "controller_logs" / "sdo-controller-run-1.log").is_file()
+    assert not (staging / STRICT_RECEIPT_FILENAME).exists()
+
+
+def test_a_rejected_receipt_is_kept_with_its_validation_error_and_logs(tmp_path: Path) -> None:
+    ops = FakeOps()
+    _run(tmp_path, ops, "s0", [])
+    ops.reflectable.add("incident-1")
+    ops.incomplete.add("incident-1")
+
+    errors = teardown(tmp_path / "sdo_persistent_controller.json", ops=ops, clock=_clock(ops))
+
+    assert len(errors) == 1
+    assert "completed=true" in errors[0]
+    receipt_dir = tmp_path / "s0" / "agent"
+    assert not (receipt_dir / STRICT_RECEIPT_FILENAME).exists()
+    rejected = json.loads((receipt_dir / REJECTED_RECEIPT_FILENAME).read_text(encoding="utf-8"))
+    assert "completed=true" in rejected["validation_error"]
+    assert rejected["receipt"]["incident_id"] == "incident-1"
+    assert ops.events.count(("logs", "hotel-sdo")) == 2
+    assert ("delete", "hotel-sdo") in ops.events

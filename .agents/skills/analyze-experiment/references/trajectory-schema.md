@@ -94,9 +94,10 @@ With `persistent_controller = true` (under `agent_config.sdo_codex`) one control
 
 - At the end of a problem, once the controller has verified health, the adapter writes `agent/sdo_incident_resolution.json` (`sdo.sregym-incident-resolution/v1`): `incident_id`, `incident_resolution_seconds` (detected to verified health) with `resolution_phase_timings_seconds`, `confirmed_root_causes`, `repair_actions`, `persistent_controller` (`control_namespace`, `controller_pod_uid`, `controller_pod_name`, `installed_this_stage`, `installed_by_stage`, `lifecycle_revalidation_skipped`, `maintenance_generation`, `stage_label`), `pre_injection_costs_seconds` (`previous_incident_reflection_drain`, `inventory_and_lifecycle`, `controller_install_or_reuse`, `controller_baseline_wait`), `reflection_drain_seconds`, gate timings, and `driver_phase_timings_seconds` (`reflection_drain`, `inventory_and_lifecycle`, `controller_install_or_reuse`, `fault_gate`, `injection_to_verified_recovery`, `pause_for_redeploy`, `conductor_wait`, `benchmark_submission`). Reflection is not finished yet.
 - The strict receipt of problem N is written later, by problem N+1 before its fault injection or by pipeline teardown, after the incident is acknowledged and the supervised controller relaunched (learned detectors rolled out). It merges the resolution fields and adds `reflection_drain` (`drained_by`, `waited_seconds`). `phase_timings_seconds.post_recovery_learning_and_receipt` therefore spans the inter-problem redeploy; use `reflection_usage` and the reflection turns for reflection cost, never the receipt's recording time.
+- SREGym publishes a problem's staging tree when the problem ends, before the drain. Pipeline teardown (`python -m benchmarks.sregym.adapter.persistent teardown --state ... --publish-root <pipeline>`) copies each drained strict receipt and the drain-time controller log into the published run directory, matched by the `incident_id` of its `sdo_incident_resolution.json`, with the opaque artifact id replaced by the problem id. A receipt that fails production validation (for example `completed=false` because the responder reported `status: failed`) is kept as `sdo_rejected_production_receipt.json` (`validation_error`, `receipt`) instead of a strict receipt, and the pipeline fails only the stage that owns it.
 - The same pod UID across problems proves reuse; `installed_this_stage=false` and `lifecycle_revalidation_skipped=true` mark a reused controller.
 - `controller_logs/<pod>.log` is cumulative for the single pod, so each problem's copy contains earlier problems too. Correlate by `controller_maintenance`/`maintenance_generation` markers (a resume logs `active` with the stage's generation before its full evaluation; a pause logs `paused`), `controller_closure_restart` (incident acknowledged; the Go controller exits for rollout), and `controller_supervisor: relaunch`.
-- Pipeline-level `sdo_persistent_controller.json` records each application's controller, its pod UID, served stages, and any incident still awaiting its drain.
+- Pipeline-level `sdo_persistent_controller.json` records each application's controller, its pod UID, served stages, any incident still awaiting its drain, and `deferred_receipts` (`incident_id`, `stage_label`, `staging_dir`) used to publish drained receipts.
 
 ## SREGym result tree
 
@@ -116,6 +117,7 @@ third_party/sregym/logs/<run-or-pipeline>/
         ├── agent/
         │   ├── sdo_production_receipt_strict.json
         │   ├── sdo_incident_resolution.json   # persistent-controller runs
+        │   ├── sdo_rejected_production_receipt.json  # persistent runs whose drained receipt failed validation
         │   ├── sdo_turn_usage.jsonl        # host-side lifecycle turns
         │   └── sdo_runtime/                # exported from the workspace PVC
         │       ├── usage/controller-turns.jsonl   # broker + reflection turns
