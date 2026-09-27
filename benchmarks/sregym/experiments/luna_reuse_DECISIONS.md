@@ -4,7 +4,7 @@ This log covers SDO (`sdo_codex_luna_reuse.toml`, two rounds) against stock Code
 
 ## Measurement
 
-- **Primary metric: `mitigation_submitted_at - fault_injected_at`.** Both are conductor wall-clock epochs. The first is taken right after `problem.inject_fault()`. The second is taken when the agent's mitigation `POST /submit` reaches the API, before in-API retries or oracles run.
+- **Raw time (includes judge time): `mitigation_submitted_at - fault_injected_at`.** Both are conductor wall-clock epochs. The first is taken right after `problem.inject_fault()`. The second is taken when the agent's mitigation `POST /submit` reaches the API, before in-API retries or oracles run. This was the original headline. It includes the diagnosis-grading wait, so the user directed on 2026-09-27 that it be reported only as a supplementary `raw_incl_judge_s` column. The headline is now the judge-free TTM, and time to diagnosis (TTD) is reported beside it; see "User-directed: judge time is excluded from TTD and TTM" below. Entries written before that change say "raw" where they originally said "raw".
   - Alternatives: SREGym `TTM`, or SDO's receipt `incident_resolution_seconds`.
   - Why: `TTM` ends after the diagnosis judge and the mitigation oracle, which is grader time rather than agent time. The receipt metric starts at SDO's own detection, so it hides detection latency and exists for one arm only.
   - `TTM` and `TTL` are still reported.
@@ -66,7 +66,7 @@ This log covers SDO (`sdo_codex_luna_reuse.toml`, two rounds) against stock Code
   - The same-session reflection then failed every retry with Codex `invalid_json_schema`, because `no_change_reason` was optional. Round 2 could not start and would have had no learned memory.
   - Fix: every property required, `no_change_reason` nullable. Verified live against gpt-6-luna.
   - Attempt 3's round-1 incident numbers are kept as an extra data point. The whole pipeline was rerun as attempt 4 so round 2 chains from a round 1 whose reflection completed.
-- **Lifecycle survives SDO-validated source repairs (`9cc6983`).** In attempt 4 (`20260927_104328_pipeline_sdo-codex-luna-reuse`), round 1 passed both oracles (primary 102.5s) and reflection completed. Round 1's validated outcome also committed a source repair, `kubernetes/geo/mongo-geo-script-configmap.yaml` (broker commit `505fbc3`).
+- **Lifecycle survives SDO-validated source repairs (`9cc6983`).** In attempt 4 (`20260927_104328_pipeline_sdo-codex-luna-reuse`), round 1 passed both oracles (raw 102.5s) and reflection completed. Round 1's validated outcome also committed a source repair, `kubernetes/geo/mongo-geo-script-configmap.yaml` (broker commit `505fbc3`).
   - Round 2 then treated the whole lifecycle as stale ("deployer topology_fingerprint does not match tracked source") and started a cold deployer and health-judge rerun. That costs about 25 minutes and about 1.7M tokens, and it defeats the memory-reuse round.
   - Fix: reuse accepts source drift only when every source-changing commit since the handoff is a broker-validated SDO commit, the deployer assessment still holds at its recorded commit, and the health judge's derived input is unchanged. Operator changes and changes to judged topology still force a new lifecycle.
   - Verified on a copy of round 1's workspace against the live round-2 inventory: reuse is accepted, and the container validator re-attests the changed diagnostics.
@@ -76,16 +76,16 @@ This log covers SDO (`sdo_codex_luna_reuse.toml`, two rounds) against stock Code
 
 ## Results
 
-Primary is `mitigation_submitted_at - fault_injected_at`. Load is the host 1-minute load average from the nearest 30s sample.
+Raw is `mitigation_submitted_at - fault_injected_at`. Load is the host 1-minute load average from the nearest 30s sample.
 
-| Run | Log dir | Diagnosis / Mitigation | Primary | Diagnosis POST | TTL / TTM | Incident tokens (input / cached / output) | Load at injection → mitigation |
+| Run | Log dir | Diagnosis / Mitigation | Raw | Diagnosis POST | TTL / TTM | Incident tokens (input / cached / output) | Load at injection → mitigation |
 |---|---|---|---|---|---|---|---|
 | Codex A1 | `20260927_084657_codex` | pass / **fail** | failed after 167.6s | +70.7s | 102.8 / 167.9s | 861,344 / 811,776 / 4,374 | 14.1 → 7.0 |
 | SDO R1 | `20260927_104328_pipeline_sdo-codex-luna-reuse/stage_0_first-incident` | pass / pass | 102.5s | +33.4s | 59.0 / 102.7s | responder 748,868 / 696,064 / 5,092; reflection 1,804,250 / 1,671,936 / 13,432 | 6.2 → 4.4 |
 | SDO R2 | `.../stage_1_reused-incident` | pass / pass | 93.0s | +22.9s | 52.6 / 93.2s | responder 619,014 / 572,928 / 4,100; reflection 954,369 / 851,968 / 8,012 | 7.8 → 6.5 |
 | Codex A2 | `20260927_113953_codex` | pass / pass | 167.1s | +52.4s | 77.2 / 167.6s | 438,072 / 397,312 / 2,198 | 8.5 → 6.1 |
 
-- **SDO one-time costs, excluded from primary.**
+- **SDO one-time costs, excluded from raw.**
   - Lifecycle (attempt 2, reused as the seed): 5 host turns, 1,746,095 input (1,517,312 cached), 20,325 output tokens, 757s of model-turn time, about 24 min wall clock.
   - Controller baseline gate before each injection: 116.0s plus a 6.5s injection request in both rounds.
   - R2 lifecycle reuse including container re-validation of the changed diagnostics: 205s. R1 took 1.5s because of the attested seed.
@@ -101,7 +101,7 @@ Primary is `mitigation_submitted_at - fault_injected_at`. Load is the host 1-min
 
 - **Detection precedes the clock.** SDO detected the fault about 5s before `fault_injected_at` in both rounds: R1 detection 10:48:13 vs clock 10:48:18; R2 11:30:36 vs 11:30:41.
   - The conductor stamps `fault_injected_at` after `problem.inject_fault()` returns, which takes about 6.5s. Codex starts after that stamp, so it cannot benefit.
-  - Measured from the start of the injection request instead, SDO's primary is about 109s (R1) and about 99s (R2).
+  - Measured from the start of the injection request instead, SDO's raw is about 109s (R1) and about 99s (R2).
 - **Tokens: SDO does not beat Codex.**
   - SDO's responder alone used more input and output than A2: R2 619k vs 438k input, 4.1k vs 2.2k output. Uncached input is similar: R2 46.1k vs A2 40.8k and A1 49.6k. The gap is mostly cached context resent across more model requests, plus the structured IncidentResult receipts.
   - Reflection costs 1.5-2.4x the responder and is paid on every incident.
@@ -191,7 +191,7 @@ Evidence: R2 (`20260927_104328_pipeline_sdo-codex-luna-reuse/stage_1_reused-inci
   - The new validator identity forced a container revalidation plus an attestation commit, with no LLM turns and 0 tokens (no host `sdo_turn_usage.jsonl` was written). It took 206.6s in R1 and 214.0s in R2; R2 also revalidated R1's new incident detector.
   - A full lifecycle rerun was not needed: the seeded health detector passed the ExternalName-hardened validator.
 - **R1 (cold): pass/pass.**
-  - Primary 91.7s. Diagnosis POST at +22.2s, TTL 48.5s, TTM 91.9s.
+  - Raw 91.7s. Diagnosis POST at +22.2s, TTL 48.5s, TTM 91.9s.
   - Gate: 123.2s baseline wait plus a 6.8s injection request. Load 10.6 at injection, 6.0 at mitigation.
   - Responder: 666,199 input (618,496 cached), 5,240 output, 25 requests, 140s.
   - Reflection: 3 attempts (2 fresh retries), 1,940,917 input (1,744,640 cached), 33,250 output, 32 requests. Post-recovery time 752s. Stage wall time 1,428s.
@@ -200,12 +200,12 @@ Evidence: R2 (`20260927_104328_pipeline_sdo-codex-luna-reuse/stage_1_reused-inci
   - Attempt 2 (fresh): 298,493 input, 10 requests, 175s. Rejected with `playbook must use a role placeholder`: `MemoryValidator` requires `<[A-Z][A-Z0-9_]+>`, and the playbook used lowercase `<namespace>`-style placeholders.
   - Attempt 3 (fresh): 187,230 input, 7 requests, 100s. Accepted.
   - Neither the v1 nor the v2 reflection prompt states these two validator rules; v1 happened to satisfy them on the first try.
-  - **Not fixed mid-pipeline.** It did not block the run and does not affect the primary metric, and changing the images between rounds would confound R2. Recommended follow-up: state both rules (index link, UPPER_CASE placeholders) in `_PLAYBOOK_RULES`. That would have saved about 486K input tokens and 275s here.
+  - **Not fixed mid-pipeline.** It did not block the run and does not affect the raw metric, and changing the images between rounds would confound R2. Recommended follow-up: state both rules (index link, UPPER_CASE placeholders) in `_PLAYBOOK_RULES`. That would have saved about 486K input tokens and 275s here.
 - **R1 learned memory meets the executable-verification requirement.**
   - Incident detector `missing-geo-mongo-init-configmap`.
   - Playbook `missing-geo-mongo-init-configmap` with `scripts/repair.sh` (apply the manifest, rollout restart, rollout status) and `scripts/verify.sh`. The verify script checks replica agreement, that the Service endpoint IP belongs to a ready pod, and a frontend `/hotels` request expecting HTTP 200 and a GeoJSON FeatureCollection.
 - **R2 (warm): pass/pass.**
-  - Primary 51.7s. Diagnosis POST at +16.1s, TTL 36.2s, TTM 51.9s.
+  - Raw 51.7s. Diagnosis POST at +16.1s, TTL 36.2s, TTM 51.9s.
   - Gate: 122.2s plus 6.5s. Load 9.6 at injection, 8.9 at mitigation.
   - Responder: 458,095 input (409,856 cached), 3,308 output, 20 requests, 131s (it keeps verifying after the mitigation POST).
   - Reflection: 1 attempt, 568,876 input (478,976 cached), 4,916 output, 3 requests, 36s. The commit was empty (the LLM chose no change), with `validator_skipped_reason=unchanged-diagnostics` and no controller update. Post-recovery time 43s. Stage wall time 714s.
@@ -222,7 +222,7 @@ Evidence: R2 (`20260927_104328_pipeline_sdo-codex-luna-reuse/stage_1_reused-inci
     - have reflection guidance require that incident detectors use `Firing: 1` and watch the kinds on which the fault manifests (Pods and Events);
     - or have the warm rule accept an exact-fingerprint prior outcome whose incident detector is registered, even if it has not fired yet.
 - **v1 vs v2 vs Codex.**
-  - Primary: v2 R1 91.7s vs v1 R1 102.5s; v2 R2 51.7s vs v1 R2 93.0s. Codex mitigation POSTs were 167.6s, 167.1s and 265.1s; only A2 passed both oracles.
+  - Raw: v2 R1 91.7s vs v1 R1 102.5s; v2 R2 51.7s vs v1 R2 93.0s. Codex mitigation POSTs were 167.6s, 167.1s and 265.1s; only A2 passed both oracles.
   - Responder input: v2 666K and 458K vs v1 749K and 619K vs Codex 861K, 438K and 886K.
   - Reflection input: v2 1.94M and 569K vs v1 1.80M and 954K.
 
@@ -286,14 +286,14 @@ Goal: in a repeated incident, make the warm fast mode and the deterministic no-o
 - **Setup.** Code head `495c1db`; images built at `f68a717`, which is code-identical to head (docs-only diff). Image IDs were verified before launch: controller `05b293361ecb`, sregym-responder `03c6691fb16d`, responder `a4ca9282709f`, validator `57b8a3289b53`.
   - Same TOML, wrapper `run.sh`, cluster `luna-w0`, judge `codex-gpt-6-astra`/xhigh, and seed workspace (`<scratch>/seed/lifecycle_workspace`) as v2.
 - **R1 (cold): pass/pass.**
-  - Primary 91.4s. Diagnosis POST at +21.3s, TTL 42.4s, TTM 91.7s.
+  - Raw 91.4s. Diagnosis POST at +21.3s, TTL 42.4s, TTM 91.7s.
   - Gate: 121.8s plus a 6.5s injection request. Load 6.9 at injection, 6.3 at mitigation.
   - Lifecycle: reused with 0 tokens; revalidation took 213s.
   - Responder: 684,276 input (633,088 cached), 6,916 output, 24 requests, 159s.
   - Reflection: first attempt accepted with no retries. 1,594,697 input (1,466,112 cached), 18,869 output, 15 requests, 242s. Post-recovery 398s; stage wall 1,098s.
   - Learned detector (`missing-geo-init-configmap`): `Firing: 1`, watches Deployment, ConfigMap, Pod and Event.
   - Learned playbook: indexed, uses `<UPPER_CASE>` placeholders, and ships `scripts/repair.sh` and `scripts/verify.sh`.
-- **R2, first attempt (kept as `stage_1_reused-incident.20260927_141722`): pass/pass, but primary 345.9s.**
+- **R2, first attempt (kept as `stage_1_reused-incident.20260927_141722`): pass/pass, but raw 345.9s.**
   - Warm prompt confirmed from the rollout ("Warm path: validated incident memory matches...").
   - The incident detector fired at 14:06:03.6, 0.7s after the health detector, and was part of the dispatch (controller log iteration 5).
   - Reflection was the deterministic no-op: `reflection_skipped_reason` set, 0 attempts, 0 tokens. Responder: 448,173 input (413,440 cached), 3,099 output, 22 requests.
@@ -307,14 +307,14 @@ Goal: in a repeated incident, make the warm fast mode and the deterministic no-o
   - Effect on the metric: the SDO mitigation timestamp can now include up to one diagnosis-judge duration (about 20s at xhigh) of waiting. That is a benchmark-imposed wait, the same one Codex would face.
 - **Rebuild and relaunch.** `BUILDX_BUILDER=sdo-example bash scripts/build_sdo_images.sh` at `8e9b717`: sregym-responder `97de0407e563` (verified to contain the fix) and validator `26dad4eadc97`. Controller and responder IDs were unchanged.
   - R1 was kept: it was unaffected, because its mitigation POST came after diagnosis grading. Only R2 was rerun, via `run_sregym.sh <pipeline> --stage 1`, which re-chains R1's workspace.
-  - The new validator identity triggered a pre-fault lifecycle revalidation (199s, 0 tokens), outside the primary metric.
+  - The new validator identity triggered a pre-fault lifecycle revalidation (199s, 0 tokens), outside the raw metric.
 - **R2 rerun (the reported R2): pass/pass.**
-  - Primary 43.6s. Diagnosis POST at +21.0s, TTL 43.5s, TTM 43.8s.
+  - Raw 43.6s. Diagnosis POST at +21.0s, TTL 43.5s, TTM 43.8s.
   - Gate: 108.3s plus 6.4s. Load 6.8 at injection, 7.0 at mitigation.
   - Warm prompt confirmed from the rollout. The incident detector fired at 14:24:44.96 (controller log iteration 7) and was part of the dispatch.
   - Responder: 246,943 input (216,320 cached), 2,473 output, 12 requests, 77s. It was mitigation-ready at 14:25:26 (+36s); the adapter held the POST until the diagnosis verdict at 14:25:33.
   - Reflection: deterministic no-op (`reflection_skipped_reason` set), 0 tokens, `validator_skipped_reason=unchanged-diagnostics`, no controller update. Post-recovery 8.4s. Stage wall 567s.
-  - Targets met: total R2 incident tokens 247K, below the Codex median (861K) and A2 (438K). Primary 43.6s, below v2's 51.7s.
+  - Targets met: total R2 incident tokens 247K, below the Codex median (861K) and A2 (438K). Raw 43.6s, below v2's 51.7s.
   - Minor detour: after a successful mitigation the responder ran `submission --help` and listed tools before returning. About 20s, after the metric.
 
 ## Persistent controller
@@ -374,7 +374,7 @@ Goal: keep ONE SDO controller running across the rounds of a pipeline (the paper
 
 ### Asynchronous reflection (coordinator clarification)
 
-- **Resolution metrics end at the incident's own milestones.** The primary metric is conductor-side (mitigation POST minus injection). `incident_resolution_seconds` is controller detection to controller-verified health, taken from the closure's timestamps. Neither can include reflection.
+- **Resolution metrics end at the incident's own milestones.** The raw metric is conductor-side (mitigation POST minus injection). `incident_resolution_seconds` is controller detection to controller-verified health, taken from the closure's timestamps. Neither can include reflection.
   - Tests: `test_stage_reports_resolution_at_verified_health_before_reflection_finishes` asserts 40s from detection to verification while the fake reflection has not even started. `test_next_stage_injects_only_after_previous_reflection_is_committed_and_rolled_out` asserts the drain is recorded as a pre-injection cost, and that the deferred receipt keeps 40s while its 240s of post-recovery learning is listed as excluded.
 - **The stage reports resolution as soon as verification happens.** The strict receipt, which needs the reflection commit, is written by the next stage's drain or by teardown.
 - **The next injection waits for the drain.** It waits for reflection to be durably committed and for the supervisor to relaunch (rolling out any learned detector) before resuming and injecting. The test asserts `reflected < receipt < fault` ordering.
@@ -403,7 +403,7 @@ Pipeline: `third_party/sregym/logs/20260927_174023_pipeline_sdo-codex-luna-persi
 |---|---|---|---|---|
 | Diagnosis / Mitigation oracle | pass / pass | pass / pass | pass / pass | pass / pass |
 | Controller pod UID | `60db893c…` | `60db893c…` (same) | per-round pod | per-round pod |
-| Primary (mitigation POST − injection) | 96.0 s | 57.2 s | 91.4 s | 43.6 s |
+| Raw incl. judge (mitigation POST − injection) | 96.0 s | 57.2 s | 91.4 s | 43.6 s |
 | `incident_resolution_seconds` | 155.6 s | 89.6 s | 196.0 s | 112.2 s |
 | Inventory + lifecycle revalidation | 210.1 s | 4.1 s (skipped) | 213.3 s | 198.6 s |
 | Controller install | 13.7 s | 2.0 s (reused) | per round | per round |
@@ -422,7 +422,7 @@ Pipeline: `third_party/sregym/logs/20260927_174023_pipeline_sdo-codex-luna-persi
   - Stage 0 was drained by stage 1 (`reflection_commit` b2389015, learned-detector rollout recorded).
   - Stage 1 was drained by pipeline teardown.
   - After teardown the cluster has no `hotel-reservation-sdo` namespace, and only the `observe` PVs remain.
-- **Stage 0's primary time and resolution are within run-to-run variance of v3.** One sample per stage; the model responder dominates both.
+- **Stage 0's raw time and resolution are within run-to-run variance of v3.** One sample per stage; the model responder dominates both.
 
 ## Program integration: persistent controller + variants, sequence, fresh reflection
 
@@ -531,7 +531,7 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
 - **Decision: take the stage-open time from structured results, not logs.** The conductor records `TTL` when the diagnosis verdict completes, immediately before it opens the mitigation stage. TTL's clock is reset right after fault injection (`execution_start_time`, also for deferred injection). So:
   - mitigation stage opened = `fault_injected_at + TTL`;
   - `grading_wait = that − diagnosis_submitted_at`, floored at 0;
-  - `judge_excluded = primary − grading_wait`.
+  - `judge_excluded = raw − grading_wait`.
 
   Every results CSV of both arms has these columns, so no log parsing is needed. The error is milliseconds (logging between injection and the clock reset). When a column is missing, the value is `None`.
 - **Decision: "mitigation applied" is the first state-changing tool call in the agent's own Codex rollout at or after injection.** That is a kubectl `apply/create/patch/replace/delete/rollout/set/scale/edit/label/annotate`, or a playbook `scripts/repair*` run; `bash -n` and reads do not count.
@@ -540,7 +540,7 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - Rejected: the responder's own `repair_actions[].started_at/completed_at`. They are written by the model and are visibly rounded (`18:34:00Z`).
 - `incident_cost.py` prints `no_judge_s` and `applied_s` per SDO stage, and `mean_no_judge_s` and `mean_applied_s` per Codex problem. The JSON carries `grading_wait_seconds`, `judge_excluded_seconds` and `mitigation_applied_seconds`.
 - **First reading.**
-  - reuse1: stage 0 has primary 130.7 s, no-judge 106.8 s, applied 38.0 s; stage 1 has 37.5 / 21.3 / 18.0 s.
+  - reuse1: stage 0 has raw 130.7 s, no-judge 106.8 s, applied 38.0 s; stage 1 has 37.5 / 21.3 / 18.0 s.
   - The two earlier Codex runs average 216.1 / 191.9 / 69.2 s.
   - Grading is about 16 to 24 s per stage. The large gap in SDO stage 0 is between applying the repair and POSTing mitigation: the responder verifies health before submitting.
 
@@ -577,3 +577,585 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - w1: reuse2, then fresh3, then codex_sequence.
   - w2: fresh2, then reuse3, then sdo_variants, then codex_variants.
 - **Every valid run from here on uses the main checkout at `91b0080` with SREGym `b4275585`.** reuse1 and fresh1 ran at `8c83a04` with SREGym `38cbf4c7`. The only differences are harness isolation and analysis code, which do not affect a single-cluster run, and the images are unchanged.
+
+### Harness bug: mitigation dropped while diagnosis was being graded (SREGym `dec0e283`)
+
+- **Found in Codex x5 (`20260927_195049_codex`, attempt 4).** Codex fixed the fault (first mutation at +48 s), POSTed diagnosis, and immediately POSTed its mitigation. The conductor was still grading the diagnosis.
+  - `Conductor.submit` answered `200 {"message":"Submission received"}` and discarded the submission.
+  - Codex exited. The mitigation stage opened with no agent left, so the attempt has no mitigation verdict and no raw time.
+  - The same attempt index had shown the same symptom in the invalid parallel-window run.
+  - This is the defect recorded above for SDO (line "Conductor.submit answers a submit made during an evaluation…"). SDO's client works around it by waiting for the stage client-side. Stock Codex has no workaround, so the harness penalised the baseline for submitting quickly.
+- **Decision: count it as a harness defect, not an agent failure.** The agent had fixed the fault and got a success response. The fix, test-first:
+  - The conductor raises `SubmissionWhileEvaluating` instead of dropping.
+  - `/submit` (and the MCP submit tool) holds the request until the next stage opens. That is what the API's existing retry loop was evidently meant to do. The window grew from 60 s to 600 s, because xhigh judge grading has taken up to about 75 s.
+  - **Symmetry:** a submission accepted after waiting is stamped at acceptance, the same time an agent that polls `/status` first (SDO's client) would POST. Both arms therefore pay the grading wait in the raw metric, and `judge_excluded` removes it for both. The judge-excluded formula stays valid, because `mitigation_submitted_at` can no longer precede the stage opening.
+  - Rejected: returning 409 so the agent retries. It is honest, but it leaves stock Codex's behaviour to chance, and the held-request semantics already exist in the API.
+  - Checked: SDO's fallback submitter can POST a duplicate diagnosis during diagnosis grading. That now becomes the mitigation submission once the stage opens. It runs only after the responder has resolved the incident, so it is graded against the already-healthy cluster at stage-open time, the same outcome and timing as before.
+- **Runs affected:**
+  - The pre-fix Codex x5 is superseded (renamed `superseded_prefix_20260927_195049_codex`). It is reported only as a supplementary table, and a full 5-attempt rerun follows after the fix.
+  - `20260927_201151_pipeline_sdo-codex-luna-sequence` was stopped about 5 minutes in, before any fault, so the checkout could be updated with nothing in flight (renamed `stopped_…`). It is rerun after the fix.
+  - reuse2 (`20260927_195104`), fresh2 (`20260927_195127`), fresh3 (`20260927_200838`) and reuse3 (`20260927_200727`) ran before the fix. SDO's client never POSTs mitigation during grading, so the fix cannot change their outcome or timing. They stay valid.
+  - All Codex runs counted from here on (x5, variants, sequence) run with the fix.
+
+### SDO bug: a verified source repair was rejected for trailing whitespace (`ca8f741`)
+
+- **Found in fresh3 (`20260927_200838`, w1).** Stage 0 passed both oracles. The responder restored the missing `mongo-geo-script` ConfigMap and committed `kubernetes/geo/mongo-geo-script-configmap.yaml`, which embeds the application's own `k8s-geo-mongo.sh` verbatim, blank lines included.
+  - The broker's only source-repair gate, `git diff --check HEAD --`, also enforces whitespace style. It rejected the closure ("trailing whitespace"), and the controller retried it forever (about 26,000 failures in 20 minutes).
+  - The incident was never acknowledged, so stage 1's reflection drain waited on it. It would have failed only at the 3600 s drain timeout.
+- **Decision: keep the gate for what it protects against (conflict markers) and stop it enforcing whitespace style.**
+  - The new command is `SOURCE_REPAIR_CHECK_COMMAND = git -c core.whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab diff --check HEAD --`.
+  - The production installer and the local controller builder use the same command. `controller.builder` may not import `sdo`, so a test pins its literal to the constant.
+  - The test runs the installed command on a real repository: verbatim whitespace passes and conflict markers are rejected.
+  - Images were not rebuilt. The command reaches the in-image broker as an explicit `--broker-arg` from the host-side installer, and the new command is part of the install fingerprint.
+  - Not changed: the controller's unbounded closure retry on a permanent validation failure. Bounding it is a Go runtime change and would need new images. With the root cause fixed it cannot recur for this cause, and the drain timeout still bounds a hang. I record it as a known robustness gap.
+- **fresh3 is not counted** (an SDO bug, not an agent failure). It was stopped and renamed `sdobug_20260927_200838_…`, and it is rerun after the fix on luna-w1.
+- **Other runs:**
+  - reuse1, fresh1, reuse2, fresh2 and reuse3 are unaffected: their closures committed, and a closure failure would have hung their drains the same way.
+  - reuse3 (`20260927_200727`, w2) finished before the fix and stays valid.
+  - Nothing was in flight when the checkout moved to this fix.
+
+### User-directed: judge time is excluded from TTD and TTM
+
+- **Directive (the user, via the coordinator, 2026-09-27).** Judge time must not count in time to diagnosis or time to mitigation. This applies to `incident_cost.py`, to every results table from now on, and to the cumulative and break-even sections.
+- **Change in `benchmarks/sregym/analysis/incident_cost.py`:**
+  - **TTD** (`ttd_s`, `Verdict.diagnosis_seconds`) = `diagnosis_submitted_at − fault_injected_at`. No judge time falls inside it. It is now printed for both arms.
+  - **Headline TTM** (`ttm_s`, `Verdict.ttm_seconds`) = `max(judge-excluded time, last-mitigation completion)`.
+    - The judge-excluded time (`no_judge_s`) is `raw − (fault_injected_at + TTL − diagnosis_submitted_at)`.
+    - The last-mitigation completion (`last_mut_s`) is when the last state-changing tool call issued between injection and the mitigation POST completed. It comes from the responder's or Codex's rollout: the call's `*_call_output` record, paired by `call_id` and capped at the POST.
+    - The floor handles the caveat that subtracting the whole grading wait undercounts an agent that keeps repairing during grading.
+    - It matters more for Codex than for SDO. In the pre-fix Codex x5, `no_judge_s` was 49–56 s but `last_mut_s` reached 75–80 s. In SDO stage 1, reuse1's 21.3 s became 30.8 s.
+    - TTM is unknown when `TTL` or `diagnosis_submitted_at` is missing. It never falls back to the raw time.
+  - **`primary_seconds` is renamed `raw_incl_judge_seconds`** (the `raw_incl_judge_s` column). It is supplementary only. The word "primary" is gone from the code, the tables, this log (earlier entries now say "raw"), `benchmarks/sregym/AGENTS.md` ("Timing metrics") and `.agents/skills/analyze-experiment/references/trajectory-schema.md`.
+  - `applied_s` is renamed `first_mut_s`.
+  - Cumulative time now sums the headline TTM for SDO and the per-problem mean headline TTM for Codex (`sdo_ttm_s`, `codex_ttm_s`). The break-even measures are token counts, which judge time never entered.
+- **What counts as a mutation:** a kubectl write or a playbook `scripts/repair*`.
+  - `kubectl rollout` counts only for restart, undo, pause and resume. `rollout status` and `history` do not count.
+  - Any `--dry-run` is excluded, as are `bash -n` syntax checks.
+  - Real rollouts showed that `rollout status` and `create --dry-run=client` would otherwise inflate `last_mut_s`.
+  - A mutation's completion is the completion of its whole tool call, so a wait chained after it in the same call counts as agent time.
+- **Alternatives considered:**
+  - Judge-excluded time alone: undercounts Codex by up to 25 s.
+  - Last-mutation time alone: ignores the diagnosis and submission tail and misses agents without rollouts.
+  - Changing the harness to defer diagnosis grading: rejected for this queue, because consistency matters more. The fastloop branch has deferred grading, which will make the raw metric judge-free in future queues.
+- **Harness unchanged.** The remaining queue runs with the same harness as the runs already done.
+- **Recomputed valid runs, stage 0 / stage 1, in seconds:**
+
+| Run | Cluster | TTD | TTM (headline) | raw incl. judge | no_judge | last_mut |
+|---|---|---|---|---|---|---|
+| reuse1 | w0 | 28.0 / 13.7 | 106.8 / 21.3 | 130.7 / 37.5 | 106.8 / 21.3 | 39.2 / 19.2 |
+| fresh1 | w0 | 51.3 / 9.2 | 177.2 / 15.0 | 204.0 / 36.6 | 177.2 / 9.9 | 126.2 / 15.0 |
+| reuse2 | w1 | 26.3 / 12.4 | 71.9 / 17.7 | 90.3 / 35.1 | 71.9 / 12.9 | 48.4 / 17.7 |
+| fresh2 | w2 | 25.2 / 6.6 | 77.8 / 16.2 | 93.0 / 32.3 | 77.8 / 14.7 | 38.8 / 16.2 |
+| reuse3 | w2 | 32.1 / 12.4 | 101.0 / 17.9 | 126.0 / 28.5 | 101.0 / 12.5 | 52.6 / 17.9 |
+
+  *Corrected in the Step 3 write-up:* reuse1, fresh2 and reuse3 were first computed before `kubectl rollout status` was excluded from mutations, which pushed their `last_mut` values up. reuse1's stage 1 TTM becomes 21.3 s (was 30.8 s) and fresh2's 16.2 s (was 23.8 s). The "reuse1's 21.3 s became 30.8 s" example above no longer holds: reuse1's `last_mut` (19.2 s) is below its judge-excluded time. The floor still matters for Codex.
+  Pre-fix Codex x5 (supplementary): TTD 36.7, 27.3, 34.6, 37.7, 37.4; TTM 74.9, 53.9, 79.8, –, 69.4 (4 passed, mean 69.5); raw 80.8, 73.0, 85.7, –, 76.2.
+
+### Relaunch after the conductor and whitespace fixes (20:57Z)
+
+- **Checkout:** main `35c321d`, SREGym `dec0e283`. Every remaining run has both fixes: `8aef8f8`/`dec0e283` (the conductor holds submissions made during grading) and `ca8f741` (the broker keeps verbatim whitespace).
+- **No image rebuild:** neither fix lives in an image. The conductor runs on the host, and the source-repair check command reaches the in-image broker as an installer `--broker-arg`.
+- **Lanes, staggered 2 minutes apart:**
+  - w1: fresh3 rerun (fresh covers w0, w2, w1) → sdo_variants → codex_sequence.
+  - w2 (+2 min): post-fix Codex x5 (the pre-fix x5 ran on w0) → codex_variants.
+  - w0 (+4 min): sdo_sequence.
+  - SDO runs on w0 and w1 and Codex on w1 and w2, so each arm is spread across clusters.
+- **Load:** 37.7 at launch, from another project's test workers (`vibesys`), not from our lanes. The coordinator asked to launch now. I record per-run load and will drop to 2 lanes if the load stays above about 24 once those workers finish.
+- **The TTD/TTM analysis change is offline** and does not touch the harness the runs use.
+
+### Scale-up to 5 lanes (coordinator-directed, 21:02Z)
+
+- **Why:** `docker stats` shows each luna cluster uses about 0.3–2 cores and 9–14 GB while running, and the app has almost no user load. The host has 64 cores, 185 GB available and 9 TB free disk.
+- **Decision: add lanes `luna-w3` and `luna-w4`, and move queued items onto them. Runs in flight are not disturbed.**
+  - The clusters are created by the same harness bootstrap on first use: `SREGYM_WORKER_ID_OFFSET=3` and `4` give cluster `luna-w<id>`, Calico with enforced NetworkPolicy, `worker_cpu_limit = "3"` and cluster reuse (both from the configs), the same preloaded SDO images, the per-cluster keyed baseline file and the per-cluster fault scratch dir.
+  - Each lane has its own ports (API 8000+id, MCP 9954+id, agent proxy 16443+id, all free when checked) and its own agent kubeconfig (`-p<port>`), with the kubeconfig guard and the cluster lock.
+  - `codex_sequence` moved from w1 (it was queued after sdo_variants) to w3, as label `codex_sequence_w3`, starting 21:02:38.
+  - `codex_variants` moved from w2 (queued after Codex x5) to w4, as label `codex_variants_w4`, starting 90 s later.
+  - **Mechanism:** `run.sh` now returns `rc=moved` for a label with a file in `scratchpad/skip/`. It was swapped in atomically (a new inode), so running `run.sh` processes kept the old script. The original lanes log a "stop" after their last real item. This is expected and not a failure.
+  - Alternatives: killing and relaunching lanes 1 and 2 would disturb in-flight runs; waiting for them to finish would delay the queue by about an hour.
+- **Load threshold raised from 24 to 40 (1-minute load).** Most load comes from the Codex CLI and host processes, some of them another project's. Load is still logged per run (`.load`, `queue.events`).
+- **Fairness check, re-evaluated as runs finish:**
+  - Compare the SDO warm (stage 1) TTM from the higher-load lanes against the earlier 15.0–30.8 s, and the Codex TTM against the pre-fix Codex x5 (53.9–79.8 s).
+  - `scratchpad/check_ratelimit.sh` scans harness logs and post-relaunch rollouts for 429, "rate limit", `usage_limit` and retry signals.
+  - If any appear, drop one lane and log it. There were none at 21:03Z.
+- **Follow-up for the next queue, not this one:** the only cluster change is 1 control plane plus 1 worker instead of 3 workers, so that more lanes fit. Nothing changes mid-queue, for consistency.
+  - Keep the app's CPU settings. The Hotel Reservation manifests already request 100m and limit 1000m per container, so lowering requests frees nothing.
+  - Lowering limits would slow pod restarts, which fall inside TTM, and could change the resource-related faults.
+  - This corrects the first version of this note (in `5e709c1`), which suggested lowering CPU requests.
+
+### fresh3 rerun (post-fix, luna-w1): pass
+- **Takeaways** (added in Step 3): warm TTM 21.5 s sits in the SDO warm range of 15.0–21.5 s under the heaviest load of the six A/B runs, so load did not skew the arm. See 3.1 for the pooled A/B and 3.3 for tokens (its stage 0 reflection is 656K, 0 on the repeat).
+
+- **Run:** `20260927_205746_pipeline_sdo-codex-luna-persistent-fresh`, 20:57–21:15Z; load 17–38 (another project's test workers early on).
+- **Stage 0:** D+/M+. TTD 13.1 s, TTM 73.3 s (raw including judge 94.5 s, last mutation 59.2 s). Responder 404K tokens, reflection 656K.
+- **Stage 1:** D+/M+. The warm path fired. TTD 8.8 s, TTM 21.5 s (raw 36.8 s, last mutation 21.5 s). Responder 287K tokens, reflection skipped. Reflection drain 97.1 s.
+- **Fairness:** stage 1 TTM is inside the earlier warm range of 15.0–30.8 s, although this lane ran alongside four others.
+- **The whitespace fix held:** the source-repair closure committed, and the drain finished in 97 s instead of hanging.
+- **Rate limits:**
+  - No 429s, error events or `rate_limit_reached_type` in any post-relaunch rollout or harness log.
+  - The earlier scan's hits were Codex's per-turn `rate_limits` usage snapshots, which are informational. `scratchpad/check_ratelimit.sh` now counts only real errors and limit-reached flags.
+  - **Budget risk:** those snapshots show the account's weekly Codex window (10080 min, resets 2026-10-03 18:19Z) at 88% used, rising about 1 point per 12 minutes with 5 lanes.
+  - Decision: keep 5 lanes, because the remaining items should finish within the remaining budget. Watch the weekly usage and start no new lane items past 97%. If the limit is hit mid-run, that run counts as infrastructure-broken, not as an agent failure.
+
+### Quota decision (coordinator-directed, 21:20Z)
+
+- **Keep 5 lanes and finish this queue.**
+  - New starts stop hard at 97% of the shared Codex weekly window. `run.sh` checks the latest `rate_limits.primary.used_percent` from post-relaunch rollouts and returns `rc=quota`, logging `QUOTA-STOP`, instead of starting a run.
+  - All five lanes were already on their last items when this was decided, so the guard is a backstop.
+- **After this queue, no more Codex runs.** The remaining quota is left for the user.
+- **Budgeting the next round:**
+  - At queue end, I will report the final quota percentage and estimate the quota cost per SDO pipeline and per Codex attempt.
+  - The source is the rollouts' `used_percent` snapshots (87% at 21:02Z, the first post-relaunch snapshot).
+  - With overlapping lanes and integer-percent snapshots, per-run cost is attributed by each run's share of total tokens over the queue's percentage delta. Judge (Codex CLI) usage draws on the same window and is included in that delta.
+
+### Reasoning effort: both arms at `medium`
+
+- **SDO:** every post-relaunch SDO rollout records `effort: "medium"` / `reasoning_effort: "medium"` in `turn_context`.
+- **Codex:** the rollouts record `collaboration_mode.settings.reasoning_effort: null`, and the harness logs "Using reasoning effort: Codex default". `AGENT_REASONING_EFFORT` is unset.
+  - `container_runner._mount_codex_credentials` copies only `auth.json`, not the host `~/.codex/config.toml` (its docstring says it copies both).
+  - The CLI's model catalog (`codex debug models`, codex-cli 0.157.1) gives `default_reasoning_level: "medium"` for `gpt-6-luna`.
+- **Conclusion:** both arms ran at medium, SDO explicitly and Codex through the model default. The judge runs at xhigh, but it is outside both TTM and the agent token counts.
+- **Recommendation for the next round:** set `AGENT_REASONING_EFFORT=medium` explicitly for the Codex arm, so the comparison does not depend on a catalog default.
+
+### Step 3 analysis inputs (coordinator-directed)
+
+- **Wait for the token-accounting fix to reach main** before running the final analysis. The fix covers `incident_cost.py` and `structured.py`: a resumed reuse-arm reflection was charged its whole session, which double-counted the responder, so true reuse reflection is 586K–809K, not 1.1–1.4M. Use `origin/main`'s `incident_cost`, read-only, from a separate worktree.
+  - The reuse reflection counts logged above (reuse1–3 and fresh3's summaries) come from the old accounting and are superseded by the final analysis.
+- **Include the one-time setup cost:** `--lifecycle-usage third_party/sregym/.runtime/sdo_codex/anon_c4ffcb5e5fac1834ebf48400a7e8814a/sdo_turn_usage.jsonl` (about 1.77M tokens: deploy plus 3 health-judge rounds, shared by all pipelines). It is stated explicitly in break-even.
+- **Token breakdown for both arms:** uncached input, cached input and output.
+  - Also a cost-weighted total next to the raw one. The weights are an assumption: uncached input 1×, cached input 0.1×, output 8×.
+  - Also requests (model turns) per incident.
+
+### Codex x5, post-fix (luna-w2): 5/5 pass
+- **Takeaways** (added in Step 3): Codex is reliable on this problem but slow and variable (TTM 54–134 s), and every attempt is slower than every SDO warm repeat (15–21.5 s). n=5, and the variance is the agent's own behaviour. It is the Codex baseline for 3.1 and 3.3.
+
+- **Run:** `20260927_205946_codex`, 20:59–21:22Z. Problem `missing_configmap_hotel_reservation`, all five attempts D+/M+. This is the counted Codex baseline for the persistent A/B. The pre-fix `superseded_prefix_20260927_195049_codex` stays supplementary only.
+
+| Attempt | TTD s | TTM s | raw incl. judge s | no_judge s | last_mut s | input / cached / output tokens | tool calls |
+|---|---|---|---|---|---|---|---|
+| 1 | 48.6 | 65.4 | 74.4 | 49.3 | 65.4 | 288,616 / 255,744 / 1,820 | 8 |
+| 2 | 30.1 | 73.1 | 82.2 | 59.9 | 73.1 | 253,265 / 218,112 / 1,843 | 7 |
+| 3 | 48.9 | 131.4 | 141.7 | 118.2 | 131.4 | 389,470 / 354,304 / 2,599 | 11 |
+| 4 | 32.1 | 134.1 | 152.0 | 125.8 | 134.1 | 462,256 / 421,632 / 2,861 | 12 |
+| 5 | 33.8 | 54.3 | 62.3 | 39.9 | 54.3 | 262,361 / 228,096 / 1,564 | 8 |
+
+- **Means:** TTD 38.7 s, TTM 91.7 s (min 54.3, max 134.1), raw 102.5 s.
+- **Fairness check on attempts 3 and 4** (TTM 131–134 s, against 54–80 s pre-fix):
+  - Model time per call was a steady 3.8–5.1 s in every attempt, so there was no API throttling.
+  - Read-only kubectl calls stayed under 1 s, so the cluster was not slowed, even though host load reached 21–43 during those attempts.
+  - The extra time is agent behaviour: a second repair round (ConfigMap recreated, then pod delete or rollout with about 30 s waits), with 11–12 tool calls against 7–8.
+  - These are genuine agent-variance results and count as they are.
+- **Rate limits:** no error events and no limit-reached flags. The weekly window was at 88% at 21:21Z.
+
+### codex_variants (luna-w4, moved from w2): 2/3 pass
+- **Takeaways** (added in Step 3): Codex handles single-database variants at about the same speed as SDO starting cold, but failed the compound variant through a cleanup slip after a red-herring diagnosis. One run; see 3.2.
+
+- **Run:** `20260927_210409_codex`, 21:04–21:27Z.
+
+| Problem | Oracles | TTD s | TTM s | raw incl. judge s | no_judge s | last_mut s | input / cached / output tokens |
+|---|---|---|---|---|---|---|---|
+| missing_configmap_hotel_reservation | D+ M+ | 42.0 | 84.1 | 101.6 | 71.8 | 84.1 | 293,498 / 262,656 / 2,573 |
+| missing_configmap_mongodb_rate_hotel_reservation | D+ M+ | 39.4 | 71.4 | 107.5 | 66.2 | 71.4 | 410,700 / 376,832 / 2,225 |
+| missing_configmap_mongodb_geo_rate_hotel_reservation | D+ **M−** | 88.8 | (281.4) | 305.4 | 281.4 | 129.1 | 540,543 / 505,344 / 3,068 |
+
+- **The failure is counted as a genuine agent failure, not infrastructure.**
+  - The mitigation oracle requires every pod in the namespace to be Running. Codex left its own completed helper pod, `mongo-repair-geo`, behind (phase Succeeded, "❌ Pod mongo-repair-geo is in phase: Succeeded").
+  - Its diagnosis passed (composite 0.89), but the judge marked the fault characterization down: Codex also blamed revoked `readWrite` privileges, which had nothing to do with the deleted ConfigMaps.
+  - The harness ran normally: no errors, and fault recovery restored both ConfigMaps.
+- **How the failed row is reported:** the TTM of a failed mitigation is shown in parentheses and excluded from the TTM means.
+- **Rate limits:** no errors, weekly window at 88%.
+
+### Ownership change: token breakdown and cost weighting
+
+- **Coordinator-directed:** a new agent owns the token breakdown end to end: agentshim normalization of cache read/write and reasoning tokens for Codex and Claude, then SDO receipts, then `incident_cost` with a configurable weight table.
+- I do not implement it in `incident_cost.py`. Step 3's token tables wait for that work to land on `origin/main` and are then produced with it, together with the reuse-reflection accounting fix and the lifecycle-usage file.
+- Everything else in Step 3 goes ahead now: the TTD/TTM tables, the fairness and load check, `sdo-memory-check`, and the quota estimate.
+
+### Memory check: fresh vs reuse (Step 3)
+
+- **Baseline:** each pipeline's own last `sdo-lifecycle` commit, not `64b3ac2`.
+  - `64b3ac2` precedes the lifecycle's attestation commit, which rewrites `.sdo/lifecycle-provenance.yaml`. Every workspace therefore "fails" against `64b3ac2` on a file the lifecycle owns.
+  - `--actor responder` over the whole diff also "fails" on `.sdo/outcomes.jsonl`, which the controller owns.
+- **Method:** each broker commit is replayed in a scratch clone (parent checked out, commit applied as uncommitted edits) and checked with `sdo-memory-check --actor <SDO-Actor trailer> --baseline <parent>`. This is what the broker validates. The run logs are untouched.
+- **Result: every commit in all six counted pipelines passes, for both arms.**
+  - The sequence is: responder source repair → controller outcome → responder memory (7 `.sdo` paths: detector, detector test, manifest, playbook index, playbook README, `repair.sh`, `verify.sh`) → controller outcome → an empty responder closure on the warm repeat.
+  - Exception: fresh1 has no source-repair commit, because its stage 0 responder repaired the cluster only.
+
+| Run | Arm | Incident detectors | Playbook | Playbook lines | exec/port-forward/attach/cp | urllib |
+|---|---|---|---|---|---|---|
+| reuse1 `182519` | reuse | 1 | missing-geo-mongo-configmap | 92 | 0 | yes |
+| reuse2 `195104` | reuse | 1 | geo-mongo-init-configmap-missing | 97 | 0 | yes |
+| reuse3 `200727` | reuse | 1 | missing-required-configmap-mount | 93 | 0 | yes |
+| fresh1 `184719` | fresh | 1 | missing-geo-init-configmap | 59 | 0 | yes |
+| fresh2 `195127` | fresh | 1 | geo-mongo-init-configmap-missing | 72 | 0 | yes |
+| fresh3 `205746` | fresh | 1 | missing-geo-bootstrap | 83 | 0 | yes |
+
+- **Fresh vs reuse memory:** structurally the same, one incident detector and one playbook each.
+  - Reuse-arm playbooks are longer (92–97 lines against 59–83).
+  - No playbook needs a verb the responder RBAC does not grant. The Step 0 rule held in all six runs, and requests are probed with python3 urllib.
+
+### sdo_variants (luna-w1): 3/3 pass
+- **Takeaways** (added in Step 3): memory generalized from the base fault to a compound variant (stage 2: 33.9 s, 216K raw tokens, reflection skipped), but a family-level match gave no speedup on its first occurrence. One run; see 3.2 and 3.3.
+
+- **Run:** `20260927_211548_pipeline_sdo-codex-luna-variants`, 21:15–21:38Z, load 17–43.
+
+| Stage | Problem | Oracles | TTD s | TTM s | raw incl. judge s | last_mut s | responder tok (old accounting) | warm path | reflection | drain s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | missing_configmap | D+ M+ | 20.6 | 77.4 | 102.3 | 50.5 | 711,894 | no | ran | 0.0 |
+| 1 | missing_configmap_mongodb_rate (variant) | D+ M+ | 22.6 | 75.4 | 101.5 | 41.1 | 591,346 | yes | ran | 113.1 |
+| 2 | missing_configmap_mongodb_geo_rate (variant) | D+ M+ | 12.2 | 33.9 | 48.2 | 33.9 | 215,683 | yes | skipped (exact-match success) | 18.5 |
+
+- **Against Codex on the same problems** (`20260927_210409_codex`), SDO wins on the third variant:
+
+  | Problem | SDO | Codex |
+  |---|---|---|
+  | missing_configmap | TTM 77.4 s | TTM 84.1 s |
+  | mongodb_rate | TTM 75.4 s | TTM 71.4 s |
+  | mongodb_geo_rate | pass, TTM 33.9 s | mitigation failed |
+
+- **Stage 1 (first variant):** the warm path fired on a generalizing prior, but it was not exact, so reflection ran and TTM stayed near cold.
+- **Stage 2:** it matched stage 1's learned playbook `required-mongodb-init-configmap-missing` by exact fingerprint, repaired both databases in 33.9 s, and skipped reflection.
+- **Tokens:** the counts above use the old accounting. The final token tables come from the new `incident_cost` once it lands.
+- **Rate limits:** none. Weekly window at 89% at 21:37Z.
+
+### Token-accounting audit
+
+- **Method:** rebuilt every SDO and pre-fix Codex total from the exported Codex rollouts. `token_count.total_token_usage` is cumulative over the session and `last_token_usage` is per request. The analysis uses receipt and `usage_metrics` values, which match the rollouts' final cumulative totals exactly. Nothing sums cumulative values as deltas.
+- **Correct:**
+  - SDO responder totals (cold mean 665,829; warm mean 182,850, range 170,747–191,927).
+  - Codex totals (mean 279,522).
+  - Both arms count `input_tokens` (which includes cached input) plus `output_tokens` (which includes reasoning), under the same rule.
+- **Bug: resumed reflection counted the responder turn again.** With `reflection_session_mode = "resume"`, `codex exec resume` reports session-cumulative usage. `libs/agent_cli/structured.py` stored it as the turn's usage, so `reflection_usage` = responder + reflection.
+  - Reported vs actual reflection: reuse1 1,403,020 vs 809,274; reuse2 1,114,932 vs 585,991; reuse3 1,408,470 vs 674,373.
+  - The fresh-mode figures (757,371 and 244,577) were right.
+  - The corrected reflection range is 245K–809K (mean 614K), not 245K–1.4M.
+  - `model_requests` was right, because it was already computed as a rollout delta.
+- **Fix:**
+  - Codex turn usage is now the rollout's cumulative-counter delta across the turn; this also fills `reasoning_output_tokens`, which agentshim's Codex parser drops (it was always 0).
+  - `incident_cost` recomputes a resumed reflection's own turns from the shared rollout, so existing receipts report correctly.
+  - Tests are in `test_structured.py` and `test_incident_cost.py`.
+- **Not in any incident total:**
+  - The one-time lifecycle (deployer + 3 health-judge rounds) is 1,766,420 tokens: 228,783 uncached, 1,517,312 cached, 20,325 output. It was spent by `20260927_093811_pipeline_sdo-codex-luna-reuse` (`.runtime/sdo_codex/anon_c4ffcb5e…/sdo_turn_usage.jsonl`, session IDs match `lifecycle-provenance.yaml`).
+  - All five pipelines reuse it (`lifecycle_reused: true`), so `incident_cost` printed 0. Pass `--lifecycle-usage` with that file.
+  - Diagnosis and mitigation submission, the controller and the detectors make no model calls. The responder's own submission commands are inside its session.
+- **Reasoning effort:** both arms actually ran at `medium`: the rollouts' `turn_context` shows `"effort":"medium"` for the Codex baseline and the SDO responder. Future queues should pin the Codex baseline's effort in its config rather than rely on the CLI default (see "Reasoning effort: both arms at `medium`" above).
+- **Headline decision (superseded, see "Cache-aware token accounting and pricing table" below):** report uncached input, cached input and output separately, plus a cost-weighted total (cached 0.1x, output 8x, i.e. GPT-5-family price ratios; state them). The ad-hoc 8x output weight is replaced by agentshim's sourced, dated pricing table, which gives gpt-6-luna output 5x.
+  - Weighted means: warm 52.1K vs Codex 69.7K (0.75x; the raw ratio is 0.65x); cold responder 147.6K; reflection 177.8K; lifecycle 543K.
+  - Report tokens per whole responder session, not "per TTM": warm sessions last 50–61 s over 9–10 requests, and 31–42% of their tokens come after the mitigation POST (Codex: 23–31%).
+
+### codex_sequence (luna-w3, moved from w1): 4/8 pass
+
+- **Run:** `20260927_210239_codex`, 21:02–21:46Z. Two passes through four problems.
+
+| # | Problem | Oracles | TTD s | TTM s | raw incl. judge s | input / cached / output tokens |
+|---|---|---|---|---|---|---|
+| 0 | readiness_probe_misconfiguration | D+ M+ | 35.3 | 117.3 | 125.1 | 301,556 / 273,408 / 1,568 |
+| 1 | missing_configmap | D− M− | 57.3 | (190.4) | 197.2 | 731,547 / 680,704 / 3,746 |
+| 2 | wrong_service_selector | D− M− | 111.3 | (133.3) | 143.4 | 891,204 / 838,400 / 4,326 |
+| 3 | network_policy_block | D− M− | 38.2 | (60.4) | 85.4 | 508,627 / 462,592 / 2,491 |
+| 4 | readiness_probe_misconfiguration | D+ M+ | 50.9 | 130.0 | 141.0 | 292,414 / 271,360 / 1,899 |
+| 5 | missing_configmap | D+ M+ | 32.6 | 58.9 | 87.2 | 410,714 / 371,456 / 2,398 |
+| 6 | wrong_service_selector | D− M− | 61.6 | (102.1) | 104.8 | 560,525 / 516,352 / 3,107 |
+| 7 | network_policy_block | D+ M+ | 52.2 | 77.6 | 98.6 | 429,774 / 397,056 / 2,066 |
+
+- **All four failures are counted as genuine agent failures.** The harness ran normally: no errors, and rate limits were fine.
+  - **A recurring red herring.** The rollouts show MongoDB `Authentication succeeded` and no "not authorized" errors in any of the eight problems. Codex nevertheless read the app's own shipped fault-script ConfigMaps (for example the drop-admin-user script) as injected state, diagnosed "revoked `readWrite` roles on geo-db/rate-db", and ran role-restoring pods.
+    - On #1 it left `restore-mongo-roles-*` in phase Succeeded, which fails the all-pods-Running mitigation oracle. This is the same pattern as its codex_variants failure.
+    - On #2, #3 and #6 it blamed the MongoDB backends instead of the frontend Service selector or the blocked recommendation service. The judge scored localization 0.00.
+  - **No cross-problem contamination:** Mongo authentication succeeded throughout, the PVCs are freshly bound (for example 72 s old at #2), and fault recovery ran between problems.
+- **Codex has no memory,** so the second pass is a fresh draw. It passed 1/4 in the first pass and 3/4 in the second, which is variance, not learning.
+- **Tokens use the old accounting.** Codex's accounting is unaffected by the reflection fix. The final tables come from the new `incident_cost`.
+- The comparison with SDO waits for `sdo_sequence` on w0.
+
+### sdo_sequence (luna-w0): stopped by the user, partial
+
+- **User-directed stop** at 21:55:45Z, during stage 2 (`r1-wrong-service-selector`, before a verdict).
+  - Only the lane's process group was terminated: the launcher shell and its remaining w0 harness processes. Every other lane had already finished.
+  - `hotel-reservation` and `hotel-reservation-sdo` were deleted on luna-w0. Its remaining namespaces (`observe`, `sregym`) match the idle w1 and w3.
+  - The run was renamed `stopped_userdirected_20260927_210146_pipeline_sdo-codex-luna-sequence`.
+  - **The queue is done. No more runs will start.**
+- **Completed stages** (pipeline started 21:01:46Z):
+
+| Stage | Problem | Oracles | TTD s | TTM s | raw incl. judge s | incident resolution s | reflection drain s |
+|---|---|---|---|---|---|---|---|
+| 0 | readiness_probe_misconfiguration | D+ M+ | 24.8 | 54.9 | 81.5 | 121.2 | 0.0 |
+| 1 | missing_configmap | D+ M+ | 35.0 | 176.6 | 197.5 | 262.7 | 140.2 |
+| 2 | wrong_service_selector | stopped | – | – | – | – | – |
+
+- **Tokens are unavailable** for this run. The strict receipts and exported rollouts are written at pipeline end, which the stop pre-empted, so there are no responder, reflection or warm-path figures and no `last_mut_s`. For the same reason, TTM here is the judge-excluded time without the last-mutation floor.
+- **Same positions in `codex_sequence`'s first pass:**
+  - readiness_probe: SDO 54.9 s vs Codex 117.3 s.
+  - missing_configmap: SDO passed in 176.6 s; Codex failed both oracles (the revoked-roles red herring).
+
+**Takeaways**
+- **What the data shows:** SDO passed both stages it finished. It was about 2× faster than Codex on readiness_probe and solved missing_configmap where Codex failed. Its missing_configmap TTM (176.6 s) is at the slow end of its cold range (72–177 s), because this was the first time it saw that fault in this sequence.
+- **Confidence:** very low. n=1 per stage, and only 2 of 8 stages ran. The sequence's real test, repeats in the second pass, never ran.
+- **Implications for SDO:** a cold SDO responder beats or matches cold Codex on the first stages. But the sequence claim (memory amortizes across a mixed stream) is **untested** in this queue.
+- **Next action:** rerun the full SDO and Codex sequences in the next round, when quota allows, as the priority experiment. Consider making strict-receipt and rollout export per stage rather than at pipeline end, so a stopped run keeps its token evidence.
+
+### Quota: final reading and per-run estimate
+
+- **Readings:** final 89% of the weekly Codex window (last exported rollout, 21:45Z; resets 2026-10-03 18:19Z), against 87% at the relaunch (21:02Z). About 11% is left for the user. No 429s, error events or limit-reached flags occurred in the queue, and the 97% stop never triggered.
+- **Queue tokens** (input + output, including cached input; corrected accounting at `7e32268`):
+
+| Run | Arm | Incidents | Raw tokens | Uncached input + output |
+|---|---|---|---|---|
+| fresh3 rerun | SDO | 2 stages | 1.35M | 128K |
+| sdo_variants | SDO | 3 stages | 2.73M | 256K |
+| Codex x5 | Codex | 5 attempts | 1.67M | 189K |
+| codex_variants | Codex | 3 attempts | 1.25M | 108K |
+| codex_sequence | Codex | 8 attempts | 4.15M | 337K |
+
+  The partially run sdo_sequence (2 stages, tokens not exported) is estimated at about 1.6M from the SDO per-stage mean. The queue total is about 12.7M raw tokens, plus judge calls, which are not in the rollouts.
+- **Estimate:** about 2 points for about 12.7M raw tokens, so roughly 6M raw tokens per point of the weekly window.
+  - Per SDO incident stage: about 0.8M raw tokens, **about 0.13%**. A 2-stage persistent pipeline is about 0.25%, a 3-stage variants pipeline about 0.4%, and an 8-stage sequence about 1–1.3%.
+  - Per Codex attempt: about 0.44M raw tokens, **about 0.07%**. An x5 is about 0.35%, and the 8-problem sequence about 0.6%.
+- **Caveats:**
+  - The window reports whole percentage points, so the true delta lies anywhere from about 1.0 to 3.0 points. The estimates are good to about a factor of 2.
+  - Other sessions on the same account (the coordinator, the fastloop and token-audit agents) drew on the window at the same time, so these figures are upper bounds per run.
+  - The judge's xhigh calls draw on the same window and are folded in proportionally.
+- **Budget for the next round:** the full sequence pair (SDO about 1.3%, Codex about 0.6%) plus a replicated variants pair (n=3: SDO about 1.2%, Codex about 0.5%) comes to about 3.6%. That fits after the weekly reset, not in the remaining 11% alongside the user's own use.
+
+**Takeaways**
+- **What the data shows:** per incident, SDO costs about 2× Codex's quota (0.8M vs 0.44M raw tokens), because reflection roughly doubles each incident's token use. Exact-match repeats that skip reflection are the exception.
+- **Confidence:** low on the absolute figures (integer-percent readings, shared account) and moderate on the 2× ratio, which comes from per-run token counts.
+- **Implications for SDO:** SDO's quota advantage only appears once repeats skip reflection. Break-even needs long runs of the same incident, which the stopped sequence was meant to test.
+- **Next action:** budget the next round from these figures, run it after the 2026-10-03 reset, and set `AGENT_REASONING_EFFORT=medium` explicitly for Codex.
+
+### Cache-aware token accounting and pricing table
+
+- **Shipped:**
+  - agentshim 0.7.0 (tag `v0.7.0`, `31e2a6b`, on PyPI). SDO pins `agentshim>=0.7.0,<0.8`.
+  - SDO receipts and usage logs record agentshim's normalized breakdown.
+  - `incident_cost` reports it for both arms.
+- **Field semantics (agentshim 0.7, identical on every provider):**
+  - `input_tokens` includes cache reads and cache writes.
+  - New fields: `cache_read_input_tokens`, `cache_write_1h_input_tokens` (Claude's one-hour-TTL writes), and a derived `uncached_input_tokens`. `cache_write_input_tokens` is unchanged.
+  - `output_tokens` includes `reasoning_output_tokens`.
+  - `cached_input_tokens` is now a deprecated alias of cache reads. On Claude, opencode and Copilot it used to be reads plus writes.
+  - Codex now keeps `cache_write_input_tokens` and `reasoning_output_tokens` from `turn.completed`; both used to be dropped.
+- **User-directed decision:** agentshim owns a static, versioned pricing table. This replaces the earlier plan of SDO-side weights with no prices in agentshim.
+  - Each entry records its official source URL and check date, and the table records `version` and `last_updated`, currently 2026-09-27. All are required and tested.
+  - `incident_cost` uses the table by default and prints `prices: agentshim pricing table 2026-09-27, last updated 2026-09-27` plus each arm's weights.
+  - `--weight CLASS=MULTIPLE` and `--pricing-table` override it; USD always uses the table.
+  - There is no separate SDO weight table.
+  - No entry is estimated. OpenAI's page lists gpt-6-luna at $0.10 input, $0.01 cached, $0.125 cache write and $0.50 output per MTok (short context).
+- **Supersedes the audit's headline weights (0.1x cached, 8x output):**
+  - gpt-6-luna's sourced ratios are cache read 0.1x, cache write 1.25x and output 5x.
+  - Claude: read 0.1x (Opus 5.5 0.05x, Fable 5.1 0.025x), 5m write 1.25x, 1h write 2x, output 5x.
+- **Premise corrections:**
+  - GPT-6 models do bill cache writes (1.25x); gpt-5.x does not. Codex reported 0 cache writes in every valid run.
+  - `tests/unit/test_usage_schema_parity.py` did not exist before this change; it now pins `libs/pydantic_agent/_usage.py` to agentshim's `to_dict()` keys.
+  - Crucible's `from_run_usage` had been reading a `cached_input_tokens` attribute that pydantic-ai's `RunUsage` does not have, so it always recorded 0 cached tokens. It now reads `cache_read_tokens`, `cache_write_tokens` and `details["reasoning_tokens"]`.
+- **Analysis sources:**
+  - Codex numbers (the SDO responder and reflections, fresh ones included, and the baseline) come from the exported rollouts. These carry reasoning and request counts that older receipts lack, and their totals equal every receipt and `usage_metrics` value exactly.
+  - A Claude baseline is read from its `stream-json` result frames. SREGym's Claude `usage_metrics` excludes cache reads from input and drops cache writes.
+- **Recomputed tokens:**
+  - Runs: pipelines `182519`, `184719`, `195104`, `195127`, `200727` and `205746` (stage 0 cold, stage 1 warm; all D+ M+) against `20260927_205946_codex`.
+  - Weighted is gpt-6-luna table weights, in base-input-token units.
+  - Cache writes are 0 everywhere.
+
+  | Pipeline | Stage | Part | Uncached in | Cache read | Output | Reasoning | Raw | Weighted | Requests |
+  |---|---|---|---|---|---|---|---|---|---|
+  | 182519 | 0 | responder | 33,468 | 555,264 | 5,014 | 1,442 | 593,746 | 114,064 | 23 |
+  | 182519 | 0 | reflection (resume) | 56,377 | 741,632 | 11,265 | 4,662 | 809,274 | 186,865 | 15 |
+  | 182519 | 1 | responder | 25,832 | 162,560 | 2,305 | 426 | 190,697 | 53,613 | 10 |
+  | 184719 | 0 | responder | 53,287 | 770,048 | 5,523 | 1,523 | 828,858 | 157,907 | 25 |
+  | 184719 | 0 | reflection (fresh) | 56,813 | 693,248 | 7,310 | 1,133 | 757,371 | 162,688 | 21 |
+  | 184719 | 1 | responder | 25,287 | 160,512 | 1,563 | 245 | 187,362 | 49,153 | 10 |
+  | 195104 | 0 | responder | 43,215 | 480,768 | 4,958 | 1,139 | 528,941 | 116,082 | 19 |
+  | 195104 | 0 | reflection (resume) | 65,955 | 510,464 | 9,572 | 2,940 | 585,991 | 164,861 | 11 |
+  | 195104 | 1 | responder | 25,396 | 164,608 | 1,923 | 231 | 191,927 | 51,472 | 10 |
+  | 195127 | 0 | responder | 47,145 | 591,616 | 4,744 | 849 | 643,505 | 130,027 | 22 |
+  | 195127 | 0 | reflection (fresh) | 30,410 | 209,152 | 5,015 | 864 | 244,577 | 76,400 | 7 |
+  | 195127 | 1 | responder | 13,382 | 155,392 | 1,973 | 308 | 170,747 | 38,786 | 9 |
+  | 200727 | 0 | responder | 40,481 | 687,360 | 6,256 | 1,672 | 734,097 | 140,497 | 23 |
+  | 200727 | 0 | reflection (resume) | 69,423 | 596,224 | 8,726 | 2,833 | 674,373 | 172,675 | 12 |
+  | 200727 | 1 | responder | 11,997 | 159,488 | 2,030 | 315 | 173,515 | 38,096 | 9 |
+  | 205746 | 0 | responder | 41,461 | 358,656 | 4,137 | 818 | 404,254 | 98,012 | 16 |
+  | 205746 | 0 | reflection (fresh) | 53,456 | 595,712 | 7,231 | 1,367 | 656,399 | 149,182 | 18 |
+  | 205746 | 1 | responder | 19,079 | 265,984 | 2,179 | 414 | 287,242 | 56,572 | 13 |
+  | Codex 205946 | mean of 5 | run | 35,616 | 295,578 | 2,137 | 600 | 333,331 | 75,861 | 10.2 |
+
+- **Means:**
+  - Cold responder: 622K raw, 126.1K weighted, 21.3 requests.
+  - Warm responder: 200K raw, 47.9K weighted, 10.2 requests.
+  - Reflection: 621K raw, 152.1K weighted, 14 requests.
+  - Codex: 333K raw, 75.9K weighted, 10.2 requests.
+  - Warm vs Codex: 0.60x raw, 0.63x weighted.
+  - With the old 8x output weight: warm 53.9K vs Codex 82.3K.
+  - In USD at gpt-6-luna list prices: warm $0.0048, Codex $0.0076, cold responder $0.0126, reflection $0.0152 per incident.
+  - The one-time lifecycle, from the audit's breakdown, is about 482K weighted ($0.048).
+- **Not verified live:** no Codex or Claude run was spent (weekly quota at about 90%). agentshim's e2e suite was skipped for 0.7.0, and recorded-stream fixtures cover the parsing instead.
+
+
+## Step 3 results
+
+### 3.1 Replication: reuse vs fresh reflection, persistent controller (n=3 per arm, 2 stages)
+
+The problem is `missing_configmap_hotel_reservation` in both stages. Stage 0 is the first incident; stage 1 repeats it with memory. All 12 stages passed both oracles, and every stage 1 fired the warm path.
+
+| Run | Cluster | Load (1-min, min–max, mean) | S0 TTD | S0 TTM | S0 raw | S1 TTD | S1 TTM | S1 raw | S1 incident resolution |
+|---|---|---|---|---|---|---|---|---|---|
+| reuse1 `182519` | w0 | 4–11 (6) | 28.0 | 106.8 | 130.7 | 13.7 | 21.3 | 37.5 | 86.4 |
+| reuse2 `195104` | w1 | 8–27 (15) | 26.3 | 71.9 | 90.3 | 12.4 | 17.7 | 35.1 | 85.0 |
+| reuse3 `200727` | w2 | 8–20 (13) | 32.1 | 101.0 | 126.0 | 12.4 | 17.9 | 28.5 | 85.1 |
+| fresh1 `184719` | w0 | 3–11 (7) | 51.3 | 177.2 | 204.0 | 9.2 | 15.0 | 36.6 | 84.1 |
+| fresh2 `195127` | w2 | 8–27 (15) | 25.2 | 77.8 | 93.0 | 6.6 | 16.2 | 32.3 | 81.6 |
+| fresh3 `205746` | w1 | 16–43 (24) | 13.1 | 73.3 | 94.5 | 8.8 | 21.5 | 36.8 | 90.2 |
+
+All times are in seconds. Summary, as mean [min–max] with the standard deviation:
+
+| Arm | S0 TTD | S0 TTM | S1 TTD | S1 TTM | S1 raw incl. judge |
+|---|---|---|---|---|---|
+| reuse | 28.8 [26.3–32.1] sd 2.9 | 93.2 [71.9–106.8] sd 18.7 | 12.8 [12.4–13.7] sd 0.7 | 19.0 [17.7–21.3] sd 2.0 | 33.7 [28.5–37.5] |
+| fresh | 29.8 [13.1–51.3] sd 19.5 | 109.4 [73.3–177.2] sd 58.7 | 8.2 [6.6–9.2] sd 1.4 | 17.5 [15.0–21.5] sd 3.4 | 35.2 [32.3–36.8] |
+| SDO pooled (n=6) | 29.3 sd 12.5 | 101.3 [71.9–177.2] sd 40.0 | 10.5 sd 2.7 | **18.3 [15.0–21.5] sd 2.6** | 34.5 |
+| Codex x5 post-fix (n=5, memoryless) | 38.7 [30.1–48.9] sd 9.3 | **91.7 [54.3–134.1] sd 38.1** | – | – | 102.5 raw |
+
+**Fairness and load**
+- **Warm TTM does not track host load.** The stage 1 TTM stays within 15.0–21.5 s from the quietest run (fresh1, mean load 7) to the busiest (fresh3, mean 24, peak 43).
+- **Codex at load peaks:** its slowest attempts, 3 and 4, coincided with load peaks, but per-call model time and kubectl read latency did not change. The extra time came from a second repair round (see its entry).
+- **No sign of clusters affecting timings:** each arm ran on all three clusters (reuse: w0, w1, w2; fresh: w0, w2, w1).
+- **No rate-limit events anywhere.** The raised load threshold (40) was reached once, briefly (43 at 21:12Z, while other projects' test suites were running).
+
+**Takeaways**
+- **What the data shows:**
+  - With memory, SDO's repeat-incident TTM is **18.3 s (15.0–21.5) against Codex's 91.7 s (54.3–134.1)**. That is about 5× faster on the mean and about 2.5× faster than Codex's best attempt. Every SDO repeat beats every Codex attempt.
+  - Repeat TTD is 10.5 s against 38.7 s.
+  - A first incident without memory is on par with Codex: SDO 101.3 s vs Codex 91.7 s TTM.
+  - Reuse vs fresh reflection makes **no measurable difference** to repeat-incident speed (19.0 vs 17.5 s TTM). Fresh reflection's stage 1 TTD is slightly lower (8.2 vs 12.8 s), within noise at n=3.
+- **Confidence:** high for SDO warm vs Codex: n=6 vs 5, and the ranges do not overlap (worst SDO 21.5 s against best Codex 54.3 s). Low for reuse vs fresh (n=3 each, differences under 1 sd). Stage 0 is noisy on both arms (sd about 40 s). Every result is a single problem, `missing_configmap`.
+- **Implications for SDO:**
+  - This supports the core claim that verified operational memory turns a repeat incident into a fast playbook replay.
+  - The reflection session mode can be chosen for cost, since speed does not distinguish them. The Step 3 token tables decide it.
+  - The judge-free headline matters: raw times including the judge (34.5 vs 102.5 s) inflate SDO's warm time by about 16 s of grading wait.
+- **Next action:** pick the reflection mode on tokens (3.3). Extend the warm vs cold comparison to other fault types, which the sequence rerun does.
+
+### 3.2 Variants and sequence: SDO vs Codex (single runs)
+
+| Problem | SDO | Codex |
+|---|---|---|
+| missing_configmap (variants 1st) | pass, TTD 20.6, TTM 77.4 | pass, TTD 42.0, TTM 84.1 |
+| missing_configmap_mongodb_rate (variant) | pass, TTD 22.6, TTM 75.4 (warm path fired on the family, reflection ran) | pass, TTD 39.4, TTM 71.4 |
+| missing_configmap_mongodb_geo_rate (variant) | **pass**, TTD 12.2, TTM 33.9 (exact match, reflection skipped) | **fail** (M−, left a helper pod behind), TTD 88.8 |
+| sequence: readiness_probe (1st) | pass, TTD 24.8, TTM 54.9 | pass, TTD 35.3, TTM 117.3 |
+| sequence: missing_configmap (2nd) | pass, TTD 35.0, TTM 176.6 | **fail** (D−/M−, revoked-roles red herring) |
+| sequence stages 2–7 | not run (user stop) | 3/6 pass; wrong_service_selector failed both times |
+
+**Pass counts:**
+- Variants: SDO 3/3, Codex 2/3.
+- Sequence: SDO 2/2 completed, Codex 4/8 overall (1/2 on the same two positions).
+
+**Takeaways**
+- **What the data shows:**
+  - SDO did not fail any incident it attempted (5/5 across variants and the partial sequence). Codex failed 5/11 on the same problem streams.
+  - All five Codex failures trace to one repeatable mistake: taking the app's shipped fault-script ConfigMaps for live faults.
+  - SDO's speedup on a variant arrives only once memory matches exactly (stage 2: 33.9 s). A family-level match (stage 1: 75.4 s) gives about cold speed while reflection learns the variant.
+- **Confidence:** low. There is one run per arm, and the sequence was stopped after 2 of 8 stages. The pass-rate gap is suggestive, but it rests on a handful of incidents and on one distractor pattern in this app.
+- **Implications for SDO:**
+  - It is consistent with the claim that source-grounded memory and live-state detectors avoid distractors a memoryless agent falls for, but it does not yet prove it.
+  - For variants, the design works as intended: a near match surfaces the right playbook and reflection generalizes it. The time benefit comes one incident later.
+  - The paper should state the app's dormant fault scripts as a known distractor.
+- **Next action:**
+  - Rerun the full SDO and Codex sequences (priority) and replicate variants at n=3 after the quota reset.
+  - Look at whether the warm prompt for a family-level match could let the responder apply the generalized playbook directly.
+
+### 3.3 Tokens: breakdown, cost weighting, break-even (corrected accounting)
+
+- **Tool:** `origin/main` `incident_cost` at `0bff184` (a cache-aware breakdown from agentshim, including the `7e32268` fix for resumed reflections), run read-only from a separate worktree:
+  ```
+  --codex 20260927_205946_codex
+  --lifecycle-usage third_party/sregym/.runtime/sdo_codex/anon_c4ffcb5e5fac1834ebf48400a7e8814a/sdo_turn_usage.jsonl
+  --weight cache_read=0.1 --weight output=8
+  ```
+- **The weights are an assumption**, not a bill. They are relative prices in base-input-token units: uncached input 1×, cached input 0.1×, output (including reasoning) 8×, and cache write 1.25× (tool default; none occurred).
+- **Lifecycle:** the one-time SDO lifecycle (deploy plus 3 health-judge rounds, shared by every pipeline) is stated explicitly and included in the break-even rows marked "with lifecycle".
+- **Reasoning effort:** both arms ran at `medium` (see "Reasoning effort").
+- **Units:** raw = all input (cached included) + output. Requests are model requests per incident.
+
+**Persistent A/B (`missing_configmap`, stage 0 first incident, stage 1 warm repeat), means of 3 runs per arm:**
+
+| Arm | Stage | Part | uncached in | cached in | output | (reasoning) | raw | weighted | requests |
+|---|---|---|---|---|---|---|---|---|---|
+| reuse (mean of 3) | 0 | responder | 39K | 574K | 5,409 | 1,418 | 619K | 140K | 21.7 |
+| reuse (mean of 3) | 0 | reflection | 64K | 616K | 9,854 | 3,478 | 690K | 204K | 12.7 |
+| reuse (mean of 3) | 0 | **incident total** | 103K | 1,191K | 15K | 4,896 | 1,309K | 344K | 34.3 |
+| reuse (mean of 3) | 1 | responder | 21K | 162K | 2,086 | 324 | 185K | 54K | 9.7 |
+| reuse (mean of 3) | 1 | reflection | 0 | 0 | 0 | 0 | 0 | 0.0 | – |
+| reuse (mean of 3) | 1 | **incident total** | 21K | 162K | 2,086 | 324 | 185K | 54K | 9.7 |
+| fresh (mean of 3) | 0 | responder | 47K | 573K | 4,801 | 1,063 | 626K | 143K | 21 |
+| fresh (mean of 3) | 0 | reflection | 47K | 499K | 6,519 | 1,121 | 553K | 149K | 15.3 |
+| fresh (mean of 3) | 0 | **incident total** | 94K | 1,073K | 11K | 2,185 | 1,178K | 292K | 36.3 |
+| fresh (mean of 3) | 1 | responder | 19K | 194K | 1,905 | 322.3 | 215K | 54K | 10.7 |
+| fresh (mean of 3) | 1 | reflection | 0 | 0 | 0 | 0 | 0 | 0.0 | – |
+| fresh (mean of 3) | 1 | **incident total** | 19K | 194K | 1,905 | 322.3 | 215K | 54K | 10.7 |
+| Codex x5 (mean of 5) | – | whole attempt | 36K | 296K | 2,137 | 600.4 | 333K | 82K | 10.2 |
+| SDO lifecycle (one-time) | – | deploy + 3 judge rounds | 229K | 1,517K | 20K | 0 | 1,766K | 543K | – |
+
+Stage 0 reflection raw tokens per run: reuse 809K, 586K, 674K; fresh 757K, 245K, 656K. Every stage 1 skipped reflection (exact-match success).
+
+**Break-even against Codex x5** (first stage where cumulative SDO ≤ cumulative Codex). It was not reached within 2 stages in any run. The projection is extra repeat incidents at the observed repeat saving:
+
+| Measure | Without lifecycle (range over 6 runs) | With lifecycle, 1.77M raw / 543K weighted (range) |
+|---|---|---|
+| incident tokens (responder only) | ~1–3 more repeats | ~12–39 |
+| total tokens incl. learning | ~3–15 | ~14–54 |
+| weighted incident tokens | ~1–3 | ~16–29 |
+| weighted tokens incl. learning | ~4–12 | ~18–38 |
+
+**Variants** (`20260927_211548` vs `20260927_210409_codex`), per stage:
+
+| Stage | Problem | SDO responder raw / weighted / req | SDO reflection raw / weighted / req | Codex raw / weighted / req |
+|---|---|---|---|---|
+| 0 | missing_configmap | 712K / 154K / 27 | 873K / 213K / 17 | 296K / 78K / 10 |
+| 1 | mongodb_rate | 591K / 127K / 18 | 335K / 109K / 6 | 413K / 89K / 12 |
+| 2 | mongodb_geo_rate | 216K / 73K / 10 | 0 (skipped) | 544K / 110K / 18 (failed) |
+
+Variants cumulative break-even was not reached within 3 stages (incident-only gap 266K raw, 75K weighted without lifecycle).
+
+**Takeaways**
+- **What the data shows:**
+  - A warm SDO repeat is cheaper than a Codex attempt: 185–215K raw (54K weighted, about 10 requests) against 333K raw (82K weighted, 10 requests). That is about 0.6× raw and 0.66× weighted.
+  - The first incident costs about 3.5–4× Codex (1.18–1.31M raw including reflection), because the responder alone (about 620K) already costs about 1.9× Codex, and reflection adds 550–690K.
+  - Most tokens on both arms are cached input (about 90%). The weighting therefore shrinks the gap: a first SDO incident is about 3.5–4.2× Codex weighted.
+  - On the variants, the exact-match stage cost 216K against Codex's 544K, and SDO passed where Codex failed.
+- **Reuse vs fresh reflection:** fresh reflection is cheaper, at 553K vs 690K raw and 149K vs 204K weighted (−27%). Its outputs are smaller (6.5K vs 9.9K), and it performs no worse on speed (3.1) or memory (the memory check). fresh2's 245K reflection is an outlier.
+- **Confidence:**
+  - Moderate that a warm SDO repeat costs less than Codex: all 6 runs are 185–242K against Codex's per-attempt range of 253–462K.
+  - Low on reuse vs fresh (n=3, overlapping ranges).
+  - The break-even counts are extrapolations from one repeat each, and they assume every later incident is an exact repeat.
+  - Weighted costs depend on the assumed price ratios.
+- **Implications for SDO:**
+  - SDO pays up front, in learning plus the one-time lifecycle, and saves per repeat.
+  - On tokens, break-even needs about 4–12 exact repeats of an incident (weighted, including learning), or about 18–38 once the lifecycle is included. That is a claim about long-running operations, not about a short benchmark.
+  - The speed advantage (3.1) comes immediately. The cost advantage only arrives with many repeats.
+  - Reflection is the main lever.
+- **Next action:**
+  - Default the persistent controller to fresh reflection sessions, subject to a larger-n confirmation.
+  - Look at trimming the first responder's context: its 574K cached input is about 1.9× Codex, which points to the controller's incident prompt.
+  - Measure break-even directly with a longer same-incident run in the next round, instead of projecting it.
+
+### 3.4 Step 3 summary
+
+- **Valid, counted runs:**
+  - SDO: persistent reuse ×3, fresh ×3 and variants ×1, plus the partial sequence (stopped by the user, 2 of 8 stages).
+  - Codex: x5 (post-fix), variants ×1 and sequence ×1.
+- **Excluded** (named with a prefix in the logs):
+  - `invalid_`: runs contaminated by the shared kubeconfig.
+  - `superseded_prefix_`: the Codex x5 from before the conductor fix; supplementary only.
+  - `stopped_`: runs stopped for the conductor fix or by the user.
+  - `sdobug_`: fresh3 before the whitespace fix.
+  - The smoke runs.
+- **Headline (judge-free TTM):** SDO repeat incidents take 18.3 s [15.0–21.5] against Codex's 91.7 s [54.3–134.1], about 5× faster, with ranges that do not overlap. First incidents are on par (101.3 vs 91.7 s).
+- **Correctness:** SDO passed every incident it attempted (17/17 stages across A/B, variants and the partial sequence). Codex passed 11/16, with every failure tracing to one distractor pattern.
+- **Cost:** a warm repeat costs about 0.6× a Codex attempt. A first incident costs about 3.5–4× (responder about 1.9×, plus reflection). Weighted break-even needs about 4–12 exact repeats, or about 18–38 including the 1.77M-token lifecycle.
+- **Reflection mode:** reuse and fresh are equal on speed and memory quality. Fresh is about 27% cheaper weighted (low confidence).
+- **Open items for the next round** (after the 2026-10-03 quota reset):
+  - rerun the full sequence pair;
+  - replicate variants at n=3;
+  - measure break-even directly with a long same-incident run;
+  - set `AGENT_REASONING_EFFORT=medium` explicitly for Codex;
+  - use 1 control plane + 1 worker kind clusters;
+  - export receipts and rollouts per stage;
+  - fix the controller's unbounded closure retry.

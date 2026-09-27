@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
-from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_structured_turn
+from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_structured_turn, turn_usage
 from sdo.contracts import DetectorEvaluation, DetectorEvaluationStatus, Finding, IncidentRequest, IncidentResult
 from sdo.operational_memory import MemoryRepository, MemoryRepositoryError, WarmPlaybookMatch, warm_playbook_matches
 
@@ -61,16 +61,7 @@ def execute_incident(
         raise ResponderExecutionError(f"{selected_provider} responder failed: {exc}") from exc
     try:
         payload = json.loads(completed.output_json)
-        tokens = completed.usage.tokens
-        payload["usage"] = {
-            "llm_calls": tokens.turns,
-            "input_tokens": tokens.input_tokens,
-            "output_tokens": tokens.output_tokens,
-            "cached_input_tokens": tokens.cached_input_tokens,
-            "cache_write_input_tokens": tokens.cache_write_input_tokens,
-            "reasoning_output_tokens": tokens.reasoning_output_tokens,
-            "total_cost_usd": completed.usage.total_cost_usd,
-        }
+        payload["usage"] = turn_usage(completed)
         result = IncidentResult.model_validate(payload)
     except (OSError, ValueError) as exc:
         raise ResponderExecutionError(f"invalid {selected_provider} incident result: {exc}") from exc

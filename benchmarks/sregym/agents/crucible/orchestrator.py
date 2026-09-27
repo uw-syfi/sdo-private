@@ -66,12 +66,13 @@ def _build_usage_metrics(
         {
           "primary":  {"by_agent": {...}, "total": {...}},
           "recovery": {"by_agent": {...}, "total": {...}},
-          "total":    {"input_tokens": ..., "output_tokens": ..., "cached_input_tokens": ..., "turns": ...}
+          "total":    {"input_tokens": ..., "output_tokens": ..., "cache_read_input_tokens": ..., ...,
+                       "turns": ...}   # agentshim's to_dict() keys; see libs/pydantic_agent/_usage.py
         }
     """
     primary_dict = primary.to_dict()
     recovery_dict = recovery.to_dict()
-    grand_total = TokenUsage(**primary_dict["total"]) + TokenUsage(**recovery_dict["total"])
+    grand_total = TokenUsage.from_dict(primary_dict["total"]) + TokenUsage.from_dict(recovery_dict["total"])
     return {
         "primary": primary_dict,
         "recovery": recovery_dict,

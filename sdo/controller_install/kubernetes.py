@@ -14,7 +14,7 @@ from typing import Any, Generic, Protocol, TypeVar, overload
 
 import yaml
 
-from sdo.operational_memory import REFLECTION_SESSION_MODES
+from sdo.operational_memory import REFLECTION_SESSION_MODES, SOURCE_REPAIR_CHECK_COMMAND
 
 
 class ControllerInstallError(RuntimeError):
@@ -179,7 +179,7 @@ def controller_resources(
         "--broker-arg=-m",
         "--broker-arg=sdo.agent_runtime.responder.broker_cli",
         "--broker-arg=--proposal-command",
-        "--broker-arg=git diff --check HEAD --",
+        f"--broker-arg={SOURCE_REPAIR_CHECK_COMMAND}",
         "--broker-arg=--validator-mode",
         "--broker-arg=kubernetes",
         "--broker-arg=--validator-namespace",

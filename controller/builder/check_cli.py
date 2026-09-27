@@ -409,7 +409,7 @@ def _controller_once(args: argparse.Namespace) -> int:
             "-m",
             "sdo.agent_runtime.responder.broker_cli",
             "--proposal-command",
-            "git diff --check HEAD --",
+            "git -c core.whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab diff --check HEAD --",
         ]
         command = [
             str(binary),

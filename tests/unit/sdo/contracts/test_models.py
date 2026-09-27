@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from sdo.contracts import IncidentRequest, IncidentResult
+from sdo.contracts import IncidentRequest, IncidentResult, UsageMetrics
 
 FIXTURE_DIR = Path(__file__).resolve().parents[3] / "fixtures" / "sdo" / "contracts"
 
@@ -47,3 +47,44 @@ def test_incident_result_rejects_duplicate_or_non_chronological_repair_actions()
     payload["repair_actions"][0]["completed_at"] = "2026-07-09T17:59:00Z"
     with pytest.raises(ValueError, match="completed_at must not be before started_at"):
         IncidentResult.model_validate(payload)
+
+
+class TestUsageMetrics:
+    def test_a_normalized_breakdown_validates(self) -> None:
+        usage = UsageMetrics(
+            llm_calls=1,
+            input_tokens=1_000,
+            output_tokens=80,
+            cached_input_tokens=600,
+            cache_read_input_tokens=600,
+            cache_write_input_tokens=300,
+            cache_write_1h_input_tokens=100,
+            uncached_input_tokens=100,
+            reasoning_output_tokens=20,
+            model_requests=7,
+        )
+        assert usage.cache_read_input_tokens == 600
+
+    def test_a_pre_split_claude_record_still_validates(self) -> None:
+        # Before agentshim 0.7, cached_input_tokens counted cache writes too.
+        usage = UsageMetrics(
+            llm_calls=4, input_tokens=800, output_tokens=75, cached_input_tokens=300, cache_write_input_tokens=100
+        )
+        assert usage.cache_read_input_tokens is None
+
+    @pytest.mark.parametrize(
+        ("fields", "match"),
+        [
+            ({"cached_input_tokens": 600, "cache_read_input_tokens": 500}, "alias"),
+            ({"cache_read_input_tokens": 800, "cache_write_input_tokens": 300}, "exceed input_tokens"),
+            ({"cache_read_input_tokens": 600, "uncached_input_tokens": 1}, "uncached_input_tokens"),
+            (
+                {"cache_read_input_tokens": 0, "cache_write_input_tokens": 10, "cache_write_1h_input_tokens": 11},
+                "cache_write_1h_input_tokens",
+            ),
+            ({"reasoning_output_tokens": 81}, "reasoning_output_tokens"),
+        ],
+    )
+    def test_an_inconsistent_breakdown_is_rejected(self, fields: dict[str, int], match: str) -> None:
+        with pytest.raises(ValueError, match=match):
+            UsageMetrics(llm_calls=1, input_tokens=1_000, output_tokens=80, **fields)

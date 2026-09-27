@@ -13,6 +13,7 @@ from sdo.operational_memory.broker_service import (
 )
 from sdo.operational_memory.commit_broker import (
     BROKER_AUTHOR_EMAIL,
+    SOURCE_REPAIR_CHECK_COMMAND,
     VALIDATION_PASSED_TRAILER,
     CommandProposalValidator,
     CommitBroker,
@@ -56,6 +57,7 @@ __all__ = [
     "PLAYBOOK_SCRIPT_SUFFIX",
     "RESPONDER_FORBIDDEN_KUBECTL_VERBS",
     "REFLECTION_SESSION_MODES",
+    "SOURCE_REPAIR_CHECK_COMMAND",
     "VALIDATION_PASSED_TRAILER",
     "ArtifactOwner",
     "BrokerClosure",

@@ -38,11 +38,11 @@ wheels = [
 
 [[package]]
 name = "agentshim"
-version = "0.6.8"
+version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/97/c8/dc2d27b5eff58df1034528466c1cc54c0b805f7200fb8e148395af489707/agentshim-0.6.8.tar.gz", hash = "sha256:2d46aefab791733c1d35afc119312261af03170d4f2f8a576e6c501f1899b38e", size = 91421, upload-time = "2026-09-27T12:24:41.505Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/eb/7a/c2393a9ba116f8eb0cf7dc3cad2a3c3e5b8d2420eac9fc2c9c9f04c2400e/agentshim-0.7.0.tar.gz", hash = "sha256:dd92e0b61e52a57d39098d69f34658970c6d7c481b30579a8415b57876be40d8", size = 100491, upload-time = "2026-09-27T21:57:41.982Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/58/84c599ad0fb1f8fea741b3aed33e8cc992fa6edc32e0df69c05098ee572e/agentshim-0.6.8-py3-none-any.whl", hash = "sha256:c73d5054a947003384215ea108a06134c46fbf1527c14a41c650d140b0e7762d", size = 115192, upload-time = "2026-09-27T12:24:40.249Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/a9/e0aa7123e2ae45cc86c0318e9b9e74c8a5a0158574bbb9edab272cd13a86/agentshim-0.7.0-py3-none-any.whl", hash = "sha256:e3b0cd90c2694f47366bca9bc6eae144bcf3a81b795a0d53e014aaa5112aa640", size = 123575, upload-time = "2026-09-27T21:57:40.718Z" },
 ]
 
 [[package]]
@@ -3448,7 +3448,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.6.8,<0.7" },
+    { name = "agentshim", specifier = ">=0.7.0,<0.8" },
     { name = "litellm", specifier = ">=1.0.0" },
     { name = "loguru", specifier = ">=0.7.2" },
 ]

@@ -118,20 +118,51 @@ class VerificationEvidence(ContractModel):
 
 
 class UsageMetrics(ContractModel):
+    """Token accounting of one agent turn, in agentshim's normalized breakdown.
+
+    ``input_tokens`` includes cache reads and cache writes;
+    ``uncached_input_tokens`` is the rest. ``output_tokens`` includes
+    ``reasoning_output_tokens``. ``cached_input_tokens`` is the deprecated
+    alias of ``cache_read_input_tokens``. A record without
+    ``cache_read_input_tokens`` predates the split (agentshim < 0.7): its
+    ``cached_input_tokens`` counted Claude cache writes too, and it is checked
+    against that older rule.
+    """
+
     llm_calls: int = Field(ge=0)
     input_tokens: int = Field(ge=0)
     output_tokens: int = Field(ge=0)
     cached_input_tokens: int = Field(default=0, ge=0)
+    cache_read_input_tokens: int | None = Field(default=None, ge=0)
     cache_write_input_tokens: int = Field(default=0, ge=0)
+    cache_write_1h_input_tokens: int | None = Field(default=None, ge=0)
+    uncached_input_tokens: int | None = Field(default=None, ge=0)
     reasoning_output_tokens: int = Field(default=0, ge=0)
+    model_requests: int | None = Field(default=None, ge=0)
     total_cost_usd: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_cached_input(self) -> UsageMetrics:
-        if self.cached_input_tokens > self.input_tokens:
-            raise ValueError("cached_input_tokens must not exceed input_tokens")
-        if self.cache_write_input_tokens > self.cached_input_tokens:
-            raise ValueError("cache_write_input_tokens must not exceed cached_input_tokens")
+        if self.reasoning_output_tokens > self.output_tokens:
+            raise ValueError("reasoning_output_tokens must not exceed output_tokens")
+        if (self.cache_write_1h_input_tokens or 0) > self.cache_write_input_tokens:
+            raise ValueError("cache_write_1h_input_tokens must not exceed cache_write_input_tokens")
+        read = self.cache_read_input_tokens
+        if read is None:
+            if self.cached_input_tokens > self.input_tokens:
+                raise ValueError("cached_input_tokens must not exceed input_tokens")
+            if self.cache_write_input_tokens > self.cached_input_tokens:
+                raise ValueError("cache_write_input_tokens must not exceed cached_input_tokens")
+            return self
+        if self.cached_input_tokens == 0 and read:
+            self.cached_input_tokens = read
+        if self.cached_input_tokens != read:
+            raise ValueError("cached_input_tokens is an alias of cache_read_input_tokens and must equal it")
+        if read + self.cache_write_input_tokens > self.input_tokens:
+            raise ValueError("cache reads plus cache writes must not exceed input_tokens")
+        uncached = self.input_tokens - read - self.cache_write_input_tokens
+        if self.uncached_input_tokens is not None and self.uncached_input_tokens != uncached:
+            raise ValueError("uncached_input_tokens must equal input minus cache reads and writes")
         return self
 
 

@@ -294,3 +294,52 @@ def test_set_controller_maintenance_declares_mode_and_generation(monkeypatch: py
 
 def _unexpected_seed(config: ControllerInstallConfig) -> None:
     raise AssertionError("a reused controller must not be reseeded")
+
+
+def _git_repository(root: Path) -> Path:
+    root.mkdir()
+    for args in (
+        ["init", "-b", "main"],
+        ["config", "user.name", "T"],
+        ["config", "user.email", "t@example.com"],
+    ):
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+    (root / "k8s-geo-mongo.sh").write_text("#!/bin/sh\nmongo <<EOF   \n\nEOF\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-m", "base"], check=True, capture_output=True)
+    return root
+
+
+def test_installed_source_repair_check_accepts_verbatim_whitespace_but_rejects_conflict_markers(
+    tmp_path: Path,
+) -> None:
+    import shlex
+
+    from sdo.operational_memory import MemoryValidationError
+    from sdo.operational_memory.commit_broker import CommandProposalValidator
+
+    broker = _broker_args(_config())
+    command = shlex.split(broker[broker.index("--proposal-command") + 1])
+    validator = CommandProposalValidator([command])
+    repository = _git_repository(tmp_path / "app")
+
+    # A verified repair that embeds an existing script verbatim keeps its trailing whitespace.
+    configmap = repository / "kubernetes" / "geo" / "mongo-geo-script-configmap.yaml"
+    configmap.parent.mkdir(parents=True)
+    configmap.write_text("data:\n  k8s-geo-mongo.sh: |\n    mongo <<EOF   \n    \n    EOF\n\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repository), "add", "-A"], check=True, capture_output=True)
+    validator.validate(repository, ["kubernetes/geo/mongo-geo-script-configmap.yaml"])
+
+    configmap.write_text("<<<<<<< HEAD\na: 1\n=======\na: 2\n>>>>>>> repair\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repository), "add", "-A"], check=True, capture_output=True)
+    with pytest.raises(MemoryValidationError, match="conflict marker"):
+        validator.validate(repository, ["kubernetes/geo/mongo-geo-script-configmap.yaml"])
+
+
+def test_local_controller_builder_uses_the_same_source_repair_check() -> None:
+    from sdo.operational_memory import SOURCE_REPAIR_CHECK_COMMAND
+
+    source = (Path(__file__).resolve().parents[4] / "controller" / "builder" / "check_cli.py").read_text(
+        encoding="utf-8"
+    )
+    assert f'"{SOURCE_REPAIR_CHECK_COMMAND}"' in source
