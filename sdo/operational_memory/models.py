@@ -20,6 +20,11 @@ FAULT_CLASS_PATTERN = r"^[a-z0-9][a-z0-9-]*$"
 #: Detector registration IDs in the diagnostics manifest.
 DETECTOR_ID_PATTERN = r"^[a-z0-9][a-z0-9_.-]*$"
 
+#: Largest ``persistence.firing`` the validator accepts for a new or changed
+#: incident detector: a learned fault signature must fire on its first match so
+#: its playbook is surfaced at dispatch rather than after the health detectors.
+INCIDENT_DETECTOR_MAX_FIRING = 1
+
 
 class MemoryModel(BaseModel):
     model_config = ConfigDict(extra="forbid")

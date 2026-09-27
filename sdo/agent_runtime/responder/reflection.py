@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from libs.agent_cli.structured import AgentProvider, StructuredTurnError, run_structured_turn, turn_usage
 from sdo.operational_memory import OutcomeClassification, OutcomeRecord, TopologyReview
 from sdo.operational_memory.detector_sdk import DETECTOR_SDK_REFERENCE
-from sdo.operational_memory.models import DETECTOR_ID_PATTERN, FAULT_CLASS_PATTERN
+from sdo.operational_memory.models import DETECTOR_ID_PATTERN, FAULT_CLASS_PATTERN, INCIDENT_DETECTOR_MAX_FIRING
 from sdo.operational_memory.validation import PLACEHOLDER_RE, PLAYBOOK_INDEX_PATH, PLAYBOOK_SCRIPT_SUFFIX
 
 if TYPE_CHECKING:
@@ -99,7 +99,8 @@ _INCIDENT_DETECTOR_SKELETON = """Incident detector layout (an existing incident 
   `func New() sdk.Detector`, table tests built on `sdktest.Snapshot` with one matching and one near-miss case.
 - `Spec()` returns `sdk.DetectorSpec{ID: "<incident-detector-id>", Class: sdk.DetectorClassIncident,
   Owner: sdk.DetectorOwnerResponder, Description: "...", Watches: []sdk.WatchKind{{APIVersion: "apps/v1",
-  Kind: "Deployment"}}, Interval: 30 * time.Second, Persistence: sdk.PersistencePolicy{Firing: 2, Clearing: 2},
+  Kind: "Deployment"}, {APIVersion: "v1", Kind: "Pod"}, {APIVersion: "v1", Kind: "Event"}},
+  Interval: 30 * time.Second, Persistence: sdk.PersistencePolicy{Firing: 1, Clearing: 2},
   Batching: sdk.BatchingPolicy{Severity: sdk.SeverityCritical, Debounce: 500 * time.Millisecond},
   Playbooks: []string{".sdo/playbooks/<playbook>/README.md"}, OriginatingIncident: "<incident id>",
   OriginatingCommit: "<outcome commit>"}` for a new detector (an existing detector keeps its values); every field
@@ -109,6 +110,16 @@ _INCIDENT_DETECTOR_SKELETON = """Incident detector layout (an existing incident 
   (`apiVersion`, `kind`), `interval`, `persistence` (`firing`, `clearing`), `batching` (`severity`, `debounce`),
   `possiblePlaybooks`, `originatingIncident`, and `originatingCommit`.
 """
+
+
+_INCIDENT_DETECTOR_RULES = (
+    f"Incident detectors must fire promptly: use `persistence.firing: {INCIDENT_DETECTOR_MAX_FIRING}` in the manifest "
+    f"and `Firing: {INCIDENT_DETECTOR_MAX_FIRING}` in Spec(); the validator rejects a new or changed incident "
+    "detector with a larger value. Watch the resources where the fault is visible, not only the root object: when "
+    "the symptom is pod-level (FailedMount, CrashLoopBackOff, ImagePullBackOff, OOMKilled, failing probes), watch "
+    'Pods and Events as well (`{APIVersion: "v1", Kind: "Pod"}`, `{APIVersion: "v1", Kind: "Event"}`) so '
+    "the detector evaluates when the symptom appears and fires alongside the health detectors. "
+)
 
 
 def _topology_facts(review: TopologyReview | None) -> str:
@@ -153,7 +164,9 @@ _PLAYBOOK_RULES = (
     "commands in executable scripts under `.sdo/playbooks/<playbook>/scripts/` (`.sh`, parameters as positional "
     "arguments, `set -eu`) and reference them from the README. After restoring a missing mount source (a "
     "ConfigMap or Secret), delete the pods stuck on it or rollout-restart their workload instead of waiting for "
-    "the kubelet mount backoff. "
+    "the kubelet mount backoff. Include a `scripts/verify.sh` (and a `scripts/diagnose.sh` when the preconditions "
+    "need their own check): when this playbook is reused before its incident detector fires, the responder runs "
+    "it as its one sanity check. "
 )
 
 
@@ -212,7 +225,9 @@ def _learning_request(
         f"{_memory_rules(incident_id=outcome.incident_id, outcome_commit=outcome_commit)}"
         "When the confirmed cause exposes a stable low-noise Kubernetes "
         "signature, add a fault-specific incident detector immediately and include both a matching test and a "
-        "near-miss test. Register a new detector with owner responder, class incident, originatingIncident set to "
+        "near-miss test. "
+        f"{_INCIDENT_DETECTOR_RULES}"
+        "Register a new detector with owner responder, class incident, originatingIncident set to "
         "this incident, and originatingCommit set to the authoritative outcome commit. Never change "
         "originatingIncident or originatingCommit of an existing detector, in the manifest or its Spec(): they "
         "record the incident that first taught it, and the broker rejects any rewrite. When an existing incident "

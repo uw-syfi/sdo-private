@@ -294,6 +294,22 @@ def test_reflection_requires_executable_playbooks_that_trust_the_incident_detect
     assert "do not prescribe re-diagnosis" in prompt
 
 
+def test_reflection_asks_for_prompt_incident_detectors_on_the_visible_symptom(tmp_path: Path) -> None:
+    prompt = _first_reflection_prompt(tmp_path)
+
+    # Incident detectors fire on their first matching evaluation, and the skeleton example agrees.
+    assert "`persistence.firing: 1`" in prompt
+    assert "Firing: 1" in prompt
+    assert "Firing: 2" not in prompt
+    # Watch where the fault is visible, not only the root object.
+    assert "Pods and Events" in prompt
+    assert "FailedMount" in prompt
+    assert "CrashLoopBackOff" in prompt
+    assert '{APIVersion: "v1", Kind: "Event"}' in prompt
+    # The warm path runs a verify or diagnose script when the detector has not fired yet.
+    assert "scripts/verify.sh" in prompt
+
+
 def test_reflection_never_asks_to_rewrite_existing_detector_provenance(tmp_path: Path) -> None:
     prompt = _first_reflection_prompt(tmp_path)
 

@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
-from sdo.operational_memory.models import ArtifactOwner, ValidatorNetworkPolicyCanary
+from sdo.operational_memory.models import INCIDENT_DETECTOR_MAX_FIRING, ArtifactOwner, ValidatorNetworkPolicyCanary
 from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
 from sdo.operational_memory.sandbox import ContainerSandboxRunner
 
@@ -76,6 +76,12 @@ class MemoryValidator:
             baseline_root=baseline_root,
         )
         self._validate_incident_provenance(
+            repository,
+            actor=actor,
+            changed_paths=normalized,
+            baseline_root=baseline_root,
+        )
+        self._validate_incident_persistence(
             repository,
             actor=actor,
             changed_paths=normalized,
@@ -297,6 +303,41 @@ class MemoryValidator:
                     f"responder may not rewrite provenance (OriginatingIncident/OriginatingCommit) in the Spec() of "
                     f"existing incident detector {detector.id!r}"
                 )
+
+    @staticmethod
+    def _validate_incident_persistence(
+        repository: MemoryRepository,
+        *,
+        actor: ArtifactOwner,
+        changed_paths: list[PurePosixPath],
+        baseline_root: Path | None,
+    ) -> None:
+        """Require a new or changed incident detector registration to fire on its first match.
+
+        A delayed incident detector lags the health detectors that trigger
+        dispatch, so its playbook is not surfaced for the incident it encodes.
+        Untouched legacy registrations are left alone so an unrelated
+        playbook-only proposal is never rejected for memory it did not change.
+        """
+
+        if actor != ArtifactOwner.RESPONDER or baseline_root is None:
+            return
+        if PurePosixPath(".sdo/diagnostics/manifest.yaml") not in changed_paths:
+            return
+        try:
+            baseline = {detector.id: detector for detector in MemoryRepository(baseline_root).diagnostics().detectors}
+        except MemoryRepositoryError:
+            baseline = {}
+        for detector in repository.diagnostics().detectors:
+            if detector.detector_class != "incident" or detector.persistence.firing <= INCIDENT_DETECTOR_MAX_FIRING:
+                continue
+            if baseline.get(detector.id) == detector:
+                continue
+            raise MemoryValidationError(
+                f"incident detector {detector.id!r}: persistence.firing must be {INCIDENT_DETECTOR_MAX_FIRING} "
+                f"(got {detector.persistence.firing}) for a new or changed incident detector, in the manifest and "
+                "its Spec(); a learned fault signature must fire on its first match"
+            )
 
     @staticmethod
     def _validate_outcomes_append_only(
