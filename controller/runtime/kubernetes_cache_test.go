@@ -163,3 +163,50 @@ func drainWatchEvents(cache *KubernetesCache) {
 	}
 	cache.TakeEvents()
 }
+
+func TestKubernetesCacheResyncObservesRecreatedNamespaceAfterStop(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "old", Namespace: "demo"}})
+	cache, err := NewKubernetesCache(KubernetesCacheConfig{Namespace: "demo", Client: client}, []sdk.Detector{
+		scheduledDetector{spec: sdk.DetectorSpec{
+			ID: "pods", Interval: time.Second, Watches: []sdk.WatchKind{{APIVersion: "v1", Kind: "Pod"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("new cache: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cache.Start(ctx)
+	if err := cache.WaitForSync(ctx); err != nil {
+		t.Fatalf("wait for sync: %v", err)
+	}
+	cache.Stop()
+	drainWatchEvents(cache)
+
+	// The application namespace is torn down and redeployed while observation is stopped.
+	if err := client.CoreV1().Pods("demo").Delete(ctx, "old", metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("delete pod: %v", err)
+	}
+	if _, err := client.CoreV1().Pods("demo").Create(ctx, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "new"},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+	if err := cache.Resync(ctx); err != nil {
+		t.Fatalf("resync: %v", err)
+	}
+	snapshot, err := cache.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if pods := snapshot.Pods(); len(pods) != 1 || pods[0].Name != "new" {
+		t.Fatalf("resynced cache must reflect only the redeployed objects, got %#v", pods)
+	}
+	drainWatchEvents(cache)
+	if _, err := client.CoreV1().Pods("demo").Create(ctx, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "later"},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create later pod: %v", err)
+	}
+	awaitWatchEvent(t, cache, sdk.WatchKind{APIVersion: "v1", Kind: "Pod", Namespace: "demo"})
+}

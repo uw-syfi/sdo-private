@@ -1292,3 +1292,106 @@ class TestPipelineRunner:
         assert rc == 0
         loaded_state = read_pipeline_state(pipeline_dir)
         assert [stage.name for stage in loaded_state.stages] == ["build", "eval", "eval_again"]
+
+
+class TestPersistentControllerPipeline:
+    """Persistent mode: one controller per application across stages, receipts after the drain."""
+
+    @pytest.fixture
+    def sregym_dir(self, tmp_path: Path):
+        d = tmp_path / "third_party" / "sregym"
+        d.mkdir(parents=True)
+        (d / "main.py").write_text("# fake")
+        return d
+
+    @staticmethod
+    def _config() -> PipelineConfig:
+        return PipelineConfig(
+            name="persistent",
+            defaults={
+                "agent": "sdo_codex",
+                "model": "gpt-test",
+                "require_strict_receipt": True,
+                "agent_config": {"sdo_codex": {"persistent_controller": True}},
+            },
+            stages=[StageConfig(name="first", chain_kb=False), StageConfig(name="second", chain_kb=False)],
+        )
+
+    def _run(
+        self, sregym_dir: Path, tmp_path: Path, *, teardown_writes_receipts: bool
+    ) -> tuple[int, list[list[str]], list[dict[str, str]], Path]:
+        config = self._config()
+        pipeline_dir = tmp_path / "pipeline"
+        pipeline_dir.mkdir()
+        calls: list[list[str]] = []
+        envs: list[dict[str, str]] = []
+        agent_dirs: list[Path] = []
+
+        def mock_run(argv, cwd=None, env=None, **_kwargs):
+            calls.append(list(argv))
+            envs.append(dict(env or {}))
+            if "benchmarks.sregym.adapter.persistent" in argv:
+                if teardown_writes_receipts:
+                    for agent_dir in agent_dirs:
+                        (agent_dir / "sdo_production_receipt_strict.json").write_text(
+                            json.dumps(_valid_strict_receipt()) + "\n", encoding="utf-8"
+                        )
+                return type("Result", (), {"returncode": 0})()
+            experiment_dir = Path(argv[argv.index("--experiment-dir") + 1])
+            problem_run = experiment_dir / "problem_runs" / "run"
+            agent_dir = problem_run / "agent"
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            agent_dirs.append(agent_dir)
+            (problem_run / "results_test.csv").write_text(
+                '"Diagnosis.success","Mitigation.success","agent_error","problem_id"\nTrue,True,False,"problem"\n',
+                encoding="utf-8",
+            )
+            # Only a resolution record exists at stage end; the strict receipt follows the drain.
+            (agent_dir / "sdo_incident_resolution.json").write_text("{}\n", encoding="utf-8")
+            Path(env["SDO_PERSISTENT_CONTROLLER_STATE"]).write_text('{"controllers": {}}\n', encoding="utf-8")
+            return type("Result", (), {"returncode": 0})()
+
+        with patch("subprocess.run", side_effect=mock_run):
+            state = PipelineState(stages=[StageState(index=0, name="first"), StageState(index=1, name="second")])
+            write_pipeline_state(state, pipeline_dir)
+            write_pipeline_snapshot(config, pipeline_dir)
+            rc = runner_mod.run_pipeline(
+                config, project_root=tmp_path, sregym_dir=sregym_dir, pipeline_dir=pipeline_dir, state=state
+            )
+        return rc, calls, envs, pipeline_dir
+
+    def test_stages_share_one_state_file_and_teardown_runs_last(self, sregym_dir, tmp_path: Path) -> None:
+        rc, calls, envs, pipeline_dir = self._run(sregym_dir, tmp_path, teardown_writes_receipts=True)
+
+        assert rc == 0
+        stage_envs = [env for call, env in zip(calls, envs, strict=True) if "main.py" in call]
+        assert len(stage_envs) == 2
+        for env in stage_envs:
+            assert env["SDO_PERSISTENT_CONTROLLER_STATE"] == str(pipeline_dir / "sdo_persistent_controller.json")
+            assert env["SREGYM_PRESERVE_NAMESPACE_LABEL"] == "sdo.dev/controller-namespace"
+        assert "benchmarks.sregym.adapter.persistent" in calls[-1]
+        assert calls[-1][calls[-1].index("--state") + 1] == str(pipeline_dir / "sdo_persistent_controller.json")
+        assert read_pipeline_state(pipeline_dir).stages[1].status == "completed"
+
+    def test_missing_deferred_strict_receipt_fails_the_pipeline(self, sregym_dir, tmp_path: Path) -> None:
+        rc, _calls, _envs, pipeline_dir = self._run(sregym_dir, tmp_path, teardown_writes_receipts=False)
+
+        assert rc == 1
+        states = read_pipeline_state(pipeline_dir).stages
+        assert states[0].status == "failed"
+        assert "strict receipt" in states[0].error
+
+
+def test_runner_preserve_label_matches_the_installed_controller_namespace_label() -> None:
+    from benchmarks.sregym.runner.experiment import PERSISTENT_CONTROLLER_NAMESPACE_LABEL
+    from sdo.controller_install import CONTROLLER_NAMESPACE_LABEL
+
+    assert PERSISTENT_CONTROLLER_NAMESPACE_LABEL == CONTROLLER_NAMESPACE_LABEL
+
+
+def test_persistent_mode_is_off_by_default_for_sdo_codex(tmp_path: Path) -> None:
+    from benchmarks.sregym.runner.experiment import ExperimentConfig, config_to_env
+
+    env = config_to_env(ExperimentConfig(agent="sdo_codex"), tmp_path)
+
+    assert "SREGYM_PRESERVE_NAMESPACE_LABEL" not in env

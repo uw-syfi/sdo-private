@@ -119,6 +119,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_common_args(controller)
     controller.add_argument("--namespace", required=True)
+    controller.add_argument(
+        "--control-namespace",
+        default="",
+        help="namespace for the controller's Lease, state, maintenance ConfigMap, and responder Jobs",
+    )
     controller.add_argument("--application")
     controller.add_argument("--source-commit")
     controller.add_argument("--deployed-commit")
@@ -139,6 +144,11 @@ def _build_parser() -> argparse.ArgumentParser:
     controller.add_argument("--duration", default="")
     controller.add_argument("--lease-name", default="sdo-controller")
     controller.add_argument("--exit-after-closure", action="store_true")
+    controller.add_argument(
+        "--supervise",
+        action="store_true",
+        help="run until cancelled, rolling out learned detectors and relaunching after each acknowledged closure",
+    )
     controller.add_argument("--keep-workdir", action="store_true", help=argparse.SUPPRESS)
     return parser
 
@@ -345,6 +355,25 @@ def _watch(args: argparse.Namespace) -> int:
 
 
 def _controller(args: argparse.Namespace) -> int:
+    if getattr(args, "supervise", False) and (args.exit_after_closure or args.duration):
+        raise SystemExit(
+            "--supervise runs until cancelled; it cannot be combined with --exit-after-closure or --duration"
+        )
+    if not getattr(args, "supervise", False) or getattr(args, "controller_update_rollout", False):
+        return _controller_once(args)
+    # A long-running controller exits after each acknowledged closure so an
+    # accepted detector change is compiled, rolled out, and observed by the
+    # relaunched controller rather than silently ignored until a pod restart.
+    launches = 0
+    while True:
+        returncode = _controller_once(args)
+        launches += 1
+        if returncode != 0:
+            return returncode
+        print(json.dumps({"controller_supervisor": "relaunch", "launches": launches}), flush=True)
+
+
+def _controller_once(args: argparse.Namespace) -> int:
     app_root = _app_root(args)
     worktree_root = args.worktree_root.resolve()
     if not getattr(args, "controller_update_rollout", False):
@@ -428,6 +457,7 @@ def _controller(args: argparse.Namespace) -> int:
             ]
         )
         optional_values = {
+            "--control-namespace": args.control_namespace,
             "--application": args.application,
             "--source-commit": args.source_commit,
             "--deployed-commit": args.deployed_commit,
@@ -436,6 +466,8 @@ def _controller(args: argparse.Namespace) -> int:
         }
         if args.exit_after_closure:
             command.append("--exit-after-closure")
+        if getattr(args, "supervise", False) and not getattr(args, "controller_update_rollout", False):
+            command.append("--restart-after-closure")
         for flag, value in optional_values.items():
             if value:
                 command.extend([flag, value])
@@ -463,6 +495,7 @@ def _execute_controller_update_rollout(
 ) -> int:
     rollout_args = copy.copy(args)
     rollout_args.exit_after_closure = False
+    rollout_args.supervise = False
     # The rollout performs cache sync, one evaluation, and a durable state
     # write. Keep it bounded, but allow normal API latency under validator and
     # controller handoff load.

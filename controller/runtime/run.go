@@ -63,6 +63,11 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	flags := flag.NewFlagSet("sdo-controller", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	namespace := flags.String("namespace", "", "Kubernetes namespace to observe")
+	controlNamespace := flags.String(
+		"control-namespace",
+		"",
+		"namespace holding the controller's Lease, state, maintenance ConfigMap, and responder Jobs; defaults to --namespace",
+	)
 	appRoot := flags.String("app-root", "", "application repository root")
 	application := flags.String("application", "", "application identity; defaults to repository directory name")
 	sourceCommit := flags.String("source-commit", "", "source repository commit; defaults to git HEAD")
@@ -94,8 +99,29 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	leaseDuration := flags.Duration("lease-duration", 60*time.Second, "leader-election Lease duration")
 	identity := flags.String("identity", defaultIdentity(), "unique leader-election identity")
 	exitAfterClosure := flags.Bool("exit-after-closure", false, "exit after one closure is durably acknowledged")
+	restartAfterClosure := flags.Bool(
+		"restart-after-closure",
+		false,
+		"exit after each newly acknowledged closure so a supervisor can roll out learned detectors and relaunch",
+	)
+	maintenanceConfigMap := flags.String(
+		"maintenance-configmap", MaintenanceConfigMapName, "maintenance ConfigMap in the control namespace",
+	)
+	maintenancePollInterval := flags.Duration("maintenance-poll-interval", time.Second, "maintenance ConfigMap poll interval")
+	resumeSyncTimeout := flags.Duration(
+		"resume-sync-timeout", time.Minute, "maximum wait for a fresh application cache when maintenance ends",
+	)
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *exitAfterClosure && *restartAfterClosure {
+		return fmt.Errorf("--exit-after-closure and --restart-after-closure are mutually exclusive")
+	}
+	if *controlNamespace == "" {
+		*controlNamespace = *namespace
+	}
+	if !namespacePattern.MatchString(*controlNamespace) {
+		return fmt.Errorf("invalid control namespace %q", *controlNamespace)
 	}
 	if *namespace == "" || *appRoot == "" {
 		return fmt.Errorf("namespace and app-root are required")
@@ -132,7 +158,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err != nil {
 		return fmt.Errorf("create dedicated leader-election client: %w", err)
 	}
-	elector := NewLeaseElector(leaseClient, *namespace, *leaseName, *identity, *leaseDuration)
+	elector := NewLeaseElector(leaseClient, *controlNamespace, *leaseName, *identity, *leaseDuration)
 	for {
 		leader, acquireErr := elector.TryAcquireOrRenew(ctx)
 		if acquireErr != nil {
@@ -164,8 +190,12 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		renewalInterval = 5 * time.Second
 	}
 	renewalErrors := maintainLeadership(renewalCtx, elector, renewalInterval)
+	stateConfigMapName := ""
+	if *controlNamespace == *namespace {
+		stateConfigMapName = "sdo-controller-state"
+	}
 	kubernetesCache, err := NewKubernetesCache(KubernetesCacheConfig{
-		Namespace: *namespace, Client: bootstrapProvider.Client, StateConfigMapName: "sdo-controller-state",
+		Namespace: *namespace, Client: bootstrapProvider.Client, StateConfigMapName: stateConfigMapName,
 	}, detectors)
 	if err != nil {
 		return fmt.Errorf("create Kubernetes informer cache: %w", err)
@@ -181,7 +211,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		dispatcher = SubprocessDispatcher{Argv: argv, Timeout: *responseTimeout}
 	case "job":
 		dispatcher = KubernetesJobDispatcher{
-			Client: bootstrapProvider.Client, Namespace: *namespace, Image: *responderImage,
+			Client: bootstrapProvider.Client, Namespace: *controlNamespace, Image: *responderImage,
 			Command: argv, ServiceAccount: "sdo-responder", RepositoryPVC: *repositoryPVC,
 			RepositoryMountPath: *repositoryMountPath, RepositoryPVCSubPath: *repositoryPVCSubPath,
 			CredentialsSecret: *credentialsSecret, PollInterval: time.Second,
@@ -223,7 +253,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	}
 	controller.CanAct = elector.IsLeader
 	controller.GuardAction = elector.GuardContext
-	stateStore := NewConfigMapStateStore(bootstrapProvider.Client, *namespace, "sdo-controller-state")
+	stateStore := NewConfigMapStateStore(bootstrapProvider.Client, *controlNamespace, "sdo-controller-state")
 	if err := controller.AttachStateStore(ctx, stateStore); err != nil {
 		return fmt.Errorf("restore controller state: %w", err)
 	}
@@ -250,15 +280,32 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		runCtx, cancel = context.WithTimeout(ctx, *duration)
 		defer cancel()
 	}
-	kubernetesCache.Start(runCtx)
-	if err := kubernetesCache.WaitForSync(runCtx); err != nil {
-		return fmt.Errorf("sync Kubernetes informer cache: %w", err)
+	maintenance := MaintenanceWatcher{
+		Client: bootstrapProvider.Client, Namespace: *controlNamespace, Name: *maintenanceConfigMap,
 	}
-	if err := controller.Step(runCtx, time.Now().UTC(), nil); err != nil {
-		if runCtx.Err() != nil {
-			return nil
-		}
+	desired, err := maintenance.Read(runCtx)
+	if err != nil {
 		return err
+	}
+	// applied is the mode the controller currently operates under. It lags
+	// desired only while a resume is waiting for a fresh application cache.
+	applied := desired
+	cacheStarted := false
+	if err := encoder.Encode(desired.Record()); err != nil {
+		fmt.Fprintln(stderr, err)
+	}
+	if !desired.Paused {
+		kubernetesCache.Start(runCtx)
+		cacheStarted = true
+		if err := kubernetesCache.WaitForSync(runCtx); err != nil {
+			return fmt.Errorf("sync Kubernetes informer cache: %w", err)
+		}
+		if err := controller.Step(runCtx, time.Now().UTC(), nil); err != nil {
+			if runCtx.Err() != nil {
+				return nil
+			}
+			return err
+		}
 	}
 	if err := controller.PersistState(ctx); err != nil {
 		return fmt.Errorf("persist controller state: %w", err)
@@ -272,11 +319,67 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		}
 		return err
 	}
+	maintenanceChanges := maintenance.Watch(runCtx, desired, *maintenancePollInterval, controller.OnError)
+	// resume re-establishes observation of the application namespace with a
+	// fresh informer generation and evaluates every detector once. The mode
+	// record precedes that evaluation so observers can correlate it.
+	resume := func() error {
+		syncCtx, cancelSync := context.WithTimeout(runCtx, *resumeSyncTimeout)
+		defer cancelSync()
+		var syncErr error
+		if cacheStarted {
+			syncErr = kubernetesCache.Resync(syncCtx)
+		} else {
+			kubernetesCache.Start(runCtx)
+			cacheStarted = true
+			syncErr = kubernetesCache.WaitForSync(syncCtx)
+		}
+		if syncErr != nil {
+			if runCtx.Err() != nil {
+				return nil
+			}
+			fmt.Fprintf(stderr, "resume observation of namespace %s: %v\n", *namespace, syncErr)
+			return nil
+		}
+		kubernetesCache.TakeEvents()
+		applied = desired
+		if err := encoder.Encode(applied.Record()); err != nil {
+			fmt.Fprintln(stderr, err)
+		}
+		if err := controller.EvaluateAll(runCtx, time.Now().UTC()); err != nil {
+			if runCtx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		if err := controller.PersistState(ctx); err != nil {
+			return fmt.Errorf("persist controller state: %w", err)
+		}
+		if err := detectorReviewError(controller); err != nil {
+			return err
+		}
+		if err := executePendingEffects(runCtx, controller); err != nil {
+			if runCtx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		return nil
+	}
 	for {
 		if *exitAfterClosure && controller.LastAcknowledgedIncidentID() != "" {
 			return nil
 		}
-		delay := time.Until(controller.NextWake())
+		var delay time.Duration
+		switch {
+		case applied != desired:
+			// A resume is waiting for the application namespace to become observable.
+			delay = 2 * time.Second
+		case applied.Paused:
+			delay = time.Hour
+		default:
+			delay = time.Until(controller.NextWake())
+		}
 		if delay < 0 {
 			delay = 0
 		}
@@ -285,9 +388,30 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		case <-runCtx.Done():
 			stopTimerForRuntimeEvent(runCtx, timer)
 			return nil
+		case change, ok := <-maintenanceChanges:
+			if stopTimerForRuntimeEvent(runCtx, timer) || !ok {
+				return nil
+			}
+			desired = change
+			if desired.Paused {
+				kubernetesCache.Stop()
+				kubernetesCache.TakeEvents()
+				applied = desired
+				if err := encoder.Encode(applied.Record()); err != nil {
+					fmt.Fprintln(stderr, err)
+				}
+				continue
+			}
+			if err := resume(); err != nil {
+				return err
+			}
 		case <-kubernetesCache.Notifications():
 			if stopTimerForRuntimeEvent(runCtx, timer) {
 				return nil
+			}
+			if applied.Paused {
+				kubernetesCache.TakeEvents()
+				continue
 			}
 			if err := controller.StepEvents(runCtx, time.Now().UTC(), kubernetesCache.TakeEvents()); err != nil {
 				if runCtx.Err() != nil {
@@ -372,6 +496,14 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			if *exitAfterClosure && completion.err == nil {
 				return nil
 			}
+			if *restartAfterClosure && completion.err == nil {
+				if err := encoder.Encode(map[string]any{
+					"controller_closure_restart": controller.LastAcknowledgedIncidentID(),
+				}); err != nil {
+					fmt.Fprintln(stderr, err)
+				}
+				return nil
+			}
 		case renewErr := <-renewalErrors:
 			if stopTimerForRuntimeEvent(runCtx, timer) {
 				return nil
@@ -380,6 +512,15 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		case <-timer.C:
 			if stopTimerForRuntimeEvent(runCtx, timer) {
 				return nil
+			}
+			if applied != desired {
+				if err := resume(); err != nil {
+					return err
+				}
+				continue
+			}
+			if applied.Paused {
+				continue
 			}
 			if err := controller.Step(runCtx, time.Now().UTC(), nil); err != nil {
 				if runCtx.Err() != nil {
@@ -460,6 +601,8 @@ func maintainLeadership(
 }
 
 var environmentNamePattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+
+var namespacePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 
 func parseResponderEnvironment(entries []string) (map[string]string, error) {
 	reserved := map[string]bool{

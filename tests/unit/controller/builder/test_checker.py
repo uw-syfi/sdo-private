@@ -712,3 +712,95 @@ def test_check_cli_test_rejects_health_detector_that_flags_externalname_endpoint
     if expected_exit:
         assert "ExternalName Service sdo-externalname-check/jaeger" in output.out
         assert "sdk.ServiceExpectsEndpoints" in output.out
+
+
+def test_check_cli_supervised_controller_relaunches_after_each_closure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app_root = tmp_path / "workspace" / "application"
+    tool_root = tmp_path / "sdo"
+    _write_app_diagnostics(app_root)
+    _write_tool_root(tool_root)
+    runs_log = tmp_path / "runs.log"
+    fake_go = tmp_path / "go"
+    # The fake controller acknowledges one closure (exit 0), then fails (exit 3)
+    # so the supervisor loop terminates and the test can inspect both launches.
+    fake_go.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ]; then
+    cat > "$a" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$SDO_RUNS_LOG"
+if [ "$(wc -l < "$SDO_RUNS_LOG")" -ge 2 ]; then exit 3; fi
+exit 0
+SCRIPT
+    chmod +x "$a"
+  fi
+  prev="$a"
+done
+""",
+        encoding="utf-8",
+    )
+    fake_go.chmod(fake_go.stat().st_mode | 0o111)
+    monkeypatch.setenv("SDO_CONTROLLER_TOOL_ROOT", str(tool_root))
+    monkeypatch.setenv("SDO_CONTROLLER_GO", str(fake_go))
+    monkeypatch.setenv("SDO_RUNS_LOG", str(runs_log))
+
+    exit_code = check_main(
+        [
+            "controller",
+            "--app",
+            str(app_root),
+            "--namespace",
+            "demo",
+            "--control-namespace",
+            "demo-sdo",
+            "--responder-image",
+            "sdo-responder:v1",
+            "--repository-pvc",
+            "sdo-repository",
+            "--credentials-secret",
+            "sdo-codex-credentials",
+            "--worktree-root",
+            str(tmp_path / "workspace" / "worktrees"),
+            "--supervise",
+        ]
+    )
+
+    assert exit_code == 3
+    runs = runs_log.read_text(encoding="utf-8").splitlines()
+    assert len(runs) == 2
+    for argv in runs:
+        assert "--restart-after-closure" in argv
+        assert "--exit-after-closure" not in argv
+        assert "--control-namespace demo-sdo" in argv
+        assert "--namespace demo" in argv
+    assert '"controller_supervisor": "relaunch"' in capsys.readouterr().out
+
+
+def test_check_cli_rejects_supervising_a_bounded_controller(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        check_main(
+            [
+                "controller",
+                "--app",
+                str(tmp_path),
+                "--namespace",
+                "demo",
+                "--responder-image",
+                "r",
+                "--repository-pvc",
+                "p",
+                "--credentials-secret",
+                "s",
+                "--worktree-root",
+                str(tmp_path / "worktrees"),
+                "--supervise",
+                "--exit-after-closure",
+            ]
+        )

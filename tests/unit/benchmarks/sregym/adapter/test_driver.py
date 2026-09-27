@@ -1386,3 +1386,78 @@ def test_exported_runtime_artifacts_cover_responder_sessions_and_usage_logs() ->
     # session rollouts (every shell command and model request) are exported.
     assert posixpath.relpath(f"{CODEX_HOME_PATH}/sessions", RUNTIME_STATE_ROOT) in exported
     assert posixpath.relpath(posixpath.dirname(RESPONDER_TURN_USAGE_LOG), RUNTIME_STATE_ROOT) in exported
+
+
+@pytest.mark.parametrize("reflection_session", ["resume", "fresh"])
+def test_persistent_driver_reports_resolution_without_strict_receipt_or_job_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    reflection_session: str,
+) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    logs_dir = tmp_path / "pipeline" / "stage_1_reused-incident" / "problem" / "agent"
+    repository = tmp_path / "application"
+    repository.mkdir()
+    state_path = tmp_path / "pipeline" / "sdo_persistent_controller.json"
+    events: list[str] = []
+    captured: dict[str, object] = {}
+
+    def fake_stage(inputs: object, *, ops: object, run_lifecycle: object, inject: object) -> dict[str, object]:
+        captured["inputs"] = inputs
+        captured["kubeconfig"] = os.environ.get("KUBECONFIG")
+        events.append("stage")
+        return {
+            "incident_id": "incident-1",
+            "confirmed_root_causes": [{"summary": "missing ConfigMap"}],
+            "repair_actions": [{"summary": "restored ConfigMap"}],
+            "driver_phase_timings_seconds": {},
+        }
+
+    monkeypatch.setenv("SREGYM_DEFER_CLEANUP", "1")
+    monkeypatch.setenv("SDO_PERSISTENT_CONTROLLER_STATE", str(state_path))
+    monkeypatch.setenv("SREGYM_BASE_KUBECONFIG", "/trusted/kubeconfig")
+    monkeypatch.setenv("KUBECONFIG", "/proxy/kubeconfig")
+    monkeypatch.setattr(driver, "get_api_base", lambda: "http://localhost:8000")
+    monkeypatch.setattr(driver, "poll_stage_sync", lambda *_args, **_kwargs: "awaiting_fault_injection")
+    monkeypatch.setattr(driver, "get_app_info", lambda *_args: {"app_name": "Demo", "namespace": "demo"})
+    monkeypatch.setattr(driver, "_application_repository", lambda: repository)
+    monkeypatch.setattr(
+        driver,
+        "_deployed_lifecycle_context",
+        lambda *_args, **_kwargs: driver.DeployedLifecycleContext(health_objective="healthy", active_resources=[]),
+    )
+    monkeypatch.setattr(driver, "run_persistent_stage", fake_stage)
+    monkeypatch.setattr(driver, "_submit_recorded_result", lambda *_args: events.append("submit"))
+    monkeypatch.setattr(driver, "signal_cleanup", lambda *_args: events.append("cleanup"))
+    monkeypatch.setattr(
+        driver, "_remove_sdo_jobs_before_benchmark_grading", lambda *_args, **_kwargs: pytest.fail("no job cleanup")
+    )
+
+    assert (
+        driver.main(
+            ["--persistent-controller", "--reflection-session", reflection_session, "--logs-dir", str(logs_dir)]
+        )
+        == 0
+    )
+
+    inputs = captured["inputs"]
+    assert inputs.runtime_config.control_namespace == "demo-sdo"  # type: ignore[attr-defined]
+    assert inputs.runtime_config.persistent is True  # type: ignore[attr-defined]
+    assert inputs.runtime_config.reflection_session == reflection_session  # type: ignore[attr-defined]
+    assert inputs.stage_label == "stage_1_reused-incident"  # type: ignore[attr-defined]
+    assert inputs.state_path == state_path  # type: ignore[attr-defined]
+    assert captured["kubeconfig"] == "/trusted/kubeconfig"
+    assert os.environ["KUBECONFIG"] == "/proxy/kubeconfig"
+    assert events == ["stage", "submit", "cleanup"]
+    assert (logs_dir / "sdo_incident_resolution.json").is_file()
+    assert not list(logs_dir.glob("sdo_production_receipt_*.json"))
+
+
+def test_persistent_mode_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
+    assert driver._parse_args([]).persistent_controller is False
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"persistent_controller": True}))
+    assert driver._parse_args([]).persistent_controller is True

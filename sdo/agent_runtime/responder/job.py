@@ -4,6 +4,7 @@ import json
 import os
 import ssl
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -66,6 +67,43 @@ class KubernetesResultPublisher:
             raise RuntimeError(f"existing result ConfigMap {name!r} has different payload")
 
 
+def write_application_kubeconfig(namespace: str) -> Path | None:
+    """Point in-pod kubectl at the incident's application namespace.
+
+    A responder Job may run in the controller's own namespace, so the pod's
+    service-account namespace is not the application. Outside a pod (no
+    service-account token) the ambient kubeconfig is left untouched.
+    """
+
+    token = SERVICE_ACCOUNT_ROOT / "token"
+    host = os.environ.get("KUBERNETES_SERVICE_HOST", "").strip()
+    if not token.is_file() or not host:
+        return None
+    port = os.environ.get("KUBERNETES_SERVICE_PORT_HTTPS", "443")
+    config = {
+        "apiVersion": "v1",
+        "kind": "Config",
+        "clusters": [
+            {
+                "name": "in-cluster",
+                "cluster": {
+                    "server": f"https://{host}:{port}",
+                    "certificate-authority": str(SERVICE_ACCOUNT_ROOT / "ca.crt"),
+                },
+            }
+        ],
+        "users": [{"name": "responder", "user": {"tokenFile": str(token)}}],
+        "contexts": [
+            {"name": "application", "context": {"cluster": "in-cluster", "user": "responder", "namespace": namespace}}
+        ],
+        "current-context": "application",
+    }
+    path = Path(tempfile.gettempdir()) / "sdo-responder-kubeconfig.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+    path.chmod(0o600)
+    return path
+
+
 def run_job(
     *,
     request_path: Path,
@@ -74,6 +112,9 @@ def run_job(
     executor: Callable[[IncidentRequest], IncidentResult] = execute_incident,
 ) -> IncidentResult:
     request = IncidentRequest.model_validate_json(request_path.read_text(encoding="utf-8"))
+    kubeconfig = write_application_kubeconfig(request.namespace)
+    if kubeconfig is not None:
+        os.environ["KUBECONFIG"] = str(kubeconfig)
     result = executor(request)
     if result.incident_id != request.incident_id:
         raise ResponderExecutionError("responder result incident_id does not match request")

@@ -58,7 +58,11 @@ type Controller struct {
 	stateStore    StateStore
 	stateRevision string
 
-	mu                         sync.Mutex
+	mu sync.Mutex
+	// durable is the state stateStore last confirmed durable. With a store
+	// attached, an effect runs only while this state records it, so a
+	// restarted controller can recover every effect that ran.
+	durable                    *RuntimeState
 	incidentOpen               bool
 	responderDone              bool
 	currentIncidentRequest     *IncidentRequest
@@ -237,6 +241,13 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 
 	c.maybeCloseIncident(now)
 	return c.dispatchReady(ctx, now)
+}
+
+// EvaluateAll evaluates every detector against one fresh snapshot, for example
+// when observation resumes after a planned maintenance window.
+func (c *Controller) EvaluateAll(ctx context.Context, now time.Time) error {
+	c.scheduler.ExpediteAll(now)
+	return c.StepEvents(ctx, now, nil)
 }
 
 func (c *Controller) mergeIntoOpenIncident(finding sdk.Finding) bool {
@@ -786,6 +797,12 @@ func (c *Controller) AttachStateStore(ctx context.Context, store StateStore) err
 	}
 	c.stateStore = store
 	c.stateRevision = revision
+	c.mu.Lock()
+	c.durable = nil
+	if revision != "" {
+		c.durable = &state
+	}
+	c.mu.Unlock()
 	return nil
 }
 
@@ -798,11 +815,20 @@ func (c *Controller) PersistState(ctx context.Context) error {
 		return err
 	}
 	defer cancel()
-	revision, err := c.stateStore.Save(actionCtx, c.ExportState(), c.stateRevision)
+	state := c.ExportState()
+	revision, err := c.stateStore.Save(actionCtx, state, c.stateRevision)
 	if err != nil {
+		// The write may or may not have landed; no effect recorded since the
+		// last confirmed save may run until a later save confirms it.
+		c.mu.Lock()
+		c.durable = nil
+		c.mu.Unlock()
 		return err
 	}
 	c.stateRevision = revision
+	c.mu.Lock()
+	c.durable = &state
+	c.mu.Unlock()
 	return nil
 }
 

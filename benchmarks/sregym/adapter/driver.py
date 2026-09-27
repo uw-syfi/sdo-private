@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -12,7 +14,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +26,14 @@ from benchmarks.sregym.adapter.fault_gate import (
     FaultGateError,
     inject_fault_after_controller_baseline,
     request_fault_injection,
+)
+from benchmarks.sregym.adapter.persistent import (
+    PERSISTENT_STATE_ENV,
+    KubectlClusterOps,
+    StageInputs,
+    control_namespace_for,
+    persist_resolution,
+    run_persistent_stage,
 )
 from benchmarks.sregym.adapter.runtime import RuntimeConfig, run_production_runtime
 from benchmarks.sregym.adapter.submission import submit_solution
@@ -195,6 +205,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--reflection-session",
         choices=("resume", "fresh"),
         default=config.get("reflection_session", "resume"),
+    )
+    parser.add_argument(
+        "--persistent-controller",
+        action=argparse.BooleanOptionalAction,
+        default=bool(config.get("persistent_controller", False)),
+        help="keep one controller per application running across benchmark problems",
     )
     parser.add_argument(
         "--logs-dir",
@@ -390,6 +406,132 @@ class _FaultGate:
             raise FaultGateError("controller completed before the deferred fault was injected")
 
 
+def _lifecycle_fingerprint(context: DeployedLifecycleContext) -> str:
+    """Identify the validated lifecycle inputs; a redeploy of the same variant keeps it."""
+
+    payload = {
+        "health_objective": context.health_objective,
+        "active_resources": sorted((resource.kind, resource.name) for resource in context.active_resources),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+@contextlib.contextmanager
+def _environment(name: str, value: str | None) -> Iterator[None]:
+    previous = os.environ.get(name)
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = previous
+
+
+def _stage_label(logs_dir: str | None) -> str:
+    if logs_dir:
+        stage_dir = next(
+            (parent for parent in Path(logs_dir).resolve().parents if re.fullmatch(r"stage_\d+_.+", parent.name)),
+            None,
+        )
+        if stage_dir is not None:
+            return stage_dir.name
+    return datetime.now(timezone.utc).strftime("run-%Y%m%dT%H%M%S")
+
+
+def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> dict[str, Any]:
+    """Serve one problem with the application's long-running controller."""
+
+    initial_stage = poll_stage_sync(
+        api_base,
+        wait_for=READY_STAGES | {AWAITING_FAULT_INJECTION},
+        timeout=300,
+        on_timeout="raise",
+    )
+    if initial_stage != AWAITING_FAULT_INJECTION:
+        raise RuntimeError("persistent controller mode requires deferred fault injection")
+    conductor_ready = time.monotonic()
+    raw_state_path = os.getenv(PERSISTENT_STATE_ENV, "").strip()
+    if not raw_state_path:
+        raise RuntimeError(f"persistent controller mode requires {PERSISTENT_STATE_ENV} from the runner")
+    app_info = get_app_info(api_base)
+    repository = _application_repository()
+    _configure_turn_usage_log(args.logs_dir)
+    application = str(app_info.get("app_name") or repository.name)
+    namespace = str(app_info.get("namespace") or "default")
+    lifecycle_context = _deployed_lifecycle_context(namespace)
+    receipt_dir = _receipt_directory(args.logs_dir, repository)
+    trusted_kubeconfig = os.getenv("SREGYM_BASE_KUBECONFIG", "").strip() or None
+    ambient_kubeconfig = os.environ.get("KUBECONFIG")
+
+    def lifecycle() -> bool:
+        # Host-side lifecycle keeps the benchmark's agent access path.
+        with _environment("KUBECONFIG", ambient_kubeconfig):
+            reused = reuse_initial_lifecycle_if_valid(
+                repository,
+                application=application,
+                health_objective=lifecycle_context.health_objective,
+                active_resources=lifecycle_context.active_resources,
+            )
+            if not reused:
+                lifecycle_type = ClaudeLifecycleBackend if args.provider == "claude" else CodexLifecycleBackend
+                run_initial_lifecycle(
+                    repository,
+                    application=application,
+                    health_objective=lifecycle_context.health_objective,
+                    active_resources=lifecycle_context.active_resources,
+                    backend=lifecycle_type(model=args.model),
+                )
+        if args.logs_dir:
+            persist_lifecycle_seed(repository, Path(args.logs_dir))
+        return reused
+
+    config = RuntimeConfig(
+        repository=repository,
+        namespace=namespace,
+        application=application,
+        controller_image=args.controller_image,
+        responder_image=args.responder_image,
+        validator_image=args.validator_image,
+        repository_pvc=args.repository_pvc,
+        credentials_secret=args.credentials_secret,
+        model=args.model,
+        timeout_seconds=args.timeout_sec,
+        repair_policy="recorded-actions",
+        agent_provider=args.provider,
+        reflection_session=args.reflection_session,
+        submission_api_base=_in_cluster_api_base(api_base),
+        submission_relay_target_base=_relay_target_api_base(api_base),
+        artifacts_dir=receipt_dir,
+        controller_namespace=control_namespace_for(namespace),
+        persistent=True,
+        wait_for_completion=False,
+    )
+    with _environment("KUBECONFIG", trusted_kubeconfig or ambient_kubeconfig):
+        resolution = run_persistent_stage(
+            StageInputs(
+                stage_label=_stage_label(args.logs_dir),
+                application=application,
+                namespace=namespace,
+                lifecycle_fingerprint=_lifecycle_fingerprint(lifecycle_context),
+                runtime_config=config,
+                receipt_dir=receipt_dir,
+                state_path=Path(raw_state_path),
+                kubeconfig=trusted_kubeconfig,
+                verification_timeout_seconds=float(args.timeout_sec + 300),
+            ),
+            ops=KubectlClusterOps(),
+            run_lifecycle=lifecycle,
+            inject=lambda: request_fault_injection(api_base),
+        )
+    resolution["driver_phase_timings_seconds"]["conductor_wait"] = conductor_ready - started
+    return resolution
+
+
 def _run(args: argparse.Namespace) -> dict[str, Any]:
     started = time.monotonic()
     if os.getenv("SREGYM_DEFER_CLEANUP", "").strip() != "1":
@@ -489,6 +631,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     api_base = get_api_base()
     logger.info("cleanup deferral watchdog configured for %.0fs", _cleanup_defer_timeout_seconds())
+    if args.persistent_controller:
+        return _main_persistent(args, api_base)
     try:
         receipt = _run(args)
     except Exception:
@@ -506,6 +650,28 @@ def main(argv: list[str] | None = None) -> int:
     )
     persist_production_receipt(receipt, receipt_dir)
     print(f"SDO_RUN_TELEMETRY={json.dumps(receipt, sort_keys=True)}")
+    signal_cleanup(api_base)
+    return 0
+
+
+def _main_persistent(args: argparse.Namespace, api_base: str) -> int:
+    """Report resolution at verified health; the strict receipt follows the reflection drain."""
+
+    started = time.monotonic()
+    if os.getenv("SREGYM_DEFER_CLEANUP", "").strip() != "1":
+        raise RuntimeError("sdo_codex requires defer_cleanup: true in the SREGym agent registry")
+    try:
+        resolution = _run_persistent(args, api_base, started)
+    except Exception:
+        logger.exception("persistent SDO incident lifecycle failed")
+        return 1
+    receipt_dir = _receipt_directory(args.logs_dir, _application_repository())
+    persist_resolution(resolution, receipt_dir)
+    submission_started = time.monotonic()
+    _submit_recorded_result(resolution, api_base)
+    resolution["driver_phase_timings_seconds"]["benchmark_submission"] = time.monotonic() - submission_started
+    persist_resolution(resolution, receipt_dir)
+    print(f"SDO_RUN_TELEMETRY={json.dumps(resolution, sort_keys=True, default=str)}")
     signal_cleanup(api_base)
     return 0
 

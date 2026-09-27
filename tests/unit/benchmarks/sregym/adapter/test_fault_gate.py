@@ -9,8 +9,10 @@ import pytest
 
 from benchmarks.sregym.adapter.fault_gate import (
     FaultGateError,
+    controller_active_findings_after_resume,
     controller_baseline_clear,
     inject_fault_after_controller_baseline,
+    inject_fault_after_resumed_baseline,
 )
 
 
@@ -131,3 +133,50 @@ def test_sdo_registry_entry_defers_fault_injection() -> None:
 
     assert agents["sdo_codex"]["defer_fault_injection"] is True
     assert "defer_fault_injection" not in agents["crucible"]
+
+
+def _maintenance(mode: str, generation: str) -> str:
+    return json.dumps({"controller_maintenance": mode, "maintenance_generation": generation})
+
+
+def test_resumed_baseline_counts_only_evaluations_after_this_stages_resume() -> None:
+    before = _evaluation("resolved")
+    assert controller_active_findings_after_resume(before, "stage-1") is None
+    assert controller_active_findings_after_resume(before + "\n" + _maintenance("active", "stage-0"), "stage-1") is None
+    resumed = "\n".join([before, _maintenance("paused", "stage-0-end"), _maintenance("active", "stage-1")])
+    assert controller_active_findings_after_resume(resumed, "stage-1") is None
+    assert controller_active_findings_after_resume(resumed + "\n" + _evaluation("active"), "stage-1") == ["r0"]
+    assert controller_active_findings_after_resume(resumed + "\n" + _evaluation("resolved"), "stage-1") == []
+    repaused = resumed + "\n" + _evaluation("resolved") + "\n" + _maintenance("paused", "stage-1-end")
+    assert controller_active_findings_after_resume(repaused, "stage-1") is None
+
+
+def test_persistent_gate_waits_for_the_resumed_controllers_all_clear_before_injecting() -> None:
+    clock = _Clock()
+    outputs = [
+        _evaluation("resolved"),  # previous stage's evaluation: must not count
+        _evaluation("resolved") + "\n" + _maintenance("active", "stage-1"),
+        _evaluation("resolved") + "\n" + _maintenance("active", "stage-1") + "\n" + _evaluation("resolved"),
+    ]
+    calls: list[tuple[list[str], str]] = []
+
+    def kubectl(args: list[str], *, namespace: str, check: bool) -> subprocess.CompletedProcess[str]:
+        calls.append((args, namespace))
+        stdout = outputs.pop(0) if len(outputs) > 1 else outputs[0]
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+    injected: list[str] = []
+    timings = inject_fault_after_resumed_baseline(
+        "hotel-sdo",
+        "stage-1",
+        inject=lambda: injected.append("fault"),
+        kubectl_runner=kubectl,
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+        timeout_seconds=60,
+    )
+
+    assert injected == ["fault"]
+    assert timings["controller_baseline_wait"] == pytest.approx(2.0)
+    assert all(namespace == "hotel-sdo" for _, namespace in calls)
+    assert calls[0][0][:2] == ["logs", "job/sdo-controller-run"]

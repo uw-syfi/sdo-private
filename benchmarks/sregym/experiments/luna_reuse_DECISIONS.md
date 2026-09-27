@@ -316,3 +316,70 @@ Goal: in a repeated incident, make the warm fast mode and the deterministic no-o
   - Reflection: deterministic no-op (`reflection_skipped_reason` set), 0 tokens, `validator_skipped_reason=unchanged-diagnostics`, no controller update. Post-recovery 8.4s. Stage wall 567s.
   - Targets met: total R2 incident tokens 247K, below the Codex median (861K) and A2 (438K). Primary 43.6s, below v2's 51.7s.
   - Minor detour: after a successful mitigation the responder ran `submission --help` and listed tools before returning. About 20s, after the metric.
+
+## Persistent controller
+
+Goal: keep ONE SDO controller running across the rounds of a pipeline (the paper's long-running design) instead of installing a fresh controller per incident that exits after one closure. Branch `vic/feat/persistent-controller`; config `sdo_codex_luna_persistent.toml`.
+
+### What the conductor does between problems (the blocker)
+
+- **Every problem deletes and recreates the application namespace.** `Conductor.start_problem` calls `undeploy_app()` (hotel: `kubectl delete namespace hotel-reservation`, wait, then delete PVs) and then `deploy_app()` (create the namespace, apply the source-built manifests, wait for ready). After the agent signals cleanup, `_cleanup_sync` recovers the fault, runs `problem.app.cleanup()` (the same namespace delete), and then `reconcile_to_baseline()`.
+- **Reconciliation deletes every namespace, PersistentVolume, ClusterRole, and ClusterRoleBinding that is not in the baseline.** Only `kube-system`, `kube-public`, `kube-node-lease`, `default`, `sregym`, and `chaos-mesh` are protected.
+- **`preserve_infrastructure` does not change either behaviour.** It only reuses the shared infrastructure (metrics-server, OpenEBS, Prometheus, Jaeger, OTel, MCP) and makes it part of the persisted baseline. The application namespace is still recreated, and anything created after the baseline is still reconciled away.
+- **Each stage is a separate `main.py` process, and each problem launches a separate driver process.** After `done`, the harness gives the agent 60s and then kills it. So the controller has to live entirely in the cluster, and teardown has to come from the pipeline runner.
+- **A latent harness bug.** Hotel's `cleanup()` selected PVs with `kubectl get pv | grep 'hotel-reservation'`, which also matches the claim column of any namespace containing that substring (for example `hotel-reservation-sdo`), and then stripped their finalizers.
+
+### Design chosen
+
+- **One controller per application, in its own namespace, named after the application namespace: `<app-namespace>-sdo`** (`hotel-reservation-sdo`).
+  - That namespace holds the controller Job, repository PVC, `sdo-controller-state`, the Lease, the credentials Secret, the maintenance ConfigMap, the SREGym submission bridge, and the responder and validator Jobs.
+  - Responder Jobs run there because the RWO repository PVC is there. Their kubectl is pointed at the incident's application namespace through a generated kubeconfig.
+  - The Go controller gained `--control-namespace`. `--namespace` stays the observed application namespace.
+- **SDO stays off the application's manifests.** The application namespace receives only two Roles and RoleBindings: a read-only observer Role for the controller, and the existing `sdo-responder` repair rules for the responder. Both are bound to ServiceAccounts in the controller namespace. The responder's Role in its own namespace is reduced to publishing its result ConfigMap.
+  - No ClusterRole or ClusterRoleBinding is created. The existence check for the application namespace is done by the host-side adapter with the trusted kubeconfig, so no cluster-scoped grant is needed.
+- **Scope is per application (coordinator constraint).** Memory, PVC, state, Lease, and credentials belong to one application's controller. The pipeline state file is keyed by application namespace.
+  - A stage for a different application installs a separate controller in its own namespace.
+  - A stage that names a different application for an already-served namespace is refused.
+  - Tests: `test_stages_for_different_applications_install_separate_controllers` and `test_refuses_to_reuse_a_controller_for_a_different_application_in_the_same_namespace`.
+- **The harness keeps the namespace.** Opt-in `SREGYM_PRESERVE_NAMESPACE_LABEL` (in `third_party/sregym`, commit `ed505f3d` on the submodule branch `vic/feat/persistent-controller`, not pushed) keeps namespaces labelled `<label>=true`, and the PVs bound to their claims, out of reconciliation.
+  - The runner sets it to `sdo.dev/controller-namespace` only when `persistent_controller` is on. The installer puts that label on every separate controller namespace.
+  - Unset (every baseline run), reconciliation is unchanged.
+  - The hotel PV selection now matches the claim namespace exactly. No baseline run ever had a namespace containing `hotel-reservation` other than the application's own, so this fix does not change any earlier result.
+  - Alternatives rejected:
+    - Rewriting the persisted baseline file from the adapter: it is harness-internal state and too fragile.
+    - Putting the controller in the protected `sregym` or `default` namespace: that mixes SDO state with the harness's and breaks per-application scoping.
+- **Maintenance pauses instead of stopping the controller.** Between problems the application is intentionally absent. Without a pause, the controller would treat that as an incident and dispatch a responder to "repair" the deleted namespace.
+  - The operator-owned ConfigMap `sdo-controller-maintenance` (`state: paused|active`, `generation`) is polled every second.
+  - While paused, the controller stops its informers and skips evaluations. It still finishes closure, reflection, and acknowledgement.
+  - Resuming re-creates the informer generation (a fresh list, which also recovers from the 403s seen while the Roles were gone), logs `{"controller_maintenance":"active","maintenance_generation":G}`, and evaluates every detector once (`Controller.EvaluateAll`).
+  - This is also a production-meaningful feature (planned redeploys).
+  - Alternative rejected: scaling the controller away between problems. That violates "one controller pod for the whole pipeline".
+- **Learned detectors reach the running controller.** A long-running controller never loaded detectors accepted by reflection: the rollout ran only after the Go binary exited, which production never did. `check_cli controller --supervise` now runs the Go controller with `--restart-after-closure`. After each acknowledged closure the controller exits 0, the supervisor compiles and records the rollout, logs `controller_supervisor: relaunch`, and relaunches in the same pod.
+  - Production installs without `--exit-after-closure` or `--duration` now pass `--supervise` too, which fixes the same gap for `sdo operate`.
+- **Production default.** `sdo operate` keeps single-namespace installation as the default. That is today's behaviour, and production namespaces are not recreated by a harness. A new optional `--controller-namespace` selects the split layout.
+  - Idempotency is opt-in (`ControllerInstallConfig.reuse_existing`). A healthy controller Job whose install-fingerprint annotation (a hash of the rendered Job) matches is kept, and only the namespace-scoped grants and transport are re-applied.
+  - `sdo operate` leaves it off: re-running operate after a new deployment should reseed memory from the verified deployment.
+- **The persistent mode flag is `persistent_controller = true` under `[defaults.agent_config.sdo_codex]`. It is off by default** (tests: `test_persistent_mode_is_off_by_default*`).
+
+### Stage sequencing in persistent mode
+
+1. **Drain the previous incident, if one is pending.** Wait until it is acknowledged and the supervisor has relaunched the controller (so the reflection commit and any learned-detector rollout are live). Sync the controller's repository into this stage's workspace (the controller's repository is the source of truth), and write the previous stage's strict receipt with `reflection_drain.{drained_by, waited_seconds}`. The wait is recorded as this stage's `reflection_drain_seconds`, a pre-injection cost.
+2. **Reuse the controller** if it is the one this pipeline installed (same pod UID in the state file) and the deployed lifecycle context has the same fingerprint (a hash of the health objective and active resources). Reuse skips lifecycle revalidation, re-applies the application-namespace grants, and re-applies the bridge.
+   - Otherwise: delete any controller this pipeline did not install, run lifecycle as before, and install fresh.
+   - If the topology changed, memory is drained into the workspace before the reinstall, so learning is not lost.
+3. **Resume with a new generation.** Gate injection on the first all-clear evaluation after `controller_maintenance: active` for that generation, never on the Job creation time.
+4. **Wait for this stage's own incident.** That is the first incident ID not known before injection whose `pending_closure.verified_at` is set. Then pause and wait for the controller to acknowledge the pause.
+5. **Write `sdo_incident_resolution.json`.** Submit the recorded result if the responder did not, then signal cleanup. The stage does not wait for reflection.
+6. **Pipeline teardown** (runner, always, including after a failure) runs `python -m benchmarks.sregym.adapter.persistent teardown --state <pipeline>/sdo_persistent_controller.json`. It drains the last incident, writes its strict receipt, and deletes the controller namespace. The runner validates the deferred strict receipts after teardown and fails the pipeline if any is missing or invalid.
+
+### Asynchronous reflection (coordinator clarification)
+
+- **Resolution metrics end at the incident's own milestones.** The primary metric is conductor-side (mitigation POST minus injection). `incident_resolution_seconds` is controller detection to controller-verified health, taken from the closure's timestamps. Neither can include reflection.
+  - Tests: `test_stage_reports_resolution_at_verified_health_before_reflection_finishes` asserts 40s from detection to verification while the fake reflection has not even started. `test_next_stage_injects_only_after_previous_reflection_is_committed_and_rolled_out` asserts the drain is recorded as a pre-injection cost, and that the deferred receipt keeps 40s while its 240s of post-recovery learning is listed as excluded.
+- **The stage reports resolution as soon as verification happens.** The strict receipt, which needs the reflection commit, is written by the next stage's drain or by teardown.
+- **The next injection waits for the drain.** It waits for reflection to be durably committed and for the supervisor to relaunch (rolling out any learned detector) before resuming and injecting. The test asserts `reflected < receipt < fault` ordering.
+
+### Other decisions
+
+- **Responder Jobs of earlier incidents coexist** in the controller namespace until their TTL. In persistent mode the receipt's live-Job consistency check ignores Jobs of other incidents; the durable request/result pair is still required to be unique.
+- **Merged `vic/perf/controller-api-rate`** (`0fcd065`, `1643124`: QPS 50 / burst 100, one cached-resourceVersion state update, and the `ErrEffectNotDurable` guard) into this branch before the live check, as the coordinator asked. The merge was clean: it touched `controller.go`, `effects.go`, `broker_effects.go`, and `state_store.go`, while this branch touched `controller.go` only in a new method. Go tests pass for `runtime`, `core`, and `sdk`.

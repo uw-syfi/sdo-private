@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -74,10 +76,28 @@ type StateStore interface {
 	Save(context.Context, RuntimeState, string) (string, error)
 }
 
+// errStaleResourceVersion reports an Update rejected because the ConfigMap
+// changed since the store last read or wrote it. The state revision decides
+// whether another writer took over or only metadata moved.
+var errStaleResourceVersion = fmt.Errorf("%w: stale ConfigMap resourceVersion", ErrStateConflict)
+
+// ConfigMapStateStore persists RuntimeState in one ConfigMap. The
+// sdo.dev/state-revision annotation is the controller's compare-and-swap
+// token. The store caches the ConfigMap it last read or wrote, so an unchanged
+// state costs no request and a changed state costs one Update carrying the
+// cached resourceVersion. Only a resourceVersion conflict falls back to Get
+// plus Update, and that path still rejects a stale state revision.
 type ConfigMapStateStore struct {
 	client    kubernetes.Interface
 	namespace string
 	name      string
+
+	mu sync.Mutex
+	// cached is the ConfigMap as the API server last returned it, or nil when
+	// no object is known or a write's outcome is unknown.
+	cached *corev1.ConfigMap
+	// durableDigest is the SHA-256 of cached's serialized state.
+	durableDigest [sha256.Size]byte
 }
 
 func NewConfigMapStateStore(client kubernetes.Interface, namespace string, name string) *ConfigMapStateStore {
@@ -85,6 +105,9 @@ func NewConfigMapStateStore(client kubernetes.Interface, namespace string, name 
 }
 
 func (s *ConfigMapStateStore) Load(ctx context.Context) (RuntimeState, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cached = nil
 	configMap, err := s.client.CoreV1().ConfigMaps(s.namespace).Get(ctx, s.name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return RuntimeState{}, "", nil
@@ -107,9 +130,14 @@ func (s *ConfigMapStateStore) Load(ctx context.Context) (RuntimeState, string, e
 	if _, err := strconv.ParseUint(revision, 10, 64); err != nil {
 		return RuntimeState{}, "", fmt.Errorf("invalid controller state revision %q", revision)
 	}
+	s.remember(configMap)
 	return state, revision, nil
 }
 
+// Save durably writes state if it differs from the last durable state and
+// returns the new revision. A nil error means the state is durable at the
+// returned revision. After an error nothing new is known to be durable, and
+// the next Save re-reads the ConfigMap instead of trusting the cache.
 func (s *ConfigMapStateStore) Save(ctx context.Context, state RuntimeState, expectedRevision string) (string, error) {
 	if err := state.Validate(); err != nil {
 		return "", err
@@ -118,6 +146,24 @@ func (s *ConfigMapStateStore) Save(ctx context.Context, state RuntimeState, expe
 	if err != nil {
 		return "", fmt.Errorf("encode controller state: %w", err)
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cached != nil && expectedRevision != "" &&
+		s.cached.Annotations[stateRevisionAnnotation] == expectedRevision {
+		if sha256.Sum256(payload) == s.durableDigest {
+			return expectedRevision, nil
+		}
+		revision, updateErr := s.update(ctx, s.cached, payload)
+		if !errors.Is(updateErr, errStaleResourceVersion) {
+			return revision, updateErr
+		}
+	}
+	return s.saveFromServer(ctx, payload, expectedRevision)
+}
+
+// saveFromServer is the compare-and-swap path against a freshly read ConfigMap.
+func (s *ConfigMapStateStore) saveFromServer(ctx context.Context, payload []byte, expectedRevision string) (string, error) {
+	s.cached = nil
 	configMaps := s.client.CoreV1().ConfigMaps(s.namespace)
 	current, err := configMaps.Get(ctx, s.name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -137,33 +183,53 @@ func (s *ConfigMapStateStore) Save(ctx context.Context, state RuntimeState, expe
 		if createErr != nil {
 			return "", fmt.Errorf("create controller state ConfigMap: %w", createErr)
 		}
+		s.remember(created)
 		return created.Annotations[stateRevisionAnnotation], nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("get controller state ConfigMap: %w", err)
 	}
-	currentRevision := current.Annotations[stateRevisionAnnotation]
-	if expectedRevision == "" || currentRevision != expectedRevision {
+	s.remember(current)
+	if expectedRevision == "" || current.Annotations[stateRevisionAnnotation] != expectedRevision {
 		return "", ErrStateConflict
 	}
+	return s.update(ctx, current, payload)
+}
+
+// update replaces base's state payload, preserving its other metadata, with
+// base's resourceVersion as the API server's precondition. Callers hold s.mu.
+func (s *ConfigMapStateStore) update(ctx context.Context, base *corev1.ConfigMap, payload []byte) (string, error) {
+	currentRevision := base.Annotations[stateRevisionAnnotation]
 	revision, err := strconv.ParseUint(currentRevision, 10, 64)
 	if err != nil {
 		return "", fmt.Errorf("invalid controller state revision %q", currentRevision)
 	}
 	nextRevision := strconv.FormatUint(revision+1, 10)
-	updated := current.DeepCopy()
+	updated := base.DeepCopy()
 	if updated.Annotations == nil {
 		updated.Annotations = make(map[string]string)
 	}
 	updated.Annotations[stateRevisionAnnotation] = nextRevision
 	updated.Data = map[string]string{stateDataKey: string(payload)}
-	if _, err := configMaps.Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
+	s.cached = nil
+	written, err := s.client.CoreV1().ConfigMaps(s.namespace).Update(ctx, updated, metav1.UpdateOptions{})
+	if err != nil {
 		if apierrors.IsConflict(err) {
-			return "", ErrStateConflict
+			return "", errStaleResourceVersion
 		}
 		return "", fmt.Errorf("update controller state ConfigMap: %w", err)
 	}
+	if written == nil {
+		written = updated
+	}
+	s.remember(written)
 	return nextRevision, nil
+}
+
+// remember caches configMap as the durable object. Callers hold s.mu.
+func (s *ConfigMapStateStore) remember(configMap *corev1.ConfigMap) {
+	s.cached = configMap.DeepCopy()
+	s.durableDigest = sha256.Sum256([]byte(configMap.Data[stateDataKey]))
 }
 
 func cloneIncidentRequest(request *IncidentRequest) *IncidentRequest {

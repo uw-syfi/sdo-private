@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
+import yaml
 
-from sdo.controller_install import ControllerInstallConfig, controller_resources
+from sdo.controller_install import (
+    ControllerInstallConfig,
+    controller_resources,
+    install_controller,
+    kubernetes,
+    set_controller_maintenance,
+)
 
 
 def _config() -> ControllerInstallConfig:
@@ -92,3 +102,168 @@ def test_broker_and_responder_pods_log_per_turn_usage_on_the_workspace_pvc() -> 
     } in container["env"]
     assert "--responder-env=SDO_TURN_USAGE_LOG=/workspace/.sdo-runtime/usage/responder-turns.jsonl" in args
     assert {"name": "repository", "mountPath": "/workspace"} in container["volumeMounts"]
+
+
+def _split_config(**overrides: object) -> ControllerInstallConfig:
+    return ControllerInstallConfig(**{**_config().__dict__, "controller_namespace": "demo-sdo", **overrides})
+
+
+def _job(resources: list[dict[str, Any]]) -> dict[str, Any]:
+    return next(resource for resource in resources if resource["kind"] == "Job")
+
+
+def test_split_namespace_keeps_every_sdo_workload_and_state_out_of_the_application_namespace() -> None:
+    resources = controller_resources(_split_config())
+    in_app = [resource for resource in resources if resource["metadata"].get("namespace") == "demo"]
+    namespace = next(resource for resource in resources if resource["kind"] == "Namespace")
+
+    assert namespace["metadata"]["name"] == "demo-sdo"
+    assert namespace["metadata"]["labels"]["sdo.dev/application-namespace"] == "demo"
+    # The application namespace receives only namespace-scoped access grants.
+    assert {resource["kind"] for resource in in_app} == {"Role", "RoleBinding"}
+    for kind in ("PersistentVolumeClaim", "Pod", "Job", "ServiceAccount"):
+        assert all(
+            resource["metadata"]["namespace"] == "demo-sdo" for resource in resources if resource["kind"] == kind
+        ), kind
+    assert not any(resource["kind"] in {"ClusterRole", "ClusterRoleBinding"} for resource in resources)
+    for binding in (resource for resource in in_app if resource["kind"] == "RoleBinding"):
+        assert all(subject["namespace"] == "demo-sdo" for subject in binding["subjects"])
+    observer = next(
+        resource
+        for resource in in_app
+        if resource["kind"] == "Role" and resource["metadata"]["name"] == "sdo-controller"
+    )
+    assert {verb for rule in observer["rules"] for verb in rule["verbs"]} <= {"get", "list", "watch"}
+    responder = next(
+        resource
+        for resource in in_app
+        if resource["kind"] == "Role" and resource["metadata"]["name"] == "sdo-responder"
+    )
+    assert any("patch" in rule["verbs"] for rule in responder["rules"])
+
+
+def test_split_namespace_controller_observes_app_and_runs_jobs_in_its_own_namespace() -> None:
+    args = _job(controller_resources(_split_config()))["spec"]["template"]["spec"]["containers"][0]["args"]
+
+    assert args[args.index("--namespace") + 1] == "demo"
+    assert args[args.index("--control-namespace") + 1] == "demo-sdo"
+    assert args[args.index("--broker-arg=--validator-namespace") + 1] == "--broker-arg=demo-sdo"
+    assert "--supervise" in args
+
+
+def test_single_namespace_install_is_the_default() -> None:
+    resources = controller_resources(_config())
+    args = _job(resources)["spec"]["template"]["spec"]["containers"][0]["args"]
+
+    assert not any(resource["kind"] == "Namespace" for resource in resources)
+    assert all(resource["metadata"]["namespace"] == "demo" for resource in resources)
+    assert "--control-namespace" not in args
+    assert "--supervise" in args
+
+
+@pytest.mark.parametrize("controller_namespace", ["Bad_Name", "", "x" * 64])
+def test_invalid_controller_namespace_is_rejected(controller_namespace: str) -> None:
+    with pytest.raises(ValueError, match="controller_namespace"):
+        _split_config(controller_namespace=controller_namespace)
+
+
+class _FakeKubectl:
+    def __init__(self, existing_job: dict[str, Any] | None) -> None:
+        self.existing_job = existing_job
+        self.calls: list[tuple[list[str], str | None, str | None]] = []
+
+    def __call__(
+        self,
+        args: list[str],
+        *,
+        namespace: str | None,
+        input_text: str | None = None,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
+        self.calls.append((args, namespace, input_text))
+        if args[:2] == ["get", "job/sdo-controller-run"]:
+            if self.existing_job is None:
+                return subprocess.CompletedProcess(args, 1, "", "NotFound")
+            return subprocess.CompletedProcess(args, 0, json.dumps(self.existing_job), "")
+        if args[:1] == ["get"] and args[1].startswith("pod/sdo-repository-sync"):
+            ready = {"status": {"conditions": [{"type": "Ready", "status": "True"}]}}
+            return subprocess.CompletedProcess(args, 0, json.dumps(ready), "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def applied(self) -> list[dict[str, Any]]:
+        documents: list[dict[str, Any]] = []
+        for args, _namespace, input_text in self.calls:
+            if args[:1] == ["apply"] and input_text:
+                documents.extend(document for document in yaml.safe_load_all(input_text) if document)
+        return documents
+
+
+def _running_job(config: ControllerInstallConfig) -> dict[str, Any]:
+    job = _job(controller_resources(config))
+    return {**job, "status": {"active": 1}}
+
+
+def test_reinstall_reuses_a_healthy_controller_with_the_same_install_fingerprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _split_config(reuse_existing=True)
+    fake = _FakeKubectl(_running_job(config))
+    monkeypatch.setattr(kubernetes, "kubectl", fake)
+    monkeypatch.setattr(kubernetes, "_copy_repository_to_pod", _unexpected_seed)
+
+    result = install_controller(config)
+
+    assert result.reused is True
+    assert not any(args[:1] == ["delete"] and "job/sdo-controller-run" in args for args, _, _ in fake.calls)
+    assert not any(args[:1] == ["exec"] for args, _, _ in fake.calls)
+    # A recreated application namespace gets its access grants back.
+    app_grants = [document for document in fake.applied() if document["metadata"].get("namespace") == "demo"]
+    assert {document["kind"] for document in app_grants} == {"Role", "RoleBinding"}
+
+
+@pytest.mark.parametrize(
+    "stale_override",
+    [{"responder_image": "responder:old"}, {"reflection_session": "fresh"}],
+    ids=["responder-image", "reflection-session"],
+)
+def test_reinstall_replaces_a_controller_whose_install_fingerprint_differs(
+    monkeypatch: pytest.MonkeyPatch, stale_override: dict[str, str]
+) -> None:
+    config = _split_config(reuse_existing=True)
+    stale = _running_job(_split_config(reuse_existing=True, **stale_override))
+    fake = _FakeKubectl(stale)
+    seeded: list[str] = []
+    monkeypatch.setattr(kubernetes, "kubectl", fake)
+    monkeypatch.setattr(kubernetes, "_copy_repository_to_pod", lambda cfg: seeded.append(cfg.control_namespace))
+
+    result = install_controller(config)
+
+    assert result.reused is False
+    assert seeded == ["demo-sdo"]
+    assert any(args[:1] == ["delete"] and "job/sdo-controller-run" in args for args, _, _ in fake.calls)
+
+
+def test_reinstall_without_reuse_always_reseeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _config()
+    fake = _FakeKubectl(_running_job(config))
+    seeded: list[str] = []
+    monkeypatch.setattr(kubernetes, "kubectl", fake)
+    monkeypatch.setattr(kubernetes, "_copy_repository_to_pod", lambda cfg: seeded.append(cfg.control_namespace))
+
+    assert install_controller(config).reused is False
+    assert seeded == ["demo"]
+
+
+def test_set_controller_maintenance_declares_mode_and_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeKubectl(None)
+    monkeypatch.setattr(kubernetes, "kubectl", fake)
+
+    set_controller_maintenance("demo-sdo", paused=True, generation="stage-1")
+
+    (document,) = fake.applied()
+    assert document["metadata"] == {"name": "sdo-controller-maintenance", "namespace": "demo-sdo"}
+    assert document["data"] == {"state": "paused", "generation": "stage-1"}
+
+
+def _unexpected_seed(config: ControllerInstallConfig) -> None:
+    raise AssertionError("a reused controller must not be reseeded")

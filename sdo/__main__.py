@@ -67,6 +67,10 @@ def _build_parser() -> argparse.ArgumentParser:
     operate_parser.add_argument("--timeout-seconds", type=int, default=1800)
     operate_parser.add_argument("--repair-policy", choices=("commit", "recorded-actions"), default="commit")
     operate_parser.add_argument("--agent-provider", choices=("codex", "claude"), default="codex")
+    operate_parser.add_argument(
+        "--controller-namespace",
+        help="install the controller and its state in this namespace instead of the application namespace",
+    )
     detector_parser = subparsers.add_parser(
         "detector",
         help="work with detector drafts in the current isolated checkout",
@@ -109,6 +113,7 @@ def _operation_config(args: argparse.Namespace) -> OperationConfig:
         timeout_seconds=args.timeout_seconds,
         repair_policy=args.repair_policy,
         agent_provider=args.agent_provider,
+        controller_namespace=args.controller_namespace,
     )
 
 
