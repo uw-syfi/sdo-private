@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentshim.providers.codex import CodexSandboxConfig, parse_sandbox
@@ -11,7 +13,8 @@ from sdo.agent_runtime.responder.reflection import (
     ReflectionTurn,
     SessionReflector,
 )
-from sdo.operational_memory import OutcomeClassification, OutcomeRecord, TopologyReview
+from sdo.contracts import IncidentRequest, IncidentResult
+from sdo.operational_memory import BrokerClosure, OutcomeClassification, OutcomeRecord, TopologyReview
 from sdo.operational_memory.models import (
     DETECTOR_ID_PATTERN,
     FAULT_CLASS_PATTERN,
@@ -26,10 +29,9 @@ from sdo.operational_memory.validation import (
     MemoryValidator,
 )
 from tests.structured_turns import ScriptedAgent, reply, turn_schema
+from tests.unit.sdo.operational_memory.test_memory import _write_memory
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from agentshim import CommandRequest
     from agentshim.testing import FakeRun
 
@@ -373,3 +375,153 @@ def test_reflection_example_playbook_passes_the_memory_validator(tmp_path: Path)
         actor=ArtifactOwner.RESPONDER,
         changed_paths=[".sdo/playbooks/README.md", ".sdo/playbooks/example-fault/README.md"],
     )
+
+
+_FAILED_MOUNT_EVENT = (
+    'Warning  FailedMount  pod/geo-7c9d-x2k  MountVolume.SetUp failed for volume "geo-config" : '
+    'configmap "geo-config" not found'
+)
+
+
+def _fresh_closure(worktree: Path, *, evidence: str = _FAILED_MOUNT_EVENT) -> BrokerClosure:
+    root = Path(__file__).resolve().parents[5] / "tests" / "fixtures" / "sdo" / "contracts"
+    request = IncidentRequest.model_validate_json((root / "incident_request.json").read_text(encoding="utf-8"))
+    finding = request.findings[0].model_copy(
+        update={
+            "evidence": evidence,
+            "metadata": {"event_reason": "FailedMount", "volume": {"configMap": "geo-config"}},
+        }
+    )
+    request = request.model_copy(update={"findings": [finding], "repository_worktree": str(worktree)})
+    result = IncidentResult.model_validate_json((root / "incident_result.json").read_text(encoding="utf-8"))
+    at = datetime(2026, 7, 9, 18, 0, tzinfo=timezone.utc)
+    return BrokerClosure(
+        request=request,
+        result=result,
+        final_detector_states=result.final_detector_states,
+        detected_at=at,
+        dispatched_at=at,
+        responder_completed_at=at,
+        verified_at=at,
+    )
+
+
+def _memory_worktree(tmp_path: Path) -> Path:
+    worktree = tmp_path / "worktree"
+    worktree.mkdir(parents=True)
+    _write_memory(worktree)
+    return worktree
+
+
+def _turn_log(tmp_path: Path, session_id: str, commands: list[str]) -> Path:
+    log = tmp_path / "responder-turns.jsonl"
+    records = [
+        {"session_id": "other-session", "shell_command_lines": ["kubectl delete ns unrelated"]},
+        {"session_id": session_id, "shell_command_lines": commands},
+    ]
+    log.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+    return log
+
+
+def _fresh_first_attempt(
+    tmp_path: Path, *, closure: BrokerClosure | None = None, log: Path | None = None
+) -> dict[str, object]:
+    worktree = _memory_worktree(tmp_path)
+    backend = _CapturingBackend()
+    outcome = _outcome()
+    SessionReflector(backend, responder_turn_log=log).resume(
+        session_id="019c-session-0001",
+        incident_id="inc-1",
+        worktree=worktree,
+        outcome=outcome,
+        history=[outcome],
+        outcome_commit="outcome-sha",
+        topology_review=_REVIEW,
+        session_mode="fresh",
+        closure=closure or _fresh_closure(worktree),
+    )
+    (call,) = backend.calls
+    return call
+
+
+def test_fresh_first_reflection_starts_a_new_session_with_a_compact_incident_brief(tmp_path: Path) -> None:
+    log = _turn_log(
+        tmp_path,
+        "019c-session-0001",
+        ["kubectl -n hotel-reservation describe pod geo-7c9d-x2k", "kubectl -n hotel-reservation apply -f cm.yaml"],
+    )
+
+    call = _fresh_first_attempt(tmp_path, log=log)
+
+    assert call["mode"] == "fresh"
+    prompt = str(call["prompt"])
+    assert "Reflect using the same incident context" not in prompt
+    assert "responder's session transcript is not available" in prompt
+    # Live evidence is verbatim, including the object shapes.
+    assert _FAILED_MOUNT_EVENT in prompt
+    assert '"configMap": "geo-config"' in prompt
+    assert "Deployment hotel-reservation/geo" in prompt
+    assert "ConfigMap hotel-reservation/geo-config" in prompt
+    # The responder's structured result.
+    assert "The geo Deployment referenced an absent required ConfigMap" in prompt
+    assert "Applied the repaired ConfigMap and waited for the rollout" in prompt
+    assert "All required endpoints passed and the missing-configmap detector cleared" in prompt
+    # Only this responder session's shell commands.
+    assert "kubectl -n hotel-reservation describe pod geo-7c9d-x2k" in prompt
+    assert "kubectl delete ns unrelated" not in prompt
+    # Relevant existing memory: paths plus short excerpts.
+    assert ".sdo/playbooks/missing-configmap/README.md" in prompt
+    assert "restore `<MISSING_CONFIG_MAP>` from source" in prompt
+    assert "missing-configmap (package ./detectors/incidents/missing_configmap" in prompt
+    # The same reflection instructions as a resumed first attempt.
+    assert "Outcome commit: outcome-sha" in prompt
+    assert "learning_decision=updated" in prompt
+    assert "Required action for this success outcome" in prompt
+    assert "stale_memory_detected: true" in prompt
+    assert "python3 -m sdo.operational_memory.memory_check --app . --actor responder" in prompt
+
+
+def test_fresh_incident_brief_stays_under_its_token_budget(tmp_path: Path) -> None:
+    worktree = _memory_worktree(tmp_path / "first")
+    huge = _FAILED_MOUNT_EVENT + "\n" + "x" * 200_000
+    closure = _fresh_closure(worktree, evidence=huge)
+    log = _turn_log(tmp_path, "019c-session-0001", [f"kubectl get pods # {i} " + "y" * 3000 for i in range(400)])
+
+    call = _fresh_first_attempt(tmp_path / "second", closure=closure, log=log)
+
+    prompt = str(call["prompt"])
+    brief = prompt.split("Incident brief (", 1)[1].split("End of incident brief.", 1)[0]
+    # About 4 characters per token: the brief stays under about 8K tokens.
+    assert len(brief) <= 8_000 * 4
+    assert _FAILED_MOUNT_EVENT in brief
+    assert "omitted" in brief
+
+
+def test_fresh_brief_without_a_shell_command_log_says_so(tmp_path: Path) -> None:
+    call = _fresh_first_attempt(tmp_path, log=tmp_path / "missing.jsonl")
+
+    assert "shell commands are not available" in str(call["prompt"])
+
+
+def test_resumed_and_retry_reflection_both_run_the_memory_check(tmp_path: Path) -> None:
+    first = _first_reflection_prompt(tmp_path)
+    backend = _CapturingBackend()
+    outcome = _outcome()
+    SessionReflector(backend).resume(
+        session_id="session-1",
+        incident_id="inc-1",
+        worktree=tmp_path,
+        outcome=outcome,
+        history=[outcome],
+        outcome_commit="outcome-sha",
+        validation_feedback="playbook is missing from index",
+        rejected_proposal_diff="+x\n",
+        session_mode="fresh",
+    )
+    retry = str(backend.calls[0]["prompt"])
+
+    for prompt in (first, retry):
+        assert "python3 -m sdo.operational_memory.memory_check --app . --actor responder" in prompt
+        assert "there is no local command that checks them" not in prompt
+    # A validation retry keeps its own short prompt in either mode.
+    assert "Validator error:\nplaybook is missing from index" in retry

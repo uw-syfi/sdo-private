@@ -37,6 +37,14 @@ class BrokerServiceError(RuntimeError):
     """Raised when durable incident brokerage cannot advance safely."""
 
 
+#: How the first reflection attempt runs: ``resume`` continues the responder's
+#: own session (the default, same-session design); ``fresh`` starts a new
+#: session from a compact broker-built incident brief. Validation retries are
+#: always fresh.
+ReflectionSessionMode = Literal["resume", "fresh"]
+REFLECTION_SESSION_MODES: tuple[ReflectionSessionMode, ...] = ("resume", "fresh")
+
+
 class ReflectionProposal(Protocol):
     summary: str
     learning_decision: Literal["updated", "no_change"]
@@ -60,10 +68,12 @@ class TopologyReview(BaseModel):
 class OutcomeReflector(Protocol):
     """Learns from one verified incident outcome.
 
-    A call without ``validation_feedback`` is the first attempt and resumes the
-    responder's own session (``session_id``). A call with feedback retries a
-    proposal the broker rejected; it runs in a short fresh session that sees
-    only ``rejected_proposal_diff``, the feedback and the original request.
+    A call without ``validation_feedback`` is the first attempt. With
+    ``session_mode="resume"`` it resumes the responder's own session
+    (``session_id``); with ``"fresh"`` it starts a new session from a compact
+    brief built from ``closure``. A call with feedback retries a proposal the
+    broker rejected; it runs in a short fresh session that sees only
+    ``rejected_proposal_diff``, the feedback and the original request.
     """
 
     def should_reflect(
@@ -86,6 +96,8 @@ class OutcomeReflector(Protocol):
         validation_feedback: str | None = None,
         topology_review: TopologyReview | None = None,
         rejected_proposal_diff: str | None = None,
+        session_mode: ReflectionSessionMode = "resume",
+        closure: BrokerClosure | None = None,
     ) -> ReflectionProposal: ...
 
 
@@ -166,6 +178,10 @@ class BrokerLedger(BaseModel):
     proposal_commit: str | None = None
     outcome_commit: str | None = None
     reflection_started: bool = False
+    # How the first reflection attempt ran ("resume" or "fresh"); fixed when the
+    # first LLM attempt starts, so a restarted broker keeps it. ``None`` when no
+    # LLM reflection ran, and in ledgers written before the mode existed.
+    reflection_session_mode: ReflectionSessionMode | None = None
     reflection_attempts: int = 0
     # Attempts after a validation rejection run in a fresh session rather than
     # resuming the responder session; defaulted for ledgers written earlier.
@@ -214,11 +230,14 @@ class BrokerService:
         reflector: OutcomeReflector | None = None,
         repair_policy: Literal["commit", "recorded-actions"] = "commit",
         max_reflection_attempts: int = 3,
+        reflection_session: ReflectionSessionMode = "resume",
     ) -> None:
         if repair_policy not in ("commit", "recorded-actions"):
             raise ValueError(f"unsupported repair policy: {repair_policy!r}")
         if max_reflection_attempts < 1:
             raise ValueError("max_reflection_attempts must be at least 1")
+        if reflection_session not in REFLECTION_SESSION_MODES:
+            raise ValueError(f"unsupported reflection session mode: {reflection_session!r}")
         self.target_repository = target_repository.resolve()
         self.worktrees = WorktreeManager(self.target_repository, worktree_root)
         self.broker = broker or CommitBroker(self.target_repository)
@@ -228,6 +247,7 @@ class BrokerService:
         self.reflector = reflector
         self.repair_policy = repair_policy
         self.max_reflection_attempts = max_reflection_attempts
+        self.reflection_session: ReflectionSessionMode = reflection_session
         common_dir = Path(self.broker._git(self.target_repository, "rev-parse", "--git-common-dir").strip())
         if not common_dir.is_absolute():
             common_dir = self.target_repository / common_dir
@@ -530,6 +550,8 @@ class BrokerService:
             self._save(ledger)
             return self._commit_noop_reflection(ledger, worktree)
         if not ledger.reflection_backend_completed:
+            if ledger.reflection_session_mode is None:
+                ledger.reflection_session_mode = self.reflection_session
             ledger.reflection_started = True
             self._save(ledger)
             turn = self.reflector.resume(
@@ -542,6 +564,8 @@ class BrokerService:
                 validation_feedback=retry_feedback,
                 topology_review=self._topology_review(ledger),
                 rejected_proposal_diff=self._rejected_reflection_diff(ledger) if retry_feedback else None,
+                session_mode=ledger.reflection_session_mode,
+                closure=closure,
             )
             ledger.reflection_attempts += 1
             if retry_feedback:

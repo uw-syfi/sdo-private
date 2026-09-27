@@ -12,6 +12,8 @@ from typing import Any, Generic, Protocol, TypeVar, overload
 
 import yaml
 
+from sdo.operational_memory import REFLECTION_SESSION_MODES
+
 
 class ControllerInstallError(RuntimeError):
     """Raised when the in-cluster SDO controller cannot be installed or completed."""
@@ -49,12 +51,16 @@ class ControllerInstallConfig:
     wait_for_completion: bool = False
     repair_policy: str = "commit"
     agent_provider: str = "codex"
+    # First reflection attempt: "resume" the responder session, or "fresh" (opt-in).
+    reflection_session: str = "resume"
 
     def __post_init__(self) -> None:
         if self.repair_policy not in ("commit", "recorded-actions"):
             raise ValueError("repair_policy must be 'commit' or 'recorded-actions'")
         if self.agent_provider not in ("codex", "claude"):
             raise ValueError("agent_provider must be 'codex' or 'claude'")
+        if self.reflection_session not in REFLECTION_SESSION_MODES:
+            raise ValueError(f"reflection_session must be one of {', '.join(REFLECTION_SESSION_MODES)}")
 
 
 @dataclass(frozen=True)
@@ -156,6 +162,10 @@ def controller_resources(
         f"--broker-arg={config.agent_provider}",
         "--broker-arg=--reflection-model",
         f"--broker-arg={config.model}",
+        "--broker-arg=--reflection-session",
+        f"--broker-arg={config.reflection_session}",
+        "--broker-arg=--responder-turn-log",
+        f"--broker-arg={RESPONDER_TURN_USAGE_LOG}",
     ]
     controller_args.extend(extra_controller_args or [])
     pod_security, container_security = controller_security_contexts()

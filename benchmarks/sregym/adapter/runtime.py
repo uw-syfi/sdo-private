@@ -348,11 +348,28 @@ def _reflection_telemetry(ledger: dict[str, Any]) -> dict[str, int | str | None]
     """
 
     skipped = ledger.get("reflection_skipped_reason")
+    mode = ledger.get("reflection_session_mode")
     return {
         "reflection_attempts": int(ledger.get("reflection_attempts") or 0),
         "reflection_fresh_retry_attempts": int(ledger.get("reflection_fresh_retry_attempts") or 0),
         "reflection_skipped_reason": skipped if isinstance(skipped, str) and skipped else None,
+        "reflection_session_mode": mode if isinstance(mode, str) and mode else None,
     }
+
+
+def _same_session_reflection(ledger: dict[str, Any]) -> bool:
+    """Whether the recorded reflection's first attempt resumed the responder session.
+
+    An opted-in fresh first attempt (``reflection_session_mode="fresh"``) does
+    not count; a ledger without a mode predates the setting or recorded a
+    deterministic no-op reflection, and keeps the historical meaning.
+    """
+
+    return bool(
+        ledger.get("responder_session_id")
+        and ledger.get("reflection_commit")
+        and ledger.get("reflection_session_mode") != "fresh"
+    )
 
 
 def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str, Any]:
@@ -437,7 +454,7 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         "reflection_commit": ledger.get("reflection_commit"),
         "validator_evidence_commit": ledger.get("validator_evidence_commit"),
         "responder_session_id": ledger.get("responder_session_id"),
-        "same_session_reflection": bool(ledger.get("responder_session_id") and ledger.get("reflection_commit")),
+        "same_session_reflection": _same_session_reflection(ledger),
         "detector_clear": detector_clear,
         "incident_detector_states": closure.get("incident_detector_states", []),
         "independent_verification": result.get("verification_evidence", []),

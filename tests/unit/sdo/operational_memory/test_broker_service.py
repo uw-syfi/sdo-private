@@ -1129,3 +1129,93 @@ def test_playbook_only_reflection_is_accepted_when_a_learned_incident_detector_f
     assert "get configmap geo-config" in (target / ".sdo" / "playbooks" / "missing-configmap" / "README.md").read_text(
         encoding="utf-8"
     )
+
+
+class FreshFirstAttemptBackend(RecordingSessionBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fresh_prompts: list[str] = []
+
+    def resume(self, **_kwargs: object) -> ReflectionTurn:  # type: ignore[override]
+        raise AssertionError("fresh reflection mode must not resume the responder session")
+
+    def fresh(self, *, worktree: Path, prompt: str, idempotency_key: str) -> ReflectionTurn:
+        self.fresh_prompts.append(prompt)
+        return super().fresh(worktree=worktree, prompt=prompt, idempotency_key=idempotency_key)
+
+
+def test_fresh_reflection_mode_starts_the_first_attempt_in_a_fresh_session(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = FreshFirstAttemptBackend()
+    service = _service(
+        target,
+        worktrees,
+        AcceptRepairValidator(),
+        reflector=SessionReflector(backend),
+        reflection_session="fresh",
+    )
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    receipt = service.process_closure(_closure(workspace.path, workspace.base_commit))
+
+    assert receipt.reflection_commit is not None
+    assert backend.calls == [("fresh", f"reflection:inc-20260709-0001:{receipt.outcome_commit}")]
+    (prompt,) = backend.fresh_prompts
+    # The brief carries the closure's live evidence and the responder's result.
+    assert "Deployment hotel-reservation/geo requires ConfigMap geo-config" in prompt
+    assert "The geo Deployment referenced an absent required ConfigMap" in prompt
+    state = service.completion_state("inc-20260709-0001")
+    assert state.reflection_session_mode == "fresh"
+    assert state.reflection_attempts == 1
+    # A fresh first attempt is not a validation retry.
+    assert state.reflection_fresh_retry_attempts == 0
+
+
+def test_reflection_session_mode_defaults_to_resume_and_is_recorded(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = NoChangeSessionBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    service.process_closure(_closure(workspace.path, workspace.base_commit))
+
+    assert backend.calls[0][0] == "019c-session-0001"
+    assert service.completion_state("inc-20260709-0001").reflection_session_mode == "resume"
+
+
+def test_reflection_session_mode_is_validated(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+
+    with pytest.raises(ValueError, match="reflection session"):
+        _service(target, tmp_path / "worktrees", AcceptRepairValidator(), reflection_session="transcript")
+
+
+def test_ledgers_written_before_reflection_modes_parse_without_a_mode() -> None:
+    from sdo.operational_memory.broker_service import BrokerLedger
+
+    ledger = BrokerLedger.model_validate({"incident_id": "inc", "worktree": "/w", "base_commit": "b"})
+
+    assert ledger.reflection_session_mode is None
+
+
+def test_broker_cli_reflection_session_defaults_to_resume() -> None:
+    from sdo.agent_runtime.responder.broker_cli import _argument_parser
+
+    required = ["--repository", "/repo", "--worktree-root", "/worktrees"]
+    parser = _argument_parser()
+
+    assert parser.parse_args(required).reflection_session == "resume"
+    assert parser.parse_args([*required, "--reflection-session", "fresh"]).reflection_session == "fresh"
+    with pytest.raises(SystemExit):
+        parser.parse_args([*required, "--reflection-session", "transcript"])

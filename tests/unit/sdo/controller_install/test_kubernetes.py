@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from sdo.controller_install import ControllerInstallConfig, controller_resources
 
 
@@ -42,6 +44,32 @@ def test_recorded_actions_policy_is_passed_to_controller() -> None:
     args = controller["spec"]["template"]["spec"]["containers"][0]["args"]
 
     assert args[args.index("--repair-policy") + 1] == "recorded-actions"
+
+
+def _broker_args(config: ControllerInstallConfig) -> list[str]:
+    controller = next(resource for resource in controller_resources(config) if resource["kind"] == "Job")
+    args = controller["spec"]["template"]["spec"]["containers"][0]["args"]
+    return [arg.removeprefix("--broker-arg=") for arg in args if arg.startswith("--broker-arg=")]
+
+
+def test_reflection_session_mode_defaults_to_resume_and_is_passed_to_the_broker() -> None:
+    broker = _broker_args(_config())
+
+    assert broker[broker.index("--reflection-session") + 1] == "resume"
+    # A fresh reflection brief quotes the responder's commands from its per-turn log.
+    assert broker[broker.index("--responder-turn-log") + 1] == "/workspace/.sdo-runtime/usage/responder-turns.jsonl"
+
+
+def test_fresh_reflection_session_mode_is_passed_to_the_broker() -> None:
+    config = ControllerInstallConfig(**{**_config().__dict__, "reflection_session": "fresh"})
+    broker = _broker_args(config)
+
+    assert broker[broker.index("--reflection-session") + 1] == "fresh"
+
+
+def test_unknown_reflection_session_mode_is_rejected() -> None:
+    with pytest.raises(ValueError, match="reflection_session"):
+        ControllerInstallConfig(**{**_config().__dict__, "reflection_session": "transcript"})
 
 
 def test_production_runtime_module_has_no_benchmark_dependency() -> None:

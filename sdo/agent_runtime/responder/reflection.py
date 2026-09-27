@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, cast
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from libs.agent_cli.structured import AgentProvider, StructuredTurnError, run_structured_turn, turn_usage
+from sdo.agent_runtime.responder.reflection_brief import incident_brief
 from sdo.operational_memory import (
     DETECTOR_ID_PATTERN,
     DETECTOR_SDK_REFERENCE,
@@ -14,6 +15,7 @@ from sdo.operational_memory import (
     PLACEHOLDER_RE,
     PLAYBOOK_INDEX_PATH,
     PLAYBOOK_SCRIPT_SUFFIX,
+    REFLECTION_SESSION_MODES,
     OutcomeClassification,
     OutcomeRecord,
     TopologyReview,
@@ -23,6 +25,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentshim import CommandExecutor
+
+    from sdo.operational_memory import BrokerClosure, ReflectionSessionMode
 
 
 def _classification_directive(classification: OutcomeClassification) -> str:
@@ -152,7 +156,12 @@ def _topology_facts(review: TopologyReview | None) -> str:
     )
 
 
+MEMORY_CHECK_COMMAND = "python3 -m sdo.operational_memory.memory_check --app . --actor responder"
+
 _SELF_CHECK_RULES = (
+    f"Before returning, run `{MEMORY_CHECK_COMMAND}` whenever you edited `.sdo/`: it applies the broker "
+    "validator's memory rules below to your uncommitted edits against the outcome commit, prints each violation "
+    "with its fix, and exits non-zero on failure. Fix every reported error and rerun it until it prints OK. "
     "Self-check scope: validate only the incident detector you added or changed, with "
     "`python3 -m controller.builder.check_cli draft-test --app . --detector-id <incident-detector-id>`. "
     "Do not run the health detector's tests, `go test ./...`, or the full `check_cli test`: the broker's isolated "
@@ -182,8 +191,8 @@ def _memory_rules(*, incident_id: str, outcome_commit: str) -> str:
     """The broker validator's rules for reflection-authored files, built from its own constants."""
 
     return (
-        "Memory rules (the broker's validator rejects any violation; there is no local command that checks them, "
-        "so check each before returning):\n"
+        "Memory rules (the broker's validator rejects any violation; "
+        f"`{MEMORY_CHECK_COMMAND}` checks them locally):\n"
         "- A playbook is `.sdo/playbooks/<fault-class>/README.md` starting with YAML front matter holding only "
         f"`schema_version: 1`, `owner: responder`, `fault_class` matching `{FAULT_CLASS_PATTERN}`, "
         "`originating_incident`, and optional `originating_commit`; the body is non-empty.\n"
@@ -269,10 +278,18 @@ def _bounded_diff(diff: str | None) -> str:
 
 
 class SessionReflector:
-    """Reflect on a verified outcome: same session first, a short fresh session on retry."""
+    """Reflect on a verified outcome.
 
-    def __init__(self, backend: StatefulResponderBackend) -> None:
+    The first attempt resumes the responder session (``session_mode="resume"``)
+    or, opt-in, starts a fresh session from a compact incident brief
+    (``"fresh"``); a retry after a validation rejection is always a short fresh
+    session. ``responder_turn_log`` is the responder's per-turn usage log, the
+    source of its shell commands for the brief.
+    """
+
+    def __init__(self, backend: StatefulResponderBackend, *, responder_turn_log: Path | None = None) -> None:
         self.backend = backend
+        self.responder_turn_log = responder_turn_log
 
     def should_reflect(self, outcome: OutcomeRecord, *, health_verified: bool, session_id: str | None) -> bool:
         return bool(
@@ -298,7 +315,11 @@ class SessionReflector:
         validation_feedback: str | None = None,
         topology_review: TopologyReview | None = None,
         rejected_proposal_diff: str | None = None,
+        session_mode: ReflectionSessionMode = "resume",
+        closure: BrokerClosure | None = None,
     ) -> ReflectionTurn:
+        if session_mode not in REFLECTION_SESSION_MODES:
+            raise ValueError(f"unsupported reflection session mode: {session_mode!r}")
         request = _learning_request(
             outcome=outcome,
             history=history,
@@ -319,6 +340,20 @@ class SessionReflector:
                 "Rejected proposal diff against that commit (reapply what was valid, fix every reported error):\n"
                 f"```diff\n{_bounded_diff(rejected_proposal_diff)}```\n\n"
                 f"Original reflection request:\n{request}"
+            )
+            return self.backend.fresh(worktree=worktree, prompt=prompt, idempotency_key=idempotency_key)
+        if session_mode == "fresh":
+            if closure is None:
+                raise ValueError("a fresh first reflection attempt requires the verified closure for its brief")
+            # The brief replaces the responder transcript, which a resumed
+            # session would re-send on every model request.
+            prompt = (
+                "The controller has independently verified incident closure and committed its authoritative "
+                "outcome. You are reflecting in a fresh session: the responder's session transcript is not "
+                "available, so rely on the incident brief below and read the worktree's source and `.sdo/` files "
+                "as needed.\n\n"
+                f"{incident_brief(closure, worktree=worktree, responder_turn_log=self.responder_turn_log)}\n"
+                f"Reflection request:\n{request}"
             )
             return self.backend.fresh(worktree=worktree, prompt=prompt, idempotency_key=idempotency_key)
         prompt = (
