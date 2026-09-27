@@ -3,12 +3,18 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 
 def seed_go_cache_from_environment() -> bool:
-    """Copy the trusted image cache into this run's private writable cache."""
+    """Copy the trusted image cache into this run's private writable cache.
+
+    Returns whether a seed was copied. A seed path that does not exist falls
+    back to a cold build with a warning; one that exists but is not a
+    directory is a configuration error.
+    """
 
     seed_value = os.environ.get("SDO_GO_CACHE_SEED", "").strip()
     target_value = os.environ.get("GOCACHE", "").strip()
@@ -16,10 +22,19 @@ def seed_go_cache_from_environment() -> bool:
         return False
     seed = Path(seed_value)
     target = Path(target_value)
+    if not seed.exists():
+        # Images built before the seed was baked in still receive SDO_GO_CACHE_SEED from the Job.
+        print(
+            f"warning: SDO_GO_CACHE_SEED {seed} does not exist; building the controller with a cold Go cache",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
     if not seed.is_dir():
         raise ValueError(f"SDO_GO_CACHE_SEED is not a directory: {seed}")
     target.mkdir(parents=True, exist_ok=True)
     shutil.copytree(seed, target, dirs_exist_ok=True)
+    print(f"seeded GOCACHE {target} from SDO_GO_CACHE_SEED {seed}", file=sys.stderr, flush=True)
     return True
 
 

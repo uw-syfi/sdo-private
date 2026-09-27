@@ -43,6 +43,7 @@ from benchmarks.sregym.adapter.runtime import (
     install_persistent_controller,
     validate_production_receipt,
 )
+from sdo.agent_runtime.lifecycle import validation_report
 from sdo.controller_install import (
     CONTROLLER_JOB_NAME,
     ControllerInstallError,
@@ -54,6 +55,8 @@ from sdo.controller_install import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from sdo.agent_runtime.lifecycle import LifecycleValidationCache
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +282,8 @@ class StageInputs:
     state_path: Path
     kubeconfig: str | None = None
     verification_timeout_seconds: float = 3900.0
+    # Opt-in shared lifecycle validation verdicts; run_lifecycle consults it.
+    validation_cache: LifecycleValidationCache | None = None
 
 
 @dataclass(frozen=True)
@@ -391,6 +396,7 @@ def run_persistent_stage(
         "confirmed_root_causes": result.get("confirmed_root_causes", []),
         "repair_actions": result.get("repair_actions", []),
         "lifecycle_reused": lifecycle_reused,
+        "lifecycle_validation": validation_report(inputs.validation_cache),
         "fault_injection_deferred": True,
         "fault_gate_timings_seconds": gate_timings,
         "persistent_controller": {

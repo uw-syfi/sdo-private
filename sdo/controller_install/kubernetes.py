@@ -28,6 +28,8 @@ RUNTIME_BUILD_ROOT = f"{RUNTIME_STATE_ROOT}/build"
 RUNTIME_TMPDIR = f"{RUNTIME_BUILD_ROOT}/tmp"
 RUNTIME_GO_TMPDIR = f"{RUNTIME_BUILD_ROOT}/go-tmp"
 RUNTIME_GO_CACHE = f"{RUNTIME_BUILD_ROOT}/go-cache"
+#: Read-only warm build cache baked into the controller image, copied into GOCACHE at start.
+CONTROLLER_GO_CACHE_SEED = "/opt/sdo/go-build-cache"
 #: Per-turn agent usage logs (``SDO_TURN_USAGE_LOG``) on the workspace PVC. The
 #: controller pod hosts the broker and its reflection turns; responder Jobs
 #: append to their own file so concurrent pods never share one writer.
@@ -344,6 +346,8 @@ def _controller_job(
                                 {"name": "TMPDIR", "value": RUNTIME_TMPDIR},
                                 {"name": "GOTMPDIR", "value": RUNTIME_GO_TMPDIR},
                                 {"name": "GOCACHE", "value": RUNTIME_GO_CACHE},
+                                # The controller image ships a warm, cgo-free build cache.
+                                {"name": "SDO_GO_CACHE_SEED", "value": CONTROLLER_GO_CACHE_SEED},
                                 {"name": TURN_USAGE_LOG_ENV, "value": CONTROLLER_TURN_USAGE_LOG},
                                 {"name": "SDO_CONTROLLER_JOB", "value": "sdo-controller-run"},
                                 {

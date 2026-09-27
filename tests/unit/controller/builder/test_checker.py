@@ -539,6 +539,7 @@ done
 def test_seed_go_cache_copies_trusted_image_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     seed = tmp_path / "seed"
     target = tmp_path / "target"
@@ -549,6 +550,38 @@ def test_seed_go_cache_copies_trusted_image_cache(
 
     assert seed_go_cache_from_environment() is True
     assert (target / "ab" / "entry").read_text(encoding="utf-8") == "compiled"
+    assert "seeded GOCACHE" in capsys.readouterr().err
+
+
+def test_missing_go_cache_seed_falls_back_to_a_cold_build_with_a_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Images built before the seed existed still get SDO_GO_CACHE_SEED from the controller Job.
+    seed = tmp_path / "absent-seed"
+    target = tmp_path / "target"
+    monkeypatch.setenv("SDO_GO_CACHE_SEED", str(seed))
+    monkeypatch.setenv("GOCACHE", str(target))
+
+    assert seed_go_cache_from_environment() is False
+    warning = capsys.readouterr().err
+    assert "warning" in warning.lower()
+    assert str(seed) in warning
+    assert "cold" in warning
+
+
+def test_go_cache_seed_that_is_a_file_is_still_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed = tmp_path / "seed"
+    seed.write_text("not a cache", encoding="utf-8")
+    monkeypatch.setenv("SDO_GO_CACHE_SEED", str(seed))
+    monkeypatch.setenv("GOCACHE", str(tmp_path / "target"))
+
+    with pytest.raises(ValueError, match="not a directory"):
+        seed_go_cache_from_environment()
 
 
 _ENDPOINT_HEALTH_DETECTOR = """package objective

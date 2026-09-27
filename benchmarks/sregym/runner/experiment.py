@@ -91,6 +91,10 @@ class RunnerEnv:
     force_recreate_cluster: bool = False
     preserve_infrastructure: bool = False
     submit_done_returns_feedback: bool = False
+    defer_diagnosis_grading: bool = False
+    lifecycle_validation_cache: bool = False
+    source_build_cache: bool = False
+    fast_namespace_teardown: bool = False
     cleanup_defer_timeout_seconds: int = 0
     docker_builder: str = ""
 
@@ -222,6 +226,10 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         force_recreate_cluster=bool(env_raw.get("force_recreate_cluster", False)),
         preserve_infrastructure=bool(env_raw.get("preserve_infrastructure", False)),
         submit_done_returns_feedback=bool(env_raw.get("submit_done_returns_feedback", False)),
+        defer_diagnosis_grading=bool(env_raw.get("defer_diagnosis_grading", False)),
+        lifecycle_validation_cache=bool(env_raw.get("lifecycle_validation_cache", False)),
+        source_build_cache=bool(env_raw.get("source_build_cache", False)),
+        fast_namespace_teardown=bool(env_raw.get("fast_namespace_teardown", False)),
         cleanup_defer_timeout_seconds=int(env_raw.get("cleanup_defer_timeout_seconds", 0)),
         docker_builder=str(env_raw.get("docker_builder", "")),
     )
@@ -293,6 +301,14 @@ def resolve_config(
         env_updates["force_recreate_cluster"] = _parse_bool_env(env_overrides["SREGYM_FORCE_RECREATE_CLUSTER"])
     if "SREGYM_PRESERVE_INFRASTRUCTURE" in env_overrides:
         env_updates["preserve_infrastructure"] = _parse_bool_env(env_overrides["SREGYM_PRESERVE_INFRASTRUCTURE"])
+    if "SREGYM_DEFER_DIAGNOSIS_GRADING" in env_overrides:
+        env_updates["defer_diagnosis_grading"] = _parse_bool_env(env_overrides["SREGYM_DEFER_DIAGNOSIS_GRADING"])
+    if "SDO_LIFECYCLE_VALIDATION_CACHE" in env_overrides:
+        env_updates["lifecycle_validation_cache"] = _parse_bool_env(env_overrides["SDO_LIFECYCLE_VALIDATION_CACHE"])
+    if "SREGYM_SOURCE_BUILD_CACHE" in env_overrides:
+        env_updates["source_build_cache"] = _parse_bool_env(env_overrides["SREGYM_SOURCE_BUILD_CACHE"])
+    if "SREGYM_FAST_NAMESPACE_TEARDOWN" in env_overrides:
+        env_updates["fast_namespace_teardown"] = _parse_bool_env(env_overrides["SREGYM_FAST_NAMESPACE_TEARDOWN"])
     if "SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK" in env_overrides:
         env_updates["submit_done_returns_feedback"] = _parse_bool_env(
             env_overrides["SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK"]
@@ -497,6 +513,16 @@ def config_to_env(config: ExperimentConfig, project_root: Path, exp_dir: Path | 
         env["SREGYM_FORCE_RECREATE_CLUSTER"] = "1"
     if config.env.preserve_infrastructure:
         env["SREGYM_PRESERVE_INFRASTRUCTURE"] = "1"
+    if config.env.defer_diagnosis_grading:
+        env["SREGYM_DEFER_DIAGNOSIS_GRADING"] = "1"
+    if config.env.lifecycle_validation_cache:
+        # Shared by every pipeline of this checkout; entries are keyed by the
+        # validator image identity and the diagnostics digest.
+        env["SDO_LIFECYCLE_VALIDATION_CACHE_DIR"] = str(project_root / ".sdo-runtime" / "lifecycle-validation-cache")
+    if config.env.source_build_cache:
+        env["SREGYM_SOURCE_BUILD_CACHE"] = "1"
+    if config.env.fast_namespace_teardown:
+        env["SREGYM_FAST_NAMESPACE_TEARDOWN"] = "1"
     env["SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK"] = "1" if config.env.submit_done_returns_feedback else "0"
     if config.env.cleanup_defer_timeout_seconds > 0:
         env["SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS"] = str(config.env.cleanup_defer_timeout_seconds)
@@ -589,6 +615,10 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"force_recreate_cluster = {_toml_value(config.env.force_recreate_cluster)}")
     lines.append(f"preserve_infrastructure = {_toml_value(config.env.preserve_infrastructure)}")
     lines.append(f"submit_done_returns_feedback = {_toml_value(config.env.submit_done_returns_feedback)}")
+    lines.append(f"defer_diagnosis_grading = {_toml_value(config.env.defer_diagnosis_grading)}")
+    lines.append(f"lifecycle_validation_cache = {_toml_value(config.env.lifecycle_validation_cache)}")
+    lines.append(f"source_build_cache = {_toml_value(config.env.source_build_cache)}")
+    lines.append(f"fast_namespace_teardown = {_toml_value(config.env.fast_namespace_teardown)}")
     lines.append(f"cleanup_defer_timeout_seconds = {_toml_value(config.env.cleanup_defer_timeout_seconds)}")
     lines.append(f"docker_builder = {_toml_value(config.env.docker_builder)}")
 

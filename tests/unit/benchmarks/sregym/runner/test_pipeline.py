@@ -397,6 +397,22 @@ class TestMergeStageConfig:
         config = merge_stage_config(defaults, {})
         assert config.env.submit_done_returns_feedback is True
 
+    def test_defaults_env_preserves_fast_namespace_teardown(self) -> None:
+        config = merge_stage_config({"env": {"fast_namespace_teardown": True}}, {})
+        assert config.env.fast_namespace_teardown is True
+
+    def test_defaults_env_preserves_lifecycle_validation_cache(self) -> None:
+        config = merge_stage_config({"env": {"lifecycle_validation_cache": True}}, {})
+        assert config.env.lifecycle_validation_cache is True
+
+    def test_defaults_env_preserves_source_build_cache(self) -> None:
+        config = merge_stage_config({"env": {"source_build_cache": True}}, {})
+        assert config.env.source_build_cache is True
+
+    def test_defaults_env_preserves_deferred_diagnosis_grading(self) -> None:
+        config = merge_stage_config({"env": {"defer_diagnosis_grading": True}}, {})
+        assert config.env.defer_diagnosis_grading is True
+
     def test_with_overrides(self) -> None:
         defaults = {
             "agent": "crucible",

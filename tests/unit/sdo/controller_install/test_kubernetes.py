@@ -104,6 +104,33 @@ def test_broker_and_responder_pods_log_per_turn_usage_on_the_workspace_pvc() -> 
     assert {"name": "repository", "mountPath": "/workspace"} in container["volumeMounts"]
 
 
+def test_controller_seeds_its_go_build_cache_from_the_image() -> None:
+    """A cold in-pod compile of the detector controller took about 110 s at the
+    pod's 2-CPU limit; the image's warm cache brings it to seconds."""
+
+    controller = next(resource for resource in controller_resources(_config()) if resource["kind"] == "Job")
+    env = controller["spec"]["template"]["spec"]["containers"][0]["env"]
+
+    assert {"name": "SDO_GO_CACHE_SEED", "value": "/opt/sdo/go-build-cache"} in env
+    assert {"name": "GOCACHE", "value": "/workspace/.sdo-runtime/build/go-cache"} in env
+
+
+def test_go_cache_seeds_are_built_for_the_cgo_free_runtimes() -> None:
+    """Cache keys include the cgo setting; the runtimes have no C compiler, so a
+    seed compiled with cgo on misses almost entirely (88 s instead of 6 s)."""
+
+    root = Path(__file__).resolve().parents[4]
+    runtime = (root / "controller/Dockerfile.runtime").read_text(encoding="utf-8")
+    validator = (root / "controller/Dockerfile.validator").read_text(encoding="utf-8")
+
+    for dockerfile in (runtime, validator):
+        seed_stage = dockerfile.split("FROM ", 2)[1]
+        assert "CGO_ENABLED=0" in seed_stage
+        assert "GOCACHE=/go/build-cache" in seed_stage
+    controller_stage = runtime.split("AS controller", 1)[1].split("FROM ", 1)[0]
+    assert "COPY --from=go-runtime /go/build-cache /opt/sdo/go-build-cache" in controller_stage
+
+
 def _split_config(**overrides: object) -> ControllerInstallConfig:
     return ControllerInstallConfig(**{**_config().__dict__, "controller_namespace": "demo-sdo", **overrides})
 

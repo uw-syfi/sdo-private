@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
+import yaml
 from agentshim.providers.codex import CodexSandboxConfig, parse_sandbox
 
 from sdo.agent_runtime.lifecycle.agents import (
@@ -40,6 +41,7 @@ from sdo.agent_runtime.lifecycle.operational_memory import (
     reuse_initial_lifecycle_if_valid,
     run_initial_lifecycle,
 )
+from sdo.agent_runtime.lifecycle.validation_cache import LifecycleValidationCache
 from sdo.operational_memory.sandbox import LocalSandboxRunner, SandboxResult
 from tests.structured_turns import ScriptedAgent, failure, fake_codex_login, reply, turn_schema
 
@@ -1442,3 +1444,155 @@ def test_real_three_round_health_judge_authors_compiling_detector(
     assert len({item["session_id"] for item in attempts}) == len(attempts)
     assert provenance["health_judge"]["round"] == 3
     assert LocalSandboxRunner(timeout_seconds=300).run(repository).returncode == 0
+
+
+def _validated_seed(tmp_path: Path, objective: str) -> Path:
+    repository = _repository(tmp_path)
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective=objective,
+        backend=RecordingBackend(),
+        validator=IdentifiedPassingValidator("validator-image@sha256:seed"),
+        judge_rounds=3,
+    )
+    return repository
+
+
+def _workspace_copy(seed: Path, destination: Path) -> Path:
+    shutil.copytree(seed, destination)
+    return destination
+
+
+def test_validation_cache_shares_a_validator_verdict_across_discarded_workspace_copies(tmp_path: Path) -> None:
+    objective = "Deployment example and Service example must remain available."
+    seed = _validated_seed(tmp_path, objective)
+    cache = LifecycleValidationCache(tmp_path / "cache")
+
+    first = IdentifiedPassingValidator("validator-image@sha256:rebuilt")
+    assert reuse_initial_lifecycle_if_valid(
+        _workspace_copy(seed, tmp_path / "stage-0"),
+        application="example",
+        health_objective=objective,
+        validator=first,
+        validation_cache=cache,
+    )
+    assert len(first.runs) == 1
+    assert cache.source == "validator"
+
+    # A later pipeline starts again from the seed, whose attestation names the old validator.
+    second_workspace = _workspace_copy(seed, tmp_path / "stage-0-next-pipeline")
+    second = IdentifiedPassingValidator("validator-image@sha256:rebuilt")
+    assert reuse_initial_lifecycle_if_valid(
+        second_workspace,
+        application="example",
+        health_objective=objective,
+        validator=second,
+        validation_cache=cache,
+    )
+    assert second.runs == []
+    assert cache.source == "validation-cache"
+    provenance = yaml.safe_load((second_workspace / ".sdo/lifecycle-provenance.yaml").read_text(encoding="utf-8"))
+    assert provenance["validation"]["attested_by"] == "validation-cache"
+    assert provenance["validation"]["validator_identity"] == "validator-image@sha256:rebuilt"
+
+
+def test_validation_cache_is_keyed_by_validator_identity_and_diagnostics(tmp_path: Path) -> None:
+    objective = "Deployment example and Service example must remain available."
+    seed = _validated_seed(tmp_path, objective)
+    cache = LifecycleValidationCache(tmp_path / "cache")
+    assert reuse_initial_lifecycle_if_valid(
+        _workspace_copy(seed, tmp_path / "a"),
+        application="example",
+        health_objective=objective,
+        validator=IdentifiedPassingValidator("validator-image@sha256:v2"),
+        validation_cache=cache,
+    )
+
+    other_validator = IdentifiedPassingValidator("validator-image@sha256:v3")
+    assert reuse_initial_lifecycle_if_valid(
+        _workspace_copy(seed, tmp_path / "b"),
+        application="example",
+        health_objective=objective,
+        validator=other_validator,
+        validation_cache=cache,
+    )
+    assert len(other_validator.runs) == 1
+
+    changed = _workspace_copy(seed, tmp_path / "c")
+    detector = changed / ".sdo/diagnostics/detectors/health/objective/detector.go"
+    detector.write_text(detector.read_text(encoding="utf-8") + "\n// changed\n", encoding="utf-8")
+    changed_diagnostics = IdentifiedPassingValidator("validator-image@sha256:v2")
+    assert reuse_initial_lifecycle_if_valid(
+        changed,
+        application="example",
+        health_objective=objective,
+        validator=changed_diagnostics,
+        validation_cache=cache,
+    )
+    assert len(changed_diagnostics.runs) == 1
+
+
+def test_validation_cache_never_records_a_failed_or_unidentified_validation(tmp_path: Path) -> None:
+    objective = "Deployment example and Service example must remain available."
+    seed = _validated_seed(tmp_path, objective)
+    cache = LifecycleValidationCache(tmp_path / "cache")
+
+    class FailingValidator(IdentifiedPassingValidator):
+        def run(self, app_root: Path) -> SandboxResult:
+            self.runs.append(app_root)
+            return SandboxResult(returncode=1, stderr="go test failed")
+
+    assert not reuse_initial_lifecycle_if_valid(
+        _workspace_copy(seed, tmp_path / "failed"),
+        application="example",
+        health_objective=objective,
+        validator=FailingValidator("validator-image@sha256:v2"),
+        validation_cache=cache,
+    )
+    unidentified = PassingValidator()
+    assert reuse_initial_lifecycle_if_valid(
+        _workspace_copy(seed, tmp_path / "unidentified"),
+        application="example",
+        health_objective=objective,
+        validator=unidentified,
+        validation_cache=cache,
+    )
+    assert cache.source == "validator"
+
+    retried = IdentifiedPassingValidator("validator-image@sha256:v2")
+    assert reuse_initial_lifecycle_if_valid(
+        _workspace_copy(seed, tmp_path / "retried"),
+        application="example",
+        health_objective=objective,
+        validator=retried,
+        validation_cache=cache,
+    )
+    assert len(retried.runs) == 1
+
+
+def test_validation_cache_reports_an_existing_workspace_attestation(tmp_path: Path) -> None:
+    objective = "Deployment example and Service example must remain available."
+    seed = _validated_seed(tmp_path, objective)
+    cache = LifecycleValidationCache(tmp_path / "cache")
+
+    assert reuse_initial_lifecycle_if_valid(
+        _workspace_copy(seed, tmp_path / "attested"),
+        application="example",
+        health_objective=objective,
+        validator=IdentifiedPassingValidator("validator-image@sha256:seed"),
+        validation_cache=cache,
+    )
+    assert cache.source == "workspace-attestation"
+
+
+def test_validation_cache_is_opt_in_through_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SDO_LIFECYCLE_VALIDATION_CACHE_DIR", raising=False)
+    assert LifecycleValidationCache.from_env() is None
+    monkeypatch.setenv("SDO_LIFECYCLE_VALIDATION_CACHE_DIR", str(tmp_path / "cache"))
+    cache = LifecycleValidationCache.from_env()
+    assert cache is not None
+    assert cache.directory == tmp_path / "cache"
+    assert cache.source is None
+    with pytest.raises(ValueError, match="absolute"):
+        LifecycleValidationCache(Path("relative/cache"))

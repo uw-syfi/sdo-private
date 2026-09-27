@@ -6,6 +6,7 @@ import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -458,6 +459,39 @@ def test_sregym_adapter_uses_trusted_worker_kubeconfig_for_controller_install(
     result = driver._run(driver._parse_args([]))
     assert result["completed"] is True
     assert result["lifecycle_reused"] is True
+    assert result["lifecycle_validation"] == {"cache": "disabled", "source": None}
+
+
+def test_driver_shares_lifecycle_validation_through_the_opt_in_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.setenv("SREGYM_DEFER_CLEANUP", "1")
+    monkeypatch.setenv("SDO_LIFECYCLE_VALIDATION_CACHE_DIR", str(tmp_path / "validation-cache"))
+    monkeypatch.setattr(driver, "get_api_base", lambda: "http://localhost:8000")
+    monkeypatch.setattr(driver, "poll_stage_sync", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(driver, "get_app_info", lambda *_args, **_kwargs: {"app_name": "demo", "namespace": "demo"})
+    monkeypatch.setattr(driver, "_application_repository", lambda: tmp_path)
+    monkeypatch.setattr(
+        driver,
+        "_deployed_lifecycle_context",
+        lambda *_args, **_kwargs: driver.DeployedLifecycleContext(health_objective="healthy", active_resources=[]),
+    )
+    caches: list[Any] = []
+
+    def cached_reuse(*_args: object, validation_cache: Any = None, **_kwargs: object) -> bool:
+        caches.append(validation_cache)
+        validation_cache.source = "validation-cache"
+        return True
+
+    monkeypatch.setattr(driver, "reuse_initial_lifecycle_if_valid", cached_reuse)
+    monkeypatch.setattr(driver, "run_production_runtime", lambda _config: {"completed": True})
+
+    result = driver._run(driver._parse_args([]))
+
+    assert caches[0].directory == tmp_path / "validation-cache"
+    assert result["lifecycle_validation"] == {"cache": "enabled", "source": "validation-cache"}
 
 
 def test_receipt_falls_back_to_experiment_directory_for_registry_agents(tmp_path: Path) -> None:
@@ -1372,6 +1406,27 @@ def test_health_objective_never_requires_endpoints_for_external_name_services() 
         "have ready endpoints" in context.health_objective
     )
     assert ("Service", "jaeger") in [(resource.kind, resource.name) for resource in context.active_resources]
+
+
+def test_deployed_lifecycle_fingerprint_ignores_resource_order_and_tracks_topology() -> None:
+    from benchmarks.sregym.adapter.driver import deployed_lifecycle
+
+    def runner_for(items: list[dict[str, object]]):
+        def fake_runner(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(args, 0, json.dumps({"items": items}), "")
+
+        return fake_runner
+
+    frontend = {"kind": "Deployment", "metadata": {"name": "frontend"}}
+    geo = {"kind": "Deployment", "metadata": {"name": "mongodb-geo"}}
+
+    first = deployed_lifecycle("hotel-reservation", command_runner=runner_for([frontend, geo]))
+    reordered = deployed_lifecycle("hotel-reservation", command_runner=runner_for([geo, frontend]))
+    shrunk = deployed_lifecycle("hotel-reservation", command_runner=runner_for([frontend]))
+
+    assert first.context == _deployed_lifecycle_context("hotel-reservation", command_runner=runner_for([frontend, geo]))
+    assert first.fingerprint == reordered.fingerprint
+    assert first.fingerprint != shrunk.fingerprint
 
 
 def test_exported_runtime_artifacts_cover_responder_sessions_and_usage_logs() -> None:

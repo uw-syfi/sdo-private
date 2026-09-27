@@ -18,6 +18,14 @@ SREGym configuration remains benchmark-specific. Parsing and resolved defaults l
 
 `preserve_infrastructure = true` retains shared storage and observability services across attempts after verifying an in-cluster readiness marker. It changes only benchmark setup and cleanup; application resources and injected faults are still reset. Persistent application workspaces remain separately controlled by `application_workspace = "persistent"`.
 
+`defer_diagnosis_grading = true` (conductor env `SREGYM_DEFER_DIAGNOSIS_GRADING=1`) opens the mitigation stage as soon as the diagnosis is submitted and grades the diagnosis with the same judge in the background. Teardown waits for the verdict, so results keep both verdicts and add `diagnosis_grading_deferred = true`; `TTM` then excludes judge latency.
+
+`fast_namespace_teardown = true` (`SREGYM_FAST_NAMESPACE_TEARDOWN=1`) deletes a terminating application namespace's pods with a zero grace period during conductor cleanup instead of waiting out each pod's termination grace. Fault recovery, PV cleanup, and baseline reconciliation are unchanged.
+
+`source_build_cache = true` (`SREGYM_SOURCE_BUILD_CACHE=1`) labels source-built application images with a digest of their build context (excluding `.git`, `.sdo`, and `.sdo-runtime` at its root) and reuses the local image when the digest is unchanged, still loading it into the kind cluster.
+
+`lifecycle_validation_cache = true` sets `SDO_LIFECYCLE_VALIDATION_CACHE_DIR` to `.sdo-runtime/lifecycle-validation-cache` in the checkout. Lifecycle reuse then shares passing detector-validator verdicts across pipelines under the attestation's own key (validator image identity and `.sdo/diagnostics` digest), so a stage 0 that starts from an unchanged seed skips revalidation. Receipts record the outcome in `lifecycle_validation`.
+
 Common sections are:
 
 | Section | Purpose |

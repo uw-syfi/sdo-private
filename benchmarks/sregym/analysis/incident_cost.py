@@ -9,7 +9,9 @@ every SDO stage:
 - the headline time to mitigation ``ttm_s``, which excludes judge time: the
   raw time ``mitigation_submitted_at - fault_injected_at`` minus the conductor's
   diagnosis grading wait (``fault_injected_at + TTL - diagnosis_submitted_at``;
-  a mitigation POST cannot land before the mitigation stage opens), but never
+  a mitigation POST cannot land before the mitigation stage opens; zero for
+  ``diagnosis_grading_deferred`` runs, whose mitigation stage opens at the
+  diagnosis POST), but never
   less than when the agent's last state-changing command before its mitigation
   submission completed (``last_mut_s``, from the exported Codex rollout), since
   subtracting the whole grading wait undercounts an agent that kept repairing
@@ -516,6 +518,10 @@ def read_verdict(results_dir: Path) -> Verdict | None:
             if injected is not None and diagnosed is not None and ttl is not None
             else None
         )
+        if _truthy(row.get("diagnosis_grading_deferred")) is True:
+            # defer_diagnosis_grading opens the mitigation stage at the diagnosis POST and grades
+            # it in the background, so the mitigation POST never waits on the judge.
+            grading_wait = 0.0
         return Verdict(
             diagnosis=_truthy(row.get("Diagnosis.success")),
             mitigation=_truthy(row.get("Mitigation.success")),
