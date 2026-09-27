@@ -1,11 +1,11 @@
 // Package generators is a hand-written test fixture of what the health judge
-// authors for DeathStarBench hotel-reservation, grounded in
+// authors for the hotel-reservation source SREGym deploys
+// (SREGym-applications/hotelReservation), grounded in
 // services/frontend/server.go, cmd/user/db.go, and the wrk2 mixed workload.
 // Production code never contains these routes.
 package generators
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -14,9 +14,9 @@ import (
 
 var frontend = traffic.Target{Service: "frontend", Port: 5000}
 
-// cmd/user/db.go seeds users 0..500 as Cornell_<hex of the decimal digits>
-// with the decimal digits repeated ten times as the password.
-func seededUser(index int) string     { return fmt.Sprintf("Cornell_%x", strconv.Itoa(index)) }
+// cmd/user/db.go seeds users 0..500 as Cornell_<i> with the decimal digits
+// of i repeated ten times as the password.
+func seededUser(index int) string     { return "Cornell_" + strconv.Itoa(index) }
 func seededPassword(index int) string { return strings.Repeat(strconv.Itoa(index), 10) }
 
 // The wrk2 workload searches April 2015 around San Francisco.
