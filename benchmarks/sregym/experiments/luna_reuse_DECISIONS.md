@@ -543,3 +543,24 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - reuse1: stage 0 has primary 130.7 s, no-judge 106.8 s, applied 38.0 s; stage 1 has 37.5 / 21.3 / 18.0 s.
   - The two earlier Codex runs average 216.1 / 191.9 / 69.2 s.
   - Grading is about 16 to 24 s per stage. The large gap in SDO stage 0 is between applying the repair and POSTing mitigation: the responder verifies health before submitting.
+
+### Invalid runs: shared agent kubeconfig across clusters (SREGym `dcbd087f`, `b4275585`)
+
+- **Found in the Codex x5 run on luna-w0.** Attempt 1 reported an empty `hotel-reservation` namespace. Its own kubectl output showed pods on `luna-w1-worker3` and then namespaces about 3 minutes old, which was luna-w2.
+  - Cause: every conductor wrote its agent kubeconfig (which points at its filtering proxy) to the one fixed path `/tmp/sregym-agent-kubeconfig`. The file is bind-mounted into agent containers, and it is `KUBECONFIG` for host-side agents, including the SDO driver's lifecycle-context and revalidation reads. The last conductor to start won, and every problem process rewrote it.
+  - The SDO incident path (controller install, stage, receipts) uses `SREGYM_BASE_KUBECONFIG` and was not directly affected. But a misdirected Codex agent could mutate another lane's cluster mid-incident, and SDO lifecycle reads could see another cluster's fault.
+- **Decision: every run in the parallel window before the fix is invalid** (infrastructure contamination) and is excluded from all analysis. The directories were renamed with an `invalid_` prefix:
+  - `20260927_190901_codex` (codex_x5, w0);
+  - `20260927_190922_pipeline_sdo-codex-luna-persistent` (reuse2, w1; passed, still invalid);
+  - `20260927_190945_pipeline_sdo-codex-luna-persistent-fresh` (fresh2, w2; stopped in stage 1);
+  - `20260927_193254_pipeline_sdo-codex-luna-persistent-fresh` (fresh3, w1; stopped);
+  - `20260927_193303_pipeline_sdo-codex-luna-sequence` (sdo_sequence, w0; stopped).
+
+  Only reuse1 (`20260927_182519`) and fresh1 (`20260927_184719`) stay valid. They ran alone on luna-w0, one at a time. All lanes were stopped by process group as soon as the cause was confirmed.
+- **Fixes, test-first, pushed before any relaunch:**
+  - `dcbd087f`: the agent kubeconfig path is keyed by the proxy port.
+  - `b4275585`, the loud guard:
+    - `verify_agent_kubeconfig`: the agent kubeconfig must name only this conductor's proxy port, and `kubectl get nodes` through it must return only `<cluster>-*` nodes. It runs when the kubeconfig is generated (lane start) and again immediately before `inject_fault`, and a mismatch aborts the problem. Host-side reading of the file is the same view the container sees, since it is a bind mount of that file.
+    - `cluster_lock`: an exclusive host-wide lock per cluster, held for the worker's lifetime. Ports, proxy, agent kubeconfig path and fault scratch directory all derive from the same worker ID, so no two lanes can resolve to the same kubeconfig, socket or temp path without the second failing at start.
+    - Fault-injector backups move from fixed `/tmp/<service>_modified.yaml` paths to `/tmp/sregym-<cluster>/`. Two clusters injecting the readiness-probe fault at once could otherwise apply each other's original manifest, and the fault would silently not happen.
+- **Next: a two-lane Codex smoke run checks isolation before going back to three lanes.** Smoke runs are isolation checks only and are not counted as baseline samples, which keeps the planned 5-attempt design.
