@@ -475,3 +475,52 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
 - **Decision: match a kubectl invocation whose subcommand, after at most four flag or value tokens on the same command, is one of the four verbs.** A verb directly followed by a backtick is prose (`` `kubectl exec` ``), so a playbook may still say what not to do. `kubectl debug` (ephemeral containers, also not granted) is not included: the task named four verbs, and no run has produced it.
   - Alternative rejected: a plain substring match. It rejects prose and names such as `deployment/exec-proxy`.
 - **The verb list is one constant** (`RESPONDER_FORBIDDEN_KUBECTL_VERBS`) that feeds both the prompt and the validator. A contract test asserts that the responder Role in `controller/runtime/deploy/rbac.yaml` grants none of `pods/exec`, `pods/portforward` or `pods/attach`. `sdo-memory-check` prints the fix.
+
+### Step 1: push, CI, images
+
+- The full unit suite passed (1552 passed, 2 skipped), as did Go `controller/sdk`, `core` and `runtime`, format, and lint.
+- Pushed submodule branches `vic/exp/variants`, `vic/feat/persistent-controller` and `vic/exp/program-integration` to the fork before the superproject.
+- `origin/main` (`54c59e3`) was an ancestor of the integration head, so `main` fast-forwarded to `8c83a04`. No merge commit was needed, because `origin/main` had not moved. Pushed `vic/feat/persistent-controller` as well.
+- CI run 36340022014 on `main` passed all 8 jobs.
+- Main checkout switched to `main`, submodule at `38cbf4c7`. Images were rebuilt with `BUILDX_BUILDER=sdo-example`, and the fix was verified in the controller and sregym-responder images:
+  - `sdo-controller` `8173e51e7c3a`
+  - `sdo-sregym-responder` `efeea534d8c2`
+  - `sdo-responder` `0c0946f1c335`
+  - `sdo-detector-validator` `bb1ff6241ceb`
+- Images reach kind the same way as in earlier runs: the `run.sh` wrapper sets `SREGYM_KIND_REQUIRED_IMAGES`, and SREGym `ensure_kind_images` compares digests and `kind load`s any image that changed.
+
+### Step 2 run protocol
+
+- **Decision: seed every SDO pipeline's stage 0 with the lifecycle seed `64b3ac2`** (`SREGYM_APP_WORKSPACE_SEED_DIR=<scratch>/seed/lifecycle_workspace`; lifecycle commit only, no incident memory). The v2, v3 and persistent live runs used this seed.
+  - Without it, each replicate runs a cold lifecycle (about 24 min and 1.7M tokens) and gets its own health detector, which adds variance unrelated to the incident.
+  - Consequence: lifecycle tokens per replicate are ~0. The one-time lifecycle cost stays the measured 1.75M input / 20k output tokens (attempt 2, above). Stage 0 still pays lifecycle revalidation, the controller install and the baseline gate. All of these are pre-injection costs.
+  - Codex runs have no lifecycle and get no seed.
+- **The first launch was aborted and is not counted.** The first `ab_reuse1` launch (`aborted_20260927_182310_pipeline_noseed`) was started without the seed and killed about 90 s in, during stage 0's lifecycle, before any fault.
+- **Run order.** A queue runs the six A/B pipelines strictly one at a time, in the order reuse1, fresh1, reuse2, fresh2, reuse3, fresh3, and stops at the first nonzero exit. Load is sampled every 30 s by `run.sh`.
+
+### Parallel runs across three clusters (coordinator change of plan)
+
+- **Decision: run up to three pipelines at once, one per kind cluster (`luna-w0`, `luna-w1`, `luna-w2`).** The machine has 64 cores and 251 GB, and its load average was about 5, so running strictly one at a time wasted it. reuse1 ran alone. fresh1 was already running on `luna-w0` and finished alone, undisturbed. The sequential queue loop was killed by PID, which left its child alone.
+- **The harness could not run concurrent single-worker experiments safely, so I made it able to** (SREGym `e9631233`, test-first). Every `parallel = 1` experiment is worker 0, so two concurrent ones would have shared:
+  - the cluster `luna-w0`;
+  - the conductor port 8000 and the MCP port 9954;
+  - the filtering proxy's fixed `127.0.0.1:16443`, which is what Codex's kubeconfig points at;
+  - the host-global `~/cache_dir/cluster_baseline_state.json`. Reconciling against another cluster's baseline deletes that cluster's observe PVs and ClusterRoles.
+
+  The fix:
+  - `SREGYM_WORKER_ID_OFFSET` shifts the host-wide worker ID. That ID gives the cluster name (`luna-w<id>`), `API_PORT` 8000+id, MCP 9954+id and `SREGYM_WORKER_ID`.
+  - The proxy listens on 16443+`SREGYM_WORKER_ID`.
+  - The baseline file is keyed by `SREGYM_KIND_CLUSTER_NAME`.
+  - Results stay under `worker_0`, and everything is unchanged when the offset is unset.
+  - The SDO bridge already follows `API_PORT`: its relay forwards to the node's default gateway on the same port. Its hostNetwork port 18000 is inside each cluster's own node network namespace.
+  - Source-deploy image tags are already keyed by cluster name.
+- **The existing baseline file becomes luna-w0's.** It lists node names `luna-w0-*`, so it was copied to `cluster_baseline_state.luna-w0.json`.
+- **Decision: create fresh `luna-w1` and `luna-w2` instead of reusing `sregym-w0` or `sregym-w1`.** The harness builds them with luna-w0's bootstrap (same `run.sh` env: Calico with enforced NetworkPolicy and a canary check, the same preloaded SDO images). They also get the same TOML settings (`worker_cpu_limit = 3`, `preserve_infrastructure`, `reuse_cluster`). The first run on each deploys the shared infrastructure and captures that cluster's own baseline before the problem starts, so the cost is pre-injection only.
+  - Rejected: reusing `sregym-w*`. They were built for other experiments with unknown CNI and images, and proving an exact match would take longer than building new ones.
+- **Lane assignment** (each lane runs its items sequentially and stops at its first failure; starts are staggered so the second-resolution run directories cannot collide):
+  - `luna-w0`: codex_x5, then sdo_sequence.
+  - `luna-w1`: reuse2, then fresh3, then codex_sequence.
+  - `luna-w2`: fresh2, then reuse3, then sdo_variants, then codex_variants.
+
+  Across the replication this puts reuse on w0/w1/w2 (r1/r2/r3) and fresh on w0/w2/w1. The Codex baselines land on w0 (x5), w2 (variants) and w1 (sequence). The cluster and load average at each run's start and end are in `run_index.txt` and `queue.events` in the scratch notes, and `run.sh` samples load every 30 s.
+- **Guard:** if the load average goes above about 24, or the same arm's timings differ a lot between clusters, drop to two lanes and log it.
