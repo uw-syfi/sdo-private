@@ -39,11 +39,16 @@ func NewKubernetesSnapshotProvider(namespace string) (*KubernetesSnapshotProvide
 // NewKubernetesClient returns a client with its own transport and rate limiter.
 // Long-running controllers use a dedicated instance for Lease renewal so
 // informer, state-store, dispatcher, and validator traffic cannot starve
-// leader-election requests.
+// leader-election requests. Its rate limit defaults to
+// DefaultKubernetesClientQPS/Burst and honors SDO_KUBE_API_QPS and
+// SDO_KUBE_API_BURST.
 func NewKubernetesClient() (kubernetes.Interface, error) {
 	config, err := kubernetesConfig()
 	if err != nil {
 		return nil, err
+	}
+	if err := applyClientRateLimits(config, os.LookupEnv); err != nil {
+		return nil, fmt.Errorf("configure kubernetes client rate limit: %w", err)
 	}
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
