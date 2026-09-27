@@ -65,11 +65,22 @@ The controller is split by stability and privilege:
 | Package | Responsibility |
 |---|---|
 | `controller/sdk/` | Public Go interfaces for detector specifications, snapshots, findings, persistence, batching, and test snapshots |
+| `controller/sdk/servicehealth/` | Zero-knowledge ready-endpoints detector that names the selector labels a Service's backing Deployment lacks |
+| `controller/sdk/traffic/` | Synthetic-traffic scenarios, parameter generators, workload profiles, the deterministic engine, sliding-window SLO evaluation, and the scenario SLO detector |
 | `controller/core/` | Detector execution, snapshot validation, finding emission, and playbook-path validation |
-| `controller/runtime/` | Kubernetes cache, scheduler, finding state, batching, responder jobs, broker effects, leader election, and durable state |
-| `controller/builder/` | Validate `.sdo/diagnostics`, compile detector tests in isolation, and generate the application-specific controller workspace |
+| `controller/runtime/` | Kubernetes cache, scheduler, finding state, batching, responder jobs, broker effects, leader election, durable state, and the prober pod and its observer |
+| `controller/runtime/prober/` | The isolated synthetic-traffic prober process (no Kubernetes dependency): continuous health probes, verify bursts, HTTP API |
+| `controller/builder/` | Validate `.sdo/diagnostics`, compile detector and traffic-generator tests in isolation, and generate the application-specific controller and prober workspaces |
 
 Generated detectors are deterministic Go. They consume controller snapshots and must not call models, read hidden benchmark labels, or use external verdicts.
+
+### Synthetic traffic
+
+The health judge writes Go generators (`.sdo/diagnostics/traffic/generators/`, a package exporting `Scenarios() traffic.Catalog`) and workload profiles (`traffic/workloads/<name>.yaml`). A scenario is a user journey: steps whose endpoints build requests from a seeded rng and per-iteration state and check responses, the Services on its request path (from `.sdo/arch.md`, for localization), a side-effect class (read, idempotent write, or write with cleanup steps), a synthetic-data marker for writes, and the fault classes it must detect. A workload is data: purpose (`health-probe` runs continuously and feeds a traffic health detector; `verify-burst` and `journey` run on demand for a bounded time), scenarios and weights, arrival pattern and rate, timeouts, and per-scenario SLOs.
+
+The `traffic.Engine` owns scheduling, arrival, rate, in-flight and time caps, latency measurement, and seeding: iteration *n* of a workload always builds the same requests, so any failing probe replays exactly. It refuses unsafe requests (writes from read scenarios, writes without the marker) without sending them. The builder compiles generators only into a separate prober binary (`cmd/prober`, with workloads embedded), never into the controller; generated tests prove that every scenario fails against simulated unreachable and 5xx targets plus its declared classes, that workloads name provided scenarios, and that traffic detectors consume health-probe workloads, and a static guard rejects generator imports that reach the network, filesystem, or cluster and package-level clock or rng calls.
+
+The controller runs the prober as a pod in the control namespace: no service-account token, a read-only mount of only its content-addressed binary on the repository volume, CPU and memory limits, restart on crash, and a NetworkPolicy allowing egress only to the application namespace and cluster DNS. An unchanged binary keeps its pod across controller relaunches. The controller polls the prober's windows every 500 ms and wakes the traffic detectors only while a failure is inside a scenario's window; a scenario judges health only after it has succeeded once, and an unreachable prober surfaces as a detector error that blocks closure but never opens an incident. The always-on `service-endpoints` detector needs no authoring.
 
 ## Operational memory
 
@@ -80,7 +91,7 @@ The application repository is the shared durable memory. Five artifact classes l
 | `goal.md` | Human | Application identity and exact health objective |
 | `arch.md` | Deployer/upkeep | Source commit, topology fingerprint, and complete architecture summary |
 | `playbooks/` | Responder | Fault-specific diagnosis, repair, and verification procedures |
-| `diagnostics/` | Health judge and responder | Health and incident detector source, tests, module, and manifest |
+| `diagnostics/` | Health judge and responder | Health and incident detector source, tests, module, and manifest; synthetic-traffic generators and workloads (judge-owned, except responder-owned `traffic/generators/incident/` and `traffic/workloads/incident-*.yaml`) |
 | `outcomes.jsonl` | Controller | Append-only authoritative incident outcomes and evidence |
 
 `schema-version` and `lifecycle-provenance.yaml` are validation metadata. They do not change the five ownership classes. Lifecycle provenance may attest an exact diagnostics-tree digest against an immutable validator image identity; only that exact pair can reuse a prior successful compilation, while any detector or validator change forces isolated validation again.

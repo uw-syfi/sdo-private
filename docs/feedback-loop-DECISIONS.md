@@ -144,3 +144,81 @@ direction from the user; the rest were made autonomously.
   generated parameters that YAML cannot, while the engine keeps all timing and
   load under deterministic control; process isolation keeps app-authored code
   away from the controller's credentials.
+
+### D10. Prober placement and build
+
+- **Decision.** The builder generates a per-application `cmd/prober/main.go`
+  next to the detectors. It is compiled with `CGO_ENABLED=0` and published to
+  the repository PVC at `.sdo-prober/<sha16>/sdo-prober`. The controller
+  starts it as `sdo-prober` in the control namespace, reusing the controller
+  image and mounting the binary directory read-only through a PVC subPath.
+  The pod gets no service-account token, limits of 250m CPU and 128Mi memory,
+  a read-only root filesystem, and dropped capabilities. A NetworkPolicy
+  allows egress only to the application namespace and kube-dns:53, and
+  ingress only from pods in the same namespace (the controller). The pod is
+  reused when its fingerprint label matches.
+- **Alternatives.** A static `controller/cmd/prober` baked into a new image.
+  A sidecar in the controller pod.
+- **Why.** The generators are app-specific Go code, so the binary must be
+  built per application, as detectors already are. Reusing the controller
+  image means no new image and no change to `scripts/build_sdo_images.sh`
+  (checked: no new Python dependencies and no new image). A sidecar would
+  share the controller's network identity and credentials.
+
+### D11. Static import and call guard for generators
+
+- **Decision.** The builder rejects generator imports outside an allowlist
+  (the SDK traffic package plus pure stdlib such as `strings`, `strconv`,
+  `fmt`, `net/url`, `encoding/json`, `time` for durations). It also rejects
+  `math/rand` calls other than through the engine rng, and wall-clock reads
+  (`time.Now`, `time.Since`).
+- **Why.** Exact replay needs every source of randomness and time to come from
+  the engine. It is defence in depth on top of the pod isolation, and it is
+  cheap to check.
+
+### D12. Fixture grounding, qualification, and write safety
+
+- **Decision.** The hotel fixtures are grounded in the SREGym source:
+  - `Cornell_<i>` users with the password made of the digit repeated ten times;
+  - `/hotels`, `/recommendations` and `/user` routes, with bodies checked for
+    `FeatureCollection` or `Login successfully!`.
+  The `reserve` write (idempotent: marker customer `sdo-synthetic`, zero rooms,
+  2099 dates) is used only in the journey workload, never in the steady
+  health probe. At startup the prober must see each scenario pass once before
+  its SLO can fire, and the controller logs `synthetic_traffic_warm` and the
+  startup time.
+- **Why.** An earlier fixture guessed hex user names. Qualification stopped it
+  from ever firing, instead of producing a permanent false positive. This is
+  the safety property we want when a judge authors a wrong generator.
+
+### D13. Live lifecycle validation deferred to startup qualification
+
+- **Decision.** The health-judge lifecycle compiles the generators, runs the
+  conformance checks (each declared fault class must be detected against a
+  simulated doer), and validates the workloads against the catalog. It does
+  not yet run the "passes against the live healthy app" step. Startup
+  qualification (D12) covers that at runtime and is logged.
+- **Why.** Running the live check in the lifecycle needs the prober pod
+  before the controller exists. That would add wall-clock time to deployment,
+  and it cannot be exercised without a live agent run, which is out of scope
+  here.
+
+### D14. Verify-burst seeding
+
+- **Decision.** Each burst derives its iterations from the workload seed plus
+  a monotonically increasing burst offset. Bursts replay exactly, and
+  consecutive bursts do not repeat the same parameters.
+
+### Smoke results (no LLM, throwaway kind `sdo-smoke`, 3 runs)
+
+Setup: hotel-reservation with SREGym's `failure-admin-geo` and
+`failure-admin-rate` ConfigMaps mounted at `/scripts`, and the prober pod in
+`hotel-reservation-sdo` running the fixture generators.
+
+| Phase | Result |
+|---|---|
+| Healthy with decoys | No findings in 66–67 evaluations over 20 s; probe rate 4.04 req/s; verify-burst healthy in about 3.0 s |
+| `wrong_service_selector` on frontend | First unhealthy verdict at 1.57, 1.59 and 1.92 s. Fired (2 evaluations) at 1.88, 1.89 and 2.21 s as `scenario-slo.search-hotels`, with evidence "connection refused", the request path frontend → search → geo → rate → profile, and the replay seed and iteration. `service-endpoints` pointed at the frontend selector label `current_service_name=frontend`. Verify-burst unhealthy in about 4.6 s |
+| Decoy fix (re-grant Mongo roles) | Still firing for 20 s; verify-burst unhealthy in 4.5–4.6 s |
+| Correct fix | First healthy verdict at 2.18, 2.52 and 2.47 s; cleared at 2.50, 2.83 and 2.77 s; verify-burst healthy in 3.0 s |
+| Prober cost | About 11 millicores of CPU and 13 MiB of memory |

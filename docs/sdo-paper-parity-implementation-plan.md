@@ -21,6 +21,7 @@ Status meanings:
 | Five-artifact operational memory | `sdo/operational_memory/`; `.sdo/{goal.md,arch.md,playbooks,diagnostics,outcomes.jsonl}` | Implemented | Typed models, repository loading, ownership validation, append-only outcomes, and fixtures have tests |
 | Source-grounded architecture | `sdo/agent_runtime/lifecycle/operational_memory.py` | Implemented | Source commit, topology fingerprint, resource inventory, and coverage validation are deterministic; prose quality remains model-dependent |
 | Go detector SDK | `controller/sdk/` | Implemented | Detector, snapshot, finding, persistence, batching, and test-snapshot contracts have Go tests |
+| End-to-end synthetic-traffic health signal | `controller/sdk/traffic/`, `controller/runtime/prober/`, `controller/runtime/prober_pod.go`, `controller/builder/traffic.py`, `.sdo/diagnostics/traffic/` | Implemented | Judge-authored Go generators and workload profiles run in an isolated prober pod; the deterministic engine, SLO detector, conformance checks, and ownership have Go/Python tests, and a no-LLM kind smoke covers hotel-reservation with the selector fault and decoys; judge authoring quality remains model-dependent |
 | Generated detector validation | `controller/builder/`, `sdo/operational_memory/sandbox.py`, `sdo detector check` | Implemented | Agent self-checks consume controller-authored semantic context before a narrow locked-down compile/test; source is mounted read-only with no network, and self-check success does not replace the full independent acceptance check |
 | Long-running controller | `controller/core/`, `controller/runtime/`, `sdo/controller_install/` | Integrated | Scheduling, cache snapshots, finding state, batching, dispatch, state, leader election, a separate controller namespace, maintenance pause/resume with a fresh informer generation, and supervised relaunch have Go/Python tests; SREGym persistent mode runs one controller pod across problems; live durability depends on cluster resources |
 | Isolated responder | `sdo/contracts/`, `sdo/agent_runtime/responder/`, controller responder jobs | Implemented | Typed request/result contracts, worktree isolation, credential handling, and session backends have tests |
@@ -38,6 +39,8 @@ Status meanings:
 | `.sdo/playbooks/` | Bootstrap index, then responder | Responder | Paths, front matter, incident provenance, and history are validated |
 | `.sdo/diagnostics/detectors/health/` | Health judge | Health judge lifecycle | Must preserve objective digest, ownership, compile, and tests |
 | `.sdo/diagnostics/detectors/incidents/` | Responder | Responder | Requires incident ownership/provenance, compile, and matching plus near-miss tests |
+| `.sdo/diagnostics/traffic/generators/`, `traffic/workloads/` | Health judge | Health judge lifecycle | Workloads validated against the engine's caps; generators compile, pass fault-class conformance, and import only allowlisted packages |
+| `.sdo/diagnostics/traffic/generators/incident/`, `traffic/workloads/incident-*.yaml` | Responder | Responder | Same checks; incident-scoped only, so the health acceptance test stays judge-owned |
 | `.sdo/outcomes.jsonl` | Controller | Controller append only | Existing records are immutable |
 
 ## Repository scope matrix
