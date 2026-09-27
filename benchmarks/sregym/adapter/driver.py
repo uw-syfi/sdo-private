@@ -215,14 +215,14 @@ def _application_repository() -> Path:
 
 def _in_cluster_api_base(api_base: str) -> str:
     parsed = urlsplit(api_base)
-    if parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+    if parsed.hostname not in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
         return api_base.rstrip("/")
     return urlunsplit(("http", "sdo-sregym-bridge:8000", parsed.path.rstrip("/"), "", ""))
 
 
 def _relay_target_api_base(api_base: str) -> str | None:
     parsed = urlsplit(api_base)
-    if parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+    if parsed.hostname not in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
         return None
     return api_base.rstrip("/")
 

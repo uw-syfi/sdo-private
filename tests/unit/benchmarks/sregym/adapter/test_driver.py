@@ -203,6 +203,12 @@ def test_local_conductor_is_routed_through_narrow_in_cluster_relay() -> None:
     assert _relay_target_api_base("http://localhost:8123/") == "http://localhost:8123"
 
 
+def test_wildcard_bound_conductor_is_local_and_routed_through_relay() -> None:
+    """SREGym's main.py defaults API_HOSTNAME to the 0.0.0.0 bind address."""
+    assert _in_cluster_api_base("http://0.0.0.0:8000") == "http://sdo-sregym-bridge:8000"
+    assert _relay_target_api_base("http://0.0.0.0:8000") == "http://0.0.0.0:8000"
+
+
 def test_health_objective_names_only_resources_deployed_in_the_runtime_namespace() -> None:
     payload = {
         "items": [
