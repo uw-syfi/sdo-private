@@ -144,6 +144,8 @@ class BrokerLedger(BaseModel):
     reflection_learning_decision: Literal["updated", "no_change"] | None = None
     reflection_no_change_reason: str | None = None
     reflection_proposed_changes: list[str] = Field(default_factory=list)
+    # Provider accounting summed over every reflection attempt for the incident.
+    reflection_usage: dict[str, int | float] = Field(default_factory=dict)
     reflection_validation_error: str | None = None
     reflection_completed: bool = False
     reflection_commit: str | None = None
@@ -492,6 +494,8 @@ class BrokerService:
                 validation_feedback=ledger.reflection_validation_error,
             )
             ledger.reflection_attempts += 1
+            for key, value in turn.usage.items():
+                ledger.reflection_usage[key] = ledger.reflection_usage.get(key, 0) + value
             ledger.reflection_backend_completed = True
             ledger.reflection_summary = turn.summary
             ledger.reflection_learning_decision = turn.learning_decision

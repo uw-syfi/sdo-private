@@ -74,9 +74,10 @@ The current receipt schema is `sdo.production-receipt/v1`. It summarizes durable
 - production job dispatch and responder-job correlation;
 - repair policy and structured repair actions; either a proposal commit or, under `recorded-actions`, at least one successful action;
 - outcome, reflection, and validator-evidence commits;
-- responder usage plus phase timings that separate operational recovery from post-recovery learning and receipt work;
+- responder usage (`usage`) and reflection usage summed over reflection attempts (`reflection_usage`, from the broker ledger), plus phase timings that separate operational recovery from post-recovery learning and receipt work;
 - compact memory-reuse evidence: candidate count, match reasons, applied-playbook count, and warm-path status;
 - driver timings for conductor readiness, inventory/lifecycle work, production runtime, and benchmark submission, plus whether lifecycle memory was reused; `incident_resolution_seconds` is strictly detection through independently verified health, while the receipt lists pre-incident lifecycle and post-recovery learning as excluded time;
+- `fault_injection_deferred` and `fault_gate_timings_seconds` (`controller_baseline_wait`, `fault_injection_request`) when the conductor deferred injection until the SDO controller reported an all-clear evaluation; in that mode lifecycle and controller install happen before the fault and sit outside TTM;
 - whether executable detector validation ran; unchanged diagnostics may skip the Kubernetes validator and carry `validator_skipped_reason=unchanged-diagnostics` with no fresh canaries;
 - same-session reflection and independent verification;
 - final detector clearing and network-policy canaries;
@@ -105,7 +106,9 @@ third_party/sregym/logs/<run-or-pipeline>/
         └── <harness and agent logs>
 ```
 
-Result CSVs may flatten stage results into fields such as `Diagnosis.success` and `Mitigation.success`. Require explicit true values and inspect `agent_error`; missing or malformed values are not success.
+Host-side agent turns (initial lifecycle) append one record each to `sdo_turn_usage.jsonl` in the run's agent log directory (`SDO_TURN_USAGE_LOG`), with provider, model, session ID, duration, and token usage.
+
+Result CSVs may flatten stage results into fields such as `Diagnosis.success` and `Mitigation.success`. They also carry conductor wall-clock epochs `fault_injected_at`, `diagnosis_submitted_at`, and `mitigation_submitted_at` (recorded when the agent's `/submit` request arrives, before API retries or oracles) and, for agents with `defer_fault_injection`, `fault_injection_deferred_seconds`. `mitigation_submitted_at - fault_injected_at` is the agent-neutral incident time; `TTM` additionally includes diagnosis judging and the mitigation oracle. Require explicit true values and inspect `agent_error`; missing or malformed values are not success.
 
 ## Agent trajectories
 

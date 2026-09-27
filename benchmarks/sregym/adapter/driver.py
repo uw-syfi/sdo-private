@@ -319,6 +319,17 @@ def _deployed_health_objective(
     return _deployed_lifecycle_context(namespace, command_runner=command_runner).health_objective
 
 
+# The agent CLI layer appends one accounting record per turn to this file.
+TURN_USAGE_LOG_ENV = "SDO_TURN_USAGE_LOG"
+
+
+def _configure_turn_usage_log(logs_dir: str | None) -> None:
+    """Account host-side agent turns (lifecycle) beside the run's artifacts."""
+
+    if logs_dir and not os.environ.get(TURN_USAGE_LOG_ENV, "").strip():
+        os.environ[TURN_USAGE_LOG_ENV] = str(Path(logs_dir) / "sdo_turn_usage.jsonl")
+
+
 class _FaultGate:
     """Inject the deferred benchmark fault once the installed controller is watching."""
 
@@ -371,6 +382,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     conductor_ready = time.monotonic()
     app_info = get_app_info(api_base)
     repository = _application_repository()
+    _configure_turn_usage_log(args.logs_dir)
     application = str(app_info.get("app_name") or repository.name)
     namespace = str(app_info.get("namespace") or "default")
     lifecycle_context = _deployed_lifecycle_context(namespace)

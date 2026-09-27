@@ -303,6 +303,7 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         "detector_clear": detector_clear,
         "independent_verification": result.get("verification_evidence", []),
         "usage": result.get("usage", {}),
+        "reflection_usage": ledger.get("reflection_usage", {}),
         "phase_timings_seconds": _phase_timings(closure, recorded_at),
         "memory_reuse": _memory_reuse_summary(closure, result),
         "validator_network_policy_canaries": ledger.get("validator_network_policy_canaries", []),

@@ -770,3 +770,54 @@ def test_mitigation_time_memory_edits_are_rejected_before_health_verification(tm
         service.process_closure(_closure(workspace.path, workspace.base_commit))
 
     assert _git(target, "log", "--format=%B").count("SDO-Phase: proposal") == 0
+
+
+class MeteredNoChangeBackend(NoChangeSessionBackend):
+    def resume(self, **kwargs: object) -> ReflectionTurn:  # type: ignore[override]
+        turn = super().resume(**kwargs)  # type: ignore[arg-type]
+        return turn.with_usage({"llm_calls": 1, "input_tokens": 1200, "output_tokens": 80})
+
+
+def test_reflection_token_usage_is_recorded_in_the_durable_ledger(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    service = _service(
+        target,
+        worktrees,
+        AcceptRepairValidator(),
+        reflector=SessionReflector(MeteredNoChangeBackend()),
+    )
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    service.process_closure(_closure(workspace.path, workspace.base_commit))
+
+    state = service.completion_state("inc-20260709-0001")
+    assert state.reflection_usage == {"llm_calls": 1, "input_tokens": 1200, "output_tokens": 80}
+
+
+def test_session_backend_attaches_provider_usage_to_reflection_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentshim import ProviderUsage, TokenUsage
+
+    from libs.agent_cli.structured import StructuredTurn
+    from sdo.agent_runtime.responder import reflection
+
+    def fake_turn(*_args: object, **_kwargs: object) -> StructuredTurn:
+        return StructuredTurn(
+            output_json='{"summary": "s", "learning_decision": "no_change", "no_change_reason": "r", '
+            '"proposed_changes": []}',
+            session_id="session",
+            usage=ProviderUsage(tokens=TokenUsage(input_tokens=10, output_tokens=2, cached_input_tokens=4, turns=1)),
+        )
+
+    monkeypatch.setattr(reflection, "run_structured_turn", fake_turn)
+
+    turn = reflection.CodexSessionBackend(model="m").resume(
+        session_id="session", worktree=Path("."), prompt="p", idempotency_key="k"
+    )
+
+    assert turn.usage["input_tokens"] == 10
+    assert turn.usage["cached_input_tokens"] == 4
+    assert turn.usage["llm_calls"] == 1

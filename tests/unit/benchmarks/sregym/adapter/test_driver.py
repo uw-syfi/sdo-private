@@ -1161,3 +1161,15 @@ def test_deferred_problem_starts_fault_gate_after_lifecycle_and_before_runtime(
     assert events == ["lifecycle", "gate-start", "runtime", "gate-join"]
     assert result["fault_injection_deferred"] is True
     assert result["fault_gate_timings_seconds"] == FakeGate.timings
+
+
+def test_driver_records_host_turn_usage_beside_run_artifacts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SDO_TURN_USAGE_LOG", raising=False)
+    driver._configure_turn_usage_log(str(tmp_path))
+    assert os.environ["SDO_TURN_USAGE_LOG"] == str(tmp_path / "sdo_turn_usage.jsonl")
+
+    monkeypatch.setenv("SDO_TURN_USAGE_LOG", "/elsewhere.jsonl")
+    driver._configure_turn_usage_log(str(tmp_path))
+    assert os.environ["SDO_TURN_USAGE_LOG"] == "/elsewhere.jsonl"

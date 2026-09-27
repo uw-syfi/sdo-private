@@ -26,9 +26,11 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -67,6 +69,8 @@ DETECTOR_GATEWAY_COMMAND = "sdo detector check"
 #: ``$XDG_CACHE_HOME/sdo/codex-homes`` (``~/.cache/sdo/codex-homes``). It must
 #: be outside the workspace and the system temp dir.
 CODEX_HOME_ROOT_ENV = "SDO_CODEX_HOME_ROOT"
+# Optional JSONL file that receives one token-accounting record per turn.
+TURN_USAGE_LOG_ENV = "SDO_TURN_USAGE_LOG"
 
 #: Environment variables that authenticate Codex without an ``auth.json``.
 _CODEX_API_KEY_ENV = ("CODEX_API_KEY", "OPENAI_API_KEY")
@@ -110,6 +114,23 @@ class StructuredTurn:
     session_id: str
     usage: ProviderUsage
     shell_commands: tuple[str, ...] = field(default=())
+
+
+def turn_usage(turn: StructuredTurn) -> dict[str, int | float]:
+    """Flatten one turn's provider accounting into the SDO usage record shape."""
+
+    tokens = turn.usage.tokens
+    usage: dict[str, int | float] = {
+        "llm_calls": tokens.turns,
+        "input_tokens": tokens.input_tokens,
+        "output_tokens": tokens.output_tokens,
+        "cached_input_tokens": tokens.cached_input_tokens,
+        "cache_write_input_tokens": tokens.cache_write_input_tokens,
+        "reasoning_output_tokens": tokens.reasoning_output_tokens,
+    }
+    if turn.usage.total_cost_usd is not None:
+        usage["total_cost_usd"] = turn.usage.total_cost_usd
+    return usage
 
 
 @dataclass
@@ -162,6 +183,7 @@ def run_structured_turn(
 
     workspace = Path(cwd).resolve()
     recorder = _ShellCommandRecorder()
+    started = time.monotonic()
     try:
         with ExitStack() as turn_scope:
             selected, extra_args, extra_env = _provider_for(provider, access, workspace, turn_scope)
@@ -201,12 +223,37 @@ def run_structured_turn(
     session_id = result.session_id or resume_session_id
     if not session_id:
         raise StructuredTurnError(f"{provider} turn did not report a session id")
-    return StructuredTurn(
+    turn = StructuredTurn(
         output_json=json.dumps(structured_output),
         session_id=session_id,
         usage=result.usage,
         shell_commands=tuple(recorder.commands),
     )
+    _append_turn_usage(provider, model, workspace, turn, time.monotonic() - started)
+    return turn
+
+
+def _append_turn_usage(
+    provider: AgentProvider, model: str | None, workspace: Path, turn: StructuredTurn, duration_seconds: float
+) -> None:
+    """Append one accounting record when ``SDO_TURN_USAGE_LOG`` names a file."""
+
+    path = os.environ.get(TURN_USAGE_LOG_ENV, "").strip()
+    if not path:
+        return
+    record = {
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "provider": provider,
+        "model": model,
+        "cwd": str(workspace),
+        "session_id": turn.session_id,
+        "duration_seconds": duration_seconds,
+        "usage": turn_usage(turn),
+    }
+    log = Path(path).expanduser()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
 def _provider_for(

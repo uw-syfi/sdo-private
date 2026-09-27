@@ -22,6 +22,7 @@ from libs.agent_cli.structured import (
     ACCESS_MODES,
     AGENT_PROVIDERS,
     DETECTOR_GATEWAY_COMMAND,
+    TURN_USAGE_LOG_ENV,
     StructuredTurnError,
     StructuredTurnTimeout,
     run_structured_turn,
@@ -392,3 +393,28 @@ def test_invalid_arguments_fail_before_any_process_starts(
             **arguments,
         )
     assert agent.requests == []
+
+
+@pytest.mark.parametrize("provider", AGENT_PROVIDERS)
+def test_each_turn_appends_its_usage_to_the_configured_log(
+    provider: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log = tmp_path / "usage" / "turns.jsonl"
+    monkeypatch.setenv(TURN_USAGE_LOG_ENV, str(log))
+
+    _run(provider, tmp_path, model="m-1")
+    _run(provider, tmp_path, model="m-1")
+
+    records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert len(records) == 2
+    assert records[0]["provider"] == provider
+    assert records[0]["model"] == "m-1"
+    assert records[0]["session_id"] == "s-1"
+    assert set(records[0]["usage"]) >= {"llm_calls", "input_tokens", "output_tokens", "cached_input_tokens"}
+    assert records[0]["duration_seconds"] >= 0
+
+
+def test_turns_write_no_usage_log_unless_configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(TURN_USAGE_LOG_ENV, raising=False)
+    _run("codex", tmp_path)
+    assert not list(tmp_path.rglob("*.jsonl"))

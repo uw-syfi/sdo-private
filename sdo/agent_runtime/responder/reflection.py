@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
-from libs.agent_cli.structured import AgentProvider, StructuredTurnError, run_structured_turn
+from libs.agent_cli.structured import AgentProvider, StructuredTurnError, run_structured_turn, turn_usage
 from sdo.operational_memory import OutcomeClassification, OutcomeRecord
 
 if TYPE_CHECKING:
@@ -31,6 +31,16 @@ class ReflectionTurn(BaseModel):
     learning_decision: Literal["updated", "no_change"]
     no_change_reason: str | None = Field(default=None, min_length=1)
     proposed_changes: list[str]
+    # Provider accounting for the turn; kept out of the model-facing schema.
+    _usage: dict[str, int | float] = PrivateAttr(default_factory=dict)
+
+    @property
+    def usage(self) -> dict[str, int | float]:
+        return dict(self._usage)
+
+    def with_usage(self, usage: dict[str, int | float]) -> ReflectionTurn:
+        self._usage = dict(usage)
+        return self
 
     def model_post_init(self, __context: object) -> None:
         if self.learning_decision == "updated" and not self.proposed_changes:
@@ -164,7 +174,7 @@ class CodexSessionBackend:
             )
         except StructuredTurnError as exc:
             raise RuntimeError(f"{self.provider} reflection failed: {exc}") from exc
-        return ReflectionTurn.model_validate_json(turn.output_json)
+        return ReflectionTurn.model_validate_json(turn.output_json).with_usage(turn_usage(turn))
 
 
 class ClaudeSessionBackend(CodexSessionBackend):
