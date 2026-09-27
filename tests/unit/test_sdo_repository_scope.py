@@ -50,8 +50,9 @@ def test_tracked_repository_has_no_legacy_sds_names() -> None:
 
 
 def test_ci_references_only_existing_repository_scripts() -> None:
-    ci = (REPOSITORY_ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8")
+    ci = (REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     referenced = sorted(set(re.findall(r"\./(scripts/[A-Za-z0-9_./-]+\.sh)", ci)))
+    assert referenced, "CI workflow references no repository scripts"
     missing = [relative for relative in referenced if not (REPOSITORY_ROOT / relative).is_file()]
     assert not missing, f"CI references missing scripts: {missing}"
 
