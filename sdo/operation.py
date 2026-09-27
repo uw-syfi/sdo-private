@@ -65,6 +65,7 @@ class OperationConfig:
     timeout_seconds: int = 1800
     repair_policy: str = "commit"
     agent_provider: str = "codex"
+    controller_namespace: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.repository, Path):
@@ -290,6 +291,7 @@ def operate(
                 repair_policy=config.repair_policy,
                 agent_provider=config.agent_provider,
                 wait_for_completion=False,
+                controller_namespace=config.controller_namespace,
             )
         )
     except (ControllerInstallError, DeploymentError, LifecycleError, OSError, ValueError) as exc:

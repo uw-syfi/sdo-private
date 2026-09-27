@@ -338,3 +338,37 @@ def test_public_operation_source_has_no_legacy_or_benchmark_transport() -> None:
     assert "SREGYM" not in normalized
     assert "SUBMISSION" not in normalized
     assert not (root / "sdo/commands/run.py").exists()
+
+
+def test_operate_can_install_the_controller_in_its_own_namespace(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    captured: list[OperationConfig] = []
+
+    exit_code = main(
+        [
+            "operate",
+            str(repository),
+            "--namespace",
+            "demo",
+            "--goal",
+            "Users can complete requests.",
+            "--controller-namespace",
+            "demo-sdo",
+        ],
+        operation_runner=lambda config: captured.append(config),
+    )
+
+    assert exit_code == 0
+    assert captured[0].controller_namespace == "demo-sdo"
+    installed: list[object] = []
+    operate(
+        captured[0],
+        deployment_backend=object(),
+        verifier=object(),
+        deployment_runner=lambda *_args, **_kwargs: DeploymentAttempt(
+            deployed=True, source_commit="a" * 40, agent_session_id="s", summary="deployed"
+        ),
+        runtime_runner=lambda config: installed.append(config) or ControllerInstallResult(controller_logs=""),
+    )
+    assert installed[0].control_namespace == "demo-sdo"  # type: ignore[attr-defined]
+    assert installed[0].namespace == "demo"  # type: ignore[attr-defined]
