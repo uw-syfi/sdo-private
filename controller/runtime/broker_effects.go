@@ -38,6 +38,14 @@ func (c *Controller) ExecuteWorkspaceEffect(ctx context.Context, effect Workspac
 		cancel()
 		return fmt.Errorf("workspace effect is not pending")
 	}
+	if err := c.requireDurableLocked("incident worktree preparation", func(state RuntimeState) bool {
+		return state.IncidentOpen && state.DispatchState == "workspace_pending" && state.IncidentRequest != nil &&
+			state.IncidentRequest.IncidentID == effect.IncidentID
+	}); err != nil {
+		c.mu.Unlock()
+		cancel()
+		return err
+	}
 	broker := c.broker
 	c.dispatchState = "workspace_running"
 	c.mu.Unlock()
@@ -69,6 +77,14 @@ func (c *Controller) ExecuteClosureEffect(ctx context.Context, effect ClosureEff
 		c.mu.Unlock()
 		cancel()
 		return fmt.Errorf("closure effect is not pending")
+	}
+	if err := c.requireDurableLocked("incident closure", func(state RuntimeState) bool {
+		return state.ClosureState == "pending" && state.PendingClosure != nil &&
+			sameJSON(*state.PendingClosure, effect.Closure)
+	}); err != nil {
+		c.mu.Unlock()
+		cancel()
+		return err
 	}
 	broker := c.broker
 	c.closureState = "processing"
@@ -104,6 +120,14 @@ func (c *Controller) ExecuteClosureAcknowledgmentEffect(
 		c.mu.Unlock()
 		cancel()
 		return fmt.Errorf("closure acknowledgment effect is not pending")
+	}
+	if err := c.requireDurableLocked("closure acknowledgment", func(state RuntimeState) bool {
+		return state.ClosureState == "committed" && state.ClosureReceipt != nil &&
+			*state.ClosureReceipt == effect.Receipt
+	}); err != nil {
+		c.mu.Unlock()
+		cancel()
+		return err
 	}
 	broker := c.broker
 	c.closureState = "acknowledging"

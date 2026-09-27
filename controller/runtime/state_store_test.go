@@ -56,10 +56,12 @@ func TestConfigMapStateStoreRoundTripAndCASConflict(t *testing.T) {
 	if loadedRevision != revision || len(loaded.History) != 1 {
 		t.Fatalf("unexpected loaded state %#v revision %q", loaded, loadedRevision)
 	}
-	if _, err := store.Save(ctx, loaded, revision); err != nil {
+	changed := loaded
+	changed.History = append(changed.History, DetectorEvaluation{DetectorID: "incident"})
+	if _, err := store.Save(ctx, changed, revision); err != nil {
 		t.Fatalf("update state: %v", err)
 	}
-	if _, err := store.Save(ctx, loaded, revision); !errors.Is(err, ErrStateConflict) {
+	if _, err := store.Save(ctx, changed, revision); !errors.Is(err, ErrStateConflict) {
 		t.Fatalf("expected stale writer conflict, got %v", err)
 	}
 }
@@ -341,6 +343,9 @@ func TestFindingArrivingDuringIncidentIsDeferredAndRestartRecoverable(t *testing
 	firstEffect, ok := controller.PendingDispatchEffect()
 	if !ok {
 		t.Fatal("expected primary dispatch effect")
+	}
+	if err := controller.PersistState(ctx); err != nil {
+		t.Fatalf("persist primary effect: %v", err)
 	}
 	if err := controller.ExecuteDispatchEffect(ctx, firstEffect); err != nil {
 		t.Fatalf("execute primary effect: %v", err)
