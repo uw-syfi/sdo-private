@@ -1159,3 +1159,24 @@ Variants cumulative break-even was not reached within 3 stages (incident-only ga
   - use 1 control plane + 1 worker kind clusters;
   - export receipts and rollouts per stage;
   - fix the controller's unbounded closure retry.
+
+## Next-round readiness: closing the 3.4 harness items
+
+Coordinator-directed, 2026-09-27. Four harness items from 3.4, each test-first, each in its own commit on main. No Codex or Claude agent runs (the weekly window is at about 89%).
+
+### 3.4-a: bounded closure retry in the controller
+
+- **The bug (recorded under `ca8f741`).** `handleClosureCompletion` set a rejected closure back to `pending`, and the run loop's `executePendingEffects` resubmitted it at once. A permanent broker rejection became a tight loop (about 26,000 failures in 20 minutes), the incident was never acknowledged, and the persistent drain could only end at its 3600 s timeout.
+- **Decision: bounded retry with exponential backoff, then a durable terminal `failed` closure state.**
+  - `ControllerConfig.ClosureRetry` (`ClosureRetryPolicy`): zero fields take the defaults of 8 attempts, backoff from 2 s doubling to a 1 min cap (about 4.5 min in total). Negative values or a cap below the initial backoff are rejected by `NewController`.
+  - Every failed attempt, including a receipt that fails the controller's own checks, updates `RuntimeState.closure_failure` (`attempts`, `max_attempts`, `last_error`, first and last failure times, `next_attempt_at`). The closure effect is not offered again before `next_attempt_at`, and `NextWake` includes it so the loop wakes for the retry.
+  - After the last attempt, `closure_state` becomes `failed` and `closure_failure.permanent` is true, with an `action` naming what to inspect and how to re-arm (fix the cause, set `closure_state` to `pending` and remove `closure_failure` in `sdo-controller-state`). The pending closure keeps its evidence. The record is durable, so a restart does not reset the budget or re-arm the closure. `RuntimeState.Validate` rejects a `failed` state without a permanent record, or a record for another incident.
+  - A `context.Canceled` completion (lost leadership, shutdown) is not a broker verdict and is not counted.
+  - **Logs:** each rejection still goes to stderr, the terminal failure is reported once more as `give up incident closure: ...`, and the controller writes one `{"controller_closure_failed": {...}}` JSON record on stdout.
+  - **Pipeline end:** the persistent drain (`_wait_for_reflection_drain`) raises `ClosureFailedError` with the incident, attempts, broker error and action as soon as the state shows the incident's closure failed, after exporting the controller logs into the stage's receipt dir. A controller started with `--exit-after-closure` (per-problem mode) exits with the failure as its error, also on restart into a failed state.
+- **Scope kept narrow** because another agent is changing `run.go`, the prober and RBAC: the policy lives in the new `controller/runtime/closure_retry.go`. `controller.go`, `state_store.go` and `broker_effects.go` get only the fields and the hooks, and `run.go` gets one logging callback and two exit checks, outside the hunks the other branch touches. `controller/runtime` stays transport-neutral: no SREGym types, relays or receipts.
+- **Alternatives considered:**
+  - Classifying broker errors as permanent or transient: the subprocess broker returns only an exit status and stderr, so a classifier would guess. The bounded budget covers both, and a transient outage longer than about 4.5 min is surfaced for an operator instead of hidden.
+  - Exiting the controller on the permanent failure in persistent mode: the supervisor would relaunch it into the same durable failed state, and the drain already ends on the state. Only `--exit-after-closure` exits.
+  - Dropping the closure to unblock new incidents: rejected. It would lose the only record of an unrecorded outcome. New incidents stay blocked until an operator acts, which is the conservative choice.
+- **Not changed:** workspace preparation and acknowledgment keep their immediate retry. They are idempotent broker operations with no validation gate, and neither has been seen to fail permanently.

@@ -482,3 +482,32 @@ def test_a_rejected_receipt_is_kept_with_its_validation_error_and_logs(tmp_path:
     assert rejected["receipt"]["incident_id"] == "incident-1"
     assert ops.events.count(("logs", "hotel-sdo")) == 2
     assert ("delete", "hotel-sdo") in ops.events
+
+
+def test_a_permanently_failed_closure_ends_the_drain_with_the_broker_error(tmp_path: Path) -> None:
+    ops = FakeOps()
+    _run(tmp_path, ops, "s0", [])
+    state = ops.states["hotel-sdo"]
+    state["closure_state"] = "failed"
+    state["closure_failure"] = {
+        "incident_id": "incident-1",
+        "attempts": 8,
+        "max_attempts": 8,
+        "permanent": True,
+        "last_error": "source repair check failed: trailing whitespace",
+        "action": "inspect the incident worktree and the broker ledger",
+    }
+    clock = _clock(ops)
+
+    errors = teardown(tmp_path / "sdo_persistent_controller.json", ops=ops, clock=clock)
+
+    assert len(errors) == 1
+    assert "incident-1" in errors[0]
+    assert "8 broker attempts" in errors[0]
+    assert "trailing whitespace" in errors[0]
+    assert "inspect the incident worktree" in errors[0]
+    # The drain ends on the controller's verdict, not at its 3600 s timeout.
+    assert clock.monotonic() < 60
+    # The controller log is evidence of the rejected closure.
+    assert ops.events.count(("logs", "hotel-sdo")) == 2
+    assert ("delete", "hotel-sdo") in ops.events

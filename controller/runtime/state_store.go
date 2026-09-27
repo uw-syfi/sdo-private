@@ -48,6 +48,7 @@ type RuntimeState struct {
 	PendingClosure             *IncidentClosure        `json:"pending_closure,omitempty"`
 	ClosureState               string                  `json:"closure_state,omitempty"`
 	ClosureReceipt             *ClosureReceipt         `json:"closure_receipt,omitempty"`
+	ClosureFailure             *ClosureFailure         `json:"closure_failure,omitempty"`
 	LastAcknowledgedIncidentID string                  `json:"last_acknowledged_incident_id,omitempty"`
 }
 
@@ -63,6 +64,9 @@ func (state RuntimeState) Validate() error {
 	}
 	if state.PendingClosure != nil && state.PendingClosure.Request.IncidentID == "" {
 		return fmt.Errorf("pending incident closure is missing its incident id")
+	}
+	if err := validateClosureFailure(state); err != nil {
+		return err
 	}
 	if state.DetectorReviewRequired && (!state.IncidentOpen || !state.ResponderDone ||
 		state.DetectorReviewRequiredAt.IsZero() || state.DetectorReviewReason == "") {

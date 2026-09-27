@@ -260,9 +260,17 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if *exitAfterClosure && controller.LastAcknowledgedIncidentID() != "" {
 		return nil
 	}
+	if err := ClosureFailureError(controller); err != nil && *exitAfterClosure {
+		return err
+	}
 	iteration := 0
 	encoder := json.NewEncoder(stdout)
 	controller.OnError = func(err error) { fmt.Fprintln(stderr, err) }
+	controller.OnClosureFailed = func(failure ClosureFailure) {
+		if err := encoder.Encode(map[string]any{"controller_closure_failed": failure}); err != nil {
+			fmt.Fprintln(stderr, err)
+		}
+	}
 	controller.OnEvaluation = func(findings []sdk.Finding) {
 		if err := encoder.Encode(map[string]any{
 			"controller_iteration": iteration,
@@ -472,6 +480,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			controller.handleClosureCompletion(completion)
 			if err := controller.PersistState(ctx); err != nil {
 				return fmt.Errorf("persist controller state: %w", err)
+			}
+			if err := ClosureFailureError(controller); err != nil && *exitAfterClosure {
+				return err
 			}
 			if err := executePendingEffects(runCtx, controller); err != nil {
 				if runCtx.Err() != nil {

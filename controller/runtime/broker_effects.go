@@ -60,7 +60,7 @@ func (c *Controller) ExecuteWorkspaceEffect(ctx context.Context, effect Workspac
 func (c *Controller) PendingClosureEffect() (ClosureEffect, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.broker == nil || c.closureState != "pending" || c.pendingClosure == nil {
+	if c.broker == nil || c.closureState != "pending" || c.pendingClosure == nil || !c.closureRetryDueLocked() {
 		return ClosureEffect{}, false
 	}
 	return ClosureEffect{Closure: *cloneIncidentClosure(c.pendingClosure)}, true
@@ -194,20 +194,31 @@ func (c *Controller) handleWorkspaceCompletion(completion workspaceCompletion) {
 
 func (c *Controller) handleClosureCompletion(completion closureCompletion) {
 	c.mu.Lock()
-	if completion.err != nil {
-		c.closureState = "pending"
-		c.mu.Unlock()
-		c.reportBrokerError("process incident closure", completion.err)
-		return
+	err := completion.err
+	if err == nil && (c.pendingClosure == nil || completion.receipt.IncidentID != c.pendingClosure.Request.IncidentID ||
+		completion.receipt.OutcomeCommit == "" || completion.receipt.AckToken == "") {
+		err = fmt.Errorf("broker returned invalid closure receipt")
 	}
-	if c.pendingClosure == nil || completion.receipt.IncidentID != c.pendingClosure.Request.IncidentID ||
-		completion.receipt.OutcomeCommit == "" || completion.receipt.AckToken == "" {
-		c.closureState = "pending"
+	if err != nil {
+		if c.pendingClosure == nil {
+			c.closureState = "pending"
+			c.mu.Unlock()
+			c.reportBrokerError("process incident closure", err)
+			return
+		}
+		failure, permanent := c.recordClosureRejectionLocked(err)
 		c.mu.Unlock()
-		c.reportBrokerError("process incident closure", fmt.Errorf("broker returned invalid closure receipt"))
+		c.reportBrokerError("process incident closure", err)
+		if permanent {
+			c.reportBrokerError("give up incident closure", failure)
+			if c.OnClosureFailed != nil {
+				c.OnClosureFailed(failure)
+			}
+		}
 		return
 	}
 	c.closureReceipt = cloneClosureReceipt(&completion.receipt)
+	c.closureFailure = nil
 	c.closureState = "committed"
 	c.mu.Unlock()
 }

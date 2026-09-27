@@ -78,6 +78,10 @@ class PersistentControllerError(RuntimeError):
     """Raised when a persistent controller cannot be installed, reused, or drained."""
 
 
+class ClosureFailedError(PersistentControllerError):
+    """Raised when the controller gave up committing an incident closure the broker kept rejecting."""
+
+
 def control_namespace_for(app_namespace: str) -> str:
     """Name the per-application SDO namespace after the application namespace."""
 
@@ -470,7 +474,12 @@ def drain_pending_incident(
     if pending is None:
         return 0.0
     started = clock.monotonic()
-    _wait_for_reflection_drain(ops, record.control_namespace, pending.incident_id, timeout_seconds, clock)
+    try:
+        _wait_for_reflection_drain(ops, record.control_namespace, pending.incident_id, timeout_seconds, clock)
+    except ClosureFailedError:
+        # The controller log holds every broker rejection of the closure.
+        ops.export_controller_logs(record.control_namespace, pending.receipt_dir)
+        raise
     waited = clock.monotonic() - started
     config = replace(
         runtime_config_from_payload(record.runtime_config),
@@ -716,11 +725,27 @@ def _wait_for_reflection_drain(ops: ClusterOps, control: str, incident_id: str, 
 
     deadline = clock.monotonic() + timeout
     while clock.monotonic() < deadline:
-        acknowledged = ops.runtime_state(control).get("last_acknowledged_incident_id") == incident_id
+        state = ops.runtime_state(control)
+        _raise_if_closure_failed(state, incident_id)
+        acknowledged = state.get("last_acknowledged_incident_id") == incident_id
         if acknowledged and _relaunched_after(_log_records(ops.controller_logs(control)), incident_id):
             return
         clock.sleep(POLL_SECONDS)
     raise PersistentControllerError(f"incident {incident_id!r} was not reflected and rolled out within {timeout:.0f}s")
+
+
+def _raise_if_closure_failed(state: dict[str, Any], incident_id: str) -> None:
+    """Stop waiting once the controller has given up the incident's closure; it never retries it again."""
+
+    failure = state.get("closure_failure")
+    if state.get("closure_state") != "failed" or not isinstance(failure, dict):
+        return
+    if failure.get("incident_id") != incident_id:
+        return
+    raise ClosureFailedError(
+        f"incident {incident_id!r} closure permanently failed after {failure.get('attempts')} broker attempts: "
+        f"{failure.get('last_error')}; {failure.get('action')}"
+    )
 
 
 def _relaunched_after(records: list[dict[str, Any]], incident_id: str) -> bool:

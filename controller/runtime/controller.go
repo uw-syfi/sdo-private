@@ -38,6 +38,8 @@ type ControllerConfig struct {
 	// to watch events and the detector's own interval.
 	ConfirmationInterval time.Duration
 	RepairPolicy         string
+	// ClosureRetry bounds resubmission of a closure the broker rejects.
+	ClosureRetry ClosureRetryPolicy
 }
 
 type dispatchCompletion struct {
@@ -81,6 +83,7 @@ type Controller struct {
 	pendingClosure             *IncidentClosure
 	closureState               string
 	closureReceipt             *ClosureReceipt
+	closureFailure             *ClosureFailure
 	lastAcknowledgedIncidentID string
 	broker                     IncidentBroker
 	workspaceResults           chan workspaceCompletion
@@ -91,8 +94,11 @@ type Controller struct {
 	OnResult         func(IncidentResult)
 	OnEvaluation     func([]sdk.Finding)
 	OnIncidentClosed func(IncidentClosure)
+	OnClosureFailed  func(ClosureFailure)
 	CanAct           func() bool
 	GuardAction      func(context.Context) (context.Context, context.CancelFunc, error)
+	// now overrides the wall clock for closure retry backoff in tests.
+	now func() time.Time
 }
 
 func NewController(
@@ -129,6 +135,11 @@ func NewController(
 	if config.RepairPolicy != "commit" && config.RepairPolicy != "recorded-actions" {
 		return nil, fmt.Errorf("unsupported repair policy %q", config.RepairPolicy)
 	}
+	closureRetry, err := config.ClosureRetry.withDefaults()
+	if err != nil {
+		return nil, err
+	}
+	config.ClosureRetry = closureRetry
 	if err := core.ValidateDetectors(detectors); err != nil {
 		return nil, err
 	}
@@ -387,7 +398,7 @@ func (c *Controller) NextWake() time.Time {
 	if verificationPending && (next.IsZero() || verificationDeadline.Before(next)) {
 		return verificationDeadline
 	}
-	return next
+	return c.closureRetryWake(next)
 }
 
 func (c *Controller) IncidentOpen() bool {
@@ -695,6 +706,7 @@ func (c *Controller) ExportState() RuntimeState {
 		PendingClosure:             cloneIncidentClosure(c.pendingClosure),
 		ClosureState:               closureState,
 		ClosureReceipt:             cloneClosureReceipt(c.closureReceipt),
+		ClosureFailure:             cloneClosureFailure(c.closureFailure),
 		LastAcknowledgedIncidentID: c.lastAcknowledgedIncidentID,
 	}
 }
@@ -732,6 +744,7 @@ func (c *Controller) RestoreState(state RuntimeState) error {
 		c.closureState = "pending"
 	}
 	c.closureReceipt = cloneClosureReceipt(state.ClosureReceipt)
+	c.closureFailure = cloneClosureFailure(state.ClosureFailure)
 	c.lastAcknowledgedIncidentID = state.LastAcknowledgedIncidentID
 	return nil
 }
