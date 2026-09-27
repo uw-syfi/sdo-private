@@ -306,10 +306,17 @@ class TestStrReplaceFileProperties:
 
 
 class TestGrepProperties:
-    """grep must always return a string, never raise."""
+    """grep must always return a string, never raise.
+
+    Each example creates a temp directory, writes a file, patches the agent cwd,
+    and compiles an arbitrary regex, so wall time per example depends on
+    filesystem and machine load. Hypothesis' default 200 ms deadline turns that
+    latency into flaky failures, so these tests disable the per-example
+    deadline; the example counts keep the total run to a few seconds.
+    """
 
     @given(pattern=arbitrary_text)
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_never_raises_on_arbitrary_pattern(self, pattern: str):
         d = _tmpdir()
         f = d / "f.txt"
@@ -320,7 +327,7 @@ class TestGrepProperties:
         assert isinstance(result, str)
 
     @given(content=file_content)
-    @settings(max_examples=50)
+    @settings(max_examples=50, deadline=None)
     def test_valid_literal_pattern_returns_string(self, content: str):
         d = _tmpdir()
         f = d / "f.txt"
@@ -341,7 +348,7 @@ class TestGrepProperties:
         assert "too long" in result
 
     @given(pattern=st.from_regex(r"[^\x00]{1,50}", fullmatch=True))
-    @settings(max_examples=50)
+    @settings(max_examples=50, deadline=None)
     def test_invalid_regex_returns_error_not_crash(self, pattern: str):
         d = _tmpdir()
         f = d / "f.txt"
