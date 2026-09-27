@@ -89,12 +89,22 @@ def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle
     for field in (
         "production_job_dispatch",
         "completed",
-        "same_session_reflection",
         "acknowledged",
         "cleaned",
     ):
         if receipt.get(field) is not True:
             raise ProductionReceiptValidationError(f"production receipt requires {field}=true")
+    # The first reflection attempt resumes the responder session unless the
+    # run opted into a fresh session; then the receipt must say so.
+    reflection_session_mode = receipt.get("reflection_session_mode")
+    if reflection_session_mode not in (None, "resume", "fresh"):
+        raise ProductionReceiptValidationError("production receipt has an invalid reflection_session_mode")
+    expected_same_session = reflection_session_mode != "fresh"
+    if receipt.get("same_session_reflection") is not expected_same_session:
+        raise ProductionReceiptValidationError(
+            f"production receipt requires same_session_reflection={str(expected_same_session).lower()} "
+            f"for reflection_session_mode={reflection_session_mode or 'resume'}"
+        )
     lifecycle_provenance = receipt.get("lifecycle_provenance")
     if lifecycle_provenance is not True and not (allow_test_lifecycle and lifecycle_provenance is False):
         raise ProductionReceiptValidationError("production receipt requires lifecycle_provenance=true")

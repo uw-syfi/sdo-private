@@ -1,4 +1,8 @@
-"""Production durable broker CLI with mandatory same-session reflection."""
+"""Production durable broker CLI with mandatory reflection.
+
+The first reflection attempt resumes the responder session unless
+``--reflection-session fresh`` opts into a fresh session from an incident brief.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +20,7 @@ from sdo.agent_runtime.responder import (
     prepare_codex_home,
 )
 from sdo.operational_memory import (
+    REFLECTION_SESSION_MODES,
     BrokerClosure,
     BrokerService,
     BrokerServiceError,
@@ -34,6 +39,7 @@ def _production_reflector(
     model: str | None,
     reasoning_effort: str,
     timeout_seconds: int,
+    responder_turn_log: Path | None = None,
 ) -> SessionReflector:
     backend_type = ClaudeSessionBackend if provider == "claude" else CodexSessionBackend
     return SessionReflector(
@@ -41,7 +47,8 @@ def _production_reflector(
             model=model,
             reasoning_effort=reasoning_effort,
             timeout_seconds=timeout_seconds,
-        )
+        ),
+        responder_turn_log=responder_turn_log,
     )
 
 
@@ -69,9 +76,7 @@ def _memory_validator(
     return MemoryValidator()
 
 
-def main(argv: list[str] | None = None) -> int:
-    prepare_codex_home()
-    prepare_claude_home()
+def _argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sdo-broker-service")
     parser.add_argument("--repository", type=Path, required=True)
     parser.add_argument("--worktree-root", type=Path, required=True)
@@ -83,12 +88,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reflection-model")
     parser.add_argument("--reflection-reasoning-effort", default="medium")
     parser.add_argument("--reflection-timeout-seconds", type=int, default=900)
+    parser.add_argument(
+        "--reflection-session",
+        choices=REFLECTION_SESSION_MODES,
+        default="resume",
+        help="first reflection attempt: resume the responder session (default) or start a fresh session "
+        "from a compact incident brief",
+    )
+    parser.add_argument(
+        "--responder-turn-log",
+        type=Path,
+        help="responder per-turn usage log; a fresh reflection brief quotes the responder's shell commands from it",
+    )
     parser.add_argument("--validator-mode", choices=("container", "kubernetes", "local"), default="container")
     parser.add_argument("--validator-namespace")
     parser.add_argument("--validator-image")
     parser.add_argument("--validator-repository-pvc")
     parser.add_argument("--validator-repository-mount-path", type=Path, default=Path("/workspace"))
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    prepare_codex_home()
+    prepare_claude_home()
+    args = _argument_parser().parse_args(argv)
     commands = [shlex.split(command) for command in args.proposal_command]
     broker = CommitBroker(
         args.repository,
@@ -113,7 +136,9 @@ def main(argv: list[str] | None = None) -> int:
             model=args.reflection_model,
             reasoning_effort=args.reflection_reasoning_effort,
             timeout_seconds=args.reflection_timeout_seconds,
+            responder_turn_log=args.responder_turn_log,
         ),
+        reflection_session=args.reflection_session,
     )
     try:
         payload = json.load(sys.stdin)

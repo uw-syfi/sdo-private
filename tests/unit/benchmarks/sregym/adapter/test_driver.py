@@ -411,6 +411,9 @@ def test_sregym_adapter_passes_configured_model_to_initial_lifecycle(
     }
     assert captured == ["gpt-5.5"]
     assert runtime_configs[0].repair_policy == "recorded-actions"
+    assert runtime_configs[0].reflection_session == "resume"
+    assert driver._run(driver._parse_args(["--reflection-session", "fresh"]))["completed"] is True
+    assert runtime_configs[1].reflection_session == "fresh"
     assert result["incident_resolution_seconds"] == 12.5
     assert result["incident_resolution_scope"] == "detected_to_independently_verified_health"
     assert result["excluded_from_incident_resolution_seconds"] == {
@@ -766,6 +769,17 @@ def test_strict_production_receipt_requires_job_route_reflection_clear_ack_and_c
     with pytest.raises(ControllerInstallError, match="lifecycle_provenance"):
         validate_production_receipt(test_double_receipt)
     validate_production_receipt(test_double_receipt, allow_test_lifecycle=True)
+
+    # An opted-in fresh first reflection is recorded, not passed off as same-session.
+    fresh = {**receipt, "same_session_reflection": False, "reflection_session_mode": "fresh"}
+    validate_production_receipt(fresh)
+    validate_production_receipt({**receipt, "reflection_session_mode": "resume"})
+    with pytest.raises(ControllerInstallError, match="same_session_reflection"):
+        validate_production_receipt({**fresh, "reflection_session_mode": "resume"})
+    with pytest.raises(ControllerInstallError, match="same_session_reflection"):
+        validate_production_receipt({**receipt, "reflection_session_mode": "fresh"})
+    with pytest.raises(ControllerInstallError, match="reflection_session_mode"):
+        validate_production_receipt({**receipt, "reflection_session_mode": "transcript"})
 
 
 def test_recorded_actions_receipt_accepts_actions_without_proposal_commit() -> None:
@@ -1262,12 +1276,39 @@ def test_receipt_reflection_telemetry_distinguishes_fresh_retries_from_same_sess
         "reflection_attempts": 2,
         "reflection_fresh_retry_attempts": 1,
         "reflection_skipped_reason": None,
+        "reflection_session_mode": None,
     }
     assert runtime._reflection_telemetry({}) == {
         "reflection_attempts": 0,
         "reflection_fresh_retry_attempts": 0,
         "reflection_skipped_reason": None,
+        "reflection_session_mode": None,
     }
+
+
+def test_receipt_same_session_reflection_holds_only_when_the_first_attempt_resumed() -> None:
+    import benchmarks.sregym.adapter.runtime as runtime
+
+    resumed = {"responder_session_id": "s-1", "reflection_commit": "r", "reflection_session_mode": "resume"}
+    fresh = {**resumed, "reflection_session_mode": "fresh"}
+
+    assert runtime._same_session_reflection(resumed) is True
+    # Older ledgers, and deterministic no-op reflections, carry no mode.
+    assert runtime._same_session_reflection({**resumed, "reflection_session_mode": None}) is True
+    assert runtime._same_session_reflection(fresh) is False
+    assert runtime._same_session_reflection({**resumed, "reflection_commit": None}) is False
+    assert runtime._reflection_telemetry(fresh)["reflection_session_mode"] == "fresh"
+
+
+def test_sregym_agent_config_selects_the_reflection_session_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
+    assert driver._parse_args([]).reflection_session == "resume"
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"reflection_session": "fresh"}))
+    assert driver._parse_args([]).reflection_session == "fresh"
+    with pytest.raises(SystemExit):
+        driver._parse_args(["--reflection-session", "transcript"])
 
 
 def test_receipt_reports_a_deterministically_skipped_reflection() -> None:

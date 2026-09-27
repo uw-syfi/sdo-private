@@ -192,6 +192,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--repository-pvc", default=config.get("repository_pvc", "sdo-application-repository"))
     parser.add_argument("--credentials-secret", default=config.get("credentials_secret", "sdo-codex-credentials"))
     parser.add_argument(
+        "--reflection-session",
+        choices=("resume", "fresh"),
+        default=config.get("reflection_session", "resume"),
+    )
+    parser.add_argument(
         "--logs-dir",
         default=config.get("logs_dir", os.getenv("AGENT_LOGS_DIR")),
         help=argparse.SUPPRESS,
@@ -444,6 +449,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             timeout_seconds=args.timeout_sec,
             repair_policy="recorded-actions",
             agent_provider=args.provider,
+            reflection_session=args.reflection_session,
             submission_api_base=_in_cluster_api_base(api_base),
             submission_relay_target_base=_relay_target_api_base(api_base),
             artifacts_dir=_receipt_directory(args.logs_dir, repository),
