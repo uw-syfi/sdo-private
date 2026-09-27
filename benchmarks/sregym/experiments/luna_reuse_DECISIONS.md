@@ -225,3 +225,58 @@ Evidence: R2 (`20260927_104328_pipeline_sdo-codex-luna-reuse/stage_1_reused-inci
   - Primary: v2 R1 91.7s vs v1 R1 102.5s; v2 R2 51.7s vs v1 R2 93.0s. Codex mitigation POSTs were 167.6s, 167.1s and 265.1s; only A2 passed both oracles.
   - Responder input: v2 666K and 458K vs v1 749K and 619K vs Codex 861K, 438K and 886K.
   - Reflection input: v2 1.94M and 569K vs v1 1.80M and 954K.
+
+## v3
+
+Goal: in a repeated incident, make the warm fast mode and the deterministic no-op reflection actually trigger. This follows the v2 R2 findings above. No SREGym runs were started for this entry.
+
+- **Merged `vic/fix/reflection-validator-rules` (8c90b1a).** The reflection prompt now states the MemoryValidator rules: the playbook index link and `<UPPER_CASE>` placeholders. This targets the 3-attempt R1 reflection in v2. Clean merge.
+- **Merged `vic/fix/detector-watch-eval` (2f671e1), at the coordinator's request.** This is a controller-runtime fix from the agent that investigated the Go runtime:
+  - informer events are coalesced per kind, so ConfigMap and Deployment events no longer queue behind a Pod-event backlog;
+  - a detector below its Firing threshold is re-evaluated within 1 s;
+  - late findings attach to an incident until its responder launches;
+  - controller pod logs are exported to `sdo_runtime/controller_logs/`.
+
+  It likely explains the v2 "unexplained detail": no incident-detector evaluation after the ConfigMap delete. The merge was clean. I made no Go changes of my own.
+- **The v2 evidence was narrower than the brief assumed.** The brief said R2's `memory_reuse` showed "1 applied playbook". That playbook was `.sdo/playbooks/health-objective/README.md`: the request's `surfaced_playbooks` held only the health playbook, which is the health finding's playbook. The prior outcome's `applied_playbooks` was also the health playbook. The R2 responder ran the incident playbook's scripts but reported only the health playbook as applied. So "a surfaced playbook owned by an incident detector", read literally as `surfaced_playbooks`, would still have declined on v2.
+  - **Decision:** a playbook counts as surfaced through any of these sources, recorded in `WarmPlaybookMatch.sources`:
+    1. `active-finding`: an active finding of its owning detector;
+    2. `surfaced`: it is in the request's `surfaced_playbooks`;
+    3. `prior-outcome-applied`: the exact-fingerprint prior outcome applied it;
+    4. `detector-learned-from-exact-prior`: its owning detector's `originatingIncident` is that exact-fingerprint prior incident.
+
+    Source 4 is what fires on the v2 shape. It is still tight, because the detector was learned from the very incident that matched by exact fingerprint. Ownership is always required: the playbook must be listed in `possiblePlaybooks` of a registered `class: incident`, `owner: responder` detector in the worktree manifest. Health-owned, unregistered, and non-exact cases stay cold.
+  - The warm prompt now asks the responder to list the applied playbook path exactly as shown. Later outcomes then record the incident playbook, so source 3 also holds from the next round on.
+  - Rejected alternative: surface the incident detector's playbooks from Go (`surfacedPlaybooks` in `controller.go`). That would change the controller while another agent owns it, and the Python-side rule is enough.
+  - Not added: declining warm mode when the incident detector evaluated `clear` after the fault became visible. With `Firing > 1` a clear status can mean "pending", so this could wrongly decline. The one combined sanity check covers contradiction instead.
+- **Warm prompt for a detector that has not fired.** Each playbook gets an evidence line:
+  - When the detector fired, the text is unchanged: the evidence establishes the preconditions, and the check replaces the playbook's diagnosis steps.
+  - When it has not fired, the prompt says no incident-detector evidence exists yet. It asks for ONE combined sanity check over the detector's watched kinds in the namespace (plus the pods and events of the affected workload) against the preconditions the playbook states. If the playbook has a script whose name contains `diagnose`, `check` or `verify` (in that order), the check runs it; a verify script is expected to fail on the fault before repair.
+  - If the check contradicts, the responder falls back to full investigation.
+  - The cold prompt is unchanged.
+- **No-op reflection.** All of these must hold:
+  - the warm rule held;
+  - the responder's `applied_playbooks` includes the warm playbook;
+  - `status=completed` with confirmed root causes, and every repair action and verification passed;
+  - the controller verified health (every final health detector state clear);
+  - for each owning detector, its latest `incident_detector_states` entry is clear with no fingerprints, or it has no entry at all ("not evaluated after the response"). A detector that is firing after the response forces a full reflection.
+
+  `reflection_skipped_reason` names:
+  - the prior incident(s);
+  - each playbook with its detector;
+  - whether the detector `fired` or `had not fired` at dispatch;
+  - the surfacing sources;
+  - each detector's post-response state.
+
+  Tradeoff: when the detector never fired, the no-op skips the only LLM turn that could have made a stale detector fire promptly, such as the v2 `Firing: 2` detector. I accepted this as specified. The controller-runtime merge and the new validator rule address promptness directly.
+- **Reflection guidance and enforcement.** The reflection prompt now asks incident detectors to:
+  - use `persistence.firing: 1` in the manifest and `Firing: 1` in `Spec()`;
+  - watch where the fault is visible, including Pods and Events for pod-level symptoms (FailedMount, CrashLoopBackOff, ImagePullBackOff, OOMKilled, failing probes).
+
+  The detector skeleton now shows Pod and Event watches with `Firing: 1`; it used to show `Firing: 2`, which probably seeded v2's choice. Playbooks are asked for `scripts/verify.sh` (and `diagnose.sh` when needed) because the warm path runs it as the sanity check.
+  - **Enforcement decision:** `MemoryValidator._validate_incident_persistence` rejects a new or changed responder incident-detector registration with `persistence.firing > 1` (`INCIDENT_DETECTOR_MAX_FIRING = 1` in `operational_memory/models.py`). I put it in the validator, not the `DetectorRegistration` model, so existing repositories with legacy `firing: 2` detectors, such as the v2 workspace, still load. Untouched legacy registrations are grandfathered, so an unrelated playbook-only proposal is not rejected. Refining a legacy detector forces the fix. The Go `Spec()` must match the manifest (enforced by the builder), so checking the manifest is enough.
+- **Validation.**
+  - `format_code.sh` and `check_errors.sh` are clean.
+  - `uv run pytest -q tests/unit/sdo tests/unit/libs/agent_cli tests/unit/benchmarks/sregym/adapter tests/unit/controller`: 354 passed, 2 skipped (after both merges).
+  - `GOMAXPROCS=8 go test ./...` passes in `controller/runtime`, `controller/core` and `controller/sdk`.
+- **Images rebuilt** at f68a717 with `BUILDX_BUILDER=sdo-example bash scripts/build_sdo_images.sh` (exit 0, smoke imports passed): `sdo-detector-validator:v0.1.0` 57b8a3289b53, `sdo-controller:v0.1.0` 05b293361ecb, `sdo-responder:v0.1.0` a4ca9282709f, `sdo-sregym-responder:v0.1.0` 03c6691fb16d.
