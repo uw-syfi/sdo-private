@@ -1,0 +1,11 @@
+apiVersion: sdo.dev/v1alpha1
+kind: TrafficWorkload
+name: journey
+description: Bounded end-to-end check that includes the synthetic reservation write.
+purpose: journey
+ratePerSecond: 2
+duration: 5s
+scenarios:
+  - id: search-hotels
+  - id: login
+  - id: reserve

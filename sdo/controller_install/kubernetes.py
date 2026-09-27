@@ -157,6 +157,9 @@ def controller_resources(
         config.application,
         "--responder-image",
         config.responder_image,
+        # The isolated traffic prober runs its static binary from the controller image.
+        "--prober-image",
+        config.controller_image,
         "--repository-pvc",
         config.repository_pvc,
         "--repository-mount-path",
