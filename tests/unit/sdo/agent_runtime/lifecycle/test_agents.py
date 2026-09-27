@@ -1148,6 +1148,9 @@ def test_real_three_round_health_judge_authors_compiling_detector(
     )
 
     provenance = __import__("yaml").safe_load((repository / ".sdo/lifecycle-provenance.yaml").read_text())
-    assert len(provenance["health_judge_rounds"]) == 3
-    assert len({item["session_id"] for item in provenance["health_judge_rounds"]}) == 3
+    # Provenance records every attempt, so a corrected round appears more than once.
+    attempts = provenance["health_judge_rounds"]
+    assert {item["round"] for item in attempts} == {1, 2, 3}
+    assert len({item["session_id"] for item in attempts}) == len(attempts)
+    assert provenance["health_judge"]["round"] == 3
     assert LocalSandboxRunner(timeout_seconds=300).run(repository).returncode == 0
