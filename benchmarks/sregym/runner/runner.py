@@ -28,6 +28,7 @@ from benchmarks.sregym.runner.experiment import (
     application_workspace_mode,
     config_to_env,
     config_to_main_args,
+    persistent_controller_enabled,
     read_snapshot,
     resolve_config,
     resolve_tasklist,
@@ -44,6 +45,8 @@ from benchmarks.sregym.runner.pipeline import (
 )
 
 _APP_WORKSPACE_SEED_ENV_VAR = "SREGYM_APP_WORKSPACE_SEED_DIR"
+_PERSISTENT_STATE_ENV_VAR = "SDO_PERSISTENT_CONTROLLER_STATE"
+_PERSISTENT_STATE_FILENAME = "sdo_persistent_controller.json"
 
 
 def _load_agent_hooks(agent_name: str, project_root: Path) -> tuple[str | None, str | None]:
@@ -241,6 +244,8 @@ def _run_stage(
     project_root: Path,
     extra_env: dict[str, str] | None = None,
 ) -> int:
+    """Run one stage; a persistent-controller stage's strict receipt is validated after its drain."""
+
     cli_args = config_to_main_args(exp_config, stage_exp_dir, tasklist_path)
     env = config_to_env(exp_config, project_root, exp_dir=stage_exp_dir)
     if extra_env:
@@ -265,7 +270,7 @@ def _run_stage(
     if result.returncode == 0:
         stage_error = _stage_results_error(
             stage_exp_dir,
-            require_strict_receipt=exp_config.require_strict_receipt,
+            require_strict_receipt=exp_config.require_strict_receipt and not persistent_controller_enabled(exp_config),
         )
         if stage_error is not None:
             print(f"  ⚠️  Stage artifacts failed validation: {stage_error}", flush=True)
@@ -401,6 +406,19 @@ def _resolve_workspace_seed_env(
     return {_APP_WORKSPACE_SEED_ENV_VAR: str(prev_workspace_dir)}
 
 
+def _teardown_persistent_controllers(state_path: Path, project_root: Path, env: dict[str, str]) -> str | None:
+    """Drain the last incidents, write their strict receipts, and stop every persistent controller."""
+
+    if not state_path.exists():
+        return None
+    argv = ["uv", "run", "python", "-m", "benchmarks.sregym.adapter.persistent", "teardown", "--state", str(state_path)]
+    print(f"  persistent controller teardown: {' '.join(argv)}", flush=True)
+    result = subprocess.run(argv, cwd=str(project_root), env=env)
+    if result.returncode != 0:
+        return f"persistent controller teardown exited with code {result.returncode}"
+    return None
+
+
 def run_pipeline(
     config: PipelineConfig,
     *,
@@ -445,6 +463,10 @@ def run_pipeline(
         _run_hook(before_hook, hook_env, "before_benchmark", project_root)
 
     prev_kb_dir: str | None = None
+    persistent_state = pipeline_dir / _PERSISTENT_STATE_FILENAME
+    # Stages whose strict receipts are written by the next stage's drain or by teardown.
+    deferred_receipt_stages: list[tuple[int, Path]] = []
+    pipeline_succeeded = False
 
     try:
         for i, stage_cfg in enumerate(config.stages):
@@ -502,6 +524,10 @@ def run_pipeline(
                 print(f"\nStage {i} failed before launch: {exc}")
                 print(f"Resume with: run_sregym.sh {pipeline_dir}")
                 return 1
+            if persistent_controller_enabled(exp_config):
+                stage_extra_env[_PERSISTENT_STATE_ENV_VAR] = str(persistent_state)
+                if exp_config.require_strict_receipt:
+                    deferred_receipt_stages.append((i, stage_exp_dir))
             print("=" * 60)
 
             lifecycle.before_stage(stage_exp_dir, exp_config)
@@ -561,11 +587,25 @@ def run_pipeline(
             prev_kb_dir = str(stage_exp_dir / "kb")
             print(f"\nStage {i} completed.\n")
 
+        if deferred_receipt_stages or persistent_state.exists():
+            teardown_error = _teardown_persistent_controllers(persistent_state, project_root, hook_env)
+            for index, stage_dir in deferred_receipt_stages:
+                receipt_error = teardown_error or _stage_results_error(stage_dir, require_strict_receipt=True)
+                if receipt_error is not None:
+                    state.stages[index].status = "failed"
+                    state.stages[index].error = f"deferred strict receipt: {receipt_error}"
+                    write_pipeline_state(state, pipeline_dir)
+                    print(f"\nStage {index} failed after the persistent controller drain: {receipt_error}")
+                    return 1
+        pipeline_succeeded = True
         print("=" * 60)
         print("Pipeline completed successfully.")
         print(f"  directory: {pipeline_dir}")
         print("=" * 60)
         return 0
     finally:
+        if not pipeline_succeeded and persistent_state.exists():
+            # Never leave a controller running after an aborted pipeline.
+            _teardown_persistent_controllers(persistent_state, project_root, hook_env)
         if after_hook:
             _run_hook(after_hook, hook_env, "after_benchmark", project_root)

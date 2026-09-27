@@ -386,6 +386,17 @@ def _resolve_tasklist_source(tasklist_ref: str, sregym_dir: Path) -> Path:
 
 
 _EXTERNAL_AGENTS = {"crucible", "sdo_codex"}
+#: Namespace label the SDO installer puts on a separate controller namespace;
+#: the harness keeps namespaces with this label across problems when told to.
+PERSISTENT_CONTROLLER_NAMESPACE_LABEL = "sdo.dev/controller-namespace"
+
+
+def persistent_controller_enabled(config: ExperimentConfig) -> bool:
+    """Whether SDO keeps one controller per application across this experiment's problems."""
+
+    if config.agent != "sdo_codex":
+        return False
+    return bool((config.agent_config.get("sdo_codex") or {}).get("persistent_controller", False))
 
 
 def config_to_main_args(
@@ -508,6 +519,8 @@ def config_to_env(config: ExperimentConfig, project_root: Path, exp_dir: Path | 
         # environment, so SDO workers require a real enforcement preflight.
         env["SREGYM_KIND_REQUIRE_NETWORK_POLICY"] = "1"
         env["SREGYM_KIND_NETWORK_POLICY_CANARY_IMAGE"] = validator_image
+        if persistent_controller_enabled(config):
+            env["SREGYM_PRESERVE_NAMESPACE_LABEL"] = PERSISTENT_CONTROLLER_NAMESPACE_LABEL
 
     return env
 

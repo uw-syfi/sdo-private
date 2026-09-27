@@ -30,6 +30,7 @@ from sdo.controller_install import (
     controller_security_contexts,
     install_controller,
     kubectl,
+    sync_repository_from_controller,
 )
 from sdo.controller_install import (
     controller_resources as production_controller_resources,
@@ -63,6 +64,9 @@ class RuntimeConfig(ControllerInstallConfig):
     wait_for_completion: bool = True
     # Where the run's results live; pod-side runtime evidence is exported here.
     artifacts_dir: Path | None = None
+    # Keep one controller running across benchmark problems (see persistent.py):
+    # no bounded duration, no exit after closure, and transport stays deployed.
+    persistent: bool = False
 
 
 def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle: bool = False) -> None:
@@ -77,7 +81,7 @@ class _SREGymRuntimeExtension:
     config: RuntimeConfig
 
     def controller_args(self, config: ControllerInstallConfig) -> list[str]:
-        args = ["--duration", f"{config.timeout_seconds}s", "--exit-after-closure"]
+        args = [] if self.config.persistent else ["--duration", f"{config.timeout_seconds}s", "--exit-after-closure"]
         if self.config.submission_api_base:
             args.extend(
                 [
@@ -100,7 +104,7 @@ class _SREGymRuntimeExtension:
 
     def complete(self, config: ControllerInstallConfig, result: ControllerInstallResult) -> dict[str, Any]:
         # Export before building the receipt so the evidence survives a receipt failure.
-        runtime_artifacts = _export_runtime_artifacts(self.config.namespace, self.config.artifacts_dir)
+        runtime_artifacts = _export_runtime_artifacts(self.config.control_namespace, self.config.artifacts_dir)
         receipt = _production_receipt(self.config, result.controller_logs)
         receipt["runtime_artifacts"] = runtime_artifacts
         validate_production_receipt(receipt, allow_test_lifecycle=self.config.allow_test_lifecycle)
@@ -108,9 +112,12 @@ class _SREGymRuntimeExtension:
         return receipt
 
     def cleanup(self, config: ControllerInstallConfig) -> None:
+        if self.config.persistent:
+            # The controller and its transport outlive this problem.
+            return
         # Cleanup also runs after a failed controller Job, when logs matter most.
         if self.config.wait_for_completion:
-            _export_controller_logs(self.config.namespace, self.config.artifacts_dir)
+            _export_controller_logs(self.config.control_namespace, self.config.artifacts_dir)
         _delete_submission_bridge(self.config)
 
 
@@ -157,7 +164,7 @@ def _submission_bridge_resources(
         {
             "apiVersion": "apps/v1",
             "kind": "Deployment",
-            "metadata": {"name": "sdo-sregym-bridge", "namespace": config.namespace},
+            "metadata": {"name": "sdo-sregym-bridge", "namespace": config.control_namespace},
             "spec": {
                 "replicas": 1,
                 "selector": {"matchLabels": labels},
@@ -201,7 +208,7 @@ def _submission_bridge_resources(
         {
             "apiVersion": "v1",
             "kind": "Service",
-            "metadata": {"name": "sdo-sregym-bridge", "namespace": config.namespace},
+            "metadata": {"name": "sdo-sregym-bridge", "namespace": config.control_namespace},
             "spec": {
                 "selector": labels,
                 "ports": [{"name": "http", "port": 8000, "targetPort": 18000}],
@@ -218,7 +225,7 @@ def _wait_for_submission_bridge(config: RuntimeConfig) -> None:
     while time.monotonic() < deadline:
         completed = kubectl(
             ["get", "deployment/sdo-sregym-bridge", "-o", "json"],
-            namespace=config.namespace,
+            namespace=config.control_namespace,
             check=False,
         )
         if completed.returncode == 0:
@@ -243,7 +250,7 @@ def _delete_submission_bridge(config: RuntimeConfig) -> None:
             "--ignore-not-found=true",
             "--wait=false",
         ],
-        namespace=config.namespace,
+        namespace=config.control_namespace,
         check=False,
     )
 
@@ -355,10 +362,23 @@ def _reflection_telemetry(ledger: dict[str, Any]) -> dict[str, int | str | None]
     }
 
 
-def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str, Any]:
+def _production_receipt(
+    config: RuntimeConfig,
+    controller_logs: str,
+    *,
+    incident_id: str | None = None,
+) -> dict[str, Any]:
+    """Build the strict receipt for the acknowledged incident.
+
+    A per-problem controller has exactly one acknowledged incident. A
+    persistent controller serves several, so the caller names the incident
+    and responder Jobs of other incidents are expected to coexist.
+    """
+
     # Logs remain useful diagnostics, but are intentionally not authoritative:
     # Kubernetes may garbage-collect a failed or even successful retry Pod.
     del controller_logs
+    control = config.control_namespace
     common_dir_result = subprocess.run(
         ["git", "-C", str(config.repository), "rev-parse", "--git-common-dir"],
         check=False,
@@ -372,22 +392,25 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         common_dir = config.repository / common_dir
     jobs_payload = kubectl(
         ["get", "jobs", "--selector", "app.kubernetes.io/name=sdo-responder", "-o", "json"],
-        namespace=config.namespace,
+        namespace=control,
     )
     jobs = json.loads(jobs_payload.stdout).get("items", [])
     state_document = json.loads(
-        kubectl(["get", "configmap/sdo-controller-state", "-o", "json"], namespace=config.namespace).stdout
+        kubectl(["get", "configmap/sdo-controller-state", "-o", "json"], namespace=control).stdout
     )
     state = json.loads(state_document.get("data", {}).get("runtime-state.json", "{}"))
-    incident_id = state.get("last_acknowledged_incident_id")
+    acknowledged_id = state.get("last_acknowledged_incident_id")
+    if incident_id is None:
+        incident_id = acknowledged_id
     if not isinstance(incident_id, str) or not incident_id.strip():
         raise ControllerInstallError("controller has no durable acknowledged incident for receipt correlation")
-    configmaps_payload = kubectl(["get", "configmaps", "-o", "json"], namespace=config.namespace)
+    configmaps_payload = kubectl(["get", "configmaps", "-o", "json"], namespace=control)
     configmaps = json.loads(configmaps_payload.stdout).get("items", [])
     responder_jobs, result, responder_job_evidence = _resolve_responder_dispatch(
         incident_id=incident_id,
         jobs=jobs,
         configmaps=configmaps,
+        other_incidents_expected=config.persistent,
     )
     ledger = _load_incident_ledger(common_dir.resolve() / "sdo-broker", incident_id)
     remaining = kubectl(
@@ -403,7 +426,7 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
             "1",
             "-print",
         ],
-        namespace=config.namespace,
+        namespace=control,
     )
     raw_closure = ledger.get("closure")
     closure: dict[str, Any] = raw_closure if isinstance(raw_closure, dict) else {}
@@ -418,6 +441,7 @@ def _production_receipt(config: RuntimeConfig, controller_logs: str) -> dict[str
         "pre_cutover": False,
         "incident_id": incident_id,
         "namespace": config.namespace,
+        "controller_namespace": control,
         "controller_workload": "batch/v1 Job/sdo-controller-run",
         "controller_image": config.controller_image,
         "responder_image": config.responder_image,
@@ -506,6 +530,7 @@ def _resolve_responder_dispatch(
     incident_id: str,
     jobs: list[Any],
     configmaps: list[Any],
+    other_incidents_expected: bool = False,
 ) -> tuple[list[str], dict[str, Any], str]:
     """Resolve one responder execution from its durable request/result protocol.
 
@@ -556,6 +581,9 @@ def _resolve_responder_dispatch(
         for job in jobs
         if isinstance(job, dict) and job.get("metadata", {}).get("name")
     )
+    if other_incidents_expected:
+        # A persistent controller keeps earlier incidents' finite responder Jobs until their TTL.
+        live_jobs = [name for name in live_jobs if name == job_name]
     if live_jobs and live_jobs != [job_name]:
         raise ControllerInstallError(
             f"live responder Jobs do not match durable incident execution: expected {[job_name]!r}, found {live_jobs!r}"
@@ -633,3 +661,31 @@ def _controller_update_rollout_succeeded(controller_logs: str) -> bool:
         if isinstance(fingerprint, str) and fingerprint and type(returncode) is int and returncode == 0:
             return True
     return False
+
+
+def install_persistent_controller(config: RuntimeConfig) -> bool:
+    """Install, or keep a matching healthy, long-running controller; return whether it was kept."""
+
+    if not config.persistent:
+        raise ControllerInstallError("persistent install requires RuntimeConfig.persistent")
+    result = install_controller(config, _SREGymRuntimeExtension(config))
+    if not isinstance(result, ControllerInstallResult):
+        raise ControllerInstallError("a persistent install must not wait for controller completion")
+    return result.reused
+
+
+def collect_production_receipt(config: RuntimeConfig, incident_id: str, artifacts_dir: Path) -> dict[str, Any]:
+    """Sync the controller's repository back and build one incident's strict receipt.
+
+    The caller must have started the repository sync pod.
+    """
+
+    sync_repository_from_controller(config)
+    runtime_artifacts = _export_runtime_artifacts(config.control_namespace, artifacts_dir)
+    receipt = _production_receipt(config, "", incident_id=incident_id)
+    receipt["runtime_artifacts"] = runtime_artifacts
+    return receipt
+
+
+def export_controller_logs(control_namespace: str, artifacts_dir: Path | None) -> dict[str, str | None]:
+    return _export_controller_logs(control_namespace, artifacts_dir)

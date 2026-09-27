@@ -23,6 +23,7 @@ INJECT_FAULT_ENDPOINT = "/inject_fault"
 AWAITING_FAULT_INJECTION = "awaiting_fault_injection"
 BASELINE_TIMEOUT_SECONDS = 1800
 BASELINE_POLL_SECONDS = 1.0
+PERSISTENT_LOG_TAIL = 2000
 
 
 class FaultGateError(RuntimeError):
@@ -117,3 +118,71 @@ def _current_controller_job(namespace: str, kubectl_runner: KubectlRunner, not_b
         return False
     # creationTimestamp has one-second resolution.
     return created_at >= not_before.replace(microsecond=0)
+
+
+def controller_active_findings_after_resume(controller_logs: str, generation: str) -> list[str] | None:
+    """Return the latest evaluation's active rule IDs after the controller resumed ``generation``.
+
+    A persistent controller observes several benchmark problems. Only an
+    evaluation after it announced this stage's resume (following the stage's
+    application deploy) counts; a later pause invalidates the baseline.
+    """
+
+    latest: list[str] | None = None
+    resumed = False
+    for line in controller_logs.splitlines():
+        try:
+            payload: Any = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if "controller_maintenance" in payload:
+            resumed = (
+                payload.get("controller_maintenance") == "active"
+                and payload.get("maintenance_generation") == generation
+            )
+            latest = None
+            continue
+        if resumed and "controller_iteration" in payload:
+            latest = controller_active_findings(line)
+    return latest
+
+
+def inject_fault_after_resumed_baseline(
+    control_namespace: str,
+    generation: str,
+    *,
+    inject: Callable[[], None],
+    kubectl_runner: KubectlRunner,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    timeout_seconds: float = BASELINE_TIMEOUT_SECONDS,
+) -> dict[str, float]:
+    """Inject once the persistent controller reports all-clear after resuming ``generation``."""
+
+    started = monotonic()
+    deadline = started + timeout_seconds
+    last_error = f"controller has not resumed maintenance generation {generation!r}"
+    while monotonic() < deadline:
+        completed = kubectl_runner(
+            ["logs", "job/sdo-controller-run", "--container=controller", f"--tail={PERSISTENT_LOG_TAIL}"],
+            namespace=control_namespace,
+            check=False,
+        )
+        active = (
+            controller_active_findings_after_resume(completed.stdout, generation) if completed.returncode == 0 else None
+        )
+        if active:
+            last_error = f"latest controller evaluation has active findings {sorted(set(active))}"
+        if active == []:
+            baseline_ready = monotonic()
+            inject()
+            return {
+                "controller_baseline_wait": baseline_ready - started,
+                "fault_injection_request": monotonic() - baseline_ready,
+            }
+        if completed.returncode != 0:
+            last_error = (completed.stderr or completed.stdout or "").strip() or last_error
+        sleep(BASELINE_POLL_SECONDS)
+    raise FaultGateError(f"controller did not report an all-clear baseline within {timeout_seconds:.0f}s: {last_error}")
