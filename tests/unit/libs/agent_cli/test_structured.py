@@ -491,3 +491,28 @@ def test_claude_model_requests_are_its_reported_agentic_turns(tmp_path: Path) ->
 
     assert turn.model_requests == turn.usage.tokens.turns
     assert turn_usage(turn)["model_requests"] == turn.usage.tokens.turns
+
+
+def test_usage_log_records_the_shell_commands_each_turn_ran(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    log = tmp_path / "turns.jsonl"
+    monkeypatch.setenv(TURN_USAGE_LOG_ENV, str(log))
+    long_command = "echo " + "x" * 10_000
+    agent = ScriptedAgent(
+        lambda _request: reply("codex", {"answer": "ok"}, session_id="s-1", commands=["kubectl get pods", long_command])
+    )
+
+    run_structured_turn(
+        "codex",
+        "prompt",
+        output_schema=_SCHEMA,
+        cwd=tmp_path,
+        access="danger-full-access",
+        executor=agent.executor,
+    )
+
+    (record,) = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert record["shell_commands"] == 2
+    lines = record["shell_command_lines"]
+    assert lines[0] == "kubectl get pods"
+    assert lines[1].startswith("echo xxx")
+    assert len(lines[1]) < 3_000

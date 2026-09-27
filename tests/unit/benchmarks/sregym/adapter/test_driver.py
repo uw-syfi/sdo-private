@@ -1331,3 +1331,17 @@ def test_health_objective_never_requires_endpoints_for_external_name_services() 
         "have ready endpoints" in context.health_objective
     )
     assert ("Service", "jaeger") in [(resource.kind, resource.name) for resource in context.active_resources]
+
+
+def test_exported_runtime_artifacts_cover_responder_sessions_and_usage_logs() -> None:
+    import posixpath
+
+    import benchmarks.sregym.adapter.runtime as runtime
+    from sdo.controller_install import CODEX_HOME_PATH, RUNTIME_STATE_ROOT
+    from sdo.controller_install.kubernetes import RESPONDER_TURN_USAGE_LOG
+
+    exported = set(runtime._EXPORTED_RUNTIME_PATHS)
+    # Responder Jobs run Codex with CODEX_HOME on the workspace PVC, so their
+    # session rollouts (every shell command and model request) are exported.
+    assert posixpath.relpath(f"{CODEX_HOME_PATH}/sessions", RUNTIME_STATE_ROOT) in exported
+    assert posixpath.relpath(posixpath.dirname(RESPONDER_TURN_USAGE_LOG), RUNTIME_STATE_ROOT) in exported

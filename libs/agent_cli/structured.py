@@ -291,12 +291,23 @@ def _append_turn_usage(
         "model_requests_source": turn.model_requests_source,
         "tool_calls": turn.tool_calls,
         "shell_commands": len(turn.shell_commands),
+        "shell_command_lines": [_bounded_command(command) for command in turn.shell_commands],
         "usage": turn_usage(turn),
     }
     log = Path(path).expanduser()
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+#: Upper bound on one shell command recorded in the usage log.
+_MAX_LOGGED_COMMAND_CHARS = 2_000
+
+
+def _bounded_command(command: str) -> str:
+    if len(command) <= _MAX_LOGGED_COMMAND_CHARS:
+        return command
+    return f"{command[:_MAX_LOGGED_COMMAND_CHARS]}... [{len(command) - _MAX_LOGGED_COMMAND_CHARS} chars omitted]"
 
 
 def _codex_session_home(extra_env: Mapping[str, str]) -> Path:
