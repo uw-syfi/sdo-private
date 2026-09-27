@@ -107,3 +107,77 @@ Primary is `mitigation_submitted_at - fault_injected_at`. Load is the host 1-min
   - Reflection costs 1.5-2.4x the responder and is paid on every incident.
   - Responder Codex transcripts are not persisted: the pod is deleted before grading and there is no session PVC. Per-request attribution was therefore not possible, and no token change was made without evidence.
 - **Aborted SDO round 2 before the fix.** Kept as `stage_1_reused-incident.20260927_112225`. It had started a cold lifecycle rerun and was stopped before fault injection. No incident data.
+
+## v2
+
+- **Codex A3 is a third baseline sample, because A1 and A2 tokens varied 2x (861K vs 438K input).** Run on branch `vic/exp/luna-reuse-v2`.
+  - The baseline path is unchanged since A2 (`9b990af`): no diff to `benchmarks/sregym/runner`, `run.py`, `scripts/run_sregym.sh`, the `third_party/sregym` pointer (`f697ecd5`), `registry.yaml`, or `codex_luna_baseline.toml`. The v2 edits touch only SDO responder, reflection, lifecycle, controller and adapter code, which the stock Codex agent does not use.
+  - Same wrapper (`run.sh`: Calico, enforced NetworkPolicy, preloaded images), cluster `luna-w0`, and judge `codex-gpt-6-astra`/xhigh. `SREGYM_APP_WORKSPACE_SEED_DIR` was unset. Nothing else was running on the host.
+- **A3 result (`20260927_120459_codex`): diagnosis FAIL, mitigation pass. Reported as failed; its time is not compared as a time-to-fix.**
+  - Timing: injected 12:07:44.9. Diagnosis POST at +57.5s, mitigation POST at +265.1s. TTL 81.1s, TTM 265.6s. Worker time 426s.
+  - Tokens: 886,324 input (827,136 cached), 5,288 output (2,469 reasoning), 21 model requests, 1 exec turn.
+  - Load, start → end: 4.25 → 4.37. The 1-minute load was 13.85 at 12:07:28 and 11.62 at 12:07:58 around injection, and 6.09 at mitigation. This is comparable to A1 (14.1 → 7.0).
+  - Why diagnosis failed: Codex correctly named the missing `mongo-geo-script` ConfigMap. It also claimed a second root cause, an "admin privilege revocation" on the geo and rate MongoDBs, inferred from the app's mounted recovery scripts. All three xhigh judge votes rejected the diagnosis. This is agent behaviour, not a harness fault.
+  - Mitigation: Codex recreated the ConfigMap and ran ad-hoc `fix-geo-role`/`fix-rate-role` pods to re-grant roles. It deleted those pods before submitting, so unlike A1 no leftover pod failed the oracle.
+- **Codex baseline variance across three samples.**
+  - Input tokens: 861K, 438K, 886K (median 861K). Output tokens: 4.4K, 2.2K, 5.3K. Model requests: 21, 12, 21.
+  - Mitigation submit at 167.6s, 167.1s, 265.1s.
+  - Only A2 passed both oracles. A2 is the low-token outlier, not A1.
+- **Cluster handoff.** `luna-w0` is kept: 4 nodes Ready, the `hotel-reservation` namespace was removed by the stock cleanup, and no pods are unhealthy. It is ready for the v2 SDO pipeline.
+- **This DECISIONS edit is left uncommitted.** Another agent is committing on `vic/exp/luna-reuse-v2`, and this task was limited to editing this file.
+
+### v2 warm-path efficiency fixes (SDO code)
+
+Evidence: R2 (`20260927_104328_pipeline_sdo-codex-luna-reuse/stage_1_reused-incident`) had an exact-fingerprint match on a validated incident detector plus a learned playbook. Its responder still used 619K input tokens and about 20 model requests, with the same 70 s diagnosis-to-mitigation window as cold. Its reflection used 954K tokens and 273 s, rewrote the detector's provenance, and forced validator Jobs plus a controller rollout.
+
+- **Warm fast mode: definition of "exact match".** It is computed in `sdo/operational_memory/warm_path.py` from data the responder already has. `IncidentRequest` is unchanged. An incident is warm when both hold:
+  - an active finding comes from a detector that the worktree's `.sdo/diagnostics/manifest.yaml` registers as `class: incident` and `owner: responder`, and that finding lists a playbook;
+  - some `relevant_outcomes` entry has `match_reason=exact-fingerprint`.
+  - In R2 the exact match came from the health-objective finding: the prior outcome predates the incident detector, and `PriorOutcomeEvidence` does not say which finding matched. So this rule does not require the matching fingerprint to be the incident detector's. Requiring that would have left the v2 rerun's round 2 cold.
+  - `SurfacedPlaybook` has no match reasons, and adding them would change the contract, so the rule uses `relevant_outcomes` instead.
+- **Warm prompt.**
+  - Content: it inlines each warm finding's playbook (capped at 8K chars) and its `scripts/*.sh` (capped at 8K total), and states that the validated incident detector's evidence already establishes the preconditions.
+  - Prescribed order: one combined sanity check, which replaces the playbook's own diagnosis steps; the diagnosis; the playbook repair; the playbook's verification once; then mitigation.
+  - It also says to delete or rollout-restart pods stuck on a restored ConfigMap or Secret mount. The learned playbook will not say this until it is re-learned.
+  - Fallback: a full investigation, only on a contradicting sanity check, a failed repair, or a failed verification.
+  - If the playbook file is missing or the manifest is unreadable, the prompt falls back to cold. The cold prompt text is unchanged.
+- **Context trim.**
+  - `detector_history` is removed from the prompt's request JSON and replaced by one line per detector: its latest evaluation, plus the latest firing evaluation when that is older.
+  - `goal.md` is inlined when it is at most 4K chars. The hotel goal is about 1K.
+  - This applies on both paths. The full history stays in the request, ledger and outcome.
+- **Reflection guidance.** Playbooks must now include:
+  - concrete, copy-pasteable verification commands, including a representative request command when the objective needs one;
+  - multi-step commands in `.sdo/playbooks/<playbook>/scripts/*.sh`, the layout the validator already `bash -n` checks and `AppliedPlaybook.scripts` reports;
+  - a restart of stuck pods after restoring a mount source;
+  - no re-diagnosis that the incident detector already establishes.
+- **Provenance.**
+  - The prompt now sets `originatingIncident`/`originatingCommit` only for a new detector.
+  - `MemoryValidator` rejects a responder proposal that changes those fields for an existing incident detector, in the manifest or in the `Originating*` string literals of its Go `Spec()`. It checks the Go literals directly so the rejection happens before any validator Job.
+  - Health-judge edits are not covered, because the lifecycle legitimately rewrites health detector provenance.
+- **Deterministic no-op reflection.** The broker skips the LLM turn when all of these hold:
+  - the outcome is `success` and the controller verified health;
+  - the result completed with confirmed root causes, every repair action succeeded, and every verification passed;
+  - the incident is warm under the same rule as above, and the responder applied the warm finding's playbook;
+  - that incident detector's post-response evaluation is `clear`.
+  
+  In that case it records an empty attributable reflection commit (no validator run, no detector change, no rollout) with `learning_decision=no_change`. The reason goes in both `reflection_no_change_reason` and the new optional ledger field `reflection_skipped_reason`.
+  - Why an optional field rather than `no_change_reason` alone: analysis must distinguish "the LLM chose no change" from "no LLM turn ran".
+  - The strict receipt keeps `same_session_reflection=true`, because the contract requires a reflection commit. It adds `reflection_skipped_reason` and `incident_detector_states`.
+- **"Incident detector cleared" needed controller evidence.** When health detectors exist, the closure's `final_detector_states` holds only health detectors.
+  - Added `IncidentClosure.incident_detector_states` in Go and `BrokerClosure.incident_detector_states` in Python, both optional. The value is each non-health finding detector's latest evaluation since responder completion.
+  - It is learning evidence only. Closure gating and `final_detector_states` are unchanged, so outcome classification cannot shift.
+  - If the detector did not evaluate after the response, the state is absent and full reflection runs.
+- **Also relaxed the broker's "confirmed success must include a detector update" rule.**
+  - It now applies only when no registered responder-owned incident detector raised a finding.
+  - Otherwise, a playbook-only improvement for an already-learned fault was rejected. That pushed the model to make cosmetic detector edits, which is how R2's provenance rewrite happened, and each edit cost a validator run plus a rollout.
+  - The two tests that pin the rule now use a closure from an unlearned detector.
+- **Responder transcripts.** `vic/perf/reflection-tokens` already exports `/workspace/.sdo-runtime/codex/sessions`. Responder Jobs already run with `CODEX_HOME=/workspace/.sdo-runtime/codex` on the same PVC, so their rollouts are exported, and a test now pins this.
+  - Added `shell_command_lines` (commands in order, each capped at 2K chars) to every usage-log record, so the responder's commands are in `sdo_runtime/usage/responder-turns.jsonl` without parsing rollouts.
+  - The commands are not put in the ledger or receipt, because that would bloat both. The exported artifacts are the intended place.
+- **Not done.**
+  - No contract changes to `IncidentRequest`, `SurfacedPlaybook` or `PriorOutcomeEvidence`.
+  - The existing learned playbook in R1/R2 workspaces was not edited; the rerun re-learns from stage 0.
+  - No change to the SREGym responder instructions in the adapter.
+- **Validation and images.**
+  - Checks: `format_code.sh` and `check_errors.sh` (ruff and tach) are clean. `go test ./...` passes in `controller/runtime`, `controller/sdk` and `controller/core`. `pytest tests/unit/sdo tests/unit/libs/agent_cli tests/unit/benchmarks/sregym/adapter tests/unit/controller`: 332 passed, 2 skipped.
+  - Images: `BUILDX_BUILDER=sdo-example bash scripts/build_sdo_images.sh` succeeded at code head `48f7461`. It produced `sdo-detector-validator`, `sdo-controller`, `sdo-responder` and `sdo-sregym-responder`, all tagged `v0.1.0`.
