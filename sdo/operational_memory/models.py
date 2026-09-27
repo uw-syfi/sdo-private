@@ -15,6 +15,10 @@ from sdo.contracts import (
 )
 
 MEMORY_SCHEMA_VERSION = 1
+#: Playbook ``fault_class`` values, also the playbook directory naming convention.
+FAULT_CLASS_PATTERN = r"^[a-z0-9][a-z0-9-]*$"
+#: Detector registration IDs in the diagnostics manifest.
+DETECTOR_ID_PATTERN = r"^[a-z0-9][a-z0-9_.-]*$"
 
 
 class MemoryModel(BaseModel):
@@ -57,7 +61,7 @@ class ArchitectureMetadata(MemoryModel):
 class PlaybookMetadata(MemoryModel):
     schema_version: Literal[1] = MEMORY_SCHEMA_VERSION
     owner: Literal[ArtifactOwner.RESPONDER] = ArtifactOwner.RESPONDER
-    fault_class: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    fault_class: str = Field(min_length=1, pattern=FAULT_CLASS_PATTERN)
     originating_incident: str = Field(min_length=1)
     originating_commit: str | None = Field(default=None, min_length=1)
 
@@ -79,7 +83,7 @@ class DetectorBatching(MemoryModel):
 
 
 class DetectorRegistration(MemoryModel):
-    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]*$")
+    id: str = Field(pattern=DETECTOR_ID_PATTERN)
     package: str = Field(min_length=1)
     constructor: str = "New"
     detector_class: Literal["health", "incident"] = Field(alias="class")

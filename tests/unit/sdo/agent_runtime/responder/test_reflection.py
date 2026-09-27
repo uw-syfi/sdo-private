@@ -12,7 +12,19 @@ from sdo.agent_runtime.responder.reflection import (
     SessionReflector,
 )
 from sdo.operational_memory import OutcomeClassification, OutcomeRecord, TopologyReview
-from sdo.operational_memory.models import OutcomeTimestamps
+from sdo.operational_memory.models import (
+    DETECTOR_ID_PATTERN,
+    FAULT_CLASS_PATTERN,
+    ArtifactOwner,
+    OutcomeTimestamps,
+    PlaybookMetadata,
+)
+from sdo.operational_memory.validation import (
+    PLACEHOLDER_RE,
+    PLAYBOOK_INDEX_PATH,
+    PLAYBOOK_SCRIPT_SUFFIX,
+    MemoryValidator,
+)
 from tests.structured_turns import ScriptedAgent, reply, turn_schema
 
 if TYPE_CHECKING:
@@ -288,3 +300,60 @@ def test_reflection_never_asks_to_rewrite_existing_detector_provenance(tmp_path:
     assert "Register a new detector" in prompt
     assert "Never change originatingIncident or originatingCommit of an existing detector" in prompt
     assert "an existing detector keeps its values" in prompt
+
+
+def test_reflection_states_every_playbook_rule_the_memory_validator_enforces(tmp_path: Path) -> None:
+    prompt = _first_reflection_prompt(tmp_path)
+
+    # Rule text comes from the validator's own constants, so prompt and validator cannot drift.
+    assert PLAYBOOK_INDEX_PATH.as_posix() in prompt
+    assert PLACEHOLDER_RE.pattern in prompt
+    assert PLAYBOOK_SCRIPT_SUFFIX in prompt
+    assert "bash -n" in prompt
+    assert FAULT_CLASS_PATTERN in prompt
+    assert DETECTOR_ID_PATTERN in prompt
+    for field in PlaybookMetadata.model_fields:
+        assert f"`{field}" in prompt
+    assert "owner: responder" in prompt
+    assert "symlink" in prompt
+    # Lowercase placeholders were the live rejection; the prompt must call them out.
+    assert "`<namespace>`" in prompt
+
+
+def test_reflection_example_playbook_passes_the_memory_validator(tmp_path: Path) -> None:
+    prompt = _first_reflection_prompt(tmp_path)
+    example = prompt.split("Example playbook README.md:\n```markdown\n", 1)[1].split("```", 1)[0]
+    index_line = prompt.split("Example index line: `", 1)[1].split("`\n", 1)[0]
+
+    app = tmp_path / "app"
+    memory = app / ".sdo"
+    (memory / "diagnostics" / "detectors" / "health" / "entrypoint").mkdir(parents=True)
+    (memory / "schema-version").write_text("1\n", encoding="utf-8")
+    (memory / "goal.md").write_text("---\nowner: human\napplication: demo\n---\n# Goal\n\nServe.\n", encoding="utf-8")
+    (memory / "arch.md").write_text(
+        "---\ngenerated_at_commit: c\ngenerated_at: 2026-01-01T00:00:00Z\napplication: demo\n"
+        "topology_fingerprint: t\n---\n# Architecture\n\nOne service.\n",
+        encoding="utf-8",
+    )
+    (memory / "outcomes.jsonl").write_text("", encoding="utf-8")
+    (memory / "diagnostics" / "detectors" / "health" / "entrypoint" / "detector.go").write_text(
+        "package entrypoint\n", encoding="utf-8"
+    )
+    (memory / "diagnostics" / "manifest.yaml").write_text(
+        "apiVersion: sdo.dev/v1alpha1\nkind: DetectorManifest\nsdkVersion: v0.1\ndetectors:\n"
+        "  - id: entrypoint-health\n    package: ./detectors/health/entrypoint\n    class: health\n"
+        "    owner: health_judge\n    watches: []\n    interval: 30s\n    persistence: {firing: 2, clearing: 2}\n"
+        "    batching: {severity: critical, debounce: 500ms}\n    possiblePlaybooks: []\n"
+        "    originatingCommit: c\n",
+        encoding="utf-8",
+    )
+    playbook = memory / "playbooks" / "example-fault" / "README.md"
+    playbook.parent.mkdir(parents=True)
+    playbook.write_text(example, encoding="utf-8")
+    (memory / "playbooks" / "README.md").write_text(f"# Playbooks\n\n{index_line}\n", encoding="utf-8")
+
+    MemoryValidator(run_diagnostics=False).validate(
+        app,
+        actor=ArtifactOwner.RESPONDER,
+        changed_paths=[".sdo/playbooks/README.md", ".sdo/playbooks/example-fault/README.md"],
+    )
