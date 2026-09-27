@@ -181,3 +181,47 @@ Evidence: R2 (`20260927_104328_pipeline_sdo-codex-luna-reuse/stage_1_reused-inci
 - **Validation and images.**
   - Checks: `format_code.sh` and `check_errors.sh` (ruff and tach) are clean. `go test ./...` passes in `controller/runtime`, `controller/sdk` and `controller/core`. `pytest tests/unit/sdo tests/unit/libs/agent_cli tests/unit/benchmarks/sregym/adapter tests/unit/controller`: 332 passed, 2 skipped.
   - Images: `BUILDX_BUILDER=sdo-example bash scripts/build_sdo_images.sh` succeeded at code head `48f7461`. It produced `sdo-detector-validator`, `sdo-controller`, `sdo-responder` and `sdo-sregym-responder`, all tagged `v0.1.0`.
+
+### v2 SDO pipeline run (`20260927_122641_pipeline_sdo-codex-luna-reuse`)
+
+- **Setup.** Code head `ae27921`. Images were built 12:23–12:25 from `48f7461`, which is code-identical to head (`48f7461..ae27921` is docs-only); verified with `docker image inspect`.
+  - Same TOML (`sdo_codex_luna_reuse.toml`, unchanged since `9b990af`), wrapper `run.sh`, cluster `luna-w0`, and judge `codex-gpt-6-astra`/xhigh.
+  - Round 1 was seeded from the same clean post-lifecycle workspace as v1 (`SREGYM_APP_WORKSPACE_SEED_DIR=<scratch>/seed/lifecycle_workspace`: lifecycle commit only, no incident memory). Round 2 chained round 1's workspace.
+- **One-time lifecycle cost.** The seeded lifecycle was reused in both rounds.
+  - The new validator identity forced a container revalidation plus an attestation commit, with no LLM turns and 0 tokens (no host `sdo_turn_usage.jsonl` was written). It took 206.6s in R1 and 214.0s in R2; R2 also revalidated R1's new incident detector.
+  - A full lifecycle rerun was not needed: the seeded health detector passed the ExternalName-hardened validator.
+- **R1 (cold): pass/pass.**
+  - Primary 91.7s. Diagnosis POST at +22.2s, TTL 48.5s, TTM 91.9s.
+  - Gate: 123.2s baseline wait plus a 6.8s injection request. Load 10.6 at injection, 6.0 at mitigation.
+  - Responder: 666,199 input (618,496 cached), 5,240 output, 25 requests, 140s.
+  - Reflection: 3 attempts (2 fresh retries), 1,940,917 input (1,744,640 cached), 33,250 output, 32 requests. Post-recovery time 752s. Stage wall time 1,428s.
+- **R1 reflection needed 3 attempts.**
+  - Attempt 1 (same-session resume): 1,455,194 input, 15 requests, 312s. Rejected with `playbook is missing from index`: the new playbook was not linked from `.sdo/playbooks/README.md`.
+  - Attempt 2 (fresh): 298,493 input, 10 requests, 175s. Rejected with `playbook must use a role placeholder`: `MemoryValidator` requires `<[A-Z][A-Z0-9_]+>`, and the playbook used lowercase `<namespace>`-style placeholders.
+  - Attempt 3 (fresh): 187,230 input, 7 requests, 100s. Accepted.
+  - Neither the v1 nor the v2 reflection prompt states these two validator rules; v1 happened to satisfy them on the first try.
+  - **Not fixed mid-pipeline.** It did not block the run and does not affect the primary metric, and changing the images between rounds would confound R2. Recommended follow-up: state both rules (index link, UPPER_CASE placeholders) in `_PLAYBOOK_RULES`. That would have saved about 486K input tokens and 275s here.
+- **R1 learned memory meets the executable-verification requirement.**
+  - Incident detector `missing-geo-mongo-init-configmap`.
+  - Playbook `missing-geo-mongo-init-configmap` with `scripts/repair.sh` (apply the manifest, rollout restart, rollout status) and `scripts/verify.sh`. The verify script checks replica agreement, that the Service endpoint IP belongs to a ready pod, and a frontend `/hotels` request expecting HTTP 200 and a GeoJSON FeatureCollection.
+- **R2 (warm): pass/pass.**
+  - Primary 51.7s. Diagnosis POST at +16.1s, TTL 36.2s, TTM 51.9s.
+  - Gate: 122.2s plus 6.5s. Load 9.6 at injection, 8.9 at mitigation.
+  - Responder: 458,095 input (409,856 cached), 3,308 output, 20 requests, 131s (it keeps verifying after the mitigation POST).
+  - Reflection: 1 attempt, 568,876 input (478,976 cached), 4,916 output, 3 requests, 36s. The commit was empty (the LLM chose no change), with `validator_skipped_reason=unchanged-diagnostics` and no controller update. Post-recovery time 43s. Stage wall time 714s.
+- **R2 did not take the warm fast mode, and its reflection was not the deterministic no-op.**
+  - `memory_reuse.warm_path=true` in the receipt is the retrieval flag (one exact-fingerprint prior outcome). It is not the fast-mode prompt. The exported rollout shows the cold prompt: it has the compacted evidence and inlined `goal.md`, but no inlined playbook or warm instructions.
+  - Cause: at dispatch the learned incident detector was `clear`. Its last evaluation was at 13:00:02.4. The health detector fired at 03.28, 03.68 and 04.08, and dispatch followed at 04.49.
+    - The v2-learned detector watches only Deployment and ConfigMap, and it chose `Persistence{Firing: 2}`. It never accumulated two active evaluations before the controller dispatched on the health batch.
+    - The health detector watches Pods, Endpoints and Events, so it re-evaluated on every pod event.
+    - v1's learned detector used `Firing: 1` and fired in the same evaluation batch as health.
+  - With no active incident-detector finding, the warm rule and the no-op rule both declined, which is correct by their definitions. `incident_detector_states=[]`, because only detectors that raised a finding are listed.
+  - Unexplained detail: no incident-detector evaluation was recorded after the ConfigMap delete, even though it watches ConfigMaps. Controller logs are not exported and the pod was cleaned up, so I could not tell whether the watch event was delayed or coalesced.
+  - **Not fixed and not rerun.** R2 passed both oracles, so the run was not blocked. The correct fix is a controller-runtime change with closure implications: at dispatch, evaluate registered responder-owned incident detectors on the dispatch snapshot and attach their raw active findings as enrichment. That needs a design decision about `incidentFindingKeys` and closure gating, which is too invasive for a mid-experiment patch on a branch another agent is editing.
+  - Cheaper mitigations for the follow-up:
+    - have reflection guidance require that incident detectors use `Firing: 1` and watch the kinds on which the fault manifests (Pods and Events);
+    - or have the warm rule accept an exact-fingerprint prior outcome whose incident detector is registered, even if it has not fired yet.
+- **v1 vs v2 vs Codex.**
+  - Primary: v2 R1 91.7s vs v1 R1 102.5s; v2 R2 51.7s vs v1 R2 93.0s. Codex mitigation POSTs were 167.6s, 167.1s and 265.1s; only A2 passed both oracles.
+  - Responder input: v2 666K and 458K vs v1 749K and 619K vs Codex 861K, 438K and 886K.
+  - Reflection input: v2 1.94M and 569K vs v1 1.80M and 954K.
