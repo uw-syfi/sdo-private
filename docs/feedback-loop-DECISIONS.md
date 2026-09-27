@@ -206,12 +206,13 @@ direction from the user; the rest were made autonomously.
 
 ### D14. Verify-burst seeding
 
-- **Decision.** A full burst uses the workload's seed. A burst restricted to
-  an incident's failing scenarios uses that seed XOR a hash of the sorted
-  scenario IDs. Both replay exactly from the seed and iteration in the
-  evidence, and the restricted burst keeps the workload's total rate.
-- **Why.** Deterministic replay matters more than parameter variety across
-  repeated bursts. The steady probe already covers variety.
+- **Decision.** Each burst starts at a fresh iteration range: the prober
+  advances its iteration counter by 2^32 per burst, and `Rand(iteration)` is
+  PCG(seed, iteration). Consecutive bursts therefore do not repeat
+  parameters. A burst restricted to an incident's failing scenarios also
+  uses the workload seed XOR a hash of the sorted scenario IDs, and keeps the
+  workload's total rate. Every failure names its seed and iteration, so it
+  replays exactly.
 
 ### Smoke results (no LLM, throwaway kind `sdo-smoke`, 3 runs)
 
