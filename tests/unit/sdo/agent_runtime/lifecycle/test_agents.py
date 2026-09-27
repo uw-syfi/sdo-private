@@ -15,6 +15,7 @@ from agentshim.providers.codex import CodexSandboxConfig, parse_sandbox
 from sdo.agent_runtime.lifecycle.agents import (
     ActiveTopologyResourceDTO,
     ClaudeLifecycleBackend,
+    ClaudeTaskOutputs,
     CodexLifecycleBackend,
     DeployerAssessment,
     HealthJudgeArtifact,
@@ -886,6 +887,102 @@ def test_repository_audit_still_rejects_external_path_after_git_object_path(tmp_
         "git show ed44ea9:/.sdo/goal.md; cat /etc/passwd",
         repository,
     )
+
+
+_CLAUDE_SESSION = "0931c4c1-3ff3-4137-b72d-a1993ddb2cd3"
+_CLAUDE_TASK_OUTPUT = f"/tmp/claude-1000/-tmp-sdo-lifecycle-application/{_CLAUDE_SESSION}/tasks/b7k2x9q1.output"
+
+
+def _claude_task_outputs(session_id: str = _CLAUDE_SESSION) -> ClaudeTaskOutputs:
+    return ClaudeTaskOutputs.for_session(session_id, environ={}, uid=1000)
+
+
+@pytest.mark.parametrize(
+    ("environ", "uid", "expected_root"),
+    [
+        ({}, 1000, "/tmp/claude-1000"),
+        ({"TMPDIR": "/var/tmp/"}, 1001, "/var/tmp/claude-1001"),
+        ({"TMPDIR": "/var/tmp", "CLAUDE_CODE_TMPDIR": "/scratch/cc"}, 0, "/scratch/cc/claude-0"),
+    ],
+)
+def test_claude_task_output_root_follows_claude_code_tmpdir_resolution(
+    environ: dict[str, str], uid: int, expected_root: str
+) -> None:
+    outputs = ClaudeTaskOutputs.for_session(_CLAUDE_SESSION, environ=environ, uid=uid)
+
+    assert outputs.root == Path(expected_root)
+
+
+def test_repository_audit_allows_claude_reading_its_own_background_task_output(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+
+    assert _command_escapes_repository(f"cat {_CLAUDE_TASK_OUTPUT}", repository)
+    assert not _command_escapes_repository(
+        f"cat {_CLAUDE_TASK_OUTPUT}", repository, task_outputs=_claude_task_outputs()
+    )
+    assert not _command_escapes_repository(
+        f"tail -n 50 '{_CLAUDE_TASK_OUTPUT}' | grep -i error", repository, task_outputs=_claude_task_outputs()
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("cat /tmp/objective.txt", id="other-tmp-file"),
+        pytest.param("ls /tmp/claude-1000", id="agent-private-root"),
+        pytest.param(f"cat /tmp/claude-1000/-tmp-sdo-lifecycle-application/{_CLAUDE_SESSION}/x.jsonl", id="not-tasks"),
+        pytest.param(_CLAUDE_TASK_OUTPUT.replace("claude-1000", "claude-1001"), id="other-uid"),
+        pytest.param(
+            _CLAUDE_TASK_OUTPUT.replace(_CLAUDE_SESSION, "11111111-2222-3333-4444-555555555555"), id="other-session"
+        ),
+        pytest.param(_CLAUDE_TASK_OUTPUT.replace("b7k2x9q1.output", "b7k2x9q1.log"), id="not-output"),
+        pytest.param(_CLAUDE_TASK_OUTPUT.replace("b7k2x9q1", "*"), id="glob-task"),
+        pytest.param(_CLAUDE_TASK_OUTPUT.replace("-tmp-sdo-lifecycle-application", "*"), id="glob-project"),
+        pytest.param(_CLAUDE_TASK_OUTPUT.replace("b7k2x9q1", "$TASK"), id="variable-task"),
+        pytest.param(f"cat {_CLAUDE_TASK_OUTPUT}/../../../../../etc/passwd", id="climb-from-output"),
+        pytest.param(
+            f"cat /tmp/claude-1000/-tmp-sdo-lifecycle-application/{_CLAUDE_SESSION}/tasks/../../x/tasks/a.output",
+            id="climb-within-root",
+        ),
+        pytest.param(f"cat {_CLAUDE_TASK_OUTPUT} && cat /etc/passwd", id="compound-outside-read"),
+        pytest.param(f"cat /etc/passwd; tail {_CLAUDE_TASK_OUTPUT}", id="compound-outside-read-first"),
+    ],
+)
+def test_repository_audit_task_output_allowance_is_narrow(tmp_path: Path, command: str) -> None:
+    repository = _repository(tmp_path)
+
+    assert _command_escapes_repository(
+        command if " " in command else f"cat {command}", repository, task_outputs=_claude_task_outputs()
+    )
+
+
+def test_claude_backend_accepts_session_that_reads_its_own_background_task_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository(tmp_path)
+    raw = _deployer_assessment({"repository": str(repository), "application": "example"})
+    claude_tmpdir = tmp_path / "claude-tmp"
+    monkeypatch.setenv("CLAUDE_CODE_TMPDIR", str(claude_tmpdir))
+    task_output = claude_tmpdir / f"claude-{os.getuid()}" / "-app" / "claude-session" / "tasks" / "bq1.output"
+    agent = ScriptedAgent(
+        lambda _request: reply(
+            "claude",
+            {
+                "source_commit": raw["source_commit"],
+                "topology_fingerprint": raw["topology_fingerprint"],
+                "resources": raw["resources"],
+                "architecture_summary_markdown": "# Architecture\n\nExample Deployment and Service.",
+            },
+            session_id="claude-session",
+            commands=["go test ./... > /dev/null &", f"cat {task_output}"],
+        )
+    )
+    backend = ClaudeLifecycleBackend(executor=agent.executor)
+
+    deployer = backend.run_deployer(repository=repository, application="example", correction_feedback=None)
+
+    assert deployer.session_id == "claude-session"
 
 
 def test_codex_cli_failure_logs_combined_output_and_returns_it_as_correction_feedback(

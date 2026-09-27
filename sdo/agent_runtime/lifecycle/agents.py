@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Protocol
 
@@ -19,7 +21,7 @@ from libs.agent_cli.structured import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from agentshim import CommandExecutor
 
@@ -160,6 +162,55 @@ _PARENT_PATH = re.compile(r"(?:^|[\s'\"=;(])\.\.(?:/[^\s'\";|&)]*)?(?=$|[\s'\";|
 _WRITE_REDIRECT_ABSOLUTE_PATH = re.compile(r"(?:^|[ \t])(?:\d*>>?|&>)\s*['\"]?(/[A-Za-z0-9_./*?{}$@%+=:,~-]+)")
 _GIT_OBJECT_PATH = re.compile(r"\b[0-9a-fA-F]{7,64}:(/[A-Za-z0-9_./*?{}$@%+=,~-]+)")
 _SYSTEM_COMMAND_ROOTS = tuple(Path(path) for path in ("/bin", "/usr/bin", "/usr/local/bin"))
+# One literal path segment: no globs, variables, or ``.``/``..`` traversal.
+_LITERAL_SEGMENT = r"[A-Za-z0-9_-][A-Za-z0-9_.-]*"
+
+
+@dataclass(frozen=True)
+class ClaudeTaskOutputs:
+    """Background-task output files that one Claude Code session may read back.
+
+    Claude Code writes the output of a backgrounded shell command to
+    ``<tmp>/claude-<uid>/<project-slug>/<session-id>/tasks/<task-id>.output`` and
+    reads it back with ordinary shell commands. Only this session's output files
+    are exempt from the repository audit; the rest of the per-uid directory, and
+    other sessions' outputs, stay outside the application repository.
+    """
+
+    root: Path
+    session_id: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.root, Path):
+            raise TypeError(f"root must be a Path, got {type(self.root).__name__}")
+        if not self.root.is_absolute():
+            raise ValueError(f"root must be absolute, got {self.root}")
+        if self.session_id in {"", ".", ".."} or "/" in self.session_id:
+            raise ValueError(f"session_id must be one path segment, got {self.session_id!r}")
+
+    @classmethod
+    def for_session(cls, session_id: str, *, environ: Mapping[str, str], uid: int) -> ClaudeTaskOutputs:
+        """Resolve the per-uid root the way Claude Code does.
+
+        Claude Code uses ``$CLAUDE_CODE_TMPDIR`` when set and otherwise Node's
+        ``os.tmpdir()`` (``$TMPDIR``, ``$TMP``, ``$TEMP``, then ``/tmp``).
+        """
+        tmpdir = next(
+            (
+                value.rstrip("/") or "/"
+                for name in ("CLAUDE_CODE_TMPDIR", "TMPDIR", "TMP", "TEMP")
+                if (value := environ.get(name))
+            ),
+            "/tmp",
+        )
+        return cls(root=Path(tmpdir) / f"claude-{uid}", session_id=session_id)
+
+    def allows(self, raw_path: str) -> bool:
+        pattern = (
+            re.escape(str(self.root))
+            + f"/{_LITERAL_SEGMENT}/{re.escape(self.session_id)}/tasks/{_LITERAL_SEGMENT}\\.output"
+        )
+        return re.fullmatch(pattern, raw_path) is not None
 
 
 class CodexLifecycleBackend:
@@ -422,7 +473,8 @@ handoff. Do not include source code in the response because the files are the au
             raise LifecycleAgentError(f"{role} timed out after {self.timeout_seconds}s") from exc
         except StructuredTurnError as exc:
             raise LifecycleAgentError(f"{role} failed: {exc}") from exc
-        escaped_command = _first_repository_escape(turn.shell_commands, repository.resolve())
+        task_outputs = ClaudeTaskOutputs.for_session(turn.session_id, environ=os.environ, uid=os.getuid())
+        escaped_command = _first_repository_escape(turn.shell_commands, repository.resolve(), task_outputs=task_outputs)
         if escaped_command is not None:
             raise LifecycleAgentError(
                 f"{role} read outside the application repository; discarding its output: {escaped_command[:300]}"
@@ -440,12 +492,23 @@ class ClaudeLifecycleBackend(CodexLifecycleBackend):
     provider: ClassVar[AgentProvider] = "claude"
 
 
-def _first_repository_escape(commands: Sequence[str], repository: Path) -> str | None:
+def _first_repository_escape(
+    commands: Sequence[str], repository: Path, *, task_outputs: ClaudeTaskOutputs | None = None
+) -> str | None:
     """Return the first shell command that reaches outside *repository*, if any."""
-    return next((command for command in commands if _command_escapes_repository(command, repository)), None)
+    return next(
+        (
+            command
+            for command in commands
+            if _command_escapes_repository(command, repository, task_outputs=task_outputs)
+        ),
+        None,
+    )
 
 
-def _command_escapes_repository(command: str, repository: Path) -> bool:
+def _command_escapes_repository(
+    command: str, repository: Path, *, task_outputs: ClaudeTaskOutputs | None = None
+) -> bool:
     if _PARENT_PATH.search(command):
         return True
     # ``git show <object>:/path`` addresses a path inside this repository's object
@@ -457,6 +520,8 @@ def _command_escapes_repository(command: str, repository: Path) -> bool:
     write_only_paths = {match.group(1) for match in _WRITE_REDIRECT_ABSOLUTE_PATH.finditer(audited_command)}
     for raw_path in _ABSOLUTE_PATH.findall(audited_command):
         if raw_path in write_only_paths:
+            continue
+        if task_outputs is not None and task_outputs.allows(raw_path):
             continue
         candidate = Path(raw_path)
         if candidate == repository or repository in candidate.parents:
