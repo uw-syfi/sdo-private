@@ -32,3 +32,12 @@ Crucible's orchestrator, judge, benchmark-oracle recovery, and private knowledge
 ## Grading
 
 - Every experiment config uses the SREGym judge `judge_model_id = "codex-gpt-6-luna"`. The Codex CLI judge backend (`third_party/sregym/llm_backend/codex_cli_backend.py`) runs it at `xhigh` reasoning by default (`JUDGE_REASONING_EFFORT`). Use the same judge for every arm of a comparison.
+
+## Timing metrics
+
+Report timing without judge time, the same way for every arm (`benchmarks.sregym.analysis.incident_cost` computes all of these):
+
+- **Time to diagnosis (TTD):** `diagnosis_submitted_at - fault_injected_at`.
+- **Time to mitigation (TTM, the headline):** `mitigation_submitted_at - fault_injected_at`, minus the diagnosis-grading wait `fault_injected_at + TTL - diagnosis_submitted_at`, and never less than when the agent's last state-changing command before its mitigation POST completed, taken from the exported Codex rollout. The floor matters because an agent that keeps repairing while the judge grades its diagnosis would otherwise be undercounted. TTM is unknown when the CSV lacks `diagnosis_submitted_at` or `TTL`.
+- **Supplementary only:** the raw `mitigation_submitted_at - fault_injected_at` (`raw_incl_judge_s`, which includes diagnosis grading), and the CSV's `TTM` column (which also includes the mitigation oracle). Do not present either as a headline number.
+- None of these times includes SDO reflection, lifecycle or controller installation.

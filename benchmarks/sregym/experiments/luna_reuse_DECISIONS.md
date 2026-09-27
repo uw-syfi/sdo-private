@@ -4,7 +4,7 @@ This log covers SDO (`sdo_codex_luna_reuse.toml`, two rounds) against stock Code
 
 ## Measurement
 
-- **Primary metric: `mitigation_submitted_at - fault_injected_at`.** Both are conductor wall-clock epochs. The first is taken right after `problem.inject_fault()`. The second is taken when the agent's mitigation `POST /submit` reaches the API, before in-API retries or oracles run.
+- **Raw time (includes judge time): `mitigation_submitted_at - fault_injected_at`.** Both are conductor wall-clock epochs. The first is taken right after `problem.inject_fault()`. The second is taken when the agent's mitigation `POST /submit` reaches the API, before in-API retries or oracles run. This was the original headline. It includes the diagnosis-grading wait, so the user directed on 2026-09-27 that it be reported only as a supplementary `raw_incl_judge_s` column. The headline is now the judge-free TTM, and time to diagnosis (TTD) is reported beside it; see "User-directed: judge time is excluded from TTD and TTM" below. Entries written before that change say "raw" where they originally said "raw".
   - Alternatives: SREGym `TTM`, or SDO's receipt `incident_resolution_seconds`.
   - Why: `TTM` ends after the diagnosis judge and the mitigation oracle, which is grader time rather than agent time. The receipt metric starts at SDO's own detection, so it hides detection latency and exists for one arm only.
   - `TTM` and `TTL` are still reported.
@@ -66,7 +66,7 @@ This log covers SDO (`sdo_codex_luna_reuse.toml`, two rounds) against stock Code
   - The same-session reflection then failed every retry with Codex `invalid_json_schema`, because `no_change_reason` was optional. Round 2 could not start and would have had no learned memory.
   - Fix: every property required, `no_change_reason` nullable. Verified live against gpt-6-luna.
   - Attempt 3's round-1 incident numbers are kept as an extra data point. The whole pipeline was rerun as attempt 4 so round 2 chains from a round 1 whose reflection completed.
-- **Lifecycle survives SDO-validated source repairs (`9cc6983`).** In attempt 4 (`20260927_104328_pipeline_sdo-codex-luna-reuse`), round 1 passed both oracles (primary 102.5s) and reflection completed. Round 1's validated outcome also committed a source repair, `kubernetes/geo/mongo-geo-script-configmap.yaml` (broker commit `505fbc3`).
+- **Lifecycle survives SDO-validated source repairs (`9cc6983`).** In attempt 4 (`20260927_104328_pipeline_sdo-codex-luna-reuse`), round 1 passed both oracles (raw 102.5s) and reflection completed. Round 1's validated outcome also committed a source repair, `kubernetes/geo/mongo-geo-script-configmap.yaml` (broker commit `505fbc3`).
   - Round 2 then treated the whole lifecycle as stale ("deployer topology_fingerprint does not match tracked source") and started a cold deployer and health-judge rerun. That costs about 25 minutes and about 1.7M tokens, and it defeats the memory-reuse round.
   - Fix: reuse accepts source drift only when every source-changing commit since the handoff is a broker-validated SDO commit, the deployer assessment still holds at its recorded commit, and the health judge's derived input is unchanged. Operator changes and changes to judged topology still force a new lifecycle.
   - Verified on a copy of round 1's workspace against the live round-2 inventory: reuse is accepted, and the container validator re-attests the changed diagnostics.
@@ -76,16 +76,16 @@ This log covers SDO (`sdo_codex_luna_reuse.toml`, two rounds) against stock Code
 
 ## Results
 
-Primary is `mitigation_submitted_at - fault_injected_at`. Load is the host 1-minute load average from the nearest 30s sample.
+Raw is `mitigation_submitted_at - fault_injected_at`. Load is the host 1-minute load average from the nearest 30s sample.
 
-| Run | Log dir | Diagnosis / Mitigation | Primary | Diagnosis POST | TTL / TTM | Incident tokens (input / cached / output) | Load at injection → mitigation |
+| Run | Log dir | Diagnosis / Mitigation | Raw | Diagnosis POST | TTL / TTM | Incident tokens (input / cached / output) | Load at injection → mitigation |
 |---|---|---|---|---|---|---|---|
 | Codex A1 | `20260927_084657_codex` | pass / **fail** | failed after 167.6s | +70.7s | 102.8 / 167.9s | 861,344 / 811,776 / 4,374 | 14.1 → 7.0 |
 | SDO R1 | `20260927_104328_pipeline_sdo-codex-luna-reuse/stage_0_first-incident` | pass / pass | 102.5s | +33.4s | 59.0 / 102.7s | responder 748,868 / 696,064 / 5,092; reflection 1,804,250 / 1,671,936 / 13,432 | 6.2 → 4.4 |
 | SDO R2 | `.../stage_1_reused-incident` | pass / pass | 93.0s | +22.9s | 52.6 / 93.2s | responder 619,014 / 572,928 / 4,100; reflection 954,369 / 851,968 / 8,012 | 7.8 → 6.5 |
 | Codex A2 | `20260927_113953_codex` | pass / pass | 167.1s | +52.4s | 77.2 / 167.6s | 438,072 / 397,312 / 2,198 | 8.5 → 6.1 |
 
-- **SDO one-time costs, excluded from primary.**
+- **SDO one-time costs, excluded from raw.**
   - Lifecycle (attempt 2, reused as the seed): 5 host turns, 1,746,095 input (1,517,312 cached), 20,325 output tokens, 757s of model-turn time, about 24 min wall clock.
   - Controller baseline gate before each injection: 116.0s plus a 6.5s injection request in both rounds.
   - R2 lifecycle reuse including container re-validation of the changed diagnostics: 205s. R1 took 1.5s because of the attested seed.
@@ -101,7 +101,7 @@ Primary is `mitigation_submitted_at - fault_injected_at`. Load is the host 1-min
 
 - **Detection precedes the clock.** SDO detected the fault about 5s before `fault_injected_at` in both rounds: R1 detection 10:48:13 vs clock 10:48:18; R2 11:30:36 vs 11:30:41.
   - The conductor stamps `fault_injected_at` after `problem.inject_fault()` returns, which takes about 6.5s. Codex starts after that stamp, so it cannot benefit.
-  - Measured from the start of the injection request instead, SDO's primary is about 109s (R1) and about 99s (R2).
+  - Measured from the start of the injection request instead, SDO's raw is about 109s (R1) and about 99s (R2).
 - **Tokens: SDO does not beat Codex.**
   - SDO's responder alone used more input and output than A2: R2 619k vs 438k input, 4.1k vs 2.2k output. Uncached input is similar: R2 46.1k vs A2 40.8k and A1 49.6k. The gap is mostly cached context resent across more model requests, plus the structured IncidentResult receipts.
   - Reflection costs 1.5-2.4x the responder and is paid on every incident.
@@ -191,7 +191,7 @@ Evidence: R2 (`20260927_104328_pipeline_sdo-codex-luna-reuse/stage_1_reused-inci
   - The new validator identity forced a container revalidation plus an attestation commit, with no LLM turns and 0 tokens (no host `sdo_turn_usage.jsonl` was written). It took 206.6s in R1 and 214.0s in R2; R2 also revalidated R1's new incident detector.
   - A full lifecycle rerun was not needed: the seeded health detector passed the ExternalName-hardened validator.
 - **R1 (cold): pass/pass.**
-  - Primary 91.7s. Diagnosis POST at +22.2s, TTL 48.5s, TTM 91.9s.
+  - Raw 91.7s. Diagnosis POST at +22.2s, TTL 48.5s, TTM 91.9s.
   - Gate: 123.2s baseline wait plus a 6.8s injection request. Load 10.6 at injection, 6.0 at mitigation.
   - Responder: 666,199 input (618,496 cached), 5,240 output, 25 requests, 140s.
   - Reflection: 3 attempts (2 fresh retries), 1,940,917 input (1,744,640 cached), 33,250 output, 32 requests. Post-recovery time 752s. Stage wall time 1,428s.
@@ -200,12 +200,12 @@ Evidence: R2 (`20260927_104328_pipeline_sdo-codex-luna-reuse/stage_1_reused-inci
   - Attempt 2 (fresh): 298,493 input, 10 requests, 175s. Rejected with `playbook must use a role placeholder`: `MemoryValidator` requires `<[A-Z][A-Z0-9_]+>`, and the playbook used lowercase `<namespace>`-style placeholders.
   - Attempt 3 (fresh): 187,230 input, 7 requests, 100s. Accepted.
   - Neither the v1 nor the v2 reflection prompt states these two validator rules; v1 happened to satisfy them on the first try.
-  - **Not fixed mid-pipeline.** It did not block the run and does not affect the primary metric, and changing the images between rounds would confound R2. Recommended follow-up: state both rules (index link, UPPER_CASE placeholders) in `_PLAYBOOK_RULES`. That would have saved about 486K input tokens and 275s here.
+  - **Not fixed mid-pipeline.** It did not block the run and does not affect the raw metric, and changing the images between rounds would confound R2. Recommended follow-up: state both rules (index link, UPPER_CASE placeholders) in `_PLAYBOOK_RULES`. That would have saved about 486K input tokens and 275s here.
 - **R1 learned memory meets the executable-verification requirement.**
   - Incident detector `missing-geo-mongo-init-configmap`.
   - Playbook `missing-geo-mongo-init-configmap` with `scripts/repair.sh` (apply the manifest, rollout restart, rollout status) and `scripts/verify.sh`. The verify script checks replica agreement, that the Service endpoint IP belongs to a ready pod, and a frontend `/hotels` request expecting HTTP 200 and a GeoJSON FeatureCollection.
 - **R2 (warm): pass/pass.**
-  - Primary 51.7s. Diagnosis POST at +16.1s, TTL 36.2s, TTM 51.9s.
+  - Raw 51.7s. Diagnosis POST at +16.1s, TTL 36.2s, TTM 51.9s.
   - Gate: 122.2s plus 6.5s. Load 9.6 at injection, 8.9 at mitigation.
   - Responder: 458,095 input (409,856 cached), 3,308 output, 20 requests, 131s (it keeps verifying after the mitigation POST).
   - Reflection: 1 attempt, 568,876 input (478,976 cached), 4,916 output, 3 requests, 36s. The commit was empty (the LLM chose no change), with `validator_skipped_reason=unchanged-diagnostics` and no controller update. Post-recovery time 43s. Stage wall time 714s.
@@ -222,7 +222,7 @@ Evidence: R2 (`20260927_104328_pipeline_sdo-codex-luna-reuse/stage_1_reused-inci
     - have reflection guidance require that incident detectors use `Firing: 1` and watch the kinds on which the fault manifests (Pods and Events);
     - or have the warm rule accept an exact-fingerprint prior outcome whose incident detector is registered, even if it has not fired yet.
 - **v1 vs v2 vs Codex.**
-  - Primary: v2 R1 91.7s vs v1 R1 102.5s; v2 R2 51.7s vs v1 R2 93.0s. Codex mitigation POSTs were 167.6s, 167.1s and 265.1s; only A2 passed both oracles.
+  - Raw: v2 R1 91.7s vs v1 R1 102.5s; v2 R2 51.7s vs v1 R2 93.0s. Codex mitigation POSTs were 167.6s, 167.1s and 265.1s; only A2 passed both oracles.
   - Responder input: v2 666K and 458K vs v1 749K and 619K vs Codex 861K, 438K and 886K.
   - Reflection input: v2 1.94M and 569K vs v1 1.80M and 954K.
 
@@ -286,14 +286,14 @@ Goal: in a repeated incident, make the warm fast mode and the deterministic no-o
 - **Setup.** Code head `495c1db`; images built at `f68a717`, which is code-identical to head (docs-only diff). Image IDs were verified before launch: controller `05b293361ecb`, sregym-responder `03c6691fb16d`, responder `a4ca9282709f`, validator `57b8a3289b53`.
   - Same TOML, wrapper `run.sh`, cluster `luna-w0`, judge `codex-gpt-6-astra`/xhigh, and seed workspace (`<scratch>/seed/lifecycle_workspace`) as v2.
 - **R1 (cold): pass/pass.**
-  - Primary 91.4s. Diagnosis POST at +21.3s, TTL 42.4s, TTM 91.7s.
+  - Raw 91.4s. Diagnosis POST at +21.3s, TTL 42.4s, TTM 91.7s.
   - Gate: 121.8s plus a 6.5s injection request. Load 6.9 at injection, 6.3 at mitigation.
   - Lifecycle: reused with 0 tokens; revalidation took 213s.
   - Responder: 684,276 input (633,088 cached), 6,916 output, 24 requests, 159s.
   - Reflection: first attempt accepted with no retries. 1,594,697 input (1,466,112 cached), 18,869 output, 15 requests, 242s. Post-recovery 398s; stage wall 1,098s.
   - Learned detector (`missing-geo-init-configmap`): `Firing: 1`, watches Deployment, ConfigMap, Pod and Event.
   - Learned playbook: indexed, uses `<UPPER_CASE>` placeholders, and ships `scripts/repair.sh` and `scripts/verify.sh`.
-- **R2, first attempt (kept as `stage_1_reused-incident.20260927_141722`): pass/pass, but primary 345.9s.**
+- **R2, first attempt (kept as `stage_1_reused-incident.20260927_141722`): pass/pass, but raw 345.9s.**
   - Warm prompt confirmed from the rollout ("Warm path: validated incident memory matches...").
   - The incident detector fired at 14:06:03.6, 0.7s after the health detector, and was part of the dispatch (controller log iteration 5).
   - Reflection was the deterministic no-op: `reflection_skipped_reason` set, 0 attempts, 0 tokens. Responder: 448,173 input (413,440 cached), 3,099 output, 22 requests.
@@ -307,14 +307,14 @@ Goal: in a repeated incident, make the warm fast mode and the deterministic no-o
   - Effect on the metric: the SDO mitigation timestamp can now include up to one diagnosis-judge duration (about 20s at xhigh) of waiting. That is a benchmark-imposed wait, the same one Codex would face.
 - **Rebuild and relaunch.** `BUILDX_BUILDER=sdo-example bash scripts/build_sdo_images.sh` at `8e9b717`: sregym-responder `97de0407e563` (verified to contain the fix) and validator `26dad4eadc97`. Controller and responder IDs were unchanged.
   - R1 was kept: it was unaffected, because its mitigation POST came after diagnosis grading. Only R2 was rerun, via `run_sregym.sh <pipeline> --stage 1`, which re-chains R1's workspace.
-  - The new validator identity triggered a pre-fault lifecycle revalidation (199s, 0 tokens), outside the primary metric.
+  - The new validator identity triggered a pre-fault lifecycle revalidation (199s, 0 tokens), outside the raw metric.
 - **R2 rerun (the reported R2): pass/pass.**
-  - Primary 43.6s. Diagnosis POST at +21.0s, TTL 43.5s, TTM 43.8s.
+  - Raw 43.6s. Diagnosis POST at +21.0s, TTL 43.5s, TTM 43.8s.
   - Gate: 108.3s plus 6.4s. Load 6.8 at injection, 7.0 at mitigation.
   - Warm prompt confirmed from the rollout. The incident detector fired at 14:24:44.96 (controller log iteration 7) and was part of the dispatch.
   - Responder: 246,943 input (216,320 cached), 2,473 output, 12 requests, 77s. It was mitigation-ready at 14:25:26 (+36s); the adapter held the POST until the diagnosis verdict at 14:25:33.
   - Reflection: deterministic no-op (`reflection_skipped_reason` set), 0 tokens, `validator_skipped_reason=unchanged-diagnostics`, no controller update. Post-recovery 8.4s. Stage wall 567s.
-  - Targets met: total R2 incident tokens 247K, below the Codex median (861K) and A2 (438K). Primary 43.6s, below v2's 51.7s.
+  - Targets met: total R2 incident tokens 247K, below the Codex median (861K) and A2 (438K). Raw 43.6s, below v2's 51.7s.
   - Minor detour: after a successful mitigation the responder ran `submission --help` and listed tools before returning. About 20s, after the metric.
 
 ## Persistent controller
@@ -374,7 +374,7 @@ Goal: keep ONE SDO controller running across the rounds of a pipeline (the paper
 
 ### Asynchronous reflection (coordinator clarification)
 
-- **Resolution metrics end at the incident's own milestones.** The primary metric is conductor-side (mitigation POST minus injection). `incident_resolution_seconds` is controller detection to controller-verified health, taken from the closure's timestamps. Neither can include reflection.
+- **Resolution metrics end at the incident's own milestones.** The raw metric is conductor-side (mitigation POST minus injection). `incident_resolution_seconds` is controller detection to controller-verified health, taken from the closure's timestamps. Neither can include reflection.
   - Tests: `test_stage_reports_resolution_at_verified_health_before_reflection_finishes` asserts 40s from detection to verification while the fake reflection has not even started. `test_next_stage_injects_only_after_previous_reflection_is_committed_and_rolled_out` asserts the drain is recorded as a pre-injection cost, and that the deferred receipt keeps 40s while its 240s of post-recovery learning is listed as excluded.
 - **The stage reports resolution as soon as verification happens.** The strict receipt, which needs the reflection commit, is written by the next stage's drain or by teardown.
 - **The next injection waits for the drain.** It waits for reflection to be durably committed and for the supervisor to relaunch (rolling out any learned detector) before resuming and injecting. The test asserts `reflected < receipt < fault` ordering.
@@ -403,7 +403,7 @@ Pipeline: `third_party/sregym/logs/20260927_174023_pipeline_sdo-codex-luna-persi
 |---|---|---|---|---|
 | Diagnosis / Mitigation oracle | pass / pass | pass / pass | pass / pass | pass / pass |
 | Controller pod UID | `60db893c…` | `60db893c…` (same) | per-round pod | per-round pod |
-| Primary (mitigation POST − injection) | 96.0 s | 57.2 s | 91.4 s | 43.6 s |
+| Raw incl. judge (mitigation POST − injection) | 96.0 s | 57.2 s | 91.4 s | 43.6 s |
 | `incident_resolution_seconds` | 155.6 s | 89.6 s | 196.0 s | 112.2 s |
 | Inventory + lifecycle revalidation | 210.1 s | 4.1 s (skipped) | 213.3 s | 198.6 s |
 | Controller install | 13.7 s | 2.0 s (reused) | per round | per round |
@@ -422,7 +422,7 @@ Pipeline: `third_party/sregym/logs/20260927_174023_pipeline_sdo-codex-luna-persi
   - Stage 0 was drained by stage 1 (`reflection_commit` b2389015, learned-detector rollout recorded).
   - Stage 1 was drained by pipeline teardown.
   - After teardown the cluster has no `hotel-reservation-sdo` namespace, and only the `observe` PVs remain.
-- **Stage 0's primary time and resolution are within run-to-run variance of v3.** One sample per stage; the model responder dominates both.
+- **Stage 0's raw time and resolution are within run-to-run variance of v3.** One sample per stage; the model responder dominates both.
 
 ## Program integration: persistent controller + variants, sequence, fresh reflection
 
@@ -531,7 +531,7 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
 - **Decision: take the stage-open time from structured results, not logs.** The conductor records `TTL` when the diagnosis verdict completes, immediately before it opens the mitigation stage. TTL's clock is reset right after fault injection (`execution_start_time`, also for deferred injection). So:
   - mitigation stage opened = `fault_injected_at + TTL`;
   - `grading_wait = that − diagnosis_submitted_at`, floored at 0;
-  - `judge_excluded = primary − grading_wait`.
+  - `judge_excluded = raw − grading_wait`.
 
   Every results CSV of both arms has these columns, so no log parsing is needed. The error is milliseconds (logging between injection and the clock reset). When a column is missing, the value is `None`.
 - **Decision: "mitigation applied" is the first state-changing tool call in the agent's own Codex rollout at or after injection.** That is a kubectl `apply/create/patch/replace/delete/rollout/set/scale/edit/label/annotate`, or a playbook `scripts/repair*` run; `bash -n` and reads do not count.
@@ -540,7 +540,7 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - Rejected: the responder's own `repair_actions[].started_at/completed_at`. They are written by the model and are visibly rounded (`18:34:00Z`).
 - `incident_cost.py` prints `no_judge_s` and `applied_s` per SDO stage, and `mean_no_judge_s` and `mean_applied_s` per Codex problem. The JSON carries `grading_wait_seconds`, `judge_excluded_seconds` and `mitigation_applied_seconds`.
 - **First reading.**
-  - reuse1: stage 0 has primary 130.7 s, no-judge 106.8 s, applied 38.0 s; stage 1 has 37.5 / 21.3 / 18.0 s.
+  - reuse1: stage 0 has raw 130.7 s, no-judge 106.8 s, applied 38.0 s; stage 1 has 37.5 / 21.3 / 18.0 s.
   - The two earlier Codex runs average 216.1 / 191.9 / 69.2 s.
   - Grading is about 16 to 24 s per stage. The large gap in SDO stage 0 is between applying the repair and POSTing mitigation: the responder verifies health before submitting.
 
@@ -582,13 +582,13 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
 
 - **Found in Codex x5 (`20260927_195049_codex`, attempt 4).** Codex fixed the fault (first mutation at +48 s), POSTed diagnosis, and immediately POSTed its mitigation. The conductor was still grading the diagnosis.
   - `Conductor.submit` answered `200 {"message":"Submission received"}` and discarded the submission.
-  - Codex exited. The mitigation stage opened with no agent left, so the attempt has no mitigation verdict and no primary time.
+  - Codex exited. The mitigation stage opened with no agent left, so the attempt has no mitigation verdict and no raw time.
   - The same attempt index had shown the same symptom in the invalid parallel-window run.
   - This is the defect recorded above for SDO (line "Conductor.submit answers a submit made during an evaluation…"). SDO's client works around it by waiting for the stage client-side. Stock Codex has no workaround, so the harness penalised the baseline for submitting quickly.
 - **Decision: count it as a harness defect, not an agent failure.** The agent had fixed the fault and got a success response. The fix, test-first:
   - The conductor raises `SubmissionWhileEvaluating` instead of dropping.
   - `/submit` (and the MCP submit tool) holds the request until the next stage opens. That is what the API's existing retry loop was evidently meant to do. The window grew from 60 s to 600 s, because xhigh judge grading has taken up to about 75 s.
-  - **Symmetry:** a submission accepted after waiting is stamped at acceptance, the same time an agent that polls `/status` first (SDO's client) would POST. Both arms therefore pay the grading wait in the primary metric, and `judge_excluded` removes it for both. The judge-excluded formula stays valid, because `mitigation_submitted_at` can no longer precede the stage opening.
+  - **Symmetry:** a submission accepted after waiting is stamped at acceptance, the same time an agent that polls `/status` first (SDO's client) would POST. Both arms therefore pay the grading wait in the raw metric, and `judge_excluded` removes it for both. The judge-excluded formula stays valid, because `mitigation_submitted_at` can no longer precede the stage opening.
   - Rejected: returning 409 so the agent retries. It is honest, but it leaves stock Codex's behaviour to chance, and the held-request semantics already exist in the API.
   - Checked: SDO's fallback submitter can POST a duplicate diagnosis during diagnosis grading. That now becomes the mitigation submission once the stage opens. It runs only after the responder has resolved the incident, so it is graded against the already-healthy cluster at stage-open time, the same outcome and timing as before.
 - **Runs affected:**
@@ -613,3 +613,39 @@ Owner: autonomous agent. Every decision below lists what was chosen, the alterna
   - reuse1, fresh1, reuse2, fresh2 and reuse3 are unaffected: their closures committed, and a closure failure would have hung their drains the same way.
   - reuse3 (`20260927_200727`, w2) finished before the fix and stays valid.
   - Nothing was in flight when the checkout moved to this fix.
+
+### User-directed: judge time is excluded from TTD and TTM
+
+- **Directive (the user, via the coordinator, 2026-09-27).** Judge time must not count in time to diagnosis or time to mitigation. This applies to `incident_cost.py`, to every results table from now on, and to the cumulative and break-even sections.
+- **Change in `benchmarks/sregym/analysis/incident_cost.py`:**
+  - **TTD** (`ttd_s`, `Verdict.diagnosis_seconds`) = `diagnosis_submitted_at − fault_injected_at`. No judge time falls inside it. It is now printed for both arms.
+  - **Headline TTM** (`ttm_s`, `Verdict.ttm_seconds`) = `max(judge-excluded time, last-mitigation completion)`.
+    - The judge-excluded time (`no_judge_s`) is `raw − (fault_injected_at + TTL − diagnosis_submitted_at)`.
+    - The last-mitigation completion (`last_mut_s`) is when the last state-changing tool call issued between injection and the mitigation POST completed. It comes from the responder's or Codex's rollout: the call's `*_call_output` record, paired by `call_id` and capped at the POST.
+    - The floor handles the caveat that subtracting the whole grading wait undercounts an agent that keeps repairing during grading.
+    - It matters more for Codex than for SDO. In the pre-fix Codex x5, `no_judge_s` was 49–56 s but `last_mut_s` reached 75–80 s. In SDO stage 1, reuse1's 21.3 s became 30.8 s.
+    - TTM is unknown when `TTL` or `diagnosis_submitted_at` is missing. It never falls back to the raw time.
+  - **`primary_seconds` is renamed `raw_incl_judge_seconds`** (the `raw_incl_judge_s` column). It is supplementary only. The word "primary" is gone from the code, the tables, this log (earlier entries now say "raw"), `benchmarks/sregym/AGENTS.md` ("Timing metrics") and `.agents/skills/analyze-experiment/references/trajectory-schema.md`.
+  - `applied_s` is renamed `first_mut_s`.
+  - Cumulative time now sums the headline TTM for SDO and the per-problem mean headline TTM for Codex (`sdo_ttm_s`, `codex_ttm_s`). The break-even measures are token counts, which judge time never entered.
+- **What counts as a mutation:** a kubectl write or a playbook `scripts/repair*`.
+  - `kubectl rollout` counts only for restart, undo, pause and resume. `rollout status` and `history` do not count.
+  - Any `--dry-run` is excluded, as are `bash -n` syntax checks.
+  - Real rollouts showed that `rollout status` and `create --dry-run=client` would otherwise inflate `last_mut_s`.
+  - A mutation's completion is the completion of its whole tool call, so a wait chained after it in the same call counts as agent time.
+- **Alternatives considered:**
+  - Judge-excluded time alone: undercounts Codex by up to 25 s.
+  - Last-mutation time alone: ignores the diagnosis and submission tail and misses agents without rollouts.
+  - Changing the harness to defer diagnosis grading: rejected for this queue, because consistency matters more. The fastloop branch has deferred grading, which will make the raw metric judge-free in future queues.
+- **Harness unchanged.** The remaining queue runs with the same harness as the runs already done.
+- **Recomputed valid runs, stage 0 / stage 1, in seconds:**
+
+| Run | Cluster | TTD | TTM (headline) | raw incl. judge | no_judge | last_mut |
+|---|---|---|---|---|---|---|
+| reuse1 | w0 | 28.0 / 13.7 | 106.8 / 30.8 | 130.7 / 37.5 | 106.8 / 21.3 | 39.2 / 30.8 |
+| fresh1 | w0 | 51.3 / 9.2 | 177.2 / 15.0 | 204.0 / 36.6 | 177.2 / 9.9 | 126.2 / 15.0 |
+| reuse2 | w1 | 26.3 / 12.4 | 71.9 / 17.7 | 90.3 / 35.1 | 71.9 / 12.9 | 48.4 / 17.7 |
+| fresh2 | w2 | 25.2 / 6.6 | 77.8 / 23.8 | 93.0 / 32.3 | 77.8 / 14.7 | 38.8 / 23.8 |
+| reuse3 | w2 | 32.1 / 12.4 | 101.0 / 17.9 | 126.0 / 28.5 | 101.0 / 12.5 | 59.7 / 17.9 |
+
+  Pre-fix Codex x5 (supplementary): TTD 36.7, 27.3, 34.6, 37.7, 37.4; TTM 74.9, 53.9, 79.8, –, 69.4 (4 passed, mean 69.5); raw 80.8, 73.0, 85.7, –, 76.2.

@@ -13,6 +13,7 @@ from benchmarks.sregym.analysis.incident_cost import (
     TokenUsage,
     build_report,
     first_mutation_at,
+    last_mutation_done_at,
     load_codex_runs,
     load_sdo_pipeline,
     main,
@@ -169,7 +170,7 @@ def test_loads_stage_metrics_from_receipts_rollouts_and_memory(pipeline: Path) -
 
     assert [(stage.index, stage.problem_id) for stage in stages] == [(0, PROBLEM_A), (1, PROBLEM_A), (2, PROBLEM_B)]
     first, repeat, variant = stages
-    assert first.verdict.primary_seconds == 50.0
+    assert first.verdict.raw_incl_judge_seconds == 50.0
     assert first.verdict.passed
     assert first.incident_resolution_seconds == 100.0
     assert first.responder.total() == 700
@@ -192,11 +193,12 @@ def test_cumulative_totals_and_break_even_against_codex(pipeline: Path, codex_di
     report = build_report(load_sdo_pipeline(pipeline), codex_runs)
 
     cost_a = report.codex[PROBLEM_A]
-    assert (cost_a.runs, cost_a.passed, cost_a.mean_tokens, cost_a.mean_primary_seconds) == (2, 1, 1_000, 200.0)
+    assert (cost_a.runs, cost_a.passed, cost_a.mean_tokens, cost_a.mean_raw_incl_judge_seconds) == (2, 1, 1_000, 200.0)
     assert [row.sdo_incident_tokens for row in report.cumulative] == [700, 900, 1_800]
     assert [row.sdo_tokens_with_learning for row in report.cumulative] == [2_300, 2_500, 3_400]
     assert [row.codex_tokens for row in report.cumulative] == [1_000, 2_000, 3_000]
-    assert [row.sdo_primary_seconds for row in report.cumulative] == [50.0, 150.0, 300.0]
+    # Without stage timestamps the judge-free TTM is unknown, so no cumulative time is claimed.
+    assert [row.sdo_ttm_seconds for row in report.cumulative] == [None, None, None]
     assert report.lifecycle_tokens == 10_000
 
     by_key = {(item.measure, item.includes_lifecycle): item for item in report.break_even}
@@ -304,7 +306,8 @@ def test_judge_excluded_time_subtracts_the_diagnosis_grading_wait(tmp_path: Path
     verdict = read_verdict(tmp_path)
 
     assert verdict is not None
-    assert verdict.primary_seconds == pytest.approx(96.0)
+    assert verdict.raw_incl_judge_seconds == pytest.approx(96.0)
+    assert verdict.diagnosis_seconds == pytest.approx(20.0)
     assert verdict.grading_wait_seconds == pytest.approx(17.0)
     assert verdict.judge_excluded_seconds == pytest.approx(79.0)
 
@@ -420,3 +423,168 @@ def test_json_report_carries_judge_excluded_stage_time(pipeline: Path, tmp_path:
     for stage in json.loads(out.read_text(encoding="utf-8"))["stages"]:
         assert "judge_excluded_seconds" in stage["verdict"]
         assert "mitigation_applied_seconds" in stage["verdict"]
+
+
+def test_headline_ttm_is_the_judge_excluded_time_when_nothing_mitigating_ran_during_grading(tmp_path: Path) -> None:
+    results = tmp_path / "exp" / "runs" / f"000000_{PROBLEM_A}" / "worker_0" / "results"
+    _timing_csv(
+        results,
+        **{
+            "Diagnosis.success": "True",
+            "Mitigation.success": "True",
+            "fault_injected_at": 1790510410.0,
+            "diagnosis_submitted_at": 1790510440.0,
+            "TTL": 45.0,
+            "mitigation_submitted_at": 1790510500.0,
+        },
+    )
+    rollout = results / "codex" / PROBLEM_A / "run_1" / "sessions" / "rollout-c.jsonl"
+    _tool_rollout(
+        rollout,
+        [
+            ("2026-09-27T12:00:20.000Z", {**_code_mode("kubectl apply -f cm.yaml"), "call_id": "a"}),
+            ("2026-09-27T12:00:25.000Z", {"type": "custom_tool_call_output", "call_id": "a", "output": "ok"}),
+        ],
+    )
+
+    (run,) = load_codex_runs(tmp_path / "exp")
+
+    assert run.verdict.diagnosis_seconds == pytest.approx(30.0)
+    assert run.verdict.last_mitigation_seconds == pytest.approx(15.0)
+    assert run.verdict.ttm_seconds == pytest.approx(90.0 - 15.0)
+
+
+def test_headline_ttm_keeps_mitigation_work_finished_during_diagnosis_grading(tmp_path: Path) -> None:
+    """Subtracting the whole grading wait would undercount an agent that kept repairing meanwhile."""
+
+    results = tmp_path / "exp" / "runs" / f"000000_{PROBLEM_A}" / "worker_0" / "results"
+    _timing_csv(
+        results,
+        **{
+            "Diagnosis.success": "True",
+            "Mitigation.success": "True",
+            "fault_injected_at": 1790510410.0,  # 12:00:10Z
+            "diagnosis_submitted_at": 1790510420.0,  # grading until 12:01:00Z (TTL 50)
+            "TTL": 50.0,
+            "mitigation_submitted_at": 1790510470.0,
+        },
+    )
+    rollout = results / "codex" / PROBLEM_A / "run_1" / "sessions" / "rollout-c.jsonl"
+    _tool_rollout(
+        rollout,
+        [
+            ("2026-09-27T12:00:22.000Z", {**_code_mode("kubectl create cm x"), "call_id": "a"}),
+            ("2026-09-27T12:00:23.000Z", {"type": "custom_tool_call_output", "call_id": "a", "output": ""}),
+            ("2026-09-27T12:00:30.000Z", {**_code_mode("kubectl rollout restart deploy/geo"), "call_id": "b"}),
+            ("2026-09-27T12:00:48.000Z", {"type": "custom_tool_call_output", "call_id": "b", "output": ""}),
+        ],
+    )
+
+    (run,) = load_codex_runs(tmp_path / "exp")
+
+    assert run.verdict.raw_incl_judge_seconds == pytest.approx(60.0)
+    assert run.verdict.judge_excluded_seconds == pytest.approx(20.0)
+    assert run.verdict.last_mitigation_seconds == pytest.approx(38.0)
+    assert run.verdict.ttm_seconds == pytest.approx(38.0)
+
+
+def test_last_mutation_ignores_reads_and_work_after_the_mitigation_submission(tmp_path: Path) -> None:
+    rollout = tmp_path / "rollout-d.jsonl"
+    _tool_rollout(
+        rollout,
+        [
+            ("2026-09-27T12:00:05.000Z", {**_code_mode("kubectl delete pod stale"), "call_id": "pre"}),
+            ("2026-09-27T12:00:06.000Z", {"type": "custom_tool_call_output", "call_id": "pre", "output": ""}),
+            ("2026-09-27T12:00:20.000Z", {**_code_mode("kubectl patch deploy geo -p '{}'"), "call_id": "fix"}),
+            ("2026-09-27T12:00:24.000Z", {"type": "custom_tool_call_output", "call_id": "fix", "output": ""}),
+            ("2026-09-27T12:00:30.000Z", {**_code_mode("kubectl get pods"), "call_id": "read"}),
+            ("2026-09-27T12:00:31.000Z", {"type": "custom_tool_call_output", "call_id": "read", "output": ""}),
+            ("2026-09-27T12:01:30.000Z", {**_code_mode("kubectl delete pod later"), "call_id": "post"}),
+            ("2026-09-27T12:01:31.000Z", {"type": "custom_tool_call_output", "call_id": "post", "output": ""}),
+        ],
+    )
+    injected = 1790510410.0  # 12:00:10Z
+
+    assert last_mutation_done_at([rollout], after=injected, before=injected + 60) == pytest.approx(injected + 14.0)
+    # A mutating call still running at the submission is counted up to the submission.
+    assert last_mutation_done_at([rollout], after=injected, before=injected + 12) == pytest.approx(injected + 12.0)
+
+
+def test_headline_ttm_is_unknown_without_the_grading_wait(tmp_path: Path) -> None:
+    _timing_csv(
+        tmp_path,
+        **{
+            "Diagnosis.success": "True",
+            "Mitigation.success": "True",
+            "fault_injected_at": 0.0,
+            "mitigation_submitted_at": 9.0,
+        },
+    )
+
+    verdict = read_verdict(tmp_path)
+
+    assert verdict is not None
+    assert verdict.ttm_seconds is None
+
+
+def test_cumulative_time_and_tables_use_the_judge_free_ttm(tmp_path: Path, capsys) -> None:
+    root = tmp_path / "20260927_000000_pipeline_sdo-codex-luna-persistent"
+    stage = _sdo_stage(
+        root, 0, "first", PROBLEM_A, responder=_usage(1, 0), reflection=_usage(1, 0), warm=False, incident_detectors=1
+    )
+    results = stage / "runs" / f"000000_{PROBLEM_A}" / "worker_0" / "results"
+    (results / "sdo_codex_ALL_results.csv").unlink()
+    _timing_csv(
+        results,
+        **{
+            "Diagnosis.success": "True",
+            "Mitigation.success": "True",
+            "fault_injected_at": 1000.0,
+            "diagnosis_submitted_at": 1010.0,
+            "TTL": 40.0,
+            "mitigation_submitted_at": 1070.0,
+        },
+    )
+    codex = tmp_path / "codex"
+    codex_results = _results_dir(codex, 0, PROBLEM_A, "codex")
+    _timing_csv(
+        codex_results,
+        **{
+            "Diagnosis.success": "True",
+            "Mitigation.success": "True",
+            "fault_injected_at": 0.0,
+            "diagnosis_submitted_at": 20.0,
+            "TTL": 50.0,
+            "mitigation_submitted_at": 100.0,
+        },
+    )
+
+    report = build_report(load_sdo_pipeline(root), load_codex_runs(codex))
+
+    assert report.stages[0].verdict.diagnosis_seconds == pytest.approx(10.0)
+    assert [row.sdo_ttm_seconds for row in report.cumulative] == [pytest.approx(40.0)]
+    assert [row.codex_ttm_seconds for row in report.cumulative] == [pytest.approx(70.0)]
+    assert report.codex[PROBLEM_A].mean_ttd_seconds == pytest.approx(20.0)
+    assert report.codex[PROBLEM_A].mean_ttm_seconds == pytest.approx(70.0)
+
+    main([str(root), "--codex", str(codex)])
+    printed = capsys.readouterr().out
+    for column in ("ttd_s", "ttm_s", "raw_incl_judge_s", "last_mut_s", "mean_ttd_s", "mean_ttm_s", "sdo_ttm_s"):
+        assert column in printed
+    assert "primary" not in printed
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "kubectl -n hotel-reservation rollout status deployment/mongodb-geo --timeout=30s",
+        "kubectl create configmap x --from-file=a.sh --dry-run=client -o yaml > cm.yaml",
+        "kubectl apply --dry-run=server -f cm.yaml",
+        "kubectl rollout history deployment/geo",
+    ],
+)
+def test_read_only_kubectl_forms_are_not_mutations(tmp_path: Path, command: str) -> None:
+    rollout = tmp_path / "rollout-e.jsonl"
+    _tool_rollout(rollout, [("2026-09-27T12:00:30.000Z", _code_mode(command))])
+
+    assert first_mutation_at([rollout], after=1790510410.0) is None
