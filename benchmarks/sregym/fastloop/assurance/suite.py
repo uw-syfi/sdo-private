@@ -351,8 +351,11 @@ class AssuranceSuite:
     # --- faults -----------------------------------------------------------------------------------
 
     def apply_wrong_fix(self, fix: WrongFix) -> tuple[bool, str]:
-        if fix.kind == "restart":
-            self.kubectl.run("rollout", "restart", f"deployment/{fix.target}", namespace=self.namespace)
+        if fix.kind == "revert-drift":
+            self.kubectl.run("set", "env", f"deployment/{fix.target}", f"{fix.env}-", namespace=self.namespace)
+        if fix.kind in ("restart", "revert-drift"):
+            if fix.kind == "restart":
+                self.kubectl.run("rollout", "restart", f"deployment/{fix.target}", namespace=self.namespace)
             rolled = self.kubectl.run(
                 "rollout",
                 "status",
@@ -457,11 +460,14 @@ class AssuranceSuite:
             wrong_fixes=case.wrong_fixes,
             iteration=iteration,
             hold=False,
+            registry_id=case.registry_id,
+            decoy_objects=case.decoy_objects,
         )
 
-    def _inject(self, problems: list[str]) -> tuple[datetime, datetime]:
-        if len(problems) == 1:
-            window = self.driver.inject(problems[0])
+    def _inject(self, problems: list[str], registry_id: str = "") -> tuple[datetime, datetime]:
+        if registry_id or len(problems) == 1:
+            # A registry composite is one SREGym problem; its fault components are faults 0..n-1.
+            window = self.driver.inject(registry_id or problems[0])
         else:
             window = self.driver.inject_composite(problems).window
         return window.started_at, window.finished_at
@@ -475,6 +481,8 @@ class AssuranceSuite:
         wrong_fixes: tuple[WrongFix, ...],
         iteration: int,
         hold: bool,
+        registry_id: str = "",
+        decoy_objects: tuple[str, ...] = (),
     ) -> FaultRun:
         problems = [fault.problem_id for fault in faults]
         objects = tuple(item for fault in faults for item in fault.faulted_objects)
@@ -499,7 +507,7 @@ class AssuranceSuite:
                 )
             )
             known = self.known_requests()
-            run.injection_started_at, run.injection_finished_at = self._inject(problems)
+            run.injection_started_at, run.injection_finished_at = self._inject(problems, registry_id)
             injected = True
             request_file, request = self.wait_request(known=known, timeout=bounds.detect_seconds + 120)
             received = utcnow()
@@ -508,7 +516,8 @@ class AssuranceSuite:
             run.first_finding_seconds = first_findings(
                 self.controller, since=started, reference=run.injection_started_at
             )
-            run.diff = diff_reading(request, objects)
+            # A registry composite's benign decoy is a real change; the diff may name it.
+            run.diff = diff_reading(request, objects, allowed=decoy_objects)
             # A fault that lands after dispatch cannot be in the request's snapshot; the responder
             # sees it in the controller's live view, which `sdo incident status` reports.
             run.live_named = (
@@ -584,7 +593,7 @@ class AssuranceSuite:
             for number, fix in enumerate(wrong_fixes, start=1):
                 began = utcnow()
                 applied, detail = self.apply_wrong_fix(fix)
-                if fix.kind == "restart":
+                if fix.kind in ("restart", "revert-drift"):
                     touched.add(f"Deployment/{fix.target}")
                 actions.append(
                     _action(
@@ -613,7 +622,8 @@ class AssuranceSuite:
                 )
 
             if len(problems) > 1:
-                # Fix every fault but the last: the application must stay unhealthy.
+                # Fix every fault but the last (a registry composite's decoys stay): the application
+                # must stay unhealthy.
                 for index in range(len(problems) - 1):
                     began = utcnow()
                     self.driver.recover_fault(index)

@@ -213,7 +213,41 @@ def test_a_composite_needs_distinct_faults_on_distinct_objects() -> None:
         CompositeCase(name="clash", faults=(MISSING_CONFIGMAP, twin))
 
 
+def test_the_plans_composites_are_sregym_registry_problems() -> None:
+    import json as json_module
+    from pathlib import Path as RealPath
+
+    specs_path = (
+        RealPath(__file__).resolve().parents[5]
+        / "third_party"
+        / "sregym"
+        / "sregym"
+        / "conductor"
+        / "problems"
+        / "composite_specs.json"
+    )
+    specs = json_module.loads(specs_path.read_text(encoding="utf-8"))
+    planned = [case for case in COMPOSITES if case.source.startswith("PLAN.md")]
+
+    assert [case.source for case in planned] == ["PLAN.md K1", "PLAN.md K2", "PLAN.md K3"]
+    for case in planned:
+        components = specs[case.registry_id]["components"]
+        assert [item["problem"] for item in components if item["role"] == "fault"] == [
+            fault.problem_id for fault in case.faults
+        ]
+        assert bool(case.decoy_objects) == any(item["role"] == "decoy" for item in components)
+    k3 = composite("K3-geo-configmap+log-drift")
+    assert k3.decoy_objects == ("Deployment/geo",)
+    assert k3.wrong_fixes[0].label == "revert the recent LOG_LEVEL change on deployment/geo"
+    with pytest.raises(ValueError, match="only a registry composite"):
+        CompositeCase(name="decoy", faults=(MISSING_CONFIGMAP,), decoy_objects=("Deployment/geo",))
+
+
 def test_wrong_fixes_and_bounds_validate() -> None:
+    with pytest.raises(ValueError, match="environment variable"):
+        WrongFix("revert-drift", "geo")
+    with pytest.raises(ValueError, match="environment variable"):
+        WrongFix("restart", "geo", env="LOG_LEVEL")
     with pytest.raises(ValueError, match="names its Deployment"):
         WrongFix("restart")
     with pytest.raises(ValueError, match="must be positive"):

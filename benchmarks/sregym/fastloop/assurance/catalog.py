@@ -15,7 +15,7 @@ from typing import Literal
 #: SREGym's red herrings: they exist, mounted, before any fault is injected.
 DECOYS: tuple[str, ...] = ("failure-admin-geo", "failure-admin-rate")
 
-WrongFixKind = Literal["restart", "decoy-regrant"]
+WrongFixKind = Literal["restart", "decoy-regrant", "revert-drift"]
 
 
 @dataclass(frozen=True)
@@ -24,21 +24,30 @@ class WrongFix:
 
     ``restart`` rolls out ``target`` (a Deployment) again; ``decoy-regrant``
     runs SREGym's own Mongo privilege-restore scripts from the decoy
-    ConfigMaps, the story the decoys tell.
+    ConfigMaps, the story the decoys tell; ``revert-drift`` removes the
+    environment variable ``env`` from Deployment ``target``, undoing a benign
+    decoy drift (the obvious recent change) and nothing else.
     """
 
     kind: WrongFixKind
     target: str = ""
+    env: str = ""
 
     def __post_init__(self) -> None:
-        if self.kind not in ("restart", "decoy-regrant"):
+        if self.kind not in ("restart", "decoy-regrant", "revert-drift"):
             raise ValueError(f"unsupported wrong fix {self.kind!r}")
-        if self.kind == "restart" and not self.target:
-            raise ValueError("a restart wrong fix names its Deployment")
+        if self.kind in ("restart", "revert-drift") and not self.target:
+            raise ValueError(f"a {self.kind} wrong fix names its Deployment")
+        if (self.kind == "revert-drift") != bool(self.env):
+            raise ValueError("only a revert-drift wrong fix names an environment variable, and it must")
 
     @property
     def label(self) -> str:
-        return f"restart deployment/{self.target}" if self.kind == "restart" else "re-grant Mongo roles (decoy scripts)"
+        if self.kind == "restart":
+            return f"restart deployment/{self.target}"
+        if self.kind == "revert-drift":
+            return f"revert the recent {self.env} change on deployment/{self.target}"
+        return "re-grant Mongo roles (decoy scripts)"
 
 
 @dataclass(frozen=True)
@@ -66,16 +75,26 @@ class FaultCase:
 
 @dataclass(frozen=True)
 class CompositeCase:
-    """Several fault cases live at once; the diff must name every faulted object."""
+    """Several fault cases live at once; the diff must name every faulted object.
+
+    A suite composite injects its faults through the fault driver's composition. A registry
+    composite (``registry_id``, SREGym's ``CompositeFaultProblem``) is one problem whose fault
+    components are ``faults`` in order, and it may add benign decoy changes (``decoy_objects``),
+    which the diff may name but which are no cause.
+    """
 
     name: str
     faults: tuple[FaultCase, ...]
     source: str = "suite"
     wrong_fixes: tuple[WrongFix, ...] = field(default=())
+    registry_id: str = ""
+    decoy_objects: tuple[str, ...] = field(default=())
 
     def __post_init__(self) -> None:
-        if len(self.faults) < 2:
-            raise ValueError(f"{self.name}: a composite fault has at least two faults")
+        if len(self.faults) + len(self.decoy_objects) < 2 or not self.faults:
+            raise ValueError(f"{self.name}: a composite fault has at least two faults, or a fault and a decoy")
+        if self.decoy_objects and not self.registry_id:
+            raise ValueError(f"{self.name}: only a registry composite injects decoys")
         problems = [fault.problem_id for fault in self.faults]
         if len(set(problems)) != len(problems):
             raise ValueError(f"{self.name}: a problem appears twice: {problems}")
@@ -143,11 +162,35 @@ SINGLE_FAULTS: tuple[FaultCase, ...] = (
     MISSING_CONFIGMAP_RATE,
 )
 
-#: Obvious pairs first: two services, and a NetworkPolicy block plus a selector fault.
+#: Obvious pairs first: two services, and a NetworkPolicy block plus a selector fault. Then the
+#: assurance plan's K1-K3 (``benchmarks/sregym/experiments/assurance/PLAN.md`` (c)), as SREGym
+#: registry composites.
 COMPOSITES: tuple[CompositeCase, ...] = (
     CompositeCase(name="policy-block+selector", faults=(NETWORK_POLICY_BLOCK, WRONG_SELECTOR)),
     CompositeCase(name="configmap-geo+selector", faults=(MISSING_CONFIGMAP, WRONG_SELECTOR)),
     CompositeCase(name="configmap-geo+configmap-rate", faults=(MISSING_CONFIGMAP, MISSING_CONFIGMAP_RATE)),
+    CompositeCase(
+        name="K1-policy+rate-configmap",
+        faults=(NETWORK_POLICY_BLOCK, MISSING_CONFIGMAP_RATE),
+        source="PLAN.md K1",
+        registry_id="composite_policy_and_rate_configmap_hotel_reservation",
+        wrong_fixes=(WrongFix("decoy-regrant"),),
+    ),
+    CompositeCase(
+        name="K2-selector+readiness",
+        faults=(WRONG_SELECTOR, READINESS_PROBE),
+        source="PLAN.md K2",
+        registry_id="composite_frontend_selector_and_readiness_hotel_reservation",
+        wrong_fixes=(WrongFix("restart", "frontend"),),
+    ),
+    CompositeCase(
+        name="K3-geo-configmap+log-drift",
+        faults=(MISSING_CONFIGMAP,),
+        source="PLAN.md K3",
+        registry_id="composite_geo_configmap_with_log_drift_hotel_reservation",
+        decoy_objects=("Deployment/geo",),
+        wrong_fixes=(WrongFix("revert-drift", "geo", env="LOG_LEVEL"), WrongFix("decoy-regrant")),
+    ),
 )
 
 
