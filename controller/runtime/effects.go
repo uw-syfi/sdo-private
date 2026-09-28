@@ -23,6 +23,9 @@ func (c *Controller) PendingDispatchEffect() (DispatchEffect, bool) {
 	if c.dispatchState != "pending" || c.currentIncidentRequest == nil {
 		return DispatchEffect{}, false
 	}
+	if !c.dispatchRetryDueLocked() {
+		return DispatchEffect{}, false
+	}
 	return DispatchEffect{Request: *cloneIncidentRequest(c.currentIncidentRequest)}, true
 }
 

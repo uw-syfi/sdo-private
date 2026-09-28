@@ -573,6 +573,14 @@ class BrokerService:
             if ledger.reflection_session_mode is None:
                 ledger.reflection_session_mode = self.reflection_session
             ledger.reflection_started = True
+            # The attempt is counted here, before the backend call, and saved
+            # durably: a broker killed mid-turn (SIGKILL, say) never reaches
+            # the exception handler below, or any other code in this
+            # process, so counting the attempt only after the call returns
+            # or raises would let repeated kills retry the same incident
+            # forever. Counting it before the call bounds that regardless of
+            # when the process dies.
+            ledger.reflection_attempts += 1
             self._save(ledger)
             try:
                 turn = self.reflector.resume(
@@ -589,15 +597,12 @@ class BrokerService:
                     closure=closure,
                 )
             except Exception as exc:
-                # A failed turn is an attempt, so a backend that always fails is bounded.
                 if self.broker.proposal_changed_paths(worktree):
                     self._rollback_incomplete_reflection(worktree)
-                ledger.reflection_attempts += 1
                 ledger.reflection_backend_error = f"{type(exc).__name__}: {exc}"[:2000]
                 ledger.reflection_started = False
                 self._save(ledger)
                 raise
-            ledger.reflection_attempts += 1
             if retry_feedback:
                 ledger.reflection_fresh_retry_attempts += 1
             for key, value in turn.usage.items():
