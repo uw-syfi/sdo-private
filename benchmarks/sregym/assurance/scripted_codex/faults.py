@@ -137,15 +137,16 @@ def _restart(namespace: str, target: str) -> tuple[str, str]:
     )
 
 
-def _claimed_cause(facts: Facts, request: dict[str, Any]) -> dict[str, Any]:
+def _claimed_cause(facts: Facts, request: dict[str, Any], workload: str | None = None) -> dict[str, Any]:
+    workload = workload or facts.target
     return {
-        "summary": f"Pods of {facts.target} are wedged after a stale rollout and must be restarted",
-        "resources": [_object_ref("apps/v1", "Deployment", facts.namespace, facts.target)],
+        "summary": f"Pods of {workload} are wedged after a stale rollout and must be restarted",
+        "resources": [_object_ref("apps/v1", "Deployment", facts.namespace, workload)],
         "evidence": [
             {
                 "kind": "live-observation",
-                "source": f"kubectl -n {facts.namespace} get pods -l {SERVICE_LABEL}={facts.target} -o wide",
-                "observation": f"{facts.target} pods were running but their callers failed",
+                "source": f"kubectl -n {facts.namespace} get pods -l {SERVICE_LABEL}={workload} -o wide",
+                "observation": f"{workload} pods were running but their requests failed",
             }
         ],
         "explained_detectors": fired_detectors(request) or ["traffic-health"],
@@ -190,8 +191,12 @@ class NetworkPolicyBlock:
             ),
         )
 
+    #: The wrong fix restarts the isolated service's caller. Restarting the isolated
+    #: service itself would crash-loop it past the fault's recovery window.
+    wrong_workload = "frontend"
+
     def wrong_repair(self, facts: Facts) -> tuple[str, str]:
-        return _restart(facts.namespace, facts.target)
+        return _restart(facts.namespace, self.wrong_workload)
 
     def correct_repair(self, facts: Facts) -> list[tuple[str, str]]:
         policy = facts.objects["policy"]
@@ -224,7 +229,7 @@ class NetworkPolicyBlock:
         }
 
     def claimed_root_cause(self, facts: Facts, request: dict[str, Any]) -> dict[str, Any]:
-        return _claimed_cause(facts, request)
+        return _claimed_cause(facts, request, self.wrong_workload)
 
     def warm_facts(self, namespace: str, target: str, request: dict[str, Any], worktree: Path) -> Facts:
         del worktree
