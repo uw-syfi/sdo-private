@@ -419,3 +419,92 @@ here because every scenario qualifies on the healthy application.
 - **Closure.** Helper cleanup adds about 10 ms before the closure gate.
 - **Verification.** Diagnosis verification is pure Python over data the
   broker already holds.
+
+### D28. The submit gate's clear hysteresis is separate from closure's
+
+Branch `vic/perf/status-clear-latency`. This follows up on the cost recorded in
+`benchmarks/sregym/experiments/assurance/NO_LLM_SUITE_DECISIONS.md` N10.
+
+- **Where the ~30 s came from.** The source was clear persistence plus the
+  detector's interval. Evaluation cost, the view's publish cadence and the
+  prober window were not factors. A fix's own watch event triggers one clear
+  evaluation, so `ClearCount` becomes 1 and the finding stays active.
+  `ConfirmationInterval` (1 s) expedites only findings that are *pending
+  firing*. The second clear evaluation therefore waits for the next watch
+  event or the detector's interval: 30 s for `health-objective` and 15 s for
+  `service-endpoints`. The view is republished after every step, so it was
+  never stale; the finding really was still active. Readiness and
+  missing-service faults cleared in 4 s because their rollout emits a stream
+  of Pod events, which gives the second clear evaluation early.
+- **Decision.** The submit gate gets its own hysteresis,
+  `GateConfirmationPolicy`. Production uses 3 consecutive clear evaluations
+  spanning at least 2 s, re-checked every 1 s.
+  - **Re-evaluation.** While a finding that closure waits on is clearing, the
+    controller re-evaluates its detector every second against a fresh
+    informer snapshot, for the gate only. These gate evaluations never reach
+    `FindingStateTracker`, the detector history or the state baseline.
+    Closure, `final_detector_states` and the health judge's persistence
+    policy are unchanged.
+  - **Reset.** Any firing observation resets the finding's count, whether it
+    comes from a scheduled, watch-driven or gate evaluation. A detector error
+    also resets it.
+  - **Publication.** The incident view moves gate-confirmed findings from
+    `blocking_findings` to a new `clearing_findings` list.
+    `sdo incident status` keeps refusing on any blocking non-traffic finding,
+    and reports clearing findings as `ok`.
+  - **Scope.** Gate state is not persisted, so a restarted controller
+    confirms again from fresh evaluations. Re-evaluation stops once a finding
+    is confirmed. A relapse still blocks at once, because the change that
+    causes it emits a watch event.
+- **Alternatives.**
+  - *Expedite the clear confirmation for closure too*, by re-running a
+    clearing detector after `ConfirmationInterval`. That changes the health
+    judge's policy (N10), and closure runs after the mitigation submit, so it
+    gains nothing for TTM. `incident_cost.py` defines `ttm_s` as the
+    submission time minus the grading wait, floored at the last mitigation
+    mutation, so closure time is already outside TTM.
+  - *On-demand re-evaluation when status is queried.* The responder would
+    need a request channel into the controller. Today it only reads a
+    ConfigMap, and `controller/runtime` stays transport-neutral.
+  - *Republish the view on informer changes.* It was already republished at
+    every step, so this addresses nothing.
+- **Guarantees kept** (tests are in
+  `controller/runtime/gate_confirmation_test.go` and `test_incident_status.py`):
+  - A wrong fix is still refused: the finding keeps firing, is never counted
+    clear, and triggers no gate evaluations.
+  - A partial composite fix is still refused: counts are kept per finding, so
+    the unfixed finding keeps blocking while the fixed one moves to
+    `clearing_findings`.
+  - A finding that flaps on a 3 s cycle (clear for 2 s, then firing for 1 s)
+    never passes over 60 s.
+  - Watch-event bursts cannot beat the time window.
+  - Closure still waits for the detector's own second clear evaluation.
+  - The traffic side is still judged by the fresh verify burst.
+- **Measured.** The runs used my own 1+1 kind cluster `assure-l0` (now
+  deleted), with `--hold none` and 2 iterations per case. "Before" is
+  `b1ba89c` (8 cases); "after" is this branch in two passes (16 cases).
+  Fix-to-healthy status is `clear_s`; fix-to-closure is `verify_s`.
+
+  | Case | Before `clear_s` | After `clear_s` | Before `verify_s` | After `verify_s` |
+  |---|---|---|---|---|
+  | selector-mismatch | 31.7, 31.7 | 4.7, 3.9, 4.1, 4.1 | 43.9, 43.4 | 23.5, 23.9, 23.8, 23.5 |
+  | missing-configmap | 36.3, 31.7 | 8.3, 4.2, 4.1, 8.4 | 55.4, 44.3 | 25.8, 25.1, 23.9, 19.2 |
+  | network-policy-block | 36.1, 31.9 | 4.1, 8.7, 8.7, 8.6 | 55.1, 44.6 | 14.3, 25.6, 25.5, 25.8 |
+  | configmap-geo+selector | 31.7, 31.6 | 4.1, 4.1, 3.8, 4.8 | 43.7, 43.8 | 23.2, 23.9, 13.7, 23.7 |
+
+  - **Gate checks.** Every wrong-fix and partial-fix probe was still refused
+    by both status (exit 1) and the gate (exit 4). There were no stray
+    incidents.
+  - **The 8 s mode.** After the change the values fall in two groups, about
+    4 s and about 8.5 s. The suite polls status, and each status call takes
+    about 4.5 s: a burst, then a read of the view. When a call's read lands
+    just before confirmation (about 2–3 s after the fix), the next call is
+    the healthy one. A responder that checks immediately after its fix sees
+    the same pattern, so it may need one retry.
+  - **Closure got faster too.** The responder returns sooner, and closure's
+    unchanged 2-evaluation rule is then met by the scheduled evaluation.
+- **One unrelated check failure.** The diff check on after pass 1,
+  missing-configmap #1, also named `Deployment/mongodb-geo`, the fault's own
+  scale-down and scale-up. This is a baseline and diff timing effect under
+  `--hold none` (N11 territory). The gate never reads the diff. It happened
+  in 1 of 24 cases and was not reproduced in the other 23.

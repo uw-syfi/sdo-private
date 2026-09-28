@@ -199,6 +199,14 @@ does not fail the run.
   nearly the same Kubernetes state, which weakens the hysteresis the health
   judge chose. That is the judge's policy to change, so it is left as a
   recommendation.
+- **Follow-up: the gate's clear latency was recovered without changing
+  closure** (`docs/feedback-loop-DECISIONS.md` D28). The submit gate now has
+  its own hysteresis. A clearing finding is re-evaluated every second for
+  the gate only, and passes after 3 clear evaluations over at least 2 s.
+  Closure keeps the judge's policy. On `assure-l0`, fix to healthy status
+  dropped from 31.6–36.3 s to 3.8–8.7 s on the selector, ConfigMap and
+  NetworkPolicy faults and on `configmap-geo+selector`, and wrong and partial
+  fixes were still refused.
 
 ## N11. SDO gap: a composite's later fault is missing from the request's diff
 
