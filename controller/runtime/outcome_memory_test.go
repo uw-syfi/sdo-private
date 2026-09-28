@@ -19,7 +19,7 @@ func TestRelevantOutcomeEvidenceSelectsCompactVerifiedMatch(t *testing.T) {
 	}
 	findings := []sdk.Finding{{DetectorID: "health", RuleID: "missing", Fingerprint: "missing:cfg", PrimaryResource: sdk.ObjectRef{Kind: "ConfigMap", Name: "cfg"}}}
 
-	got := relevantOutcomeEvidence(repository, findings, "abc")
+	got := relevantOutcomeEvidence(repository, findings, "abc", nil)
 
 	if len(got) != 1 || got[0].MatchReason != "exact-fingerprint" || !got[0].ExactSourceMatch {
 		t.Fatalf("unexpected relevant outcome: %#v", got)
@@ -40,8 +40,41 @@ func TestRelevantOutcomeEvidenceIgnoresFailuresAndUnrelatedFindings(t *testing.T
 		t.Fatal(err)
 	}
 
-	got := relevantOutcomeEvidence(repository, []sdk.Finding{{DetectorID: "health", RuleID: "missing", PrimaryResource: sdk.ObjectRef{Kind: "ConfigMap", Name: "cfg"}}}, "abc")
+	got := relevantOutcomeEvidence(repository, []sdk.Finding{{DetectorID: "health", RuleID: "missing", PrimaryResource: sdk.ObjectRef{Kind: "ConfigMap", Name: "cfg"}}}, "abc", nil)
 	if len(got) != 0 {
 		t.Fatalf("expected no relevant outcomes, got %#v", got)
+	}
+}
+
+// A detector learned from an incident fires on its first match, often before
+// the health detectors that opened the original incident. Its repeat then
+// shares no fingerprint with the prior outcome, and the warm path was lost
+// on timing. The learned detector's origin, on the same resource, links them.
+func TestALearnedDetectorLinksItsRepeatToTheIncidentItWasLearnedFrom(t *testing.T) {
+	repository := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repository, ".sdo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outcome := `{"incident_id":"first","source_commit":"abc","classification":"success","findings":[{"detector_id":"health-objective","rule_id":"network-policy-total-isolation","primary_resource":{"kind":"NetworkPolicy","namespace":"app","name":"deny-all"},"fingerprint":"health-objective/deny-all"}],"applied_playbooks":[]}` + "\n"
+	if err := os.WriteFile(filepath.Join(repository, ".sdo", "outcomes.jsonl"), []byte(outcome), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	origins := map[string]string{"deny-all-isolation": "first"}
+	repeat := []sdk.Finding{{
+		DetectorID: "deny-all-isolation", RuleID: "total-isolation", Fingerprint: "deny-all-isolation/deny-all",
+		PrimaryResource: sdk.ObjectRef{Kind: "NetworkPolicy", Namespace: "app", Name: "deny-all"},
+	}}
+
+	got := relevantOutcomeEvidence(repository, repeat, "abc", origins)
+	if len(got) != 1 || got[0].IncidentID != "first" || got[0].MatchReason != "learned-detector-origin" {
+		t.Fatalf("the learned detector's repeat must match its originating outcome: %#v", got)
+	}
+
+	variant := []sdk.Finding{{
+		DetectorID: "deny-all-isolation", RuleID: "total-isolation", Fingerprint: "deny-all-isolation/other",
+		PrimaryResource: sdk.ObjectRef{Kind: "NetworkPolicy", Namespace: "app", Name: "other"},
+	}}
+	if got := relevantOutcomeEvidence(repository, variant, "abc", origins); len(got) != 0 {
+		t.Fatalf("the learned detector on another resource is not a repeat: %#v", got)
 	}
 }

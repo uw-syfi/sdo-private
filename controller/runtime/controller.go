@@ -330,7 +330,7 @@ func (c *Controller) attachBeforeLaunch(findings []sdk.Finding) bool {
 	sortFindings(request.Findings)
 	request.SurfacedPlaybooks = surfacedPlaybooks(request.Findings)
 	request.RelevantOutcomes = relevantOutcomeEvidence(
-		c.config.RepositoryWorktree, request.Findings, c.config.SourceCommit,
+		c.config.RepositoryWorktree, request.Findings, c.config.SourceCommit, c.detectorOrigins(),
 	)
 	request.DetectorHistory = compactDetectorHistory(c.history)
 	c.incidentFindingKeys = findingKeys(request.Findings)
@@ -464,14 +464,28 @@ func (c *Controller) recordDetectorError(detectorID string, now time.Time, err e
 	}
 }
 
+// detectorOrigins maps each learned incident detector to the incident it was
+// learned from.
+func (c *Controller) detectorOrigins() map[string]string {
+	origins := make(map[string]string)
+	for id, spec := range c.detectorSpecs {
+		if spec.Class == sdk.DetectorClassIncident && spec.OriginatingIncident != "" {
+			origins[id] = spec.OriginatingIncident
+		}
+	}
+	return origins
+}
+
 func (c *Controller) incidentRequest(now time.Time, findings []sdk.Finding) IncidentRequest {
 	incidentID := fmt.Sprintf("%s-%d", c.config.Application, now.UnixNano())
 	return IncidentRequest{
 		SchemaVersion: ProtocolSchemaVersion, Application: c.config.Application, Namespace: c.config.Namespace,
 		IncidentID: incidentID, Findings: findings,
 		DetectorHistory: compactDetectorHistory(c.history), SurfacedPlaybooks: surfacedPlaybooks(findings),
-		RelevantOutcomes: relevantOutcomeEvidence(c.config.RepositoryWorktree, findings, c.config.SourceCommit),
-		SourceCommit:     c.config.SourceCommit, DeployedCommit: c.config.DeployedCommit,
+		RelevantOutcomes: relevantOutcomeEvidence(
+			c.config.RepositoryWorktree, findings, c.config.SourceCommit, c.detectorOrigins(),
+		),
+		SourceCommit: c.config.SourceCommit, DeployedCommit: c.config.DeployedCommit,
 		ArchitectureSummaryPath: c.config.ArchitectureSummaryPath, HealthObjectivePath: c.config.HealthObjectivePath,
 		RepositoryWorktree: c.config.RepositoryWorktree, RepositoryBaseCommit: c.config.SourceCommit,
 		ResponseDeadline:  now.Add(c.config.ResponseTimeout).UTC(),

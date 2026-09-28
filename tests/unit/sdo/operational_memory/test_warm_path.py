@@ -144,6 +144,17 @@ def test_fired_incident_detector_reports_its_findings() -> None:
     assert SOURCE_ACTIVE_FINDING in matches[0].sources
 
 
+def test_a_repeat_linked_by_its_learned_detector_is_warm() -> None:
+    """The learned detector fired alone, so the controller linked the prior by its origin, not a fingerprint."""
+
+    request = _request(match_reason="learned-detector-origin", incident_finding=True)
+
+    matches = warm_playbook_matches(request, _manifest(incident_playbooks=[INCIDENT_PLAYBOOK]))
+
+    assert [match.path for match in matches] == [INCIDENT_PLAYBOOK]
+    assert matches[0].prior_incidents == (PRIOR_INCIDENT,)
+
+
 def test_non_exact_prior_is_cold() -> None:
     request = _request(match_reason="detector-rule-resource-kind", prior_applied=[INCIDENT_PLAYBOOK])
 

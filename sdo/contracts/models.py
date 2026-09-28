@@ -73,7 +73,8 @@ class SurfacedPlaybook(ContractModel):
 
 class PriorOutcomeEvidence(ContractModel):
     incident_id: str = Field(min_length=1)
-    match_reason: Literal["exact-fingerprint", "detector-rule-resource-kind"]
+    # learned-detector-origin: a detector learned from this outcome fired on the same resource.
+    match_reason: Literal["exact-fingerprint", "learned-detector-origin", "detector-rule-resource-kind"]
     root_cause_summaries: list[str] = Field(default_factory=list)
     repair_action_summaries: list[str] = Field(default_factory=list)
     applied_playbooks: list[str] = Field(default_factory=list)
