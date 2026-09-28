@@ -6,7 +6,7 @@ import pytest
 
 from benchmarks.sregym.adapter import submission
 from benchmarks.sregym.adapter.submission import SubmissionBridgeError, submit_solution
-from sdo.agent_runtime.responder import IncidentStatus, IncidentStatusState, VerifyBurstResult
+from sdo.agent_runtime.responder import IncidentStatusReport, IncidentStatusState, VerifyBurstResult
 
 
 class Response:
@@ -122,7 +122,7 @@ def test_repeated_mitigation_after_the_problem_ended_returns_at_once_without_res
     assert result == {"mitigation": {"status": "already_submitted"}, "done": {"status": terminal_stage}}
 
 
-def _status(state: IncidentStatusState) -> IncidentStatus:
+def _status(state: IncidentStatusState) -> IncidentStatusReport:
     burst = None
     if state != IncidentStatusState.UNAVAILABLE:
         verdict = {"scenario": "search-hotels", "healthy": state == IncidentStatusState.HEALTHY, "qualified": True}
@@ -131,7 +131,7 @@ def _status(state: IncidentStatusState) -> IncidentStatus:
         burst = VerifyBurstResult.model_validate(
             {"workload": "verify", "healthy": state == IncidentStatusState.HEALTHY, "verdicts": [verdict]}
         )
-    return IncidentStatus(state=state, burst=burst, detail="test")
+    return IncidentStatusReport(state=state, burst=burst, detail="test")
 
 
 @pytest.mark.parametrize(

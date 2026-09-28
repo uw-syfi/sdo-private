@@ -2,7 +2,7 @@
 
 from sdo.agent_runtime.responder.credentials import prepare_claude_home, prepare_codex_home
 from sdo.agent_runtime.responder.incident_status import (
-    IncidentStatus,
+    IncidentStatusReport,
     IncidentStatusState,
     VerifyBurstResult,
     VerifyScenarioVerdict,
@@ -22,7 +22,7 @@ __all__ = [
     "INCIDENT_REASONING_EFFORT",
     "CodexSessionBackend",
     "ClaudeSessionBackend",
-    "IncidentStatus",
+    "IncidentStatusReport",
     "IncidentStatusState",
     "ReflectionTurn",
     "SessionReflector",

@@ -15,7 +15,7 @@ from sdo.agent_runtime.responder.incident_status import (
     EXIT_HEALTHY,
     EXIT_UNAVAILABLE,
     EXIT_UNHEALTHY,
-    IncidentStatus,
+    IncidentStatusReport,
     IncidentStatusState,
     incident_status,
 )
@@ -191,4 +191,4 @@ def test_cli_prints_json_and_exits_with_the_verdict(
 
 def test_status_model_rejects_a_healthy_state_without_a_burst() -> None:
     with pytest.raises(ValueError, match="burst"):
-        IncidentStatus(state=IncidentStatusState.HEALTHY, burst=None, detail="")
+        IncidentStatusReport(state=IncidentStatusState.HEALTHY, burst=None, detail="")

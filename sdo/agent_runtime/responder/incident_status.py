@@ -85,7 +85,7 @@ class VerifyBurstResult(BaseModel):
 
 
 @dataclass(frozen=True)
-class IncidentStatus:
+class IncidentStatusReport:
     state: IncidentStatusState
     burst: VerifyBurstResult | None
     detail: str
@@ -164,12 +164,12 @@ def incident_status(
     scenarios: Sequence[str] = (),
     timeout_seconds: float = BURST_TIMEOUT_SECONDS,
     opener: Opener = urllib.request.urlopen,
-) -> IncidentStatus:
+) -> IncidentStatusReport:
     """Run a verify burst now and judge it as the closure gate would."""
 
     incident = _incident_scenarios(request_path)
     if not prober_url:
-        return IncidentStatus(
+        return IncidentStatusReport(
             state=IncidentStatusState.UNAVAILABLE,
             burst=None,
             detail=f"{PROBER_URL_ENVIRONMENT} is not set",
@@ -191,14 +191,14 @@ def incident_status(
             burst = VerifyBurstResult.model_validate_json(response.read())
     except urllib.error.HTTPError as exc:
         message = exc.read().decode("utf-8", errors="replace").strip() or str(exc)
-        return IncidentStatus(
+        return IncidentStatusReport(
             state=IncidentStatusState.UNAVAILABLE,
             burst=None,
             detail=f"prober rejected the burst: {message}",
             incident_scenarios=incident,
         )
     except (OSError, ValidationError, ValueError) as exc:
-        return IncidentStatus(
+        return IncidentStatusReport(
             state=IncidentStatusState.UNAVAILABLE,
             burst=None,
             detail=f"prober unreachable: {exc}",
@@ -208,7 +208,7 @@ def incident_status(
     state = IncidentStatusState.UNHEALTHY if blocking or not burst.verdicts else IncidentStatusState.HEALTHY
     healthy = state == IncidentStatusState.HEALTHY
     detail = "every qualified scenario meets its SLO" if healthy else "scenarios violate their SLO"
-    return IncidentStatus(state=state, burst=burst, detail=detail, incident_scenarios=incident)
+    return IncidentStatusReport(state=state, burst=burst, detail=detail, incident_scenarios=incident)
 
 
 def _incident_scenarios(request_path: Path | None) -> tuple[str, ...]:
@@ -229,7 +229,7 @@ def _incident_scenarios(request_path: Path | None) -> tuple[str, ...]:
     )
 
 
-def live_incident_status(*, workload: str | None = None, scenarios: Sequence[str] = ()) -> IncidentStatus:
+def live_incident_status(*, workload: str | None = None, scenarios: Sequence[str] = ()) -> IncidentStatusReport:
     """The incident status for the responder's environment (prober URL and mounted request)."""
 
     return incident_status(

@@ -17,7 +17,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from benchmarks.sregym.protocol.schema import TERMINAL_STAGES
-from sdo.agent_runtime.responder import IncidentStatus, IncidentStatusState, live_incident_status
+from sdo.agent_runtime.responder import IncidentStatusReport, IncidentStatusState, live_incident_status
 
 
 class SubmissionBridgeError(RuntimeError):
@@ -94,7 +94,7 @@ def submit_solution(
 EXIT_VERIFICATION_FAILED = 4
 
 
-def main(argv: list[str] | None = None, *, status_check: Callable[[], IncidentStatus] | None = None) -> int:
+def main(argv: list[str] | None = None, *, status_check: Callable[[], IncidentStatusReport] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("diagnosis", "mitigation"))
     parser.add_argument("solution")
