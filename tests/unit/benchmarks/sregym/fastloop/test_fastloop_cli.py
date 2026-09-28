@@ -67,6 +67,26 @@ def test_parser_defaults_match_the_benchmark_configuration() -> None:
     assert up.cpu_limit == "3"
     assert up.cluster_prefix == "fastloop-w"
     assert up.no_sandbox is False
+    assert up.kind_worker_nodes == 1
+
+
+def test_up_builds_the_same_one_worker_kind_lane_as_the_experiments(tmp_path: Path) -> None:
+    from benchmarks.sregym.fastloop.cli import up_worker_environment
+
+    args = build_parser().parse_args(
+        ["up", "--run-dir", str(tmp_path), "--cluster-prefix", "assure-s", "--worker-id", "1"]
+    )
+    environment = up_worker_environment(args, workspace=tmp_path / "workspace")
+
+    assert environment["SREGYM_KIND_CLUSTER_NAME"] == "assure-s1"
+    assert environment["SREGYM_KIND_WORKER_NODES"] == "1"
+    assert environment["SREGYM_APP_SOURCE_DIR"] == str(tmp_path / "workspace")
+    assert environment["SREGYM_KIND_REQUIRE_NETWORK_POLICY"] == "1"
+
+
+def test_up_rejects_a_negative_worker_count(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="kind-worker-nodes"):
+        main(["up", "--run-dir", str(tmp_path), "--kind-worker-nodes", "-1"])
 
 
 class _StopAtProxy(Exception):
