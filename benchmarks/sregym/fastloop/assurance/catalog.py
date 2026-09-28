@@ -72,10 +72,15 @@ class CompositeCase:
     faults: tuple[FaultCase, ...]
     source: str = "suite"
     wrong_fixes: tuple[WrongFix, ...] = field(default=())
+    #: A SREGym registry composite (``composite_specs.json``), injected as one problem; its fault
+    #: components are ``faults``, in order. Empty: the worker composes ``faults`` itself.
+    registry_id: str = ""
 
     def __post_init__(self) -> None:
         if len(self.faults) < 2:
             raise ValueError(f"{self.name}: a composite fault has at least two faults")
+        if self.registry_id and not self.registry_id.startswith("composite_"):
+            raise ValueError(f"{self.name}: a registry composite id starts with composite_, got {self.registry_id}")
         problems = [fault.problem_id for fault in self.faults]
         if len(set(problems)) != len(problems):
             raise ValueError(f"{self.name}: a problem appears twice: {problems}")
@@ -148,6 +153,19 @@ COMPOSITES: tuple[CompositeCase, ...] = (
     CompositeCase(name="policy-block+selector", faults=(NETWORK_POLICY_BLOCK, WRONG_SELECTOR)),
     CompositeCase(name="configmap-geo+selector", faults=(MISSING_CONFIGMAP, WRONG_SELECTOR)),
     CompositeCase(name="configmap-geo+configmap-rate", faults=(MISSING_CONFIGMAP, MISSING_CONFIGMAP_RATE)),
+    # The assurance program's phase-1 composites (experiments/assurance/composites.toml).
+    CompositeCase(
+        name="K1",
+        faults=(NETWORK_POLICY_BLOCK, MISSING_CONFIGMAP_RATE),
+        source="assurance",
+        registry_id="composite_policy_and_rate_configmap_hotel_reservation",
+    ),
+    CompositeCase(
+        name="K2",
+        faults=(WRONG_SELECTOR, READINESS_PROBE),
+        source="assurance",
+        registry_id="composite_frontend_selector_and_readiness_hotel_reservation",
+    ),
 )
 
 
