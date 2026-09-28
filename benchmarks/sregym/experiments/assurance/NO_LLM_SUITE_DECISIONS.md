@@ -218,3 +218,32 @@ does not fail the run.
   change as a state change gets `contradicted`. The scripted responder cites
   it as a `live-observation`. Carrying the final view's diff into the closure
   would close this; not done here.
+
+## N12. Stray incidents after closure (harness fixed; SDO behaviour recorded)
+
+- **Found** in the first 5-iteration passes, once on each cluster:
+  `composites2` (after `configmap-geo+selector` #3) and `flake-singles`
+  (after `missing-service` #1). 3–11 s after an incident closed, all three
+  traffic scenarios saw 3 timeouts in 5 iterations for about 3 s, and the
+  controller opened a new incident whose diff named only the recovery's own
+  rollout (`restartedAt`). User-login, which never touches the recovered
+  service, failed too, so the stall is at the frontend or the node (the kind
+  worker is capped at 3 CPUs while Mongo and geo reload after a restart), not
+  a fault the suite injected.
+- **Harness bug.** The suite did not own that request. The next case's
+  findings merged into the open incident, so no new request came and the run
+  timed out; the case after that inherited the stray incident's diff. Each
+  case now first answers unanswered requests with an empty result, waits for
+  closure, records a `stray_incidents` entry (findings, first evidence,
+  diff) and settles again.
+- **SDO behaviour, not changed.** The incident is a real SLO violation by the
+  health judge's own rule, and the controller handles it correctly (it closes
+  once traffic is clean). Two properties make it cheap to trigger, and both
+  belong to the judge's policy rather than to the runtime:
+  - traffic windows re-evaluate the detector about every 0.5 s, so
+    "firing after 2 evaluations" spans about 0.5 s, not two 10 s intervals;
+  - closure needs only two clear evaluations, so it can land seconds before
+    a relapse.
+
+  In a live eval each stray costs a responder session. The stray rate is
+  reported with the flake results below.
