@@ -99,6 +99,14 @@ class RunnerEnv:
     fast_namespace_teardown: bool = False
     cleanup_defer_timeout_seconds: int = 0
     docker_builder: str = ""
+    # Worker nodes of a kind cluster the harness creates for this lane; 0
+    # keeps SREGym's default topology (1 control plane + 3 workers). A reused
+    # cluster with another worker count is recreated.
+    kind_worker_nodes: int = 0
+
+    def __post_init__(self) -> None:
+        if self.kind_worker_nodes < 0:
+            raise ValueError(f"env.kind_worker_nodes must not be negative, got {self.kind_worker_nodes}")
 
 
 def promote_crucible_legacy_config(
@@ -243,6 +251,7 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         fast_namespace_teardown=bool(env_raw.get("fast_namespace_teardown", False)),
         cleanup_defer_timeout_seconds=int(env_raw.get("cleanup_defer_timeout_seconds", 0)),
         docker_builder=str(env_raw.get("docker_builder", "")),
+        kind_worker_nodes=int(env_raw.get("kind_worker_nodes", 0)),
     )
 
     agent = runner.get("agent", "crucible")
@@ -289,7 +298,7 @@ def resolve_config(
     Recognized env vars: MODEL, PARALLEL, JUDGE_MODEL_ID,
     SREGYM_WORKER_CPU_LIMIT, SREGYM_REUSE_CLUSTER,
     SREGYM_FORCE_RECREATE_CLUSTER, SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK,
-    SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS.
+    SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS, SREGYM_KIND_WORKER_NODES.
     """
     if env_overrides is None:
         env_overrides = dict(os.environ)
@@ -327,6 +336,8 @@ def resolve_config(
         )
     if "SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS" in env_overrides:
         env_updates["cleanup_defer_timeout_seconds"] = int(env_overrides["SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS"])
+    if "SREGYM_KIND_WORKER_NODES" in env_overrides:
+        env_updates["kind_worker_nodes"] = int(env_overrides["SREGYM_KIND_WORKER_NODES"])
     if updates or env_updates:
         new_env = dataclasses.replace(config.env, **env_updates) if env_updates else config.env
         config = dataclasses.replace(config, **updates, env=new_env)
@@ -543,6 +554,8 @@ def config_to_env(config: ExperimentConfig, project_root: Path, exp_dir: Path | 
         env["SREGYM_CLEANUP_DEFER_TIMEOUT_SECONDS"] = str(config.env.cleanup_defer_timeout_seconds)
     if config.env.docker_builder:
         env["SREGYM_DOCKER_BUILDER"] = config.env.docker_builder
+    if config.env.kind_worker_nodes > 0:
+        env["SREGYM_KIND_WORKER_NODES"] = str(config.env.kind_worker_nodes)
 
     env["SREGYM_PROGRESS_MODE"] = "rich"
     if exp_dir is not None:
@@ -638,6 +651,7 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"fast_namespace_teardown = {_toml_value(config.env.fast_namespace_teardown)}")
     lines.append(f"cleanup_defer_timeout_seconds = {_toml_value(config.env.cleanup_defer_timeout_seconds)}")
     lines.append(f"docker_builder = {_toml_value(config.env.docker_builder)}")
+    lines.append(f"kind_worker_nodes = {_toml_value(config.env.kind_worker_nodes)}")
 
     agent_configs = promote_crucible_legacy_config(
         agent=config.agent,

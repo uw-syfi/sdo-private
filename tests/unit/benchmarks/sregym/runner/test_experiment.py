@@ -771,3 +771,35 @@ def test_default_repeat_emits_no_attempt_flag(tmp_path: Path) -> None:
 def test_repeat_must_be_positive(repeat: int) -> None:
     with pytest.raises(ValueError, match="repeat"):
         ExperimentConfig(problems=["a"], repeat=repeat)
+
+
+def test_kind_worker_nodes_is_opt_in_and_reaches_the_cluster_bootstrap(tmp_path: Path) -> None:
+    assert ExperimentConfig().env.kind_worker_nodes == 0
+    assert "SREGYM_KIND_WORKER_NODES" not in config_to_env(ExperimentConfig(), project_root=tmp_path)
+    toml = _write_toml(
+        tmp_path,
+        """
+        [runner.env]
+        kind_worker_nodes = 1
+    """,
+    )
+    config = load_experiment_config(toml)
+
+    assert config_to_env(config, project_root=tmp_path)["SREGYM_KIND_WORKER_NODES"] == "1"
+    snapshot = tmp_path / "snapshot.toml"
+    snapshot.write_text(_serialize_config(config))
+    assert load_experiment_config(snapshot).env.kind_worker_nodes == 1
+    assert resolve_config(config, env_overrides={"SREGYM_KIND_WORKER_NODES": "2"}).env.kind_worker_nodes == 2
+
+
+def test_pipeline_stages_inherit_the_kind_worker_nodes() -> None:
+    from benchmarks.sregym.runner.pipeline import merge_stage_config
+
+    config = merge_stage_config({"env": {"kind_worker_nodes": 1}}, {"problems": ["a"]})
+
+    assert config.env.kind_worker_nodes == 1
+
+
+def test_kind_worker_nodes_must_not_be_negative() -> None:
+    with pytest.raises(ValueError, match="kind_worker_nodes"):
+        RunnerEnv(kind_worker_nodes=-1)

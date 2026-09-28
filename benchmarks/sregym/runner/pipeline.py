@@ -211,6 +211,7 @@ def merge_stage_config(
             fast_namespace_teardown=bool(env_raw.get("fast_namespace_teardown", False)),
             cleanup_defer_timeout_seconds=int(env_raw.get("cleanup_defer_timeout_seconds", 0)),
             docker_builder=str(env_raw.get("docker_builder", "")),
+            kind_worker_nodes=int(env_raw.get("kind_worker_nodes", 0)),
         ),
         agent_config=agent_config,
     )
