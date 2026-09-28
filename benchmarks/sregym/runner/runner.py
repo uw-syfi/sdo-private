@@ -130,14 +130,24 @@ NOOP_EXP_STAGE_LIFECYCLE: ExpStageLifecycle = _NoopExpStageLifecycle()
 # ---------------------------------------------------------------------------
 
 
-def _create_experiment_dir(config: ExperimentConfig, sregym_dir: Path) -> Path:
-    logs_root = sregym_dir / "logs"
+def _claim_run_dir(logs_root: Path, dir_name: str) -> Path:
+    """Create a run directory no concurrent launch shares; a same-second clash gets a ``_2``, ``_3``... suffix."""
+
     logs_root.mkdir(parents=True, exist_ok=True)
+    candidate = logs_root / dir_name
+    attempt = 1
+    while True:
+        try:
+            candidate.mkdir()  # atomic: exactly one launcher wins each name
+            return candidate
+        except FileExistsError:
+            attempt += 1
+            candidate = logs_root / f"{dir_name}_{attempt}"
+
+
+def _create_experiment_dir(config: ExperimentConfig, sregym_dir: Path) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dir_name = f"{timestamp}_{config.agent}"
-    exp_dir = logs_root / dir_name
-    exp_dir.mkdir(parents=True, exist_ok=True)
-    return exp_dir
+    return _claim_run_dir(sregym_dir / "logs", f"{timestamp}_{config.agent}")
 
 
 def _print_experiment_info(config: ExperimentConfig, env: dict[str, str]) -> None:
@@ -249,14 +259,9 @@ def load_experiment_config_or_resolve(path: Path) -> ExperimentConfig:
 
 
 def _create_pipeline_dir(config: PipelineConfig, sregym_dir: Path) -> Path:
-    logs_root = sregym_dir / "logs"
-    logs_root.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     suffix = f"_{config.name}" if config.name else ""
-    dir_name = f"{timestamp}_pipeline{suffix}"
-    pipeline_dir = logs_root / dir_name
-    pipeline_dir.mkdir(parents=True, exist_ok=True)
-    return pipeline_dir
+    return _claim_run_dir(sregym_dir / "logs", f"{timestamp}_pipeline{suffix}")
 
 
 def _run_stage(
