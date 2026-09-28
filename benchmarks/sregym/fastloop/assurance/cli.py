@@ -239,7 +239,7 @@ def format_table(results: SuiteResults) -> str:
         "helpers",
         "ok",
     )
-    rows = [header]
+    rows: list[tuple[str, ...]] = [header]
     for run in results.runs:
         missing = [] if run.diff is None else sorted(set(run.diff.missing) - set(run.live_named))
         diff = (

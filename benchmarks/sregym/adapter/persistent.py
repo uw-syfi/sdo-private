@@ -752,7 +752,8 @@ def _open_incident_summary(state: dict[str, Any]) -> str:
                 f"{str(failure.get('last_error') or '').strip()[:500]}"
             )
         return summary
-    request = state.get("incident_request") if isinstance(state.get("incident_request"), dict) else {}
+    raw_request = state.get("incident_request")
+    request: dict[str, Any] = raw_request if isinstance(raw_request, dict) else {}
     parts = [f"; incident {request.get('incident_id') or 'unknown'!r} is open"]
     result = state.get("incident_result")
     if isinstance(result, dict):

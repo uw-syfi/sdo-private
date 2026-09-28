@@ -19,6 +19,7 @@ import json
 import logging
 import subprocess
 import sys
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -207,7 +208,7 @@ def _run(args: argparse.Namespace) -> int:
     return 0 if records and all(record.passed for record in records) else 1
 
 
-def format_report(records: list[object]) -> str:
+def format_report(records: Sequence[object]) -> str:
     lines = []
     for record in records:
         checks = getattr(record, "checks", [])

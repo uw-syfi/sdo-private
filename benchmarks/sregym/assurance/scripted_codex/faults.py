@@ -109,6 +109,7 @@ def _finding_evidence(request: dict[str, Any]) -> list[dict[str, str]]:
 
 class FaultPlan(Protocol):
     name: str
+    playbook_dir: str
 
     def diagnose(self, run: Runner, namespace: str, target: str, request: dict[str, Any], worktree: Path) -> Facts: ...
 
