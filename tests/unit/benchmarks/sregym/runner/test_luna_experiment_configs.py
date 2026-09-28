@@ -148,3 +148,17 @@ def test_codex_verify_arm_differs_from_its_base_only_in_the_protocol_flag(name: 
     assert config.reasoning_effort == "medium"
     assert config.env.judge_model_id == "codex-gpt-6-luna"
     assert config.agent_config["codex"]["verify_protocol"] is True
+
+
+LUNA_CONFIGS = sorted(path.name for path in EXPERIMENTS.glob("*luna*.toml"))
+
+
+@pytest.mark.parametrize("name", LUNA_CONFIGS)
+def test_every_luna_arm_runs_on_a_one_worker_kind_cluster(name: str) -> None:
+    """SDO and baseline arms share one lane topology: 1 control plane + 1 worker."""
+    if "stages" in _toml(name):
+        config = load_pipeline_config(EXPERIMENTS / name)
+        resolved = [merge_stage_config(config.defaults, stage.runner_overrides) for stage in config.stages]
+        assert all(stage.env.kind_worker_nodes == 1 for stage in resolved)
+    else:
+        assert load_experiment_config(EXPERIMENTS / name).env.kind_worker_nodes == 1

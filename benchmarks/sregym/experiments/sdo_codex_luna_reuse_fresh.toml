@@ -20,6 +20,7 @@ require_strict_receipt = true
 [defaults.env]
 judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
 worker_cpu_limit = "3"
+kind_worker_nodes = 1  # 1 control plane + 1 worker per lane (topology measurement, 2026-09-28)
 reuse_cluster = true
 force_recreate_cluster = false
 preserve_infrastructure = true

@@ -1227,3 +1227,26 @@ Coordinator-directed, 2026-09-27. Four harness items from 3.4, each test-first, 
   - Passing `--force-build` on verify runs: rejected. The parallel runner forwards it to every worker, and concurrent builds share one build-context directory.
   - Naming the decoys or the helper-pod oracle in the prompt: rejected. That would be benchmark-specific coaching, not a fair good-practice baseline.
 - **No runs yet** (Codex weekly quota at about 89% until 2026-10-03). First smoke: check that the rollout's first user message ends with `VERIFICATION PROTOCOL (REQUIRED):` and that `turn_context` shows `"effort":"medium"`.
+
+### Lane topology: 1 control plane + 1 worker (user-directed, 2026-09-28)
+
+- **Decision:** every luna experiment config (SDO and Codex arms) sets `kind_worker_nodes = 1`, so each lane's kind cluster has one control plane and one worker, instead of SREGym's default of three workers. `test_every_luna_arm_runs_on_a_one_worker_kind_cluster` keeps all arms on the same topology. The code default is unchanged (`0`, meaning 1 + 3), so problems that need pods spread across nodes can still use it.
+- **Measurement** (throwaway clusters `topo-w8` = 1 + 3 and `topo-w9` = 1 + 1, `worker_cpu_limit = "3"`, no LLM calls; raw logs in `/mnt/data/shli/sdo-topology-runs/`):
+
+  | Metric | 1 + 3 | 1 + 1 |
+  |---|---|---|
+  | Hotel pods Ready | 20/20 | 20/20 on the single worker |
+  | Cluster bring-up | 139–174 s | 132 s |
+  | Fresh app start to all pods Ready | 21–23 s | 42 s |
+  | `up --redeploy` | 51 s | 56 s |
+  | Idle memory, all nodes | 7.4 GiB | 5.5–5.8 GiB |
+  | Idle CPU, all nodes | about 1.1 cores | about 1.1 cores |
+  | Image data inside the nodes | about 36 GB | about 18.5 GB |
+  | Controller install to baseline gate passed | about 18 s | 18–20 s |
+
+- **Takeaways:**
+  - **What it shows:** 1 + 1 fits the whole app and starts the controller just as fast, with half the disk and about 1.8 GiB less RAM. The only cost is about 20 s more for a fresh app start, which is setup time, not incident time.
+  - **Confidence:** moderate for footprint and scheduling; low for times (1–2 runs per topology).
+  - **Implication:** the host fits about 8 concurrent lanes, against about 4 at 1 + 3. Budget about 20 GB of disk per lane.
+  - **Keep at least 100 GB free on `/mnt/data`.** When the disk filled to 100% during this work, idle clusters' MongoDB pods crashed with "no space left on device".
+  - **Next action:** in the first 1 + 1 run, compare TTD and TTM against the 1 + 3 runs. That checks that the responder and detector builds sharing one worker don't slow incident handling.
