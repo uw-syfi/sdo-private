@@ -327,6 +327,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		return err
 	}
 	iteration := 0
+	reviewGate := &detectorReviewGate{exit: *exitAfterClosure || *duration > 0, log: stderr}
 	encoder := json.NewEncoder(stdout)
 	controller.OnError = func(err error) { fmt.Fprintln(stderr, err) }
 	controller.OnClosureFailed = func(failure ClosureFailure) {
@@ -456,7 +457,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err := controller.PersistState(ctx); err != nil {
 		return fmt.Errorf("persist controller state: %w", err)
 	}
-	if err := detectorReviewError(controller); err != nil {
+	if err := reviewGate.check(controller); err != nil {
 		return err
 	}
 	if err := executePendingEffects(runCtx, controller); err != nil {
@@ -504,7 +505,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		if err := controller.PersistState(ctx); err != nil {
 			return fmt.Errorf("persist controller state: %w", err)
 		}
-		if err := detectorReviewError(controller); err != nil {
+		if err := reviewGate.check(controller); err != nil {
 			return err
 		}
 		if err := executePendingEffects(runCtx, controller); err != nil {
@@ -575,7 +576,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			if err := controller.PersistState(ctx); err != nil {
 				return fmt.Errorf("persist controller state: %w", err)
 			}
-			if err := detectorReviewError(controller); err != nil {
+			if err := reviewGate.check(controller); err != nil {
 				return err
 			}
 			if err := executePendingEffects(runCtx, controller); err != nil {
@@ -592,7 +593,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			if err := controller.PersistState(ctx); err != nil {
 				return fmt.Errorf("persist controller state: %w", err)
 			}
-			if err := detectorReviewError(controller); err != nil {
+			if err := reviewGate.check(controller); err != nil {
 				return err
 			}
 			if err := executePendingEffects(runCtx, controller); err != nil {
@@ -609,7 +610,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			if err := controller.PersistState(ctx); err != nil {
 				return fmt.Errorf("persist controller state: %w", err)
 			}
-			if err := detectorReviewError(controller); err != nil {
+			if err := reviewGate.check(controller); err != nil {
 				return err
 			}
 			if err := executePendingEffects(runCtx, controller); err != nil {
@@ -687,7 +688,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			if err := controller.PersistState(ctx); err != nil {
 				return fmt.Errorf("persist controller state: %w", err)
 			}
-			if err := detectorReviewError(controller); err != nil {
+			if err := reviewGate.check(controller); err != nil {
 				return err
 			}
 			if err := executePendingEffects(runCtx, controller); err != nil {
@@ -700,12 +701,31 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	}
 }
 
-func detectorReviewError(controller *Controller) error {
+// detectorReviewGate ends a one-shot run when health did not clear after the
+// responder. A persistent controller keeps observing instead and reports the
+// review once: its Job restarts it on exit, so exiting crash-looped it past
+// the backoff limit and stopped detection for every later incident. The
+// incident still closes, marked late-verified, if health clears.
+type detectorReviewGate struct {
+	exit     bool
+	log      io.Writer
+	reported string
+}
+
+func (gate *detectorReviewGate) check(controller *Controller) error {
 	required, reason := controller.DetectorReviewStatus()
 	if !required {
+		gate.reported = ""
 		return nil
 	}
-	return fmt.Errorf("detector review required: %s", reason)
+	if gate.exit {
+		return fmt.Errorf("detector review required: %s", reason)
+	}
+	if gate.reported != reason {
+		gate.reported = reason
+		fmt.Fprintf(gate.log, "detector review required (controller keeps observing): %s\n", reason)
+	}
+	return nil
 }
 
 func stopTimerForRuntimeEvent(ctx context.Context, timer *time.Timer) bool {

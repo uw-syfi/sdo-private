@@ -1,9 +1,11 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -511,6 +513,65 @@ func TestControllerRequiresDetectorReviewWhenPostResponseHealthNeverClears(t *te
 	state := controller.ExportState()
 	if !state.DetectorReviewRequired || state.DetectorReviewRequiredAt.IsZero() || state.DetectorReviewReason == "" {
 		t.Fatalf("detector review state was not durable: %#v", state)
+	}
+}
+
+// A persistent controller's Job restarts it on exit. Exiting on detector
+// review crash-looped the Job past its backoff limit, which stopped detection
+// for every later incident; only a one-shot run ends on review.
+func TestDetectorReviewEndsOnlyOneShotRuns(t *testing.T) {
+	interval := time.Second
+	health := controllerDetector(
+		"health", interval,
+		stateFinding("health"), stateFinding("health"), stateFinding("health"), stateFinding("health"),
+	)
+	health.spec.Class = sdk.DetectorClassHealth
+	health.spec.Owner = sdk.DetectorOwnerHealthJudge
+	health.spec.Persistence = sdk.PersistencePolicy{Firing: 2, Clearing: 2}
+	health.spec.Batching = sdk.BatchingPolicy{Severity: sdk.SeverityCritical}
+	health.spec.OriginatingCommit = "health-objective"
+	for index := range health.samples {
+		health.samples[index][0].Severity = sdk.SeverityCritical
+	}
+	dispatcher := &recordingDispatcher{requests: make(chan IncidentRequest, 1)}
+	config := testControllerConfig()
+	config.VerificationTimeout = 2 * time.Second
+	controller, err := NewController(
+		config, []sdk.Detector{health}, staticProvider{snapshot: sdktest.Snapshot{}}, dispatcher, time.Unix(0, 0),
+	)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	for sample := 0; sample < 2; sample++ {
+		if err := controller.Step(context.Background(), time.Unix(int64(sample), 0), nil); err != nil {
+			t.Fatalf("firing step: %v", err)
+		}
+	}
+	executePendingEffect(t, controller)
+	awaitRequest(t, dispatcher.requests)
+	awaitDispatchCompletionQueued(t, controller)
+	for sample := 2; sample < 5; sample++ {
+		if err := controller.Step(context.Background(), time.Unix(int64(sample), 0), nil); err != nil {
+			t.Fatalf("step %d: %v", sample, err)
+		}
+	}
+	if !controller.DetectorReviewRequired() {
+		t.Fatal("setup: detector review was not required")
+	}
+
+	oneShot := detectorReviewGate{exit: true, log: &bytes.Buffer{}}
+	if err := oneShot.check(controller); err == nil || !strings.Contains(err.Error(), "detector review required") {
+		t.Fatalf("one-shot run did not end on detector review: %v", err)
+	}
+	var log bytes.Buffer
+	persistent := detectorReviewGate{log: &log}
+	for range 3 {
+		if err := persistent.check(controller); err != nil {
+			t.Fatalf("persistent controller ended on detector review: %v", err)
+		}
+	}
+	if got := strings.Count(log.String(), "detector review required"); got != 1 {
+		t.Fatalf("persistent controller must report the review once, got %d reports: %q", got, log.String())
 	}
 }
 
