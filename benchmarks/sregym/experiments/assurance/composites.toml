@@ -1,0 +1,116 @@
+# Assurance metadata for the SREGym composite fault problems (PLAN.md section (c)).
+#
+# The mechanism and the component list live in the SREGym fork:
+#   third_party/sregym/sregym/conductor/problems/composite.py
+#   third_party/sregym/sregym/conductor/problems/composite_specs.json
+# This file adds what only the assurance program needs: difficulty, the expected
+# healthy-state diff at dispatch, the correct mitigation and the partial-fix trap.
+# tests/unit/benchmarks/sregym/runner/test_assurance_composites.py checks that the
+# id, the components, their order, roles and decoy parameters match the JSON table.
+#
+# Component roles: "fault" components are graded (mitigation is the AND of their
+# own oracles); "decoy" components are never graded, and the diagnosis ground
+# truth names them as not a cause.
+#
+# expected_diff: application objects the controller's healthy-state diff should
+# name. change is "added", "removed" or "modified". required = false marks an
+# incidental change (for example a Deployment SREGym's injector rolls) that the
+# diff may or may not show; decoy = true marks the decoy's own change.
+
+schema = "sdo.assurance-composites/v1"
+
+[[composite]]
+id = "K1"
+problem_id = "composite_policy_and_rate_configmap_hotel_reservation"
+phase = 1
+difficulty = "Two simultaneous, independent faults on different services with different symptoms. Recommendations time out intermittently (network); search and rate fail hard because mongodb-rate is stuck ContainerCreating on the missing volume. The louder rate failure can hide the network fault."
+correct_mitigation = "Delete NetworkPolicy/deny-all-recommendation. Recreate ConfigMap/mongo-rate-script from the application source, then let or make mongodb-rate roll out."
+partial_fix_trap = "Fixing only the ConfigMap leaves recommendation blocked while the traffic detector may be quiet; fixing only the policy leaves mongodb-rate down."
+
+[[composite.components]]
+role = "fault"
+problem = "network_policy_block"
+target = "recommendation"
+
+[[composite.components]]
+role = "fault"
+problem = "missing_configmap_mongodb_rate_hotel_reservation"
+target = "mongodb-rate"
+
+[[composite.expected_diff]]
+object = "NetworkPolicy/deny-all-recommendation"
+change = "added"
+required = true
+
+[[composite.expected_diff]]
+object = "ConfigMap/mongo-rate-script"
+change = "removed"
+required = true
+
+[[composite.expected_diff]]
+object = "Deployment/mongodb-rate"
+change = "modified"
+required = false
+
+[[composite]]
+id = "K2"
+problem_id = "composite_frontend_selector_and_readiness_hotel_reservation"
+phase = 1
+difficulty = "Two causes, one symptom, one service. Both leave Service/frontend with no ready endpoints, so every user request fails the same way. Until the selector is fixed the probe fault cannot be seen through the endpoints, because the Service selects no pods at all."
+correct_mitigation = "Restore the Service/frontend selector AND restore the frontend readiness probe from the source manifests."
+partial_fix_trap = "Fixing either one alone leaves frontend with no ready endpoints; an agent that stops after the first plausible fix fails."
+
+[[composite.components]]
+role = "fault"
+problem = "wrong_service_selector_hotel_reservation"
+target = "frontend"
+
+[[composite.components]]
+role = "fault"
+problem = "readiness_probe_misconfiguration_hotel_reservation"
+target = "frontend"
+
+[[composite.expected_diff]]
+object = "Service/frontend"
+change = "modified"
+required = true
+
+[[composite.expected_diff]]
+object = "Deployment/frontend"
+change = "modified"
+required = true
+
+[[composite]]
+id = "K3"
+problem_id = "composite_geo_configmap_with_log_drift_hotel_reservation"
+phase = 2
+difficulty = "A fault plus a misleading symptom. geo's requests fail, and geo also shows a fresh, unexplained config change and a burst of debug logs. The drift is harmless: tune/setting.go only changes zerolog's level."
+correct_mitigation = "Recreate ConfigMap/mongo-geo-script and roll out mongodb-geo. Reverting LOG_LEVEL on geo is allowed but not required."
+partial_fix_trap = "Reverting only the geo env drift, the obvious recent change, fixes nothing; the diagnosis must not name the drift as the root cause."
+
+[[composite.components]]
+role = "fault"
+problem = "missing_configmap_hotel_reservation"
+target = "mongodb-geo"
+
+[[composite.components]]
+role = "decoy"
+decoy = "benign_env_drift"
+target = "geo"
+params = { deployment = "geo", env = { LOG_LEVEL = "debug" } }
+
+[[composite.expected_diff]]
+object = "ConfigMap/mongo-geo-script"
+change = "removed"
+required = true
+
+[[composite.expected_diff]]
+object = "Deployment/mongodb-geo"
+change = "modified"
+required = false
+
+[[composite.expected_diff]]
+object = "Deployment/geo"
+change = "modified"
+required = true
+decoy = true
