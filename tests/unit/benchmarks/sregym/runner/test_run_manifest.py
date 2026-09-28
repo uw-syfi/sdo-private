@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from benchmarks.sregym.runner import runner as runner_mod
+from benchmarks.sregym.runner.codex_baseline import CONCISE_VERIFY_PROMPT, FULL_VERIFY_PROMPT
 from benchmarks.sregym.runner.experiment import ExperimentConfig, RunnerEnv, write_snapshot
 from benchmarks.sregym.runner.manifest import MANIFEST_NAME, build_run_manifest, read_run_manifest, write_run_manifest
 from benchmarks.sregym.runner.pipeline import PipelineConfig, StageConfig
@@ -97,6 +98,85 @@ def test_manifest_records_provenance_versions_models_topology_config_and_host(
     assert manifest["host"]["load_average"] == [1.0, 2.0, 3.0]
     assert manifest["host"]["disk_free_bytes"]["logs"] > 0
     assert manifest["preflight"]["ok"] is True
+
+
+def _codex_config(agent_config: dict | None = None) -> ExperimentConfig:
+    return ExperimentConfig(
+        agent="codex",
+        model="gpt-6-luna",
+        reasoning_effort="medium",
+        parallel=1,
+        env=RunnerEnv(judge_model_id="codex-gpt-6-luna", kind_worker_nodes=1),
+        agent_config=agent_config or {},
+    )
+
+
+@pytest.mark.parametrize(
+    ("agent_config", "expected_mode", "expected_text"),
+    [
+        ({}, "concise", CONCISE_VERIFY_PROMPT),
+        ({"codex": {"verify_protocol": "full"}}, "full", FULL_VERIFY_PROMPT),
+        ({"codex": {"verify_protocol": True}}, "full", FULL_VERIFY_PROMPT),
+        ({"codex": {"verify_protocol": "none"}}, "none", ""),
+    ],
+)
+def test_manifest_records_the_codex_verify_protocol_mode_and_a_hash_of_its_text(
+    fake_host: FakeHost,
+    sregym_dir: Path,
+    tmp_path: Path,
+    agent_config: dict,
+    expected_mode: str,
+    expected_text: str,
+) -> None:
+    _git(fake_host)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    config = _codex_config(agent_config)
+    snapshot = write_snapshot(config, run_dir)
+    env = {"SREGYM_KIND_CLUSTER_PREFIX": "luna-w"}
+    report = run_preflight([config], project_root=REPO_ROOT, sregym_dir=sregym_dir, env=env, host=fake_host)
+
+    manifest = build_run_manifest(
+        run_dir=run_dir,
+        configs=[config],
+        snapshot=snapshot,
+        report=report,
+        host=fake_host,
+        project_root=REPO_ROOT,
+        sregym_dir=sregym_dir,
+        env=env,
+    )
+
+    (entry,) = manifest["codex_prompt_appendix"]
+    assert entry["mode"] == expected_mode
+    if expected_text:
+        assert entry["sha256"] == hashlib.sha256(expected_text.encode("utf-8")).hexdigest()
+    else:
+        assert entry["sha256"] is None
+
+
+def test_manifest_records_no_codex_prompt_appendix_for_a_non_codex_agent(
+    fake_host: FakeHost, sregym_dir: Path, tmp_path: Path
+) -> None:
+    _git(fake_host)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    snapshot = write_snapshot(_config(), run_dir)
+    env = {"SREGYM_KIND_CLUSTER_PREFIX": "luna-w"}
+    report = run_preflight([_config()], project_root=REPO_ROOT, sregym_dir=sregym_dir, env=env, host=fake_host)
+
+    manifest = build_run_manifest(
+        run_dir=run_dir,
+        configs=[_config()],
+        snapshot=snapshot,
+        report=report,
+        host=fake_host,
+        project_root=REPO_ROOT,
+        sregym_dir=sregym_dir,
+        env=env,
+    )
+
+    assert manifest["codex_prompt_appendix"] is None
 
 
 def test_a_resumed_run_keeps_its_first_manifest_and_appends_the_resume(tmp_path: Path) -> None:

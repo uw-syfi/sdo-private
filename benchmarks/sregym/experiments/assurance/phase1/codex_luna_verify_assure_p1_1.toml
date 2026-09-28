@@ -1,16 +1,22 @@
-# Assurance phase 1, Codex + verify arm, attempt plan 1 of 2 (PLAN.md section (d)); lane assure-w6.
+# Assurance phase 1, Codex (concise verify) arm, attempt plan 1 of 4 (PLAN.md
+# section (d)); lane assure-w4.
+#
+# User decision (2026-09-28): the default Codex baseline arm verifies its own
+# work, concisely (benchmarks/sregym/runner/codex_baseline.py CONCISE_VERIFY_PROMPT).
+# Phase 1 has no stock (no-verify) arm; see PLAN.md's decisions log for the
+# rationale.
 #
 # Memoryless: each listed problem is an independent attempt (the runner keeps
-# repeated inline problems as separate runs, in order). The two lanes of this arm
-# together give 5 attempts per phase-1 problem (13 + 12), in interleaved order so
-# problem and lane are not confounded.
+# repeated inline problems as separate runs, in order). The four lanes of this
+# arm together give 5 attempts per phase-1 problem (7 + 6 + 6 + 6 = 25), cut
+# from one repeating S1 S2 S3 K1 K2 cycle so problem and lane are not confounded.
 #
 # Models (user rule, 2026-09-28): Codex gpt-6-luna at medium effort; the SREGym
 # judge is codex-gpt-6-luna at the Codex CLI backend's default xhigh, never
 # overridden. Enforced by tests/unit/benchmarks/sregym/runner/test_assurance_configs.py.
 #
 # DO NOT LAUNCH before the 2026-10-03 18:19 UTC quota reset and the PLAN.md
-# preconditions. Settings copied from ../../codex_luna_baseline.toml plus the verify protocol ([agent.codex] verify_protocol).
+# preconditions. Settings copied from ../../codex_luna_baseline.toml.
 
 [runner]
 agent = "codex"
@@ -30,12 +36,6 @@ problems = [
     "composite_frontend_selector_and_readiness_hotel_reservation",
     "missing_configmap_hotel_reservation",
     "wrong_service_selector_hotel_reservation",
-    "network_policy_block",
-    "composite_policy_and_rate_configmap_hotel_reservation",
-    "composite_frontend_selector_and_readiness_hotel_reservation",
-    "missing_configmap_hotel_reservation",
-    "wrong_service_selector_hotel_reservation",
-    "network_policy_block",
 ]
 
 [runner.env]
@@ -48,4 +48,4 @@ preserve_infrastructure = true
 docker_builder = "sdo-example"
 
 [agent.codex]
-verify_protocol = true
+verify_protocol = "concise"

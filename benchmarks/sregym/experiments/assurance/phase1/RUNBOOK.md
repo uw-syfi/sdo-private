@@ -1,47 +1,332 @@
-# Phase-1 live assurance matrix: runbook (seed precondition)
+# Phase-1 live assurance matrix: runbook
 
-The full runbook (preconditions, launch, monitoring and analysis) is on `vic/exp/phase1-launch`. When the two
-branches merge, this section becomes that runbook's precondition 0. Its text wins over any mention there of
-seed `30e023d`.
+This runbook covers the phase-1 live matrix in `PLAN.md` (d): 8 lanes
+(`assure-w0`..`assure-w7`), about 2 h wall clock, comparing SDO against a
+memoryless Codex baseline. **Phase 1 has no stock (no-verify) Codex arm**
+(user decision, 2026-09-28, logged in `PLAN.md`'s decisions log): the sole
+Codex arm is the default, concise-verify baseline, run on 4 lanes. The
+full-verify protocol stays available as a config option (`PLAN.md` C11); it
+is just not scheduled in phase 1. It assumes the launcher (`launch.sh` /
+`benchmarks.sregym.assurance.phase1_launch`), the image rebuild step
+(`benchmarks.sregym.assurance.rebuild_v010_images`) and the analysis step
+(`benchmarks.sregym.assurance.phase1_analyze`) built alongside this file, on
+branch `vic/exp/phase1-launch`.
 
-## Seed (precondition 0): regenerate from a fresh lifecycle
+**2026-10 update: this run does not wait for the 2026-10-03 18:19 UTC quota
+reset.** The user asked to run as soon as RC2 lands (now RC3), with the shared Codex
+weekly window already at about 90% used. The start gate is no longer the
+fixed "`used_percent <= 50%`" rule PLAN.md (d) states; see "Quota budget
+correction (2026-10)" below for the budget-aware gate this launcher actually
+enforces, and its own hard stop at `used_percent >= 97%` is kept, with this
+run's own stop line set one point under it, at 96%.
 
-**Do not seed phase 1 from `30e023d`.** That lifecycle ran with benchmark-tailored hints: a ConfigMap clause
-in the goal, a `network-policy-total-isolation` template rule, and a judge prompt and validator that pushed a
-missing-ConfigMap check. `docs/fairness-DECISIONS.md` removes them. The four SDO configs
-(`sdo_codex_luna_assure_p1_{a,b,c,d}.toml`) set `[pipeline] workspace_seed = "PENDING-FRESH-LIFECYCLE-SEED"`.
-The runner refuses to launch stage 0 while that placeholder is in place. The Codex arms need no seed.
+**2026-10 gate change, same day (`HARNESS_DECISIONS.md`):** the start gate
+checks the plan's EXPECTED (nominal) cost against the stop line, not its 2x
+worst case. The worst case is still computed and printed, for information;
+gating on it auto-shrank the full matrix down to a single SDO pipeline for
+no measured reason. The run's actual safety nets are the live global hard
+stop and the per-lane 1.5x budget abort, both below.
 
-Steps, run by the launch agent. This is a live LLM run of about 2M tokens and about 13 minutes.
+## Preconditions
 
-1. **Code and images.** Check out a commit that contains `vic/fix/detailor-sdo`. Rebuild the `sdo-*:v0.1.0`
-   images from that commit, as in the full runbook's image precondition. The lifecycle runs in the adapter
-   on the host, but the controller, responder and validator images must match the code that produced the
-   seed.
-2. **Run one unseeded SDO stage** on one lane: a single-stage pipeline with the same `[defaults]` as
-   `sdo_codex_luna_assure_p1_a.toml`, no `workspace_seed`, `chain_application_workspace = false`, and any
-   one phase-1 problem. The adapter finds no reusable lifecycle, because the objective text and its digest
-   changed, and runs the fresh deployer and the three health-judge rounds. The model is Codex gpt-6-luna at
-   medium effort (the D13 rule).
-3. **Take the lifecycle-only checkpoint.** The adapter writes it before the first incident, to
-   `<pipeline_dir>/lifecycle_seed_stage0` (`persist_lifecycle_seed`). Copy that directory outside the run
-   tree, for example `/mnt/data/shli/assure-runs/seed-<lifecycle-sha>`. Do not use the stage's final
-   `application_workspace`: by then it holds incident outcomes and reflection commits.
-4. **Check the seed before use.**
-   - `git -C <seed> log --oneline -3`: HEAD is the lifecycle commit ("sdo: capture goal, architecture, and
-     independent health judge" or the refresh commit). There are no `sdo(incident-…)` commits.
-   - `.sdo/outcomes.jsonl` is empty, and the only playbook is `health-objective`.
-   - `.sdo/goal.md` has no "ConfigMap" clause.
-     `grep -r network-policy-total-isolation <seed>/.sdo` finds nothing.
-   - The health-objective manifest watches include `apps/v1 ReplicaSet`.
-   - Record the lifecycle's token cost from `sdo_turn_usage.jsonl`. It is reported separately, as the
-     one-time lifecycle cost.
-5. **Fill in the placeholder.** In all four SDO configs, set `workspace_seed` to the seed's absolute path.
-   Record the path and lifecycle commit in the configs' header comment and in the run manifest. Commit.
-   `test_each_sdo_pipeline_waits_for_a_fresh_lifecycle_seed` then fails on purpose. Update it in the same
-   commit to assert the recorded seed, and keep its `30e023d` check.
-6. **Optional.** Replace the no-LLM suite's `seeds/hotel_reservation_30e023d` with the new seed's `.sdo`, as
-   `assurance seed` expects.
+Check every one of these before running the launcher for real (not
+`--dry-run`). The launcher's own preflight step re-checks the model policy,
+image pins and quota gate mechanically; it does **not** check the four
+below, because they are branch/merge and seed decisions outside its scope
+(the runner itself does refuse to start an SDO stage while precondition 0's
+placeholder seed is in place).
 
-If the lifecycle fails, the adapter reports it, as the earlier 3.6M-token failed attempt shows. Fix the cause
-and rerun step 2. Do not fall back to `30e023d`.
+0. **Seed: regenerate from a fresh lifecycle** (from `vic/fix/detailor-sdo`,
+   merged in RC3). This precondition's text wins over any mention of seed
+   `30e023d` elsewhere in this runbook.
+
+   **Do not seed phase 1 from `30e023d`.** That lifecycle ran with benchmark-tailored hints: a ConfigMap clause
+   in the goal, a `network-policy-total-isolation` template rule, and a judge prompt and validator that pushed a
+   missing-ConfigMap check. `docs/fairness-DECISIONS.md` removes them. The four SDO configs
+   (`sdo_codex_luna_assure_p1_{a,b,c,d}.toml`) set `[pipeline] workspace_seed = "PENDING-FRESH-LIFECYCLE-SEED"`.
+   The runner refuses to launch stage 0 while that placeholder is in place. The Codex arms need no seed.
+
+   Steps, run by the launch agent. This is a live LLM run of about 2M tokens and about 13 minutes.
+
+   1. **Code and images.** Check out a commit that contains `vic/fix/detailor-sdo`. Rebuild the `sdo-*:v0.1.0`
+      images from that commit, as in precondition 2 below. The lifecycle runs in the adapter
+      on the host, but the controller, responder and validator images must match the code that produced the
+      seed.
+   2. **Run one unseeded SDO stage** on one lane: a single-stage pipeline with the same `[defaults]` as
+      `sdo_codex_luna_assure_p1_a.toml`, no `workspace_seed`, `chain_application_workspace = false`, and any
+      one phase-1 problem. The adapter finds no reusable lifecycle, because the objective text and its digest
+      changed, and runs the fresh deployer and the three health-judge rounds. The model is Codex gpt-6-luna at
+      medium effort (the D13 rule).
+   3. **Take the lifecycle-only checkpoint.** The adapter writes it before the first incident, to
+      `<pipeline_dir>/lifecycle_seed_stage0` (`persist_lifecycle_seed`). Copy that directory outside the run
+      tree, for example `/mnt/data/shli/assure-runs/seed-<lifecycle-sha>`. Do not use the stage's final
+      `application_workspace`: by then it holds incident outcomes and reflection commits.
+   4. **Check the seed before use.**
+      - `git -C <seed> log --oneline -3`: HEAD is the lifecycle commit ("sdo: capture goal, architecture, and
+        independent health judge" or the refresh commit). There are no `sdo(incident-…)` commits.
+      - `.sdo/outcomes.jsonl` is empty, and the only playbook is `health-objective`.
+      - `.sdo/goal.md` has no "ConfigMap" clause.
+        `grep -r network-policy-total-isolation <seed>/.sdo` finds nothing.
+      - The health-objective manifest watches include `apps/v1 ReplicaSet`.
+      - Record the lifecycle's token cost from `sdo_turn_usage.jsonl`. It is reported separately, as the
+        one-time lifecycle cost.
+   5. **Fill in the placeholder.** In all four SDO configs, set `workspace_seed` to the seed's absolute path.
+      Record the path and lifecycle commit in the configs' header comment and in the run manifest. Commit.
+      `test_each_sdo_pipeline_waits_for_a_fresh_lifecycle_seed` then fails on purpose. Update it in the same
+      commit to assert the recorded seed, and keep its `30e023d` check.
+   6. **Optional.** Replace the no-LLM suite's `seeds/hotel_reservation_30e023d` with the new seed's `.sdo`, as
+      `assurance seed` expects.
+
+   If the lifecycle fails, the adapter reports it, as the earlier 3.6M-token failed attempt shows. Fix the cause
+   and rerun step 2. Do not fall back to `30e023d`.
+
+1. **RC3 (`vic/integrate/assurance-rc3`, which contains RC2) is merged to `main`, pending user approval.**
+   - RC3 contains RC2 (F16 `noop-closure-cancelled`, D28
+     `status-clear-latency`, F17 `repair-attribution`), F19
+     (`image-no-benchmark-tree`), the fairness fixes (`detailor-sdo`) and
+     this launcher. As of this writing it is **not** an ancestor of
+     `origin/main` (`8cadce1`). Get the user's sign-off on `RC3.md`, merge it
+     to `main`, and only then treat this precondition as met.
+   - RC1 (`47a3162`, this branch's own base) is a sound integration on its
+     own (`RC1.md` takeaways), but it still carries F8's attribution gap and
+     the N13 stray-dispatch residual that RC2's branches close. Launching
+     phase 1 from RC1 alone under-tests C11 (memory safety) and the
+     status-clear latency numbers RC1 flagged as a known gap.
+2. **`sdo-*:v0.1.0` is rebuilt from the merged `main` (post-RC3), and no
+   lane is using the old tags while it happens.**
+   - Run: `uv run python -m benchmarks.sregym.assurance.rebuild_v010_images <post-RC3-main-sha>`
+     from a checkout at that exact commit. It refuses (does not build) if
+     any known kind cluster is locked or is running a pod built from one of
+     the four `v0.1.0` images, or if the working tree is not at the commit
+     you named — see its docstring and
+     `tests/unit/benchmarks/sregym/assurance/test_rebuild_v010_images.py`.
+   - It writes the rebuilt images' ids and repo digests to
+     `.launch/v010_digests.json` (default location) for the run manifest.
+     Fold that file's `images` block into the phase-1 manifest/run log before
+     launching.
+   - RC1.md's own decision log is explicit that the shared tags were **not**
+     rebuilt during RC1 integration, and that skipping this step means the
+     SDO arm runs without `950a4b7` (the closing-view-diff fix) and wedges
+     after its first correct repair. Do not skip this.
+3. **Preflight is green for every lane.**
+   - `uv run python -m benchmarks.sregym.runner.preflight benchmarks/sregym/experiments/assurance/phase1/*.toml`
+     must show every check `ok`. `codex-quota` will read the pre-reset ~90%
+     figure; that is expected and, run by hand like this, uses preflight's
+     own default 85% ceiling and will show `fail`. The launcher itself does
+     **not** use that default: it computes an effective ceiling from its own
+     quota gate (`stop_percent` minus the selected matrix's EXPECTED,
+     nominal percent) and passes that to preflight instead, recording which
+     ceiling was used (`preflight_max_quota_used_percent`,
+     `preflight_max_quota_used_percent_source`) in the report's facts. See
+     "Quota budget correction (2026-10)" below.
+   - The launcher (step 2 below) re-runs this per lane in enforcing mode and
+     aborts the whole matrix on any failure, but running it by hand first is
+     the fast way to catch a problem before the 2 h window opens.
+
+## Commands
+
+All commands run from the repository root, `uv run ...` per `CLAUDE.md`.
+
+```bash
+# 1. Confirm quota and preflight look right (repeatable, no side effects).
+uv run python -m benchmarks.sregym.runner.preflight \
+    benchmarks/sregym/experiments/assurance/phase1/*.toml
+
+# 2. Rebuild v0.1.0 from the merged post-RC3 main (only once nothing is using it).
+uv run python -m benchmarks.sregym.assurance.rebuild_v010_images <post-RC3-main-sha>
+
+# 3. Launch the matrix. One command; resumable if interrupted (rerun the same
+#    command — it reads .launch/state.json and continues, never restarts a
+#    lane already done). Prints the smoke + matrix token budget, the
+#    current-quota gate decision, and (if the plan does not fit) the
+#    auto-shrunk plan, before anything starts. --matrix defaults to "full"
+#    (PLAN.md's own matrix); pass --matrix reduced for the smaller 2026-10
+#    preset instead.
+bash benchmarks/sregym/experiments/assurance/phase1/launch.sh --stop-percent 96
+
+# 3'. Rehearse first with --dry-run: stubs cluster, quota and process calls,
+#     touches no real cluster or quota, and exercises lane binding + preflight
+#     + the budget/gate printout (quota reads as unknown, so the gate always
+#     lets a dry run through).
+bash benchmarks/sregym/experiments/assurance/phase1/launch.sh --dry-run --stop-percent 96
+
+# 4. After the matrix finishes (or is stopped), analyze.
+uv run python -m benchmarks.sregym.assurance.phase1_analyze \
+    --sdo third_party/sregym/logs/<pipeline-w0> third_party/sregym/logs/<pipeline-w1> \
+          third_party/sregym/logs/<pipeline-w2> third_party/sregym/logs/<pipeline-w3> \
+    --codex third_party/sregym/logs/<w4> third_party/sregym/logs/<w5> \
+            third_party/sregym/logs/<w6> third_party/sregym/logs/<w7> \
+    --out benchmarks/sregym/experiments/assurance/phase1/report.md
+```
+
+The launcher's default lane binding comes from each config's own header
+comment (`; lane assure-wN`), already fixed in `PLAN.md` D11:
+
+| Lane | Config | Arm |
+|---|---|---|
+| `assure-w0`..`w3` | `sdo_codex_luna_assure_p1_{a,b,c,d}.toml` | SDO (4 pipelines, rotations A-D) |
+| `assure-w4`..`w7` | `codex_luna_verify_assure_p1_{1,2,3,4}.toml` | Codex (concise verify, the default; no stock arm) |
+
+## Expected duration
+
+**About 2 h wall clock** (`PLAN.md` (d)), staggered lane starts (default
+120 s apart, `--stagger-seconds`), so the last lane (`assure-w7`) begins
+about 14 minutes after the first. Lane starts are interleaved across arms,
+not grouped (`interleaved_launch_order`, user decision, 2026-09-28): the
+stagger order is `w0, w4, w1, w5, w2, w6, w3, w7`, one SDO lane then one
+Codex lane, repeating — not all four SDO lanes first. If the matrix is
+stopped partway (the hard stop below, or a person killing the launcher),
+both arms are left with roughly the same amount of progress, not one arm
+well ahead of the other.
+
+- SDO lanes: 10 stages each (5 cold + 5 warm repeats); each stage runs a
+  deploy-once, then inject/diagnose/mitigate/verify cycle.
+- Codex lanes: 6-7 sequential attempts each (25 total across 4 lanes, 5 per
+  problem).
+
+## Monitoring while it runs
+
+- **State:** `benchmarks/sregym/experiments/assurance/phase1/.launch/state.json`
+  — one JSON document, `matrix_status` plus each lane's status
+  (`pending`/`running`/`done`/`failed`/`aborted_budget`/`aborted_matrix_stop`)
+  and its quota records.
+- **Host load and disk:** `.launch/host_samples.jsonl`, one line every 30 s
+  (`--sample-interval-seconds`): load averages and free bytes on the logs and
+  Docker data disks. Watch for the same drop in free disk RC1.md flagged
+  (PLAN.md budgets about 20 GB per 1+1 lane, 100+ GB free minimum).
+- **Quota:** `.launch/quota_log.jsonl`, one line per completed lane run
+  (`used_percent_before`/`after`, the attributed delta). Cross-check against
+  `uv run python -m benchmarks.sregym.runner.preflight <any-config>` any
+  time — it reads the same offline rate-limit snapshot.
+- **Per-lane subprocess logs:** `.launch/logs/<lane>.log` (real run only;
+  `--dry-run` starts nothing).
+
+## Quota budget correction (2026-10)
+
+`PLAN.md` (d)'s per-unit quota costs (SDO stage 0.13%, Codex attempt 0.07%,
+"good to about x2") are **wrong by several times over**. Evidence: a live
+`network_policy_block` eval (lifecycle bootstrap + 3 SDO warm attempts + 3
+Codex-stock attempts + 3 Codex+verify attempts, run 2026-09-28 05:04-08:30
+UTC) consumed on the order of 8-13M raw tokens total, and the shared
+window's `used_percent` read exactly `90.0` at every single `QUOTA-READ`
+checkpoint across that window — unmoved. `(delta used_percent) / (delta
+tokens)` is therefore unmeasurable as a positive rate (every observed delta
+was exactly zero even at multi-million-token scale).
+
+`benchmarks/sregym/assurance/phase1_budget.py` now budgets the matrix in
+**tokens**, using per-unit token costs measured directly from that same run
+(`SDO_STAGE_TOKENS`, `SDO_LIFECYCLE_BOOTSTRAP_TOKENS`,
+`CODEX_ATTEMPT_TOKENS`), and converts tokens to quota points at a
+conservative fallback rate, `POINTS_PER_TOKEN = 1e-7` (1 point per
+10,000,000 tokens) — higher (more cautious) than either observed upper bound
+so it will not under-budget. PLAN.md (d)'s relative multipliers (composite
+x1.5, verify x1.3, worst case x2) are unchanged; only the absolute
+weekly-percent conversion was wrong.
+
+The launcher now (a) **defaults to the full phase-1 matrix** from PLAN.md,
+amended by the same-day no-stock-arm decision: 4 SDO pipelines, 5
+concise-verify Codex attempts per problem, 0 stock (the `reduced` 2026-10
+preset is available via `--matrix reduced` — 2 pipelines, 3 attempts per
+problem — but is no longer the default), (b) reserves a small, non-shrinking
+smoke budget (1 SDO pipeline + 1 Codex attempt, 1 problem) ahead of the
+matrix, (c) auto-shrinks the matrix's pipeline/attempt counts — most
+expensive component first, down to a floor of 1 SDO pipeline and 1 Codex
+attempt per problem (never to zero: phase 1 never launches with no baseline
+comparison at all) — until `current used_percent + combined EXPECTED
+(nominal) cost <= --stop-percent`, and (d) prints the plan (and, if it
+shrank, exactly what changed and why), including the worst case for
+information, before anything launches. `--stop-percent` defaults to 96%, one
+point under PLAN.md's own 97% hard stop, for this run specifically (quota
+was already around 90% used when this correction was made).
+
+**2026-10 gate change, same day:** the start decision in (c) and (d) is
+gated on the plan's EXPECTED (nominal) cost, not its 2x worst case
+(`HARNESS_DECISIONS.md`'s "Phase-1 gate: expected cost, not the 2x worst
+case"). The worst case is still computed and printed everywhere it was
+before; it just no longer decides whether the matrix starts. The run's
+actual safety nets are the live global hard stop and the per-lane 1.5x
+budget abort, both in "Abort criteria" below.
+
+**Not yet wired**: the smoke run's own `run_validity`-gated execution (the
+launcher reserves its token budget and will not start the matrix if the
+combined plan does not fit, but does not yet actually run 1 SDO pipeline + 1
+Codex attempt and check their runs are `valid` before proceeding — that
+remains a manual step for this launch). The `reduced` preset's own lane
+configs (a smaller lane subset) also do not exist yet; `--matrix reduced`
+sizes the budget correctly but the launcher still binds and runs all 8
+phase-1 lanes.
+
+## Abort criteria (enforced by the launcher; also watch for them by hand)
+
+- **Matrix-wide hard stop at `used_percent >= --stop-percent`** (default 96
+  for this run; `PLAN.md` (d) `run.sh` `QUOTA-STOP`'s own hard stop is 97%):
+  the launcher terminates every running lane and sets
+  `matrix_status = "stopped_quota"`. If you see this, the run is over; do not
+  restart until the next quota window.
+- **Matrix does not start** if `current used_percent + the planned matrix's
+  EXPECTED (nominal) percent > --stop-percent` at launch time
+  (`matrix_status = "aborted_quota_start"`; see "Quota budget correction
+  (2026-10)" below for how the nominal cost is computed and auto-shrunk, and
+  the "gate change" note there for why nominal, not worst case, gates this),
+  or if **any** lane's own preflight fails
+  (`matrix_status = "aborted_preflight"`) — the whole matrix aborts before
+  any lane starts, by design (one bad lane must not silently run a partial
+  comparison). Every start-gate decision (current quota, planned
+  nominal/worst-case tokens and percent, which one gated the decision, the
+  stop line, and the outcome) is written to `.launch/gate_decision.json` and
+  appended to `.launch/quota_log.jsonl` before anything launches.
+- **Per-lane abort** when a lane's own attributed quota spend exceeds 1.5x
+  its budgeted share of its arm's `PLAN.md` (d) row (SDO ~1.55%/lane,
+  threshold ~2.33%; Codex (concise verify) ~0.675%/lane, threshold ~1.01%) —
+  that lane is terminated (`aborted_budget`) and the rest of the matrix
+  continues. This usually means a retry storm or a stuck loop in that one
+  lane; check its log before re-launching it alone.
+- **Host disk below 100 GB free** is not auto-enforced mid-run today (only
+  at preflight); if `host_samples.jsonl` shows it dropping toward that
+  floor, stop the matrix by hand (`Ctrl-C` the launcher, or `kill` the PIDs
+  in `.launch/logs/`) before it repeats RC1.md's "`/mnt/data` at 100%"
+  incident.
+
+## Analysis
+
+`benchmarks.sregym.assurance.phase1_analyze` (step 4 above):
+
+1. classifies every run with `run_validity` (valid / `agent_failure` /
+   `invalid_infra`, with reasons);
+2. runs `incident_cost` per SDO pipeline against the sole Codex arm (the
+   default concise-verify baseline), over the valid runs only, and includes
+   each pipeline's rendered report;
+3. computes C1-C11 against `PLAN.md` (a)'s pre-registered pass criteria,
+   using a stratified bootstrap for ratios, Wilson for a proportion, and
+   Newcombe for a difference of proportions, exactly as the plan specifies.
+   Every claim compares SDO against the concise-verify arm; where the paper's
+   own comparisons were against a stock baseline (C1-C4, C8), the claim's
+   summary notes that phase 1 has no stock arm to compare against
+   (`NO_STOCK_ARM_NOTE`);
+4. writes a report with a mandatory **Takeaways** section per claim.
+
+**Known gaps in this analysis step** (flagged in the report itself, not
+silently dropped):
+
+- **C6 and C9** are no-LLM fastloop instruments (`PLAN.md` (e)), separate
+  from the live matrix this tool reads; run them separately and score them
+  with a dedicated tool.
+- **C7's primary check (variant V1) and C10** are phase-2 only
+  (`PLAN.md` (b)); phase 1's own analysis marks them `deferred`.
+- **False closures (C4, C8)** need controller closure/receipt evidence
+  beyond `incident_cost`'s `SdoStage`/`Verdict` model; check them by hand
+  against `run_validity`'s helper-leftover and receipt checks before
+  reporting either claim as a clean pass.
+- **Decoy-citation counting (C11)** needs a diagnosis-text scan against the
+  known decoy markers; this tool only computes C11's ratio-vs-concise-verify
+  half.
+
+## After the matrix
+
+- Commit the phase-1 experiment TOMLs' run log entry (per-lane `run_manifest.json`
+  paths, the digests file from step 2, and the analysis report) under
+  `benchmarks/sregym/experiments/assurance/` per the repo's "commit
+  experiment configs" convention.
+- If phase 1's headline claims look sound and quota allows
+  (`used_percent <= 59%` after phase 1, `PLAN.md` (d) "Phase-2 start"),
+  proceed to phase 2; otherwise run only the phase-2 delta (S4, V1, K3).

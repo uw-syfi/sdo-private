@@ -135,3 +135,108 @@ Code: `benchmarks/sregym/analysis/run_validity.py`. Run it with `uv run python -
 - **npm transitive dependencies of the Codex and Claude Code CLIs:** there is no lockfile. Codex ships a self-contained platform binary, so the exposure is small.
 - **SREGym agents that none of our arms use:** `claudecode`, `gemini`, `opencode` and `copilot` have `agent_version: null`, so they install the latest release. Pin one before using it in a comparison.
 - **The local `sregym-agent-base:latest` tag:** SREGym builds it from the checkout and refers to it by tag. The manifest records its image ID, so a rebuild between runs is still visible.
+
+## Phase-1 quota budget correction (2026-10)
+
+**Decision:** `PLAN.md` (d)'s per-unit quota costs (SDO stage 0.13%, Codex
+attempt 0.07%, "good to about x2") are wrong by several times over.
+`benchmarks/sregym/assurance/phase1_budget.py` now budgets the phase-1
+matrix in tokens, calibrated from a measured live run, instead.
+
+**Evidence:** a live `network_policy_block` eval (lifecycle bootstrap + 3
+SDO warm attempts + 3 Codex-stock attempts + 3 Codex+verify attempts, run
+2026-09-28 05:04-08:30 UTC, artifacts under the run's own scratch
+`.../scratchpad/np/{queue.events,ic_*.json,*.meta}`) consumed on the order
+of 8-13M raw tokens total:
+
+- `lifecycle_tokens=2,086,905` for the one cold lifecycle bootstrap
+  (`ic_20260928_074550.json`);
+- `sdo_tokens_with_learning` of 521,453 / 789,458 / 705,392 across three
+  warm single-stage repeats (`sdo1`/`sdo2`/`sdo3`), mean 666,758;
+- a Codex-stock mean of 529,706.67 tokens/attempt x3 runs = 1,589,120
+  (`codex_x3b`).
+
+Across every `QUOTA-READ` in `queue.events` over that same window, the
+primary window's `used_percent` read exactly `90.0` at every checkpoint —
+unmoved from the run before it to the run after it. `(delta used_percent) /
+(delta tokens)` is therefore unmeasurable as a positive rate: every observed
+delta is exactly zero even at multi-million-token scale.
+
+**Resolution:** since the true rate cannot be measured directly, use a
+conservative fallback instead of inventing precision the data does not
+support: `POINTS_PER_TOKEN = 1e-7` (1 point per 10,000,000 tokens). That
+rate is higher (assumes more quota cost per token, i.e. more cautious) than
+either observed upper bound (under 1 point per ~12.9M tokens per the
+correction as reported; under 1 point per ~8.4M tokens summed across every
+run in the cited session scratchpad), so it will not under-budget relative
+to what was actually observed. PLAN.md (d)'s relative multipliers (composite
+x1.5, verify x1.3, worst case x2) are kept unchanged; only the absolute
+weekly-percent conversion was wrong.
+
+**Consequence for the launcher:** the start gate is budget-aware
+(`current used_percent + planned worst-case percent <= stop_percent`, as
+first landed)
+instead of a fixed "`used_percent <= 50%`" rule, the launcher defaults to
+the full phase-1 matrix (the 2026-10 reduced preset is an explicit
+`--matrix reduced` option, not the default), and it auto-shrinks the
+matrix's pipeline/attempt counts — most expensive component first, down to
+a floor — if the full plan does not fit the current quota headroom. See
+`benchmarks/sregym/experiments/assurance/phase1/RUNBOOK.md`'s "Quota budget
+correction (2026-10)" section for the operational detail. **This worst-case
+gate was replaced the same day** — see "Phase-1 gate: expected cost, not
+the 2x worst case" below.
+
+## Phase-1 gate: expected cost, not the 2x worst case (2026-10, same day)
+
+**Decision (user):** the start gate now checks the plan's EXPECTED
+(nominal) token cost against the stop line, not its 2x worst case. The
+worst case is still computed and printed (`TokenBudgetEstimate.render`,
+the launcher's own console output and `gate_decision.json`), but no longer
+gates the start decision (`TokenBudgetEstimate.fits`,
+`QuotaGate.can_start_matrix`).
+
+**Why.** The worst-case gate, at the (already conservative) fallback rate
+of 1 point per 10M tokens, auto-shrank the full phase-1 matrix down to a
+single SDO pipeline under realistic quota headroom (see the correction
+above: the full matrix's 2x worst case does not clear a 96% stop line even
+at 90% used, because the 2x multiplier alone doubles an already-cautious
+per-token rate). That is too timid given the same evidence this module
+already cites: the measured `network_policy_block` eval moved 12.9M tokens
+through the account without moving `used_percent` at all, so a 2x safety
+factor on top of a rate already chosen to be conservative buys no real
+margin, only a much smaller matrix.
+
+**Where the actual safety comes from instead:**
+- the live global hard stop, `QuotaGate.must_stop_matrix` (`--stop-percent`,
+  default 96%, still one point under PLAN.md (d)'s own 97%): the matrix
+  terminates every running lane the moment a real quota read crosses it,
+  mid-run, regardless of what was planned;
+- the per-lane 1.5x budget abort, `QuotaGate.lane_over_budget`: a lane whose
+  own attributed spend runs away (a retry storm, a stuck loop) is stopped
+  on its own without touching the rest of the matrix.
+
+Both of these react to the account's actual, currently-measured usage, not
+a pre-launch estimate; doubling the pre-launch estimate does not make either
+of them more effective, it only makes the launcher refuse to start a matrix
+it could safely have run.
+
+**Also fixed the same day: phase 1 has no stock (no-verify) Codex arm**
+(separate user decision, logged in `PLAN.md`'s own decisions log). Its sole
+Codex arm is now the default, concise-verify baseline.
+`phase1_budget.py`'s `FULL_MATRIX` and `REDUCED_MATRIX` presets therefore
+carry one Codex component (`codex_attempts`), not two
+(`codex_stock_attempts` / `codex_verify_attempts`); the estimate per
+concise-verify attempt still starts from the measured stock constant times
+the 1.3x verify multiplier, since no concise-specific token measurement
+exists yet.
+
+**Also fixed: lane start order is interleaved across arms, not grouped by
+arm.** Lane names sort alphabetically by arm (SDO `assure-w0`-`w3`, Codex
+`assure-w4`-`w7`); staggering lanes in that plain sorted order would launch
+every SDO lane before any Codex lane even started, so a matrix stopped
+partway through (the hard stop above, or a person killing the launcher)
+would leave lopsided partial data — one arm well progressed, the other
+barely begun. `interleaved_launch_order` (`phase1_launch.py`) round-robins
+the stagger schedule across arms instead (`w0, w4, w1, w5, w2, w6, w3, w7`),
+so a stop at any point leaves roughly balanced partial data across both
+arms.

@@ -24,3 +24,6 @@ reuse_cluster = true
 force_recreate_cluster = false
 preserve_infrastructure = true
 docker_builder = "sdo-example"
+
+[agent.codex]
+verify_protocol = "none"  # pin stock (2026-09-28): the Codex baseline now defaults to "concise" verify

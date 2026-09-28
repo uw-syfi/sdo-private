@@ -1,4 +1,12 @@
-"""The opt-in "Codex + verify" baseline: config, prompt text and its route to SREGym."""
+"""The Codex baseline's verify protocol: config, prompt text and its route to SREGym.
+
+User direction (2026-09-28): the default baseline verifies its work,
+concisely. ``verify_protocol`` is ``"concise"`` by default, with ``"full"``
+(the original, longer step-by-step protocol, used to isolate the verify loop
+from memory) and ``"none"`` (the unmodified stock instruction) as opt-ins.
+The legacy booleans (``true``/``false``) still work, for old TOMLs and
+snapshots: ``true`` maps to ``"full"``, ``false`` to ``"none"``.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +17,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from benchmarks.sregym.runner.codex_baseline import (
+    CONCISE_VERIFY_PROMPT,
+    FULL_VERIFY_PROMPT,
     PROMPT_APPENDIX_ENV,
     VERIFY_PROTOCOL_PROMPT,
     CodexBaselineConfig,
@@ -30,16 +40,39 @@ def _codex(agent_config: dict | None = None) -> ExperimentConfig:
     return ExperimentConfig(agent="codex", model="gpt-6-luna", agent_config=agent_config or {})
 
 
-def test_the_protocol_is_off_by_default() -> None:
-    assert CodexBaselineConfig().verify_protocol is False
-    assert CodexBaselineConfig().prompt_appendix() == ""
+def test_the_protocol_defaults_to_concise() -> None:
+    assert CodexBaselineConfig().verify_protocol == "concise"
+    assert CodexBaselineConfig().prompt_appendix() == CONCISE_VERIFY_PROMPT
 
 
-def test_the_protocol_config_rejects_unknown_keys_and_non_booleans() -> None:
+def test_full_verify_protocol_prompt_is_the_legacy_prompt_text() -> None:
+    assert VERIFY_PROTOCOL_PROMPT == FULL_VERIFY_PROMPT
+    assert CodexBaselineConfig(verify_protocol="full").prompt_appendix() == FULL_VERIFY_PROMPT
+
+
+def test_none_mode_gives_the_stock_prompt() -> None:
+    assert CodexBaselineConfig(verify_protocol="none").prompt_appendix() == ""
+
+
+@pytest.mark.parametrize(("legacy", "mode"), [(True, "full"), (False, "none")])
+def test_the_legacy_booleans_map_to_full_and_none(legacy: bool, mode: str) -> None:
+    assert CodexBaselineConfig(verify_protocol=legacy).verify_protocol == mode
+    assert CodexBaselineConfig.from_agent_config({"verify_protocol": legacy}).verify_protocol == mode
+
+
+def test_the_protocol_config_rejects_unknown_keys() -> None:
     with pytest.raises(ValueError, match="verify_protocl"):
         CodexBaselineConfig.from_agent_config({"verify_protocl": True})
-    with pytest.raises(TypeError, match="verify_protocol"):
+
+
+def test_the_protocol_config_rejects_an_unknown_mode() -> None:
+    with pytest.raises(ValueError, match="verify_protocol"):
         CodexBaselineConfig.from_agent_config({"verify_protocol": "yes"})
+
+
+def test_the_protocol_config_rejects_a_non_string_non_boolean_mode() -> None:
+    with pytest.raises(TypeError, match="verify_protocol"):
+        CodexBaselineConfig.from_agent_config({"verify_protocol": 1})
 
 
 def test_an_invalid_codex_agent_config_fails_at_load(tmp_path: Path) -> None:
@@ -53,10 +86,23 @@ def test_an_invalid_codex_agent_config_fails_at_load(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "requirement",
     [
+        "confirm the user-facing symptom is actually gone",
+        "end-to-end check",
+        "not just pod status",
+        "delete any helper pods or Jobs you created",
+    ],
+)
+def test_the_concise_prompt_states_each_requirement(requirement: str) -> None:
+    assert requirement in CONCISE_VERIFY_PROMPT
+
+
+@pytest.mark.parametrize(
+    "requirement",
+    [
         # (a) reproduce a user-facing symptom first and record it
         "reproduce a concrete user-facing symptom",
         "end-to-end request",
-        "no ready endpoints",
+        "component that is unreachable",
         "exact command you ran and its output",
         # (b) evidence tying the root cause to the symptom
         "evidence that ties the root cause to that symptom",
@@ -68,29 +114,46 @@ def test_an_invalid_codex_agent_config_fails_at_load(tmp_path: Path) -> None:
         "delete every helper pod, Job",
     ],
 )
-def test_the_protocol_prompt_states_each_requirement(requirement: str) -> None:
-    assert requirement in VERIFY_PROTOCOL_PROMPT
+def test_the_full_protocol_prompt_states_each_requirement(requirement: str) -> None:
+    assert requirement in FULL_VERIFY_PROMPT
 
 
 @pytest.mark.parametrize(
     "hint", ["configmap", "failure-admin", "mongo", "hotel", "decoy", "red herring", "geo", "rate", "selector"]
 )
-def test_the_protocol_prompt_names_no_fault_or_decoy(hint: str) -> None:
-    assert hint not in VERIFY_PROTOCOL_PROMPT.lower()
+def test_neither_protocol_prompt_names_a_fault_or_decoy(hint: str) -> None:
+    assert hint not in CONCISE_VERIFY_PROMPT.lower()
+    assert hint not in FULL_VERIFY_PROMPT.lower()
+
+
+def test_the_concise_prompt_does_not_prescribe_how_to_reproduce_the_symptom() -> None:
+    """The full protocol's step 1 anchored the agent on a healthy-endpoint check; concise must not."""
+    assert "reproduce" not in CONCISE_VERIFY_PROMPT.lower()
+    assert "kubectl get pods" not in CONCISE_VERIFY_PROMPT.lower()
 
 
 def test_verify_protocol_reaches_sregym_as_the_prompt_appendix(tmp_path: Path) -> None:
+    env = config_to_env(_codex(), tmp_path)
+    assert env[PROMPT_APPENDIX_ENV] == CONCISE_VERIFY_PROMPT
+
+    env = config_to_env(_codex({"codex": {"verify_protocol": "full"}}), tmp_path)
+    assert env[PROMPT_APPENDIX_ENV] == FULL_VERIFY_PROMPT
+
     env = config_to_env(_codex({"codex": {"verify_protocol": True}}), tmp_path)
+    assert env[PROMPT_APPENDIX_ENV] == FULL_VERIFY_PROMPT
 
-    assert env[PROMPT_APPENDIX_ENV] == VERIFY_PROTOCOL_PROMPT
 
-
-def test_the_plain_baseline_never_inherits_a_stray_appendix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_stock_baseline_never_inherits_a_stray_appendix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(PROMPT_APPENDIX_ENV, "leaked from the shell")
 
-    assert PROMPT_APPENDIX_ENV not in config_to_env(_codex(), tmp_path)
-    assert PROMPT_APPENDIX_ENV not in config_to_env(_codex({"codex": {"verify_protocol": False}}), tmp_path)
-    assert PROMPT_APPENDIX_ENV not in config_to_env(ExperimentConfig(agent="sdo_codex"), tmp_path)
+    env = config_to_env(_codex({"codex": {"verify_protocol": "none"}}), tmp_path)
+    assert PROMPT_APPENDIX_ENV not in env
+
+    env = config_to_env(_codex({"codex": {"verify_protocol": False}}), tmp_path)
+    assert PROMPT_APPENDIX_ENV not in env
+
+    env = config_to_env(ExperimentConfig(agent="sdo_codex"), tmp_path)
+    assert PROMPT_APPENDIX_ENV not in env
 
 
 def test_verify_protocol_survives_the_snapshot(tmp_path: Path) -> None:
@@ -102,7 +165,7 @@ def test_verify_protocol_survives_the_snapshot(tmp_path: Path) -> None:
             agent = "codex"
 
             [agent.codex]
-            verify_protocol = true
+            verify_protocol = "full"
             """
         ),
         encoding="utf-8",
@@ -110,7 +173,7 @@ def test_verify_protocol_survives_the_snapshot(tmp_path: Path) -> None:
     snapshot = tmp_path / "snapshot.toml"
     snapshot.write_text(_serialize_config(load_experiment_config(source)), encoding="utf-8")
 
-    assert load_experiment_config(snapshot).agent_config["codex"] == {"verify_protocol": True}
+    assert load_experiment_config(snapshot).agent_config["codex"] == {"verify_protocol": "full"}
 
 
 class _FakeDocker:
