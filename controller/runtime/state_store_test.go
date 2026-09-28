@@ -40,6 +40,32 @@ func TestCloneIncidentResultPreservesEmptyCollectionsForBrokerProtocol(t *testin
 	}
 }
 
+// A clean closing view has no changes. The broker's schema requires a list,
+// so a persisted closure must say "changes":[] and never "changes":null,
+// or every broker attempt fails and the closure fails permanently.
+func TestCloneIncidentClosureKeepsAnEmptyClosingViewDiffAList(t *testing.T) {
+	closure := IncidentClosure{
+		FinalStateChanges: &StateChanges{BaselineAt: time.Unix(0, 0).UTC(), ObservedAt: time.Unix(1, 0).UTC(), Changes: []StateChange{}},
+	}
+	encoded, err := json.Marshal(cloneIncidentClosure(&closure))
+	if err != nil {
+		t.Fatalf("marshal closure: %v", err)
+	}
+	var decoded struct {
+		FinalStateChanges map[string]json.RawMessage `json:"final_state_changes"`
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal closure: %v", err)
+	}
+	if got := string(decoded.FinalStateChanges["changes"]); got != "[]" {
+		t.Fatalf("an empty closing-view diff must encode as [], got %s", got)
+	}
+	view := cloneIncidentView(&IncidentView{StateChanges: closure.FinalStateChanges})
+	if view.StateChanges.Changes == nil {
+		t.Fatal("an empty live-view diff must stay a list, not null")
+	}
+}
+
 func TestConfigMapStateStoreRoundTripAndCASConflict(t *testing.T) {
 	ctx := context.Background()
 	store := NewConfigMapStateStore(fake.NewSimpleClientset(), "demo", "sdo-controller-state")

@@ -305,13 +305,14 @@ func cloneIncidentClosure(closure *IncidentClosure) *IncidentClosure {
 }
 
 // cloneStateChanges deep-copies a StateChanges so a published or persisted
-// snapshot cannot be mutated through a shared slice.
+// snapshot cannot be mutated through a shared slice. Changes stays a list
+// when empty: the broker's and the responder's schemas reject null.
 func cloneStateChanges(changes *StateChanges) *StateChanges {
 	if changes == nil {
 		return nil
 	}
 	copy := *changes
-	copy.Changes = append([]StateChange(nil), changes.Changes...)
+	copy.Changes = append(make([]StateChange, 0, len(changes.Changes)), changes.Changes...)
 	copy.UnobservedKinds = append([]string(nil), changes.UnobservedKinds...)
 	return &copy
 }
