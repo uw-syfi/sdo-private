@@ -28,6 +28,26 @@ if TYPE_CHECKING:
     from agentshim import CommandExecutor
 
 
+#: The health-objective detector watches every Kubernetes kind the detector SDK's
+#: snapshot exposes except high-churn Events, in this order. The set follows the SDK,
+#: not any fault class, so a judge can check any object the snapshot offers.
+HEALTH_OBJECTIVE_WATCHES: tuple[tuple[str, str], ...] = (
+    ("v1", "Pod"),
+    ("v1", "ConfigMap"),
+    ("v1", "Service"),
+    ("apps/v1", "Deployment"),
+    ("apps/v1", "ReplicaSet"),
+    ("networking.k8s.io/v1", "NetworkPolicy"),
+    ("v1", "Endpoints"),
+    ("discovery.k8s.io/v1", "EndpointSlice"),
+)
+
+#: Kinds whose source-backed objects count as health-judge coverage provenance: the
+#: application configuration kinds the deployment adapter observes as active topology.
+#: Coverage is controller-canonicalized metadata; it selects no check.
+COVERED_RESOURCE_KINDS: frozenset[str] = frozenset({"ConfigMap", "Deployment", "NetworkPolicy", "Service"})
+
+
 class LifecycleAgentError(RuntimeError):
     """Raised when a lifecycle agent cannot produce a valid structured handoff."""
 
@@ -128,6 +148,9 @@ class HealthJudgeWorkspaceArtifact(HealthJudgeWorkspaceDraft):
     session_id: str = Field(min_length=1)
 
 
+_WATCH_LIST = ", ".join(f"{api_version} {kind}" for api_version, kind in HEALTH_OBJECTIVE_WATCHES)
+_COVERED_KINDS = ", ".join(sorted(COVERED_RESOURCE_KINDS))
+
 #: Health-judge instructions for synthetic traffic, shared by both judge sessions.
 TRAFFIC_AUTHORING = """Synthetic traffic (health-judge owned). For an application that serves HTTP, also author
 end-to-end synthetic traffic under .sdo/diagnostics/traffic/. Ground it in the application source and the deployer's
@@ -145,8 +168,8 @@ when the same scenarios recover. Every scenario must therefore succeed against t
    SideEffectIdempotentWrite, or SideEffectWriteWithCleanup with Cleanup steps), Marker (writes only: a string such
    as "sdo-synthetic" that appears in every write request and names dedicated synthetic data), Steps, and Detects
    (extra fault classes: traffic.FaultWrongBody when a step checks the body, traffic.FaultSlow). A simple step is one
-   line: `{Name: "search", Endpoint: traffic.GET("/hotels", traffic.Params{"inDate": traffic.DateRange("2015-04-09",
-   "2015-04-23"), "outDate": traffic.DaysAfter("inDate", 1, 3)}).Contains("expected text")}`. Other parameter
+   line: `{Name: "list", Endpoint: traffic.GET("/items", traffic.Params{"from": traffic.DateRange("2024-01-01",
+   "2024-01-31"), "to": traffic.DaysAfter("from", 1, 3)}).Contains("expected text")}`. Other parameter
    generators: Const, OneOf, IntBetween, FloatBetween, FromSeed(count, render), FromSeedPair(key, count, first,
    second) for matching credentials, FromPrevious(key); chain steps with .SaveJSON(field, key) and "{key}" path
    segments. Use .Contains(...) whenever the application reports failures inside a successful status. Generators only
@@ -377,11 +400,11 @@ Close every composite literal, control-flow block, and function before starting 
 both complete files before returning them, paying special attention to the line immediately before each `func`.
 
 The detector's Spec() is a fixed controller contract, not a design choice. Return exactly ID "health-objective",
-Class sdk.DetectorClassHealth, Owner sdk.DetectorOwnerHealthJudge, Interval 30*time.Second; watches for v1 Pod,
-v1 ConfigMap, v1 Service, apps/v1 Deployment, networking.k8s.io/v1 NetworkPolicy, v1 Endpoints, and discovery.k8s.io/v1
-EndpointSlice; persistence Firing 2 and Clearing 2; batching Severity sdk.SeverityCritical and Debounce
-500*time.Millisecond; playbooks []string{{".sdo/playbooks/health-objective/README.md"}}; no originating incident;
-and OriginatingCommit "lifecycle-bootstrap". Do not substitute incident/responder ownership or another ID.
+Class sdk.DetectorClassHealth, Owner sdk.DetectorOwnerHealthJudge, Interval 30*time.Second; watches for every
+Kubernetes kind the snapshot exposes except Events ({_WATCH_LIST}); persistence Firing 2 and Clearing 2;
+batching Severity sdk.SeverityCritical and Debounce 500*time.Millisecond; playbooks
+[]string{{".sdo/playbooks/health-objective/README.md"}}; no originating incident; and OriginatingCommit
+"lifecycle-bootstrap". Do not substitute incident/responder ownership or another ID.
 
 Never read environment variables, benchmark results, SREGym data, verdict files, hidden fault labels, or any external
 oracle. Never call an LLM at detector runtime. Return source text in the structured fields; do not edit repository
@@ -389,24 +412,17 @@ files. Set round exactly to {round_index}; set source_commit to the deployer's c
 in the deployer handoff; and copy the authoritative objective SHA-256 above exactly.
 The last structured response is the only response the controller accepts. It must repeat both complete Go files;
 never return a placeholder such as "pending", "superseded", or a reference to an earlier commentary payload.
-For covered_resources, copy every resource required by the objective exactly from the deployer handoff. Never invent
-a covered ConfigMap object for a dependency that has no standalone object in the handoff. When the
-controller-observed active topology is non-null, the controller will canonicalize this provenance to exact matching
-active Deployment, Service, ConfigMap, and NetworkPolicy objects and ignore source variants that are not active. In
-particular, "all source-backed Deployments" requires every Deployment and "all selected Services" requires every
-Service in that handoff, together with every source-backed ConfigMap and NetworkPolicy that can determine those
-workloads' health; do not reduce coverage to only user-facing or application-tier names. For this global objective,
-covered_resources must contain exactly those Deployment, Service, ConfigMap, and NetworkPolicy objects—do not add
-PersistentVolumes, PersistentVolumeClaims, Routes, or other kinds. Preserve each kind, name,
-source-manifest namespace,
-source path, and complete dependencies list. Do not substitute the configured runtime namespace into this provenance
-field.
+For covered_resources, copy every resource required by the objective exactly from the deployer handoff, preserving
+each kind, name, source-manifest namespace, source path, and complete dependencies list; never invent an object that
+is absent from the handoff, and do not substitute the configured runtime namespace into this provenance field. For a
+global objective, or when the controller-observed active topology is non-null, the controller canonicalizes this
+provenance itself from the trusted inventory ({_COVERED_KINDS} objects, restricted to active ones), so coverage is
+metadata and does not choose your checks.
 
-ConfigMaps created imperatively at deployment time may have no standalone source manifest and therefore no ConfigMap
-object in the deployer inventory. Derive these required dependencies dynamically from every observed Deployment's pod
-template volumes (deployment.Spec.Template.Spec.Volumes[*].ConfigMap.Name), compare them with
-DetectionContext.ConfigMaps(), and emit a stable missing-ConfigMap finding for any absent reference. Do not rely only
-on covered_resources or hard-coded ConfigMap names. Include matching and near-miss tests for that behavior.
+Choose the checks from the human objective and the application's own topology, not from a catalogue of fault types.
+Derive what a check depends on from the objects observed at detection time (the relationships the deployer assessment
+and the active topology record) rather than hard-coding object names, so each check stays valid when objects are
+recreated, and include matching and near-miss tests for every check.
 
 The controller evaluates one configured runtime namespace. A source manifest namespace of "default" means the
 resource will be applied into that configured namespace; it is not a literal runtime namespace. Never embed the
@@ -483,13 +499,11 @@ healthObjectiveDigest. Its Spec is controller-owned and already present in detec
 environment variables, benchmark results, SREGym data, verdict files, hidden fault labels, or an external oracle.
 Inspect only this checkout; never use `..` or paths outside it.
 
-All named helper functions must be package-level. Derive required ConfigMaps from every observed Deployment pod
-template, including volume, projected-volume, envFrom, and env references, and compare them with the snapshot rather
-than relying only on hard-coded names. Use DetectionContext.Namespace() for absent runtime objects and each observed
-object's namespace for objects that exist; never embed "default" as a runtime namespace. When active topology is
-provided, cover the matching Deployment, Service, ConfigMap, and NetworkPolicy resources required by the objective,
-including low-level dependencies rather than only user-facing workloads. Do not invent resource objects absent from
-the deployer handoff.
+All named helper functions must be package-level. Choose the checks from the human objective and the application's
+own topology, not from a catalogue of fault types, and derive what each check depends on from the objects observed at
+detection time rather than hard-coded names. Use DetectionContext.Namespace() for absent runtime objects and each
+observed object's namespace for objects that exist; never embed "default" as a runtime namespace. Do not invent
+resource objects absent from the deployer handoff.
 
 {TRAFFIC_AUTHORING}
 `sdo detector check` also compiles the generators, proves every scenario fails against unreachable and erroring
@@ -583,7 +597,7 @@ def _unwrap_shell_command(command: str) -> str:
 
 
 def _mask_quoted_pattern_alternatives(script: str) -> str:
-    """Hide ``/route`` alternatives inside quoted strings, such as ``rg 'HandleFunc|/hotels'``.
+    """Hide ``/route`` alternatives inside quoted strings, such as ``rg 'HandleFunc|/items'``.
 
     Inside a quoted argument a ``/`` right after ``|`` or ``(`` starts a regular-expression
     alternative or group, not a path the shell opens. Unquoted text, including a pipe into an

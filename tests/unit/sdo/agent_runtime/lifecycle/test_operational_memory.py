@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -61,14 +62,27 @@ def test_bootstrap_creates_owned_valid_operational_memory_in_one_trusted_commit(
     detector_path = repository / ".sdo" / "diagnostics" / "detectors" / "health" / "objective" / "detector.go"
     detector_source = detector_path.read_text(encoding="utf-8")
     assert "sdo-health-judge" not in detector_source
-    assert "NetworkPolicies()" in detector_source
-    assert "network-policy-total-isolation" in detector_source
     assert "healthObjectiveDigest" in detector_source
     assert '"example": {}' in detector_source
     assert "isRequiredDeployment(deployment.Name)" in detector_source
-    assert "policySelectsRequiredWorkload" in detector_source
-    assert any(watch.kind == "ConfigMap" for watch in manifest.detectors[0].watches)
-    assert any(watch.kind == "NetworkPolicy" for watch in manifest.detectors[0].watches)
+    # The bootstrap template checks only what the objective states (available Deployments,
+    # Services with ready endpoints); it ships no fault-class rule such as a NetworkPolicy check.
+    assert "NetworkPolicies()" not in detector_source
+    assert re.findall(r'healthFinding\(\s*"([^"]+)"', detector_source) == [
+        "deployment-unavailable",
+        "service-without-ready-endpoints",
+    ]
+    # The health detector watches every object kind the SDK snapshot exposes except Events.
+    assert {watch.kind for watch in manifest.detectors[0].watches} == {
+        "ConfigMap",
+        "Deployment",
+        "EndpointSlice",
+        "Endpoints",
+        "NetworkPolicy",
+        "Pod",
+        "ReplicaSet",
+        "Service",
+    }
     assert "func (Detector) Detect(context.Context" not in detector_source
     assert "return nil, nil" not in detector_source
     assert _git(repository, "show", "--format=", "--name-only", "HEAD").splitlines()
