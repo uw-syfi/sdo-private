@@ -2,7 +2,9 @@ package traffic_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -196,15 +198,79 @@ func TestEngineClassifiesTimeoutsAndConnectionRefused(t *testing.T) {
 	w := workload(t, "health", traffic.PurposeHealthProbe, traffic.WorkloadScenario{ID: "search"})
 	w.Timeout = traffic.Duration(50 * time.Millisecond)
 	_, sample := engine(t, w, traffic.Catalog{search()}, base).Iterate(context.Background(), 0)
-	if sample.Outcome != traffic.OutcomeTimeout {
-		t.Fatalf("a hung response must time out, got %+v", sample)
+	if sample.Outcome != traffic.OutcomeTimeout || sample.DialFailed {
+		t.Fatalf("a hung response must time out without being classified as a dial failure, got %+v", sample)
 	}
 	closed := httptest.NewServer(http.NotFoundHandler())
 	address := closed.URL
 	closed.Close()
 	_, sample = engine(t, w, traffic.Catalog{search()}, func(traffic.Target) string { return address }).Iterate(context.Background(), 0)
-	if sample.Outcome != traffic.OutcomeError || !strings.Contains(sample.Error, "refused") {
-		t.Fatalf("a closed port must fail with connection refused, got %+v", sample)
+	if sample.Outcome != traffic.OutcomeError || !strings.Contains(sample.Error, "refused") || !sample.DialFailed {
+		t.Fatalf("a closed port must fail with a classified dial failure, got %+v", sample)
+	}
+}
+
+// stubDoer lets a test hand the engine a synthetic transport error without
+// touching a real network, so a dial timeout (which a closed listener alone
+// cannot reproduce portably: the OS still completes the handshake unless
+// something drops the packets) can still be classified deterministically.
+type stubDoer struct{ err error }
+
+func (s stubDoer) Do(*http.Request) (*http.Response, error) { return nil, s.err }
+
+// stubTimeout satisfies the unexported `interface{ Timeout() bool }` that
+// net/http and this package's isTimeout check for, purely by structure.
+type stubTimeout struct{ msg string }
+
+func (e stubTimeout) Error() string { return e.msg }
+func (e stubTimeout) Timeout() bool { return true }
+
+func TestEngineClassifiesDialFailuresSeparatelyFromOtherTransportErrors(t *testing.T) {
+	cases := []struct {
+		name           string
+		err            error
+		wantOutcome    traffic.Outcome
+		wantDialFailed bool
+	}{
+		{
+			name:           "a dial that hangs until its own timeout",
+			err:            &net.OpError{Op: "dial", Net: "tcp", Err: stubTimeout{msg: "i/o timeout"}},
+			wantOutcome:    traffic.OutcomeTimeout,
+			wantDialFailed: true,
+		},
+		{
+			name:           "a dial refused outright",
+			err:            &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")},
+			wantOutcome:    traffic.OutcomeError,
+			wantDialFailed: true,
+		},
+		{
+			name:           "a slow response after a successful dial",
+			err:            &net.OpError{Op: "read", Net: "tcp", Err: stubTimeout{msg: "i/o timeout"}},
+			wantOutcome:    traffic.OutcomeTimeout,
+			wantDialFailed: false,
+		},
+		{
+			name:           "a generic transport error with no dial phase",
+			err:            errors.New("unexpected EOF"),
+			wantOutcome:    traffic.OutcomeError,
+			wantDialFailed: false,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			w := workload(t, "health", traffic.PurposeHealthProbe, traffic.WorkloadScenario{ID: "search"})
+			e, err := traffic.NewEngine(w, traffic.Catalog{search()}, stubDoer{err: testCase.err},
+				func(traffic.Target) string { return "http://x" }, nil)
+			if err != nil {
+				t.Fatalf("new engine: %v", err)
+			}
+			_, sample := e.Iterate(context.Background(), 0)
+			if sample.Outcome != testCase.wantOutcome || sample.DialFailed != testCase.wantDialFailed {
+				t.Fatalf("got outcome=%s dialFailed=%v, want outcome=%s dialFailed=%v: %+v",
+					sample.Outcome, sample.DialFailed, testCase.wantOutcome, testCase.wantDialFailed, sample)
+			}
+		})
 	}
 }
 

@@ -21,6 +21,15 @@ import (
 // DefaultCapacity bounds the samples kept per scenario.
 const DefaultCapacity = 64
 
+// DialTimeout bounds how long a probe waits to establish a connection. It
+// is intentionally shorter than the workload's default per-request timeout
+// (traffic.DefaultTimeout, 2s) so a blocked dial, for example a
+// NetworkPolicy that denies new connections, is classified as its own
+// failure (Sample.DialFailed) and counted well before the general request
+// deadline would otherwise cancel it with a generic "context deadline
+// exceeded". See docs/feedback-loop-DECISIONS.md D25.
+const DialTimeout = 1 * time.Second
+
 // Config configures a Prober.
 type Config struct {
 	// Namespace is the application namespace whose Services scenarios call.
@@ -38,12 +47,17 @@ type Config struct {
 	Capacity int
 }
 
-// NewHTTPClient is the prober's default client: no keep-alives, no
-// redirects, bounded dial time.
+// NewHTTPClient is the prober's default client: no keep-alives, so every
+// request dials a fresh connection instead of reusing one that a fault may
+// have opened before the fault started (a changed Service selector, or a
+// NetworkPolicy that only blocks new connections and lets established ones
+// keep working); no redirects; a dial time bounded well below the default
+// per-request timeout so a blocked dial fails, and is classified, as its
+// own kind of failure rather than racing the request's own deadline.
 func NewHTTPClient() *http.Client {
 	transport := &http.Transport{
 		DisableKeepAlives:     true,
-		DialContext:           (&net.Dialer{Timeout: 2 * time.Second}).DialContext,
+		DialContext:           (&net.Dialer{Timeout: DialTimeout}).DialContext,
 		ResponseHeaderTimeout: traffic.MaxTimeout,
 		MaxIdleConns:          0,
 	}

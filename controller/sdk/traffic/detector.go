@@ -72,7 +72,7 @@ func ScenarioFinding(spec sdk.DetectorSpec, namespace string, workload Workload,
 	statusParts := make([]string, 0, len(statusKeys))
 	for _, key := range statusKeys {
 		label := key
-		if key != "transport" && key != "timeout" {
+		if key != "transport" && key != "timeout" && key != "dial" {
 			label = "HTTP " + key
 		}
 		statusParts = append(statusParts, fmt.Sprintf("%s ×%d", label, verdict.StatusCounts[key]))
@@ -80,6 +80,9 @@ func ScenarioFinding(spec sdk.DetectorSpec, namespace string, workload Workload,
 	failures := make([]string, 0, len(verdict.RecentFailures))
 	for _, sample := range verdict.RecentFailures {
 		label := string(sample.Outcome)
+		if sample.DialFailed {
+			label = "dial " + label
+		}
 		if sample.Status > 0 {
 			label = fmt.Sprintf("HTTP %d", sample.Status)
 		}
