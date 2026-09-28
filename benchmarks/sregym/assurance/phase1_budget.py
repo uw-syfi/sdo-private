@@ -35,6 +35,24 @@ The relative *shape* of PLAN.md (d)'s per-unit costs (composite stages/
 attempts at 1.5x, verify at 1.3x, "worst case" at 2x) is not disputed by this
 correction and is kept unchanged; only the absolute weekly-% conversion was
 wrong.
+
+2026-09-28 (later the same day) user decision: phase 1 drops its stock
+(no-verify) Codex arm entirely. The sole Codex arm is now the default,
+concise-verify baseline; ``FULL_MATRIX`` and ``REDUCED_MATRIX`` therefore
+carry one Codex component (``codex_attempts``), not two. The measured
+``CODEX_ATTEMPT_TOKENS`` constant (a stock attempt) times ``VERIFY_MULTIPLIER``
+is kept as the estimate for a concise-verify attempt: no concise-specific
+token measurement exists yet, and this is the conservative (higher) of the
+two verify variants measured so far.
+
+2026-10 gate change (user decision, logged in ``HARNESS_DECISIONS.md``): the
+start gate now checks *expected* (nominal) cost against the stop line, not
+the 2x worst case -- the 2x figure was designed for a per-unit rate an order
+of magnitude more expensive than what was actually observed, and kept
+shrinking the full matrix down to a single SDO pipeline for no measured
+reason. The live global stop (``QuotaGate.must_stop_matrix``) and the
+per-lane 1.5x abort (``QuotaGate.lane_over_budget``) remain the run's safety
+nets. The worst case is still computed and printed for information.
 """
 
 from __future__ import annotations
@@ -53,7 +71,9 @@ SDO_STAGE_TOKENS = 666_758.0
 #: stage, from a fresh workspace (``lifecycle2``'s ``lifecycle_tokens``).
 SDO_LIFECYCLE_BOOTSTRAP_TOKENS = 2_086_905.0
 #: Measured the same day: Codex-stock mean tokens/attempt on
-#: ``network_policy_block`` (``codex_x3b``, 3 runs, mean_tokens).
+#: ``network_policy_block`` (``codex_x3b``, 3 runs, mean_tokens). Phase 1 no
+#: longer schedules a stock arm; this constant is still the base a
+#: concise-verify attempt's estimate is built from (see module docstring).
 CODEX_ATTEMPT_TOKENS = 529_706.6666666666
 
 #: PLAN.md (d)'s relative multipliers, unchanged by this correction.
@@ -77,16 +97,18 @@ COMPOSITE_PROBLEMS = (PHASE1_PROBLEMS[3], PHASE1_PROBLEMS[4])
 #: The smoke run's one problem: S1, PLAN.md (b)'s anchor ("Anchors Step 3").
 SMOKE_PROBLEM = PHASE1_PROBLEMS[0]
 
-#: PLAN.md (d)'s full phase-1 matrix: 4 SDO pipelines (rotations A-D), 5
-#: attempts/problem on each of the Codex-stock and Codex+verify arms.
-FULL_MATRIX: dict[str, int] = {"sdo_pipelines": 4, "codex_stock_attempts": 5, "codex_verify_attempts": 5}
-#: The 2026-10 reduced preset (pivot #1): 2 SDO pipelines (rotations A, C),
-#: 2 attempts/problem on each Codex arm. Kept as an explicit ``--matrix``
+#: PLAN.md (d)'s full phase-1 matrix, as amended by the 2026-09-28 no-stock-arm
+#: decision: 4 SDO pipelines (rotations A-D), 5 concise-verify Codex attempts
+#: per problem, 0 stock.
+FULL_MATRIX: dict[str, int] = {"sdo_pipelines": 4, "codex_attempts": 5}
+#: The 2026-10 reduced preset (pivot #1): 2 SDO pipelines (rotations A, C), 3
+#: concise-verify Codex attempts per problem. Kept as an explicit ``--matrix``
 #: option; the default is :data:`FULL_MATRIX`.
-REDUCED_MATRIX: dict[str, int] = {"sdo_pipelines": 2, "codex_stock_attempts": 2, "codex_verify_attempts": 2}
-#: A component may not shrink below this floor; the verify arm alone may be
-#: dropped to zero (it is PLAN.md's optional add-on comparison, C11).
-MATRIX_FLOORS: dict[str, int] = {"sdo_pipelines": 1, "codex_stock_attempts": 1, "codex_verify_attempts": 0}
+REDUCED_MATRIX: dict[str, int] = {"sdo_pipelines": 2, "codex_attempts": 3}
+#: A component may not shrink below this floor: at least one SDO pipeline and
+#: at least one Codex attempt per problem, so phase 1 never launches with no
+#: baseline comparison at all.
+MATRIX_FLOORS: dict[str, int] = {"sdo_pipelines": 1, "codex_attempts": 1}
 
 
 def sdo_stage_tokens(problem: str) -> float:
@@ -95,13 +117,15 @@ def sdo_stage_tokens(problem: str) -> float:
     return SDO_STAGE_TOKENS
 
 
-def codex_attempt_tokens(problem: str, *, verify: bool) -> float:
+def codex_attempt_tokens(problem: str) -> float:
+    """One concise-verify Codex attempt's tokens (phase 1's sole Codex arm)."""
+
     base = (
         CODEX_ATTEMPT_TOKENS * CODEX_COMPOSITE_ATTEMPT_MULTIPLIER
         if problem in COMPOSITE_PROBLEMS
         else CODEX_ATTEMPT_TOKENS
     )
-    return base * VERIFY_MULTIPLIER if verify else base
+    return base * VERIFY_MULTIPLIER
 
 
 def sdo_pipeline_tokens(problems: Sequence[str], *, rounds: int = 2, include_bootstrap: bool = True) -> float:
@@ -113,12 +137,12 @@ def sdo_pipeline_tokens(problems: Sequence[str], *, rounds: int = 2, include_boo
     return stage_total + (SDO_LIFECYCLE_BOOTSTRAP_TOKENS if include_bootstrap else 0.0)
 
 
-def codex_arm_tokens(problems: Sequence[str], attempts_per_problem: int, *, verify: bool) -> float:
+def codex_arm_tokens(problems: Sequence[str], attempts_per_problem: int) -> float:
     if attempts_per_problem < 0:
         raise ValueError(f"attempts_per_problem must be >= 0, got {attempts_per_problem}")
     if attempts_per_problem == 0:
         return 0.0
-    return sum(codex_attempt_tokens(problem, verify=verify) for problem in problems) * attempts_per_problem
+    return sum(codex_attempt_tokens(problem) for problem in problems) * attempts_per_problem
 
 
 @dataclass(frozen=True)
@@ -155,15 +179,23 @@ class TokenBudgetEstimate:
         return self.worst_case_tokens * self.points_per_token
 
     def fits(self, *, current_used_percent: float, stop_percent: float) -> bool:
-        """Start gate: current + this plan's worst case (in points) must clear the stop line."""
+        """Start gate: current + this plan's EXPECTED (nominal) cost must clear the stop line.
 
-        return current_used_percent + self.worst_case_percent <= stop_percent
+        2026-10 gate change (``HARNESS_DECISIONS.md``): gating on the 2x
+        worst case auto-shrunk the full matrix to a single SDO pipeline for
+        no measured reason. The live global stop and the per-lane 1.5x abort
+        are the run's actual safety nets; the worst case is still computed
+        (``worst_case_percent``) and printed for information, not gated on.
+        """
+
+        return current_used_percent + self.nominal_percent <= stop_percent
 
     def render(self) -> str:
         lines = [
-            f"{self.label}: nominal {self.nominal_tokens:,.0f} tok ({self.nominal_percent:.3f} pt), "
+            f"{self.label}: nominal {self.nominal_tokens:,.0f} tok ({self.nominal_percent:.3f} pt, "
+            "gates the start decision), "
             f"worst case (x{self.worst_case_multiplier:.0f}) {self.worst_case_tokens:,.0f} tok "
-            f"({self.worst_case_percent:.3f} pt)"
+            f"({self.worst_case_percent:.3f} pt, informational only)"
         ]
         lines.extend(f"  - {name}: {value:,.0f} tok" for name, value in self.breakdown.items())
         return "\n".join(lines)
@@ -173,22 +205,24 @@ def matrix_budget(
     label: str,
     *,
     sdo_pipelines: int,
-    codex_stock_attempts: int,
-    codex_verify_attempts: int,
+    codex_attempts: int,
     problems: Sequence[str] = PHASE1_PROBLEMS,
     sdo_rounds: int = 2,
 ) -> TokenBudgetEstimate:
-    """One SDO/Codex-stock/Codex+verify matrix cell selection, in tokens."""
+    """One SDO / Codex (concise verify) matrix cell selection, in tokens.
 
-    if sdo_pipelines < 0 or codex_stock_attempts < 0 or codex_verify_attempts < 0:
-        raise ValueError("sdo_pipelines, codex_stock_attempts and codex_verify_attempts must be non-negative")
+    Phase 1 has no stock (no-verify) Codex arm (user decision, 2026-09-28):
+    *codex_attempts* is the sole Codex arm, the default concise-verify
+    baseline.
+    """
+
+    if sdo_pipelines < 0 or codex_attempts < 0:
+        raise ValueError("sdo_pipelines and codex_attempts must be non-negative")
     breakdown: dict[str, float] = {}
     if sdo_pipelines:
         breakdown[f"sdo_{sdo_pipelines}_pipelines"] = sdo_pipeline_tokens(problems, rounds=sdo_rounds) * sdo_pipelines
-    if codex_stock_attempts:
-        breakdown["codex_stock"] = codex_arm_tokens(problems, codex_stock_attempts, verify=False)
-    if codex_verify_attempts:
-        breakdown["codex_verify"] = codex_arm_tokens(problems, codex_verify_attempts, verify=True)
+    if codex_attempts:
+        breakdown["codex"] = codex_arm_tokens(problems, codex_attempts)
     if not breakdown:
         raise ValueError(f"{label!r} matrix produced an empty plan; widen at least one component")
     return TokenBudgetEstimate(label, breakdown)
@@ -197,53 +231,36 @@ def matrix_budget(
 def full_matrix_budget(
     *,
     sdo_pipelines: int | None = None,
-    codex_stock_attempts: int | None = None,
-    codex_verify_attempts: int | None = None,
+    codex_attempts: int | None = None,
 ) -> TokenBudgetEstimate:
     plan = dict(FULL_MATRIX)
     if sdo_pipelines is not None:
         plan["sdo_pipelines"] = sdo_pipelines
-    if codex_stock_attempts is not None:
-        plan["codex_stock_attempts"] = codex_stock_attempts
-    if codex_verify_attempts is not None:
-        plan["codex_verify_attempts"] = codex_verify_attempts
-    return matrix_budget(
-        "full-matrix",
-        sdo_pipelines=plan["sdo_pipelines"],
-        codex_stock_attempts=plan["codex_stock_attempts"],
-        codex_verify_attempts=plan["codex_verify_attempts"],
-    )
+    if codex_attempts is not None:
+        plan["codex_attempts"] = codex_attempts
+    return matrix_budget("full-matrix", sdo_pipelines=plan["sdo_pipelines"], codex_attempts=plan["codex_attempts"])
 
 
 def reduced_matrix_budget(
     *,
     sdo_pipelines: int | None = None,
-    codex_stock_attempts: int | None = None,
-    codex_verify_attempts: int | None = None,
+    codex_attempts: int | None = None,
 ) -> TokenBudgetEstimate:
     plan = dict(REDUCED_MATRIX)
     if sdo_pipelines is not None:
         plan["sdo_pipelines"] = sdo_pipelines
-    if codex_stock_attempts is not None:
-        plan["codex_stock_attempts"] = codex_stock_attempts
-    if codex_verify_attempts is not None:
-        plan["codex_verify_attempts"] = codex_verify_attempts
-    return matrix_budget(
-        "reduced-matrix",
-        sdo_pipelines=plan["sdo_pipelines"],
-        codex_stock_attempts=plan["codex_stock_attempts"],
-        codex_verify_attempts=plan["codex_verify_attempts"],
-    )
+    if codex_attempts is not None:
+        plan["codex_attempts"] = codex_attempts
+    return matrix_budget("reduced-matrix", sdo_pipelines=plan["sdo_pipelines"], codex_attempts=plan["codex_attempts"])
 
 
 def smoke_budget() -> TokenBudgetEstimate:
-    """1 SDO 2-stage (cold+warm) pipeline + 1 attempt/arm, one problem (S1)."""
+    """1 SDO 2-stage (cold+warm) pipeline + 1 Codex (concise verify) attempt, one problem (S1)."""
 
     return matrix_budget(
         "smoke",
         sdo_pipelines=1,
-        codex_stock_attempts=1,
-        codex_verify_attempts=1,
+        codex_attempts=1,
         problems=(SMOKE_PROBLEM,),
     )
 
@@ -288,19 +305,17 @@ def autoshrink_to_fit(
         return matrix_budget(
             label,
             sdo_pipelines=candidate["sdo_pipelines"],
-            codex_stock_attempts=candidate["codex_stock_attempts"],
-            codex_verify_attempts=candidate["codex_verify_attempts"],
+            codex_attempts=candidate["codex_attempts"],
             problems=problems,
         )
 
     def marginal_tokens(component: str) -> float:
-        one = {"sdo_pipelines": 0, "codex_stock_attempts": 0, "codex_verify_attempts": 0}
+        one = {"sdo_pipelines": 0, "codex_attempts": 0}
         one[component] = 1
         return matrix_budget(
             "unit",
             sdo_pipelines=one["sdo_pipelines"],
-            codex_stock_attempts=one["codex_stock_attempts"],
-            codex_verify_attempts=one["codex_verify_attempts"],
+            codex_attempts=one["codex_attempts"],
             problems=problems,
         ).nominal_tokens
 
@@ -308,11 +323,7 @@ def autoshrink_to_fit(
     if estimate.fits(current_used_percent=current_used_percent, stop_percent=stop_percent):
         return ShrunkPlan(plan=plan, estimate=estimate, fits=True, shrunk=False)
 
-    priority = sorted(
-        ("sdo_pipelines", "codex_stock_attempts", "codex_verify_attempts"),
-        key=marginal_tokens,
-        reverse=True,
-    )
+    priority = sorted(("sdo_pipelines", "codex_attempts"), key=marginal_tokens, reverse=True)
     steps: list[str] = []
     for component in priority:
         floor = MATRIX_FLOORS[component]
