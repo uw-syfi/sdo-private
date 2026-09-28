@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import textwrap
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 import yaml
@@ -20,9 +20,6 @@ from benchmarks.sregym.runner.experiment import (
     resolve_config,
     resolve_tasklist,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _write_toml(tmp_path: Path, content: str) -> Path:
@@ -803,3 +800,40 @@ def test_pipeline_stages_inherit_the_kind_worker_nodes() -> None:
 def test_kind_worker_nodes_must_not_be_negative() -> None:
     with pytest.raises(ValueError, match="kind_worker_nodes"):
         RunnerEnv(kind_worker_nodes=-1)
+
+
+def test_submit_done_returns_feedback_stays_unread_outside_its_own_plumbing() -> None:
+    """Audit finding #17: ``SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK`` is written into the
+    subprocess env by ``config_to_env`` (and round-tripped by ``resolve_config`` and TOML
+    load/serialize), but no adapter, protocol, SDO, or controller code reads it back — the
+    config field promises a "submit done returns feedback" knob that has no effect on
+    anything. This is dead plumbing, tracked rather than silently expanded: it fails if a
+    consumer starts reading the variable (or the field) without updating this test to say
+    the gap was closed, and fails if the name drifts between the env var and the field.
+    """
+    root = Path(__file__).resolve().parents[5]
+    needles = ("SREGYM_SUBMIT_DONE_RETURNS_FEEDBACK", "submit_done_returns_feedback")
+    consumer_dirs = (
+        root / "benchmarks" / "sregym" / "adapter",
+        root / "benchmarks" / "sregym" / "protocol",
+        root / "benchmarks" / "sregym" / "fastloop",
+        root / "sdo",
+        root / "controller",
+        root / "libs",
+    )
+    readers = [
+        path
+        for directory in consumer_dirs
+        for path in directory.rglob("*.py")
+        if any(needle in path.read_text(encoding="utf-8") for needle in needles)
+    ]
+    assert readers == [], f"{needles} is meant to be dead outside runner/experiment.py and pipeline.py: {readers}"
+
+    # The only two places that may legitimately name it: the field definition/plumbing in
+    # experiment.py, and pipeline.py's RunnerEnv construction from a stage's [env] table.
+    owners = (
+        root / "benchmarks" / "sregym" / "runner" / "experiment.py",
+        root / "benchmarks" / "sregym" / "runner" / "pipeline.py",
+    )
+    for owner in owners:
+        assert any(needle in owner.read_text(encoding="utf-8") for needle in needles), owner
