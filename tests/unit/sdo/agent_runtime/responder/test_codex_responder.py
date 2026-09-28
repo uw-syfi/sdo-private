@@ -311,6 +311,25 @@ def test_every_path_verifies_with_incident_status_before_submitting(tmp_path: Pa
     assert "Run the playbook's verification and `python3 -m sdo incident status`" in warm
 
 
+def test_every_path_prefers_one_blocking_wait_over_manual_poll_turns(tmp_path: Path) -> None:
+    """Each check-in on a backgrounded command is a separate model turn that resends the whole context.
+
+    Audited rollouts (``benchmarks/sregym/experiments/assurance/EFFICIENCY_DECISIONS.md``) show the
+    responder issuing a short-yield exec check, getting nothing new, and returning later in a fresh
+    turn to check again; each such turn cost about as much context as any other turn in the session.
+    The prompt should steer the responder toward a single command that blocks until done instead.
+    """
+    _write_memory(tmp_path)
+    _own_playbook(tmp_path)
+    cold = IncidentRequest.model_validate_json(_fixture("incident_request.json"))
+
+    for prompt in (_responder_prompt(cold), _responder_prompt(_warm_request(tmp_path))):
+        assert "one blocking command" in prompt
+        assert "checking in on a backgrounded" in prompt
+        assert "kubectl rollout status" in prompt
+        assert "--timeout" in prompt
+
+
 def test_prompt_requires_helper_objects_to_carry_the_cleanup_label() -> None:
     prompt = _responder_prompt(IncidentRequest.model_validate_json(_fixture("incident_request.json")))
 
@@ -413,4 +432,25 @@ def test_prompt_inlines_a_small_health_objective(tmp_path: Path) -> None:
     assert "do not re-read it" in prompt
 
     (tmp_path / ".sdo" / "goal.md").write_text("---\nowner: human\n---\n" + "y" * 20_000, encoding="utf-8")
+    assert "y" * 5_000 not in _responder_prompt(request)
+
+
+def test_prompt_inlines_a_small_architecture_summary(tmp_path: Path) -> None:
+    """Without this, every incident pays a fresh shell round-trip to read `.sdo/arch.md` (observed in an
+    audited rollout as part of a single 22K-character combined `cat`/`rg` dump; see
+    ``benchmarks/sregym/experiments/assurance/EFFICIENCY_DECISIONS.md``). Inlining it, like `goal.md`
+    already is, gives the responder the same content without that extra model turn.
+    """
+    _write_memory(tmp_path)
+    request = IncidentRequest.model_validate_json(_fixture("incident_request.json")).model_copy(
+        update={"repository_worktree": str(tmp_path)}
+    )
+
+    prompt = _responder_prompt(request)
+
+    assert "The entrypoint uses the configuration service." in prompt
+    assert ".sdo/arch.md" in prompt
+    assert "do not re-read it" in prompt
+
+    (tmp_path / ".sdo" / "arch.md").write_text("---\nowner: deployer\n---\n" + "y" * 20_000, encoding="utf-8")
     assert "y" * 5_000 not in _responder_prompt(request)
