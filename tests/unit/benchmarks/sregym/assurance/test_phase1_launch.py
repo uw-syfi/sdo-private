@@ -22,10 +22,10 @@ PHASE1_HEADERS = {
     "sdo_codex_luna_assure_p1_b.toml": "assure-w1",
     "sdo_codex_luna_assure_p1_c.toml": "assure-w2",
     "sdo_codex_luna_assure_p1_d.toml": "assure-w3",
-    "codex_luna_assure_p1_stock_1.toml": "assure-w4",
-    "codex_luna_assure_p1_stock_2.toml": "assure-w5",
-    "codex_luna_verify_assure_p1_1.toml": "assure-w6",
-    "codex_luna_verify_assure_p1_2.toml": "assure-w7",
+    "codex_luna_verify_assure_p1_1.toml": "assure-w4",
+    "codex_luna_verify_assure_p1_2.toml": "assure-w5",
+    "codex_luna_verify_assure_p1_3.toml": "assure-w6",
+    "codex_luna_verify_assure_p1_4.toml": "assure-w7",
 }
 
 
@@ -65,12 +65,11 @@ def test_bind_lanes_binds_every_config_to_its_declared_lane_and_arm(tmp_path: Pa
     bindings = bind_lanes(phase1)
     assert set(bindings) == {f"assure-w{n}" for n in range(8)}
     assert bindings["assure-w0"].arm == "sdo_codex"
-    assert bindings["assure-w4"].arm == "codex_stock"
-    assert bindings["assure-w6"].arm == "codex_verify"
+    assert bindings["assure-w4"].arm == "codex_verify"
+    assert bindings["assure-w7"].arm == "codex_verify"
     # Each arm's per-lane budget is its PLAN.md (d) row total, divided across its lanes.
     assert bindings["assure-w0"].budget_percent == pytest.approx(6.2 / 4)
-    assert bindings["assure-w4"].budget_percent == pytest.approx(2.1 / 2)
-    assert bindings["assure-w6"].budget_percent == pytest.approx(2.7 / 2)
+    assert bindings["assure-w4"].budget_percent == pytest.approx(2.7 / 4)
 
 
 def test_bind_lanes_rejects_a_missing_lane(tmp_path: Path) -> None:
@@ -350,13 +349,14 @@ def test_run_matrix_aborts_only_the_lane_that_exceeds_its_own_budget(tmp_path: P
         process_runner=process_runner,
         max_ticks=17,
     )
-    # Stock lanes have the smallest per-lane budget (2.1/2=1.05, abort at 1.575);
+    # The (sole) Codex arm's per-lane budget is 2.7/4=0.675, abort at 1.0125;
     # by tick 17 (now=16) the shared quota has grown by 1.6, past that but not
-    # past the verify (1.35*1.5=2.025) or SDO (1.55*1.5=2.325) thresholds.
+    # past the SDO threshold (1.55*1.5=2.325).
     assert state.lanes["assure-w4"].status == "aborted_budget"
     assert state.lanes["assure-w5"].status == "aborted_budget"
+    assert state.lanes["assure-w6"].status == "aborted_budget"
+    assert state.lanes["assure-w7"].status == "aborted_budget"
     assert state.lanes["assure-w0"].status == "running"
-    assert state.lanes["assure-w6"].status == "running"
     assert process_runner.handles["assure-w4"].terminated
     assert not process_runner.handles["assure-w0"].terminated
 

@@ -77,17 +77,18 @@ LANE_HEADER = re.compile(r"lane (assure-w(\d))")
 LANE_COUNT = 8
 LANE_PREFIX = "assure-w"
 
-#: The eight PLAN.md (d) matrix lanes, grouped by arm (D11).
+#: The eight PLAN.md (d) matrix lanes, grouped by arm (D11). Phase 1 has no
+#: stock (no-verify) Codex arm (user decision, 2026-09-28): the sole Codex arm
+#: is the default, concise-verify baseline, on w4-w7.
 ARM_OF_PREFIX: tuple[tuple[str, str], ...] = (
     ("sdo_codex_luna_assure_p1_", "sdo_codex"),
-    ("codex_luna_assure_p1_stock_", "codex_stock"),
     ("codex_luna_verify_assure_p1_", "codex_verify"),
 )
 
 #: PLAN.md (d) "Phase 1 matrix" row totals (weekly-% of the shared Codex quota,
 #: across every lane of that arm) and how many lanes share each row.
-ARM_BUDGET_PERCENT: dict[str, float] = {"sdo_codex": 6.2, "codex_stock": 2.1, "codex_verify": 2.7}
-ARM_LANE_COUNT: dict[str, int] = {"sdo_codex": 4, "codex_stock": 2, "codex_verify": 2}
+ARM_BUDGET_PERCENT: dict[str, float] = {"sdo_codex": 6.2, "codex_verify": 2.7}
+ARM_LANE_COUNT: dict[str, int] = {"sdo_codex": 4, "codex_verify": 4}
 
 LaneStatus = Literal["pending", "running", "done", "failed", "aborted_budget", "aborted_matrix_stop"]
 MatrixStatus = Literal["pending", "running", "completed", "aborted_preflight", "aborted_quota_start", "stopped_quota"]
