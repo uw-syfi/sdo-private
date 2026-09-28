@@ -60,6 +60,10 @@ class PipelineConfig:
     name: str = ""
     #: Application workspace that seeds a stage-0 run which does not chain one.
     workspace_seed: str = ""
+    #: Record a stage whose benchmark ran but whose oracles failed as
+    #: ``agent_failure`` and keep chaining, instead of aborting the pipeline.
+    #: A measurement pipeline needs every later stage; a harness crash still aborts.
+    continue_on_agent_failure: bool = False
     defaults: dict[str, Any] = dataclasses.field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
     stages: list[StageConfig] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
@@ -77,7 +81,7 @@ class StageState:
 
     index: int
     name: str
-    status: str = "pending"  # pending | running | completed | failed
+    status: str = "pending"  # pending | running | completed | agent_failure | failed
     experiment_dir: str = ""
     error: str = ""
 
@@ -138,6 +142,7 @@ def load_pipeline_config(path: Path) -> PipelineConfig:
     return PipelineConfig(
         name=pipeline_raw.get("name", ""),
         workspace_seed=str(pipeline_raw.get("workspace_seed", "")),
+        continue_on_agent_failure=bool(pipeline_raw.get("continue_on_agent_failure", False)),
         defaults=defaults_raw,
         stages=stages,
     )
@@ -416,6 +421,10 @@ def _serialize_pipeline_config(config: PipelineConfig) -> str:
 
     lines.append("[pipeline]")
     lines.append(f"name = {_toml_value(config.name)}")
+    if config.workspace_seed:
+        lines.append(f"workspace_seed = {_toml_value(config.workspace_seed)}")
+    if config.continue_on_agent_failure:
+        lines.append(f"continue_on_agent_failure = {_toml_value(config.continue_on_agent_failure)}")
 
     if config.defaults:
         lines.append("")

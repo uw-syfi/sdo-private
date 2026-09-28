@@ -298,8 +298,24 @@ def _run_stage(
         )
         if stage_error is not None:
             print(f"  ⚠️  Stage artifacts failed validation: {stage_error}", flush=True)
-            return 1
+            _write_stage_failure(stage_exp_dir, stage_error)
+            return STAGE_ARTIFACTS_FAILED
     return result.returncode
+
+
+#: ``_run_stage`` result when the benchmark exited cleanly but its artifacts
+#: failed validation (an oracle failed, or no valid receipt): an agent outcome.
+STAGE_ARTIFACTS_FAILED = 2
+_STAGE_FAILURE_FILENAME = "stage_failure.txt"
+
+
+def _write_stage_failure(stage_exp_dir: Path, error: str) -> None:
+    (stage_exp_dir / _STAGE_FAILURE_FILENAME).write_text(error + "\n", encoding="utf-8")
+
+
+def _read_stage_failure(stage_exp_dir: Path) -> str:
+    path = stage_exp_dir / _STAGE_FAILURE_FILENAME
+    return path.read_text(encoding="utf-8").strip() if path.is_file() else ""
 
 
 def _csv_semantic_success(row: dict[str, str | None], stage: str) -> bool:
@@ -533,12 +549,12 @@ def run_pipeline(
         for i, stage_cfg in enumerate(config.stages):
             stage_state = state.stages[i]
 
-            if stage_state.status == "completed":
+            if stage_state.status in ("completed", "agent_failure"):
                 if stage_state.experiment_dir:
                     prev_kb_dir = str(Path(stage_state.experiment_dir) / "kb")
                 print(
                     f"Stage {i}/{len(config.stages) - 1}: "
-                    f"{stage_cfg.name or f'stage_{i}'} [skipped — already completed]"
+                    f"{stage_cfg.name or f'stage_{i}'} [skipped — already {stage_state.status}]"
                 )
                 continue
 
@@ -620,6 +636,18 @@ def run_pipeline(
                 print(f"Resume with: run_sregym.sh {pipeline_dir}")
                 return 1
 
+            if returncode == STAGE_ARTIFACTS_FAILED and config.continue_on_agent_failure:
+                stage_state.status = "agent_failure"
+                stage_state.error = _read_stage_failure(stage_exp_dir) or "stage artifacts failed validation"
+                write_pipeline_state(state, pipeline_dir)
+                if persistent_state.exists():
+                    # Same state an abort plus resume leaves: the next stage
+                    # installs a fresh controller over the chained workspace.
+                    _teardown_persistent_controllers(persistent_state, project_root, hook_env)
+                prev_kb_dir = str(stage_exp_dir / "kb")
+                print(f"\nStage {i} agent failure ({stage_state.error}); continuing the pipeline.\n")
+                continue
+
             if returncode != 0:
                 stage_state.status = "failed"
                 stage_state.error = f"exit code {returncode}"
@@ -656,6 +684,8 @@ def run_pipeline(
         if deferred_receipt_stages or persistent_state.exists():
             teardown_error = _teardown_persistent_controllers(persistent_state, project_root, hook_env)
             for index, stage_dir in deferred_receipt_stages:
+                if state.stages[index].status == "agent_failure":
+                    continue  # already an agent outcome; its receipt is not expected to validate
                 # Each stage is judged by its own published receipt; a teardown
                 # failure is reported with the stages it left without one.
                 receipt_error = _stage_results_error(stage_dir, require_strict_receipt=True)

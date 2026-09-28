@@ -266,6 +266,22 @@ def _pipeline(root: Path, stages: list[dict[str, str]]) -> Path:
     return root
 
 
+def test_a_recorded_agent_failure_stage_ends_its_pipeline_normally(tmp_path: Path) -> None:
+    """A pipeline that continued past an agent failure ran to its end; no receipt is still pending."""
+
+    pipeline = _pipeline(
+        tmp_path / "p",
+        [{"name": "one", "status": "agent_failure"}, {"name": "two", "status": "completed"}],
+    )
+    stage = Run(agent="sdo_codex", receipt=None).write(pipeline / "stage_0_one")
+    resolution = next(stage.rglob("run_1")) / "sdo_incident_resolution.json"
+    resolution.write_text(json.dumps({"incident_id": "i", "responder_session_id": "resp1"}), encoding="utf-8")
+
+    result = classify_path(pipeline / "stage_0_one", policy=LEGACY)[0]
+
+    assert not any("deferred strict receipt" in reason for reason in result.reasons)
+
+
 def test_a_stage_whose_pipeline_stopped_before_its_receipt_was_published_is_invalid_infra(tmp_path: Path) -> None:
     pipeline = _pipeline(
         tmp_path / "p",

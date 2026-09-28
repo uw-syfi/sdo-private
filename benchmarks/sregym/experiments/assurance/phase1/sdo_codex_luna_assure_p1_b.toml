@@ -26,6 +26,7 @@
 [pipeline]
 name = "assure-p1-sdo-b"
 workspace_seed = "/mnt/data/shli/assure-runs/seed-dd6bc81"
+continue_on_agent_failure = true  # a failed incident is data; keep the rotation going
 
 [defaults]
 agent = "sdo_codex"

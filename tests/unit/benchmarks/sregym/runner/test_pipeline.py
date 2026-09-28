@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import textwrap
 from pathlib import Path
@@ -20,6 +21,7 @@ from benchmarks.sregym.runner.pipeline import (
     is_pipeline_config,
     load_pipeline_config,
     merge_stage_config,
+    read_pipeline_snapshot,
     read_pipeline_state,
     reset_stages_for_rerun,
     write_pipeline_snapshot,
@@ -549,6 +551,31 @@ class TestPipelineState:
         assert loaded.stages[0].experiment_dir == "/tmp/a"
         assert loaded.stages[1].status == "pending"
 
+    def test_snapshot_keeps_the_workspace_seed_and_the_agent_failure_policy(self, tmp_path: Path) -> None:
+        """A resume reads the snapshot: dropping the seed would rerun stage 0 as a fresh lifecycle."""
+
+        config = PipelineConfig(
+            name="p",
+            workspace_seed="/seeds/lifecycle",
+            continue_on_agent_failure=True,
+            stages=[StageConfig(name="s0", chain_kb=False)],
+        )
+        write_pipeline_snapshot(config, tmp_path)
+
+        loaded = read_pipeline_snapshot(tmp_path)
+
+        assert loaded.workspace_seed == "/seeds/lifecycle"
+        assert loaded.continue_on_agent_failure is True
+
+    def test_agent_failure_policy_loads_from_toml_and_defaults_off(self, tmp_path: Path) -> None:
+        on = tmp_path / "on.toml"
+        on.write_text('[pipeline]\nname = "p"\ncontinue_on_agent_failure = true\n\n[[stages]]\nname = "s"\n')
+        off = tmp_path / "off.toml"
+        off.write_text('[pipeline]\nname = "p"\n\n[[stages]]\nname = "s"\n')
+
+        assert load_pipeline_config(on).continue_on_agent_failure is True
+        assert load_pipeline_config(off).continue_on_agent_failure is False
+
     def test_has_pipeline_state(self, tmp_path: Path) -> None:
         assert has_pipeline_state(tmp_path) is False
         state = PipelineState(stages=[StageState(index=0, name="a")])
@@ -801,6 +828,106 @@ class TestPipelineRunner:
         loaded_state = read_pipeline_state(pipeline_dir)
         assert loaded_state.stages[0].status == "failed"
         assert loaded_state.stages[1].status == "pending"
+
+    @staticmethod
+    def _write_mitigation_failure(argv: list[str]) -> None:
+        experiment_dir = Path(argv[argv.index("--experiment-dir") + 1])
+        problem_run = experiment_dir / "problem_runs" / "run"
+        problem_run.mkdir(parents=True, exist_ok=True)
+        (problem_run / "results_test.csv").write_text(
+            '"Diagnosis.success","Mitigation.success","agent_error","agent_exit_code","problem_id"\n'
+            'True,False,False,0,"problem"\n',
+            encoding="utf-8",
+        )
+
+    def _run(self, config, sregym_dir, tmp_path: Path, mock_run, state=None):
+        pipeline_dir = tmp_path / "pipeline"
+        pipeline_dir.mkdir(exist_ok=True)
+        state = state or PipelineState(
+            stages=[StageState(index=i, name=stage.name) for i, stage in enumerate(config.stages)]
+        )
+        with patch("subprocess.run", side_effect=mock_run):
+            write_pipeline_state(state, pipeline_dir)
+            write_pipeline_snapshot(config, pipeline_dir)
+            rc = runner_mod.run_pipeline(
+                config, project_root=tmp_path, sregym_dir=sregym_dir, pipeline_dir=pipeline_dir, state=state
+            )
+        return rc, read_pipeline_state(pipeline_dir)
+
+    def test_an_oracle_failure_is_recorded_and_the_chain_continues_when_the_policy_allows_it(
+        self, sregym_dir, tmp_path: Path
+    ) -> None:
+        """One agent failure must not discard every later stage of a measurement pipeline."""
+
+        config = dataclasses.replace(self._make_config(), continue_on_agent_failure=True)
+        calls: list[list[str]] = []
+
+        def mock_run(argv, cwd=None, env=None):
+            calls.append(argv)
+            if len(calls) == 1:
+                self._write_mitigation_failure(argv)
+            else:
+                self._write_success_result(argv)
+            return type("Result", (), {"returncode": 0})()
+
+        rc, loaded = self._run(config, sregym_dir, tmp_path, mock_run)
+
+        assert rc == 0
+        assert len(calls) == 2
+        assert loaded.stages[0].status == "agent_failure"
+        assert "Mitigation.success" in loaded.stages[0].error
+        assert loaded.stages[1].status == "completed"
+
+    def test_an_oracle_failure_still_aborts_by_default(self, sregym_dir, tmp_path: Path) -> None:
+        calls: list[list[str]] = []
+
+        def mock_run(argv, cwd=None, env=None):
+            calls.append(argv)
+            self._write_mitigation_failure(argv)
+            return type("Result", (), {"returncode": 0})()
+
+        rc, loaded = self._run(self._make_config(), sregym_dir, tmp_path, mock_run)
+
+        assert rc == 1
+        assert len(calls) == 1
+        assert loaded.stages[0].status == "failed"
+
+    def test_a_harness_crash_aborts_even_when_agent_failures_may_continue(self, sregym_dir, tmp_path: Path) -> None:
+        config = dataclasses.replace(self._make_config(), continue_on_agent_failure=True)
+        calls: list[list[str]] = []
+
+        def mock_run(argv, cwd=None, env=None):
+            calls.append(argv)
+            return type("Result", (), {"returncode": 1})()
+
+        rc, loaded = self._run(config, sregym_dir, tmp_path, mock_run)
+
+        assert rc == 1
+        assert len(calls) == 1
+        assert loaded.stages[0].status == "failed"
+
+    def test_resume_skips_a_recorded_agent_failure(self, sregym_dir, tmp_path: Path) -> None:
+        config = dataclasses.replace(self._make_config(), continue_on_agent_failure=True)
+        stage0_dir = tmp_path / "pipeline" / "stage_0_build"
+        (stage0_dir / "kb").mkdir(parents=True)
+        calls: list[list[str]] = []
+
+        def mock_run(argv, cwd=None, env=None):
+            calls.append(argv)
+            self._write_success_result(argv)
+            return type("Result", (), {"returncode": 0})()
+
+        state = PipelineState(
+            stages=[
+                StageState(index=0, name="build", status="agent_failure", experiment_dir=str(stage0_dir)),
+                StageState(index=1, name="eval"),
+            ]
+        )
+        rc, loaded = self._run(config, sregym_dir, tmp_path, mock_run, state=state)
+
+        assert rc == 0
+        assert len(calls) == 1
+        assert loaded.stages[0].status == "agent_failure"
 
     def test_resume_skips_completed(self, sregym_dir, tmp_path: Path) -> None:
         config = self._make_config()

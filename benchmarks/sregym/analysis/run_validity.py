@@ -520,7 +520,8 @@ def _pipeline_finished(experiment_dir: Path) -> bool:
         return True
     stages = cast("list[dict[str, Any]]", state.get("stages") or [])
     return all(
-        stage.get("status") == "completed" or (stage.get("status") == "failed" and stage.get("error") != "interrupted")
+        stage.get("status") in ("completed", "agent_failure")
+        or (stage.get("status") == "failed" and stage.get("error") != "interrupted")
         for stage in stages
     )
 
