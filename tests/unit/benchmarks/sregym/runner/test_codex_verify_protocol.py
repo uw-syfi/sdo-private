@@ -18,6 +18,7 @@ import pytest
 
 from benchmarks.sregym.runner.codex_baseline import (
     CONCISE_VERIFY_PROMPT,
+    EXEC_DISCLOSURE_PROMPT,
     FULL_VERIFY_PROMPT,
     PROMPT_APPENDIX_ENV,
     VERIFY_PROTOCOL_PROMPT,
@@ -174,6 +175,59 @@ def test_verify_protocol_survives_the_snapshot(tmp_path: Path) -> None:
     snapshot.write_text(_serialize_config(load_experiment_config(source)), encoding="utf-8")
 
     assert load_experiment_config(snapshot).agent_config["codex"] == {"verify_protocol": "full"}
+
+
+# --------------------------------------------------------------------------- exec disclosure
+
+
+def test_the_exec_disclosure_is_off_unless_asked_for() -> None:
+    assert CodexBaselineConfig().exec_disclosure is False
+    assert CodexBaselineConfig().prompt_appendix() == CONCISE_VERIFY_PROMPT
+
+
+def test_the_exec_disclosure_is_its_own_block_after_the_verify_text() -> None:
+    concise = CodexBaselineConfig(exec_disclosure=True).prompt_appendix()
+    assert concise == CONCISE_VERIFY_PROMPT + "\n" + EXEC_DISCLOSURE_PROMPT
+
+    stock = CodexBaselineConfig(verify_protocol="none", exec_disclosure=True).prompt_appendix()
+    assert stock == EXEC_DISCLOSURE_PROMPT
+
+
+@pytest.mark.parametrize("verb", ["kubectl exec", "attach", "port-forward", "cp"])
+def test_the_exec_disclosure_names_every_unavailable_verb(verb: str) -> None:
+    assert verb in EXEC_DISCLOSURE_PROMPT
+
+
+@pytest.mark.parametrize("alternative", ["Kubernetes API", "logs", "HTTP requests from a helper pod"])
+def test_the_exec_disclosure_names_the_neutral_alternatives(alternative: str) -> None:
+    assert alternative in EXEC_DISCLOSURE_PROMPT
+
+
+def test_the_exec_disclosure_covers_the_verbs_sdo_forbids_its_responder() -> None:
+    from sdo.operational_memory.validation import RESPONDER_FORBIDDEN_KUBECTL_VERBS
+
+    for verb in RESPONDER_FORBIDDEN_KUBECTL_VERBS:
+        assert verb in EXEC_DISCLOSURE_PROMPT
+
+
+def test_the_exec_disclosure_rejects_a_non_boolean() -> None:
+    with pytest.raises(TypeError, match="exec_disclosure"):
+        CodexBaselineConfig(exec_disclosure="yes")  # type: ignore[arg-type]
+
+
+def test_the_exec_disclosure_reaches_sregym_in_the_appendix(tmp_path: Path) -> None:
+    env = config_to_env(_codex({"codex": {"verify_protocol": "concise", "exec_disclosure": True}}), tmp_path)
+    assert env[PROMPT_APPENDIX_ENV].endswith(EXEC_DISCLOSURE_PROMPT)
+
+
+def test_no_codex_baseline_prompt_carries_a_benchmark_tailored_token() -> None:
+    import re
+
+    from tests.unit.test_benchmark_neutrality import TAILORED_TOKENS
+
+    for text in (CONCISE_VERIFY_PROMPT, FULL_VERIFY_PROMPT, EXEC_DISCLOSURE_PROMPT):
+        for pattern, why in TAILORED_TOKENS:
+            assert not re.search(pattern, text, re.IGNORECASE), why
 
 
 class _FakeDocker:

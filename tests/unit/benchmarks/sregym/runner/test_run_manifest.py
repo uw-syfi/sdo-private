@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from benchmarks.sregym.runner import runner as runner_mod
-from benchmarks.sregym.runner.codex_baseline import CONCISE_VERIFY_PROMPT, FULL_VERIFY_PROMPT
+from benchmarks.sregym.runner.codex_baseline import CONCISE_VERIFY_PROMPT, EXEC_DISCLOSURE_PROMPT, FULL_VERIFY_PROMPT
 from benchmarks.sregym.runner.experiment import ExperimentConfig, RunnerEnv, write_snapshot
 from benchmarks.sregym.runner.manifest import MANIFEST_NAME, build_run_manifest, read_run_manifest, write_run_manifest
 from benchmarks.sregym.runner.pipeline import PipelineConfig, StageConfig
@@ -109,6 +109,35 @@ def _codex_config(agent_config: dict | None = None) -> ExperimentConfig:
         env=RunnerEnv(judge_model_id="codex-gpt-6-luna", kind_worker_nodes=1),
         agent_config=agent_config or {},
     )
+
+
+def test_manifest_records_whether_the_exec_disclosure_was_on(
+    fake_host: FakeHost, sregym_dir: Path, tmp_path: Path
+) -> None:
+    _git(fake_host)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    config = _codex_config({"codex": {"verify_protocol": "concise", "exec_disclosure": True}})
+    snapshot = write_snapshot(config, run_dir)
+    env = {"SREGYM_KIND_CLUSTER_PREFIX": "luna-w"}
+    report = run_preflight([config], project_root=REPO_ROOT, sregym_dir=sregym_dir, env=env, host=fake_host)
+
+    manifest = build_run_manifest(
+        run_dir=run_dir,
+        configs=[config],
+        snapshot=snapshot,
+        report=report,
+        host=fake_host,
+        project_root=REPO_ROOT,
+        sregym_dir=sregym_dir,
+        env=env,
+    )
+
+    (entry,) = manifest["codex_prompt_appendix"]
+    assert entry["mode"] == "concise"
+    assert entry["exec_disclosure"] is True
+    expected = CONCISE_VERIFY_PROMPT + "\n" + EXEC_DISCLOSURE_PROMPT
+    assert entry["sha256"] == hashlib.sha256(expected.encode("utf-8")).hexdigest()
 
 
 @pytest.mark.parametrize(

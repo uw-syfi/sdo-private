@@ -63,6 +63,15 @@ created (for example, pods used to send test requests or run debugging commands)
 gone.
 """
 
+#: Environment disclosure (``exec_disclosure = true``), kept separate from the
+#: verify text. It states the same limit SDO's responder works under (its RBAC
+#: has no exec/attach/port-forward, and its prompt says so), so both arms know
+#: the environment's real capabilities. It names no fault, resource or decoy.
+EXEC_DISCLOSURE_PROMPT = """\
+ENVIRONMENT: `kubectl exec`, `kubectl attach`, `kubectl port-forward` and `kubectl cp` are unavailable in this \
+environment. Inspect state through the Kubernetes API, logs, and HTTP requests from a helper pod.
+"""
+
 #: Backward-compatible alias: older tests and code imported this name for the full protocol.
 VERIFY_PROTOCOL_PROMPT = FULL_VERIFY_PROMPT
 
@@ -78,8 +87,12 @@ class CodexBaselineConfig:
     """``[agent.codex]`` settings of an experiment config."""
 
     verify_protocol: VerifyProtocolMode = "concise"
+    #: Append :data:`EXEC_DISCLOSURE_PROMPT` (off by default; phase-1 configs turn it on).
+    exec_disclosure: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(cast("object", self.exec_disclosure), bool):
+            raise TypeError(f"agent.codex.exec_disclosure must be a boolean, got {self.exec_disclosure!r}")
         value = cast("object", self.verify_protocol)  # TOML input: a legacy bool or any other type may arrive
         if isinstance(value, bool):
             object.__setattr__(self, "verify_protocol", _LEGACY_BOOL_MODE[value])
@@ -102,7 +115,10 @@ class CodexBaselineConfig:
 
     def prompt_appendix(self) -> str:
         """Text SREGym appends to the Codex instruction; empty keeps the stock prompt."""
-        return _PROMPT_BY_MODE[self.verify_protocol]
+        blocks = [_PROMPT_BY_MODE[self.verify_protocol]]
+        if self.exec_disclosure:
+            blocks.append(EXEC_DISCLOSURE_PROMPT)
+        return "\n".join(block for block in blocks if block)
 
 
 class PromptAppendixImageError(RuntimeError):

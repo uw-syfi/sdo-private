@@ -1,0 +1,53 @@
+# Phase-1 Codex rerun WITH the exec disclosure; otherwise identical to ../phase1/codex_luna_verify_assure_p1_4.toml
+# (the as-run, no-disclosure condition, labelled confounded_exec_proxy).
+# Assurance phase 1, Codex (concise verify) arm, attempt plan 4 of 4 (PLAN.md
+# section (d)); lane assure-w7.
+#
+# User decision (2026-09-28): the default Codex baseline arm verifies its own
+# work, concisely (benchmarks/sregym/runner/codex_baseline.py CONCISE_VERIFY_PROMPT).
+# Phase 1 has no stock (no-verify) arm; see PLAN.md's decisions log for the
+# rationale.
+#
+# Memoryless: each listed problem is an independent attempt (the runner keeps
+# repeated inline problems as separate runs, in order). The four lanes of this
+# arm together give 5 attempts per phase-1 problem (7 + 6 + 6 + 6 = 25), cut
+# from one repeating S1 S2 S3 K1 K2 cycle so problem and lane are not confounded.
+#
+# Models (user rule, 2026-09-28): Codex gpt-6-luna at medium effort; the SREGym
+# judge is codex-gpt-6-luna at the Codex CLI backend's default xhigh, never
+# overridden. Enforced by tests/unit/benchmarks/sregym/runner/test_assurance_configs.py.
+#
+# DO NOT LAUNCH before the 2026-10-03 18:19 UTC quota reset and the PLAN.md
+# preconditions. Settings copied from ../../codex_luna_baseline.toml.
+
+[runner]
+agent = "codex"
+model = "gpt-6-luna"
+reasoning_effort = "medium"  # explicit on every arm; SDO pins its incident agents to medium
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+enable_summary = false
+no_inject_summary = true
+problems = [
+    "composite_frontend_selector_and_readiness_hotel_reservation",
+    "missing_configmap_hotel_reservation",
+    "wrong_service_selector_hotel_reservation",
+    "network_policy_block",
+    "composite_policy_and_rate_configmap_hotel_reservation",
+    "composite_frontend_selector_and_readiness_hotel_reservation",
+]
+
+[runner.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+kind_worker_nodes = 1  # 1 control plane + 1 worker per lane
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+docker_builder = "sdo-example"
+
+[agent.codex]
+verify_protocol = "concise"
+exec_disclosure = true  # the no-exec limit SDO's responder prompt states (coordinator decision, 2026-09-28)
