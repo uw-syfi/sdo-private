@@ -47,6 +47,13 @@ def _contract_fixture(name: str) -> str:
             OutcomeClassification.PARTIAL,
         ),
         (lambda facts: facts.model_copy(update={"fault_confirmed": False}), OutcomeClassification.FALSE_POSITIVE),
+        (
+            # A healed stray: completed, health already clear, no successful repair action and
+            # no repository commit. This must not be credited as SUCCESS/FALSE_POSITIVE or
+            # learned from (CHAOS_DECISIONS.md F16).
+            lambda facts: facts.model_copy(update={"result": facts.result.model_copy(update={"repair_actions": []})}),
+            OutcomeClassification.CANCELLED,
+        ),
         (lambda facts: facts, OutcomeClassification.SUCCESS),
     ],
 )

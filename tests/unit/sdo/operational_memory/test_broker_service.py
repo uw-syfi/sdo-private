@@ -433,7 +433,82 @@ def test_recorded_actions_policy_brokers_responder_committed_source_changes(tmp_
     assert validator.paths == ["application.txt"]
 
 
-def test_recorded_actions_closure_rejects_confirmed_repair_without_action_or_commit(tmp_path: Path) -> None:
+def _recorded_actions_closure(
+    worktree: Path, base_commit: str, incident_id: str = "inc-20260709-0001"
+) -> BrokerClosure:
+    closure = _closure(worktree, base_commit)
+    assert closure.result is not None
+    request = closure.request.model_copy(update={"incident_id": incident_id, "repair_policy": "recorded-actions"})
+    result = closure.result.model_copy(update={"incident_id": incident_id})
+    return closure.model_copy(update={"request": request, "result": result})
+
+
+def test_recorded_actions_healed_stray_closes_as_cancelled_and_does_not_learn(tmp_path: Path) -> None:
+    """N13 / F16: a completed result with no action, but health already clear, is a no-op.
+
+    A real responder that finds an already-healed transient (for example a stray 3 s
+    data-plane stall) truthfully reports this shape. It must close cleanly instead of
+    being rejected forever, and it must not be credited as a mitigation or learned from.
+    """
+
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = MustNotReflectBackend()
+    service = _service(
+        target,
+        worktrees,
+        AcceptRepairValidator(),
+        repair_policy="recorded-actions",
+        reflector=SessionReflector(backend),
+    )
+    workspace = service.prepare_incident("inc-20260709-0001")
+    closure = _recorded_actions_closure(workspace.path, workspace.base_commit)
+    closure = closure.model_copy(update={"result": closure.result.model_copy(update={"repair_actions": []})})
+
+    receipt = service.process_closure(closure)
+    service.acknowledge(receipt)
+
+    assert backend.calls == []
+    outcome = MemoryRepository(target).outcomes()[-1]
+    assert outcome.classification == OutcomeClassification.CANCELLED
+    assert outcome.repair_commit is None
+    assert "SDO-Phase: proposal" not in _git(target, "log", "--format=%B")
+
+
+def test_recorded_actions_healed_stray_does_not_block_the_next_incident(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    service = _service(target, worktrees, AcceptRepairValidator(), repair_policy="recorded-actions")
+
+    stray_workspace = service.prepare_incident("inc-20260709-0001")
+    stray_closure = _recorded_actions_closure(stray_workspace.path, stray_workspace.base_commit)
+    stray_closure = stray_closure.model_copy(
+        update={"result": stray_closure.result.model_copy(update={"repair_actions": []})}
+    )
+    stray_receipt = service.process_closure(stray_closure)
+    service.acknowledge(stray_receipt)
+
+    next_workspace = service.prepare_incident("inc-20260709-0002")
+    next_closure = _recorded_actions_closure(next_workspace.path, next_workspace.base_commit, "inc-20260709-0002")
+
+    next_receipt = service.process_closure(next_closure)
+
+    assert next_receipt.outcome_commit is not None
+    outcomes = MemoryRepository(target).outcomes()
+    assert [outcome.incident_id for outcome in outcomes] == ["inc-20260709-0001", "inc-20260709-0002"]
+    assert outcomes[0].classification == OutcomeClassification.CANCELLED
+    assert outcomes[1].classification == OutcomeClassification.SUCCESS
+
+
+def test_recorded_actions_closure_rejects_completed_claim_while_still_unhealthy(tmp_path: Path) -> None:
+    """A responder claiming success without acting while health is still bad must fail loudly."""
+
     target = tmp_path / "target"
     worktrees = tmp_path / "worktrees"
     target.mkdir()
@@ -441,16 +516,17 @@ def test_recorded_actions_closure_rejects_confirmed_repair_without_action_or_com
     _init_repository(target)
     service = _service(target, worktrees, AcceptRepairValidator(), repair_policy="recorded-actions")
     workspace = service.prepare_incident("inc-20260709-0001")
-    closure = _closure(workspace.path, workspace.base_commit)
-    assert closure.result is not None
+    closure = _recorded_actions_closure(workspace.path, workspace.base_commit)
+    still_firing = closure.final_detector_states[0].model_copy(update={"status": DetectorEvaluationStatus.FIRING})
     closure = closure.model_copy(
         update={
-            "request": closure.request.model_copy(update={"repair_policy": "recorded-actions"}),
             "result": closure.result.model_copy(update={"repair_actions": []}),
+            "final_detector_states": [still_firing],
         }
     )
+    assert not closure.health_verified
 
-    with pytest.raises(BrokerServiceError, match="successful recorded repair action"):
+    with pytest.raises(BrokerServiceError, match="not verified clear"):
         service.process_closure(closure)
 
 

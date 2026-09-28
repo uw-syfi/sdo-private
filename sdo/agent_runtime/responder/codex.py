@@ -513,6 +513,20 @@ def _verification_instructions() -> str:
     )
 
 
+def _no_action_instructions() -> str:
+    return (
+        "Some triggering findings are transient and self-heal: if `python3 -m sdo incident status` already "
+        "reports healthy before you make any change, or clears on its own while you are still investigating and "
+        "nothing you did explains it, do not fabricate a repair. Return status `cancelled`, with no repair "
+        "actions and no applied playbooks, and say in your summary that the finding had already cleared. Return "
+        "`completed` only when a repair you made or recorded was needed and applied; a `completed` result with no "
+        "successful repair action, submitted while every triggering finding is already clear, is treated as that "
+        "same no-op, never credited as a mitigation, and never learned from, so returning `cancelled` costs "
+        "nothing extra. Never return `completed` while the health objective is still failing: a completion claim "
+        "with no repair evidence is rejected outright when nothing is confirmed fixed.\n\n"
+    )
+
+
 def _responder_prompt(request: IncidentRequest) -> str:
     extra_instructions = os.getenv("SDO_RESPONDER_EXTRA_INSTRUCTIONS", "").strip()
     additional_context = (
@@ -524,6 +538,7 @@ def _responder_prompt(request: IncidentRequest) -> str:
         f"You are the SDO incident responder for incident {request.incident_id}.\n\n"
         "Work autonomously in the supplied repository and Kubernetes namespace to resolve every triggering finding. "
         f"{strategy}"
+        f"{_no_action_instructions()}"
         f"{_verification_instructions()}"
         "During this response, "
         "`.sdo/` is read-only. Do not create, edit, or delete any path under `.sdo/`. The controller independently "

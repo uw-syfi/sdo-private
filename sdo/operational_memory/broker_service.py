@@ -458,13 +458,33 @@ class BrokerService:
 
     @staticmethod
     def _validate_recorded_actions(closure: BrokerClosure) -> None:
+        """Guard a live-only "recorded-actions" repair with no repository change.
+
+        The caller only reaches this branch when nothing was committed to the
+        repository, so a ``completed`` result needs some other durable
+        evidence that it did something: at least one successful repair
+        action. The one exception is health already being clear: a responder
+        that finds an already-healed transient (for example a stray 3 s
+        data-plane stall) truthfully reports ``completed`` with no action,
+        because nothing needed repair. Rejecting that here on every retry
+        would fail the closure permanently and block every later incident
+        (CHAOS_DECISIONS.md F16), so it is left to commit; ``derive_outcome``
+        classifies it CANCELLED rather than crediting it as a mitigation, and
+        it is never reflected on. A ``completed`` claim with no action while
+        health is still not verified cannot be trusted and is rejected
+        regardless.
+        """
+
         result = closure.result
-        health_verified = closure.health_verified
-        if not health_verified or result is None or result.status.value != "completed":
+        if result is None or result.status.value != "completed":
             return
-        if not any(action.success for action in result.repair_actions):
+        if any(action.success for action in result.repair_actions):
+            return
+        if not closure.health_verified:
             raise BrokerServiceError(
-                "a confirmed repair without source changes requires at least one successful recorded repair action"
+                "a completed result reported no successful recorded repair action while the incident's health "
+                "detectors were not verified clear; a completion claim with no repair evidence cannot be "
+                "trusted when nothing is confirmed fixed"
             )
 
     def _recover_commits(self, ledger: BrokerLedger) -> BrokerLedger:
