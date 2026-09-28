@@ -838,6 +838,65 @@ def test_a_reflection_backend_that_always_fails_is_bounded_and_the_closure_compl
     assert "failed independent validation" not in str(state.reflection_no_change_reason)
 
 
+class KilledMidTurnBackend(RecordingSessionBackend):
+    """A reflection turn the broker process never finishes: for example a
+    SIGKILL during `resume()`. SystemExit is not caught by `except Exception`,
+    so it models a process death that runs no Python cleanup at all, only
+    whatever the broker already made durable before the call."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls_started = 0
+
+    def resume(self, *, session_id: str, worktree: Path, prompt: str, idempotency_key: str) -> ReflectionTurn:
+        del session_id, worktree, prompt, idempotency_key
+        self.calls_started += 1
+        raise SystemExit("broker process killed mid-reflection")
+
+
+def test_broker_killed_mid_reflection_counts_the_attempt(tmp_path: Path) -> None:
+    """A broker killed while a reflection turn is in flight must still count
+
+    the attempt, so repeated kills cannot retry the same incident forever.
+    """
+
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    validator = AcceptRepairValidator()
+    backend = KilledMidTurnBackend()
+    service = _service(target, worktrees, validator, reflector=SessionReflector(backend), max_reflection_attempts=2)
+    workspace = service.prepare_incident("inc-20260709-0001")
+    closure = _closure(workspace.path, workspace.base_commit)
+
+    with pytest.raises(SystemExit):
+        service.process_closure(closure)
+    state = service.completion_state("inc-20260709-0001")
+    assert state.reflection_attempts == 1, "a broker kill mid-turn must still count as an attempt"
+
+    # A broker restart is a fresh process reading the same persisted ledger.
+    restarted = _service(target, worktrees, validator, reflector=SessionReflector(backend), max_reflection_attempts=2)
+    with pytest.raises(SystemExit):
+        restarted.recover("inc-20260709-0001")
+    state = restarted.completion_state("inc-20260709-0001")
+    assert state.reflection_attempts == 2, "a second broker kill must also count, bounding the retries"
+    assert backend.calls_started == 2
+
+    # The retry budget is spent: a third restart must not call the backend
+    # again, and must complete the closure without learning.
+    final_service = _service(
+        target, worktrees, validator, reflector=SessionReflector(backend), max_reflection_attempts=2
+    )
+    receipt = final_service.recover("inc-20260709-0001")
+
+    assert backend.calls_started == 2
+    assert receipt.reflection_commit is not None
+    final_state = final_service.completion_state("inc-20260709-0001")
+    assert final_state.reflection_learning_decision == "no_change"
+
+
 def test_recovery_rolls_back_partial_reflection_edits_before_resuming_same_session(tmp_path: Path) -> None:
     target = tmp_path / "target"
     worktrees = tmp_path / "worktrees"
