@@ -102,6 +102,30 @@ def _classification(facts: OutcomeFacts) -> OutcomeClassification:
         return OutcomeClassification.CANCELLED
     if not facts.health_verified:
         return OutcomeClassification.PARTIAL
+    if _no_recorded_repair(facts):
+        return OutcomeClassification.CANCELLED
     if not facts.fault_confirmed:
         return OutcomeClassification.FALSE_POSITIVE
     return OutcomeClassification.SUCCESS
+
+
+def _no_recorded_repair(facts: OutcomeFacts) -> bool:
+    """A ``completed`` result that changed nothing, with health already clear.
+
+    A responder that finds an already-healed transient (for example a stray
+    self-healed data-plane stall) reports exactly this shape: ``completed``,
+    no repository commit, and no successful repair action. It is a no-op, not
+    a mitigation: crediting it as SUCCESS or FALSE_POSITIVE would be wrong,
+    and reflecting on it would learn a playbook from nothing. This is
+    reachable only when health is already verified clear (checked above), so
+    a claim of completion with no action while health is still bad is never
+    reclassified here; the broker rejects that before an outcome exists (see
+    ``BrokerService._validate_recorded_actions`` and CHAOS_DECISIONS.md F16).
+    """
+
+    return (
+        facts.result is not None
+        and facts.result.status == IncidentStatus.COMPLETED
+        and facts.repair_commit is None
+        and not any(action.success for action in facts.result.repair_actions)
+    )
