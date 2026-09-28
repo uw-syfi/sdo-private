@@ -19,9 +19,9 @@ import json
 import logging
 import subprocess
 import sys
-from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from benchmarks.sregym.assurance.harness import (
     ASSURANCE_FILENAME,
@@ -31,6 +31,9 @@ from benchmarks.sregym.assurance.harness import (
 )
 from benchmarks.sregym.assurance.scenarios import SCENARIOS, IncidentSpec
 from benchmarks.sregym.fastloop.environment import FastloopEnvironment, Images
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -112,8 +115,7 @@ def _run(args: argparse.Namespace) -> int:
     from benchmarks.sregym.fastloop.loop import LoopConfig, run_incidents
     from benchmarks.sregym.fastloop.sdo_agent import SdoAgentSettings, SdoPersistentAgent
     from benchmarks.sregym.fastloop.worker_client import SregymWorker, worker_argv
-    from sdo.agent_runtime.lifecycle import LifecycleValidationCache
-    from sdo.agent_runtime.lifecycle.operational_memory import reuse_initial_lifecycle_if_valid
+    from sdo.agent_runtime.lifecycle import LifecycleValidationCache, reuse_initial_lifecycle_if_valid
 
     environment = FastloopEnvironment.load(args.run_dir.resolve())
     images = scripted_images(args.tag)
