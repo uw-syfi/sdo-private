@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"sort"
+	"time"
 
 	"sdo.dev/controller/sdk"
 )
@@ -12,6 +13,10 @@ type FindingState struct {
 	FiringCount int         `json:"firing_count"`
 	ClearCount  int         `json:"clear_count"`
 	Active      bool        `json:"active"`
+	// FirstSeenAt is when this finding was first observed since it last
+	// cleared. It anchors a policy's MinDuration: the finding may not
+	// activate until now Sub FirstSeenAt is at least that long.
+	FirstSeenAt time.Time `json:"first_seen_at,omitempty"`
 }
 
 type FindingChanges struct {
@@ -35,11 +40,11 @@ func NewFindingStateTracker(firingThreshold int, clearThreshold int) *FindingSta
 	}
 }
 
-func (t *FindingStateTracker) SetPolicy(detectorID string, firingThreshold int, clearThreshold int) {
-	if firingThreshold < 1 || clearThreshold < 1 {
+func (t *FindingStateTracker) SetPolicy(detectorID string, firingThreshold int, clearThreshold int, minDuration time.Duration) {
+	if firingThreshold < 1 || clearThreshold < 1 || minDuration < 0 {
 		return
 	}
-	t.policies[detectorID] = sdk.PersistencePolicy{Firing: firingThreshold, Clearing: clearThreshold}
+	t.policies[detectorID] = sdk.PersistencePolicy{Firing: firingThreshold, Clearing: clearThreshold, MinDuration: minDuration}
 }
 
 func (t *FindingStateTracker) policy(detectorID string) sdk.PersistencePolicy {
@@ -49,7 +54,7 @@ func (t *FindingStateTracker) policy(detectorID string) sdk.PersistencePolicy {
 	return sdk.PersistencePolicy{Firing: t.firingThreshold, Clearing: t.clearThreshold}
 }
 
-func (t *FindingStateTracker) Observe(detectorID string, findings []sdk.Finding) FindingChanges {
+func (t *FindingStateTracker) Observe(now time.Time, detectorID string, findings []sdk.Finding) FindingChanges {
 	policy := t.policy(detectorID)
 	seen := make(map[string]sdk.Finding)
 	for _, finding := range findings {
@@ -69,10 +74,13 @@ func (t *FindingStateTracker) Observe(detectorID string, findings []sdk.Finding)
 			state = &FindingState{DetectorID: detectorID}
 			t.states[key] = state
 		}
+		if state.FiringCount == 0 {
+			state.FirstSeenAt = now
+		}
 		state.Finding = finding
 		state.ClearCount = 0
 		state.FiringCount++
-		if !state.Active && state.FiringCount >= policy.Firing {
+		if !state.Active && state.FiringCount >= policy.Firing && persistedLongEnough(policy, state.FirstSeenAt, now) {
 			state.Active = true
 			changes.Activated = append(changes.Activated, finding)
 		}
@@ -165,6 +173,16 @@ func (t *FindingStateTracker) Restore(states map[string]FindingState) {
 		copy := state
 		t.states[fingerprint] = &copy
 	}
+}
+
+// persistedLongEnough reports whether a finding first seen at firstSeenAt has
+// been observed continuously for at least policy.MinDuration as of now. A
+// zero MinDuration keeps the evaluation-count-only policy.
+func persistedLongEnough(policy sdk.PersistencePolicy, firstSeenAt time.Time, now time.Time) bool {
+	if policy.MinDuration <= 0 {
+		return true
+	}
+	return now.Sub(firstSeenAt) >= policy.MinDuration
 }
 
 func FindingFingerprint(finding sdk.Finding) string {
