@@ -197,12 +197,12 @@ class TrafficSLO(TrafficModel):
 #: Defaults applied by ``controller/sdk/traffic`` when a workload leaves them unset.
 TRAFFIC_DEFAULT_SLO = TrafficSLO(
     window=5,
-    min_samples=3,
-    max_age="30s",
-    max_error_rate=0.5,
-    max_timeout_rate=0.5,
-    latency_percentile=90,
-    max_latency="1500ms",
+    minSamples=3,
+    maxAge="30s",
+    maxErrorRate=0.5,
+    maxTimeoutRate=0.5,
+    latencyPercentile=90,
+    maxLatency="1500ms",
 )
 
 
