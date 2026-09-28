@@ -10,7 +10,14 @@ from typing import TYPE_CHECKING
 
 from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_structured_turn, turn_usage
 from sdo.agent_runtime.responder.reflection import INCIDENT_REASONING_EFFORT
-from sdo.contracts import DetectorEvaluation, DetectorEvaluationStatus, Finding, IncidentRequest, IncidentResult
+from sdo.contracts import (
+    DetectorEvaluation,
+    DetectorEvaluationStatus,
+    Finding,
+    IncidentRequest,
+    IncidentResult,
+    StateFieldChange,
+)
 from sdo.operational_memory import MemoryRepository, MemoryRepositoryError, WarmPlaybookMatch, warm_playbook_matches
 
 if TYPE_CHECKING:
@@ -386,6 +393,52 @@ def _warm_instructions(playbooks: list[WarmPlaybook], namespace: str) -> str:
     )
 
 
+def _field_change(field: StateFieldChange) -> str:
+    if field.before is None and field.after is None:
+        return field.field
+    if field.before is None:
+        return f"{field.field}: {field.after}"
+    return f"{field.field}: {field.before} -> {field.after or '(none)'}"
+
+
+def _state_changes_section(request: IncidentRequest) -> str:
+    """Render the controller's configuration diff against the last healthy baseline."""
+
+    changes = request.state_changes
+    if changes is None:
+        return ""
+    window = f"baseline {_timestamp(changes.baseline_at)}, observed {_timestamp(changes.observed_at)}"
+    unobserved = (
+        f"(not observed: {', '.join(changes.unobserved_kinds)}; changes to these kinds are unknown)\n"
+        if changes.unobserved_kinds
+        else ""
+    )
+    if not changes.changes and not changes.omitted:
+        return (
+            "No Service, workload, NetworkPolicy, ConfigMap, Secret, or RBAC object changed since the last healthy "
+            f"state ({window}). The fault is likely not a configuration change in these kinds (for example a "
+            "process, data, permission-inside-a-database, or dependency fault); objects present then existed "
+            "unchanged while the application was healthy.\n"
+            f"{unobserved}\n"
+        )
+    lines = []
+    for change in changes.changes:
+        line = f"- {change.kind}/{change.name} {change.change}"
+        if change.fields:
+            line += ": " + "; ".join(_field_change(field) for field in change.fields)
+        lines.append(line + "\n")
+    omitted = f"({changes.omitted} more changes omitted)\n" if changes.omitted else ""
+    return (
+        f"Changes since the last healthy state ({window}; SDO's deterministic configuration diff, with "
+        "ConfigMap and Secret values shown only as digests):\n"
+        f"{''.join(lines)}{omitted}{unobserved}"
+        "A change listed here happened after the application was last verified healthy and is a prime suspect. "
+        "Objects not listed existed unchanged while the application was healthy: however suspicious their names "
+        "or contents look, they did not cause this incident on their own. If no listed change explains the "
+        "symptoms, the fault is likely not a configuration change in these kinds.\n\n"
+    )
+
+
 def _verification_instructions() -> str:
     return (
         "Verify before you submit or return: after the repair, run `python3 -m sdo incident status` (exit 0 "
@@ -423,7 +476,8 @@ def _responder_prompt(request: IncidentRequest) -> str:
         f"{additional_context}\n"
         f"{_inlined_health_objective(request)}"
         f"{_detector_evidence(request)}\n"
-        f"Incident request:\n{request.model_dump_json(indent=2, exclude={'detector_history'})}\n"
+        f"{_state_changes_section(request)}"
+        f"Incident request:\n{request.model_dump_json(indent=2, exclude={'detector_history', 'state_changes'})}\n"
     )
 
 

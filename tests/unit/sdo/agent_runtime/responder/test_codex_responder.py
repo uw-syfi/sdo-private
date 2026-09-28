@@ -297,6 +297,43 @@ def test_every_path_verifies_with_incident_status_before_submitting(tmp_path: Pa
     assert "Run the playbook's verification and `python3 -m sdo incident status`" in warm
 
 
+def test_prompt_lists_changes_since_the_healthy_baseline_once() -> None:
+    request = IncidentRequest.model_validate_json(_fixture("incident_request_state_changes.json"))
+
+    prompt = _responder_prompt(request)
+
+    assert "Changes since the last healthy state (baseline 2026-09-27T10:00:00Z" in prompt
+    assert (
+        "- Service/frontend modified: selector: io.kompose.service=frontend -> "
+        "current_service_name=frontend,io.kompose.service=frontend" in prompt
+    )
+    assert "- NetworkPolicy/deny-all added: policyTypes: Ingress" in prompt
+    assert "- ConfigMap/geo-config removed" in prompt
+    assert "2 more changes omitted" in prompt
+    assert "not observed: Secret" in prompt
+    assert "existed unchanged while the application was healthy" in prompt
+    assert prompt.count("current_service_name=frontend,io.kompose.service=frontend") == 1
+
+
+def test_prompt_says_when_nothing_changed_since_the_healthy_baseline() -> None:
+    request = IncidentRequest.model_validate_json(_fixture("incident_request_state_changes.json"))
+    assert request.state_changes is not None
+    unchanged = request.model_copy(
+        update={
+            "state_changes": request.state_changes.model_copy(
+                update={"changes": [], "omitted": None, "unobserved_kinds": None}
+            )
+        }
+    )
+
+    prompt = _responder_prompt(unchanged)
+
+    assert "No Service, workload, NetworkPolicy, ConfigMap, Secret, or RBAC object changed" in prompt
+    assert "Changes since the last healthy state" not in _responder_prompt(
+        IncidentRequest.model_validate_json(_fixture("incident_request.json"))
+    )
+
+
 def test_warm_path_requires_the_incident_playbook_to_exist(tmp_path: Path) -> None:
     _write_memory(tmp_path)
     _own_playbook(tmp_path)
