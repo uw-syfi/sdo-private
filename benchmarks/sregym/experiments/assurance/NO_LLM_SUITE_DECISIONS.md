@@ -184,6 +184,21 @@ does not fail the run.
   gate now agrees with closure. Live-eval TTM on these faults will rise by
   up to that much; the coordinator should know before comparing runs across
   this change.
+- **Measured** (`singles2`, same cluster, before → after): time from the
+  correct fix to status healthy went from 3.8–4.3 s to 30.5–34.8 s on the
+  faults with a non-traffic health finding (selector, both ConfigMaps,
+  NetworkPolicy); readiness-probe and missing-service still clear in 3.9 s,
+  because their recovery waits for a rollout long enough for the detectors
+  to clear first. Closure (fix → verified) moved from 14–30 s to 43–47 s,
+  because the responder returns later and closure needs two clear
+  evaluations after it returns.
+- **Not done: expediting the clear confirmation.** `health-objective` runs
+  every 30 s and needs 2 clear evaluations. Re-running a clearing detector
+  after the 1 s `ConfirmationInterval`, as firing already does, would cut
+  most of the 30 s. It would also make the two clear evaluations observe
+  nearly the same Kubernetes state, which weakens the hysteresis the health
+  judge chose. That is the judge's policy to change, so it is left as a
+  recommendation.
 
 ## N11. SDO gap: a composite's later fault is missing from the request's diff
 
