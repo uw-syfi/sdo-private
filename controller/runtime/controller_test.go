@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -464,6 +465,14 @@ func TestResponderCompletionDoesNotCloseIncidentUntilAllHealthFindingsClear(t *t
 	if !ok || pending.Request.IncidentID != closure.Request.IncidentID {
 		t.Fatalf("verified closure was not persisted for outcome handling: %#v", pending)
 	}
+	// An in-time verification must not carry a (zero) detector review time.
+	encoded, err := json.Marshal(closure)
+	if err != nil {
+		t.Fatalf("encode closure: %v", err)
+	}
+	if strings.Contains(string(encoded), "detector_review") {
+		t.Fatalf("in-time closure carries a detector review marker: %s", encoded)
+	}
 }
 
 func TestControllerRequiresDetectorReviewWhenPostResponseHealthNeverClears(t *testing.T) {
@@ -626,10 +635,10 @@ func TestClosureAfterDetectorReviewRecordsTheLateVerification(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("late health recovery did not close the incident")
 	}
-	if closure.DetectorReviewRequiredAt.IsZero() || closure.DetectorReviewReason == "" {
+	if closure.DetectorReviewRequiredAt == nil || closure.DetectorReviewReason == "" {
 		t.Fatalf("closure hid that verification came after detector review: %#v", closure)
 	}
-	if !closure.VerifiedAt.After(closure.DetectorReviewRequiredAt) {
+	if !closure.VerifiedAt.After(*closure.DetectorReviewRequiredAt) {
 		t.Fatalf("closure verified before its review deadline: %#v", closure)
 	}
 }

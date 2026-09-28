@@ -619,8 +619,12 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 		IncidentDetectorStates: c.incidentDetectorStates(),
 		DetectedAt:             c.incidentDetectedAt, DispatchedAt: c.incidentDispatchedAt,
 		ResponderCompletedAt: c.responderCompletedAt, VerifiedAt: verifiedAt,
-		CleanedHelpers:           append([]string(nil), c.cleanedHelpers...),
-		DetectorReviewRequiredAt: c.detectorReviewRequiredAt, DetectorReviewReason: c.detectorReviewReason,
+		CleanedHelpers:       append([]string(nil), c.cleanedHelpers...),
+		DetectorReviewReason: c.detectorReviewReason,
+	}
+	if !c.detectorReviewRequiredAt.IsZero() {
+		reviewAt := c.detectorReviewRequiredAt
+		closure.DetectorReviewRequiredAt = &reviewAt
 	}
 	c.pendingClosure = cloneIncidentClosure(&closure)
 	c.closureState = "pending"
