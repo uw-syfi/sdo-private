@@ -11,3 +11,6 @@ problems = ["faulty_image_correlated"]
 judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
 worker_cpu_limit = "16"
 reuse_cluster = true
+
+[agent.codex]
+verify_protocol = "none"  # pin stock (2026-09-28): the Codex baseline now defaults to "concise" verify

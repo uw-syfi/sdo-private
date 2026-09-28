@@ -136,12 +136,17 @@ VERIFY_BASELINES = {
 
 @pytest.mark.parametrize(("name", "base_name"), sorted(VERIFY_BASELINES.items()))
 def test_codex_verify_arm_differs_from_its_base_only_in_the_protocol_flag(name: str, base_name: str) -> None:
-    """The "Codex + verify" arms isolate the verify protocol; name and problems may differ."""
+    """The "Codex + verify" arms isolate the (full) verify protocol; name and problems may differ.
+
+    The base config now pins ``verify_protocol = "none"`` explicitly, since the
+    Codex baseline defaults to ``"concise"`` (2026-09-28); without that pin it
+    would no longer be a stock baseline.
+    """
     verify = _toml(name)
     base = _toml(base_name)
 
     assert verify.pop("agent") == {"codex": {"verify_protocol": True}}
-    assert "agent" not in base
+    assert base.pop("agent") == {"codex": {"verify_protocol": "none"}}
     for raw in (verify, base):
         raw["runner"].pop("problems")
         raw["runner"].pop("name", None)
