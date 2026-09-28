@@ -130,9 +130,8 @@ def test_memory_check_includes_commits_after_an_explicit_baseline(
     assert "playbook is missing from index" in capsys.readouterr().err
 
 
-def test_memory_check_rejects_a_playbook_step_that_needs_kubectl_exec(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_memory_check_accepts_a_playbook_step_that_uses_kubectl_exec(tmp_path: Path) -> None:
+    """The responder Role grants pods/exec (exec parity), so the check no longer rejects it."""
     app = _repository(tmp_path)
     _propose_playbook(app)
     playbook = app / ".sdo" / "playbooks" / "failed-mount" / "README.md"
@@ -141,8 +140,4 @@ def test_memory_check_rejects_a_playbook_step_that_needs_kubectl_exec(
         encoding="utf-8",
     )
 
-    assert main(["--app", str(app), "--actor", "responder"]) == 1
-
-    err = capsys.readouterr().err
-    assert "responder RBAC does not grant kubectl exec" in err
-    assert "python3" in err
+    assert main(["--app", str(app), "--actor", "responder"]) == 0

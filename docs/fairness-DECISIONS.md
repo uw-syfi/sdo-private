@@ -39,13 +39,50 @@ Line numbers refer to `fec31e9`.
 | 4 | Adapter `goal.md` clause "required non-optional ConfigMap volume references remain present" (`driver.py:317-330`). It was inlined into every responder prompt. | **(a) remove** | The clause names S1's fault class. The objective now says: named Deployments remain available, named Services expose ready endpoints (ExternalName Services excepted), and representative requests succeed. It states outcomes and names only the observed topology. The objective's text changed, and so did its digest, so no earlier lifecycle can be reused with it. |
 | 5 | Judge Spec contract forced watches on NetworkPolicy, Endpoints and EndpointSlice (`agents.py:379-384`, `_canonicalize_health_registration` at `operational_memory.py:1490-1505`, bootstrap manifest). The coverage text also asked for "every … ConfigMap and NetworkPolicy" (`agents.py:395-400`). | **(b) generalize** | The watch list is now a single constant, `HEALTH_OBJECTIVE_WATCHES`. It holds every Kubernetes kind the SDK's `DetectionContext` exposes except high-churn Events: Pod, ConfigMap, Service, Deployment, ReplicaSet (new), NetworkPolicy, Endpoints, EndpointSlice. It is rendered into the prompt, the canonical Spec, the bootstrap template and the manifest. `_ensure_health_objective_watches` keeps an existing manifest in sync. The rule follows the SDK, not a fault. The coverage paragraph no longer lists kinds for the judge to think about. It says the controller canonicalizes coverage from the trusted inventory, and that coverage is provenance metadata that chooses no check. The kind set stays in `COVERED_RESOURCE_KINDS`, as the adapter's observed configuration kinds (see Disclosure). |
 | 6 | Warm path: "After restoring a missing ConfigMap or Secret …, delete the stuck pods or rollout-restart …" (`codex.py:427-429`). | **(a) remove** | This is an S1 repair tip. On the warm path, the learned playbook owns the repair. It was learned from an independently verified outcome, so any restart step it needs is written into it. |
-| 7 | Reflection prompt: the same mount-backoff tip (`reflection.py:201-203`). Its permission text said "delete NetworkPolicies" (`:183`). The responder RBAC granted NetworkPolicy get/list/delete and read-only Services (`rbac.yaml:82-84`). | Tip **(a) remove**. RBAC and permission text **(b) generalize** | The tip steered playbook content toward S1. The RBAC was shaped around the benchmark's repairs. A responder could delete a NetworkPolicy but could not edit a Service, so the only way to "fix" S2 inside the Role was to relabel pods to match the broken selector. The `sdo-responder` Role is now generic namespace-scoped edit on application resources, following Kubernetes' built-in `edit` role: get/list/watch/create/update/patch/delete on configmaps, services, pods, persistentvolumeclaims, deployments, statefulsets, daemonsets, replicasets, networkpolicies, ingresses and jobs, plus read access to pod logs, events, endpoints and endpointslices. It deliberately leaves out Secrets (values must never reach a model), RBAC objects, and pods/exec, attach and port-forward (already forbidden in playbooks). With this Role, S2 is repaired by patching the Service selector back to the source manifest. The permission text in the reflection prompt now states that Role, and `test_reflection_states_which_kubectl_verbs_the_responder_may_use` checks it against `rbac.yaml`. |
+| 7 | Reflection prompt: the same mount-backoff tip (`reflection.py:201-203`). Its permission text said "delete NetworkPolicies" (`:183`). The responder RBAC granted NetworkPolicy get/list/delete and read-only Services (`rbac.yaml:82-84`). | Tip **(a) remove**. RBAC and permission text **(b) generalize** | The tip steered playbook content toward S1. The RBAC was shaped around the benchmark's repairs. A responder could delete a NetworkPolicy but could not edit a Service, so the only way to "fix" S2 inside the Role was to relabel pods to match the broken selector. The `sdo-responder` Role is now generic namespace-scoped edit on application resources, following Kubernetes' built-in `edit` role: get/list/watch/create/update/patch/delete on configmaps, services, pods, persistentvolumeclaims, deployments, statefulsets, daemonsets, replicasets, networkpolicies, ingresses and jobs, plus read access to pod logs, events, endpoints and endpointslices. It deliberately leaves out Secrets (values must never reach a model) and RBAC objects. It originally left out pods/exec, attach and port-forward too; "Exec parity" below grants them (2026-09-28). With this Role, S2 is repaired by patching the Service selector back to the source manifest. The permission text in the reflection prompt now states that Role, and `test_reflection_states_which_kubectl_verbs_the_responder_may_use` checks it against `rbac.yaml`. |
 | 8 | State-diff text: objects not listed "however suspicious their names or contents look … did not cause this incident" (`codex.py:479-482`). | **(b) reword, keep the inference** | The inference is sound and generic: objects unchanged since the healthy baseline did not cause a new incident on their own. The "suspicious names" steer was written against the decoys and was removed. |
 | 9 | Adapter responder instructions: "require each affected Service to expose a ready endpoint for the current rollout" (`runtime.py:141-157`). | **(b) reword** | Now "verify the affected user-facing requests succeed". The rollout-agreement check and `sdo incident status` stay; both are generic. |
 | 10 | The lifecycle deployer, and the non-workspace judge, ran with `cwd` = the hosting workspace (`agents.py:527`). In SREGym that path sits under a stage directory named after the problem (for example `r1-s1-missing-configmap`). | **(b) neutral path** | `run_initial_lifecycle` clones the repository into `<tmp>/sdo-lifecycle-source-*/application` and runs every read-only lifecycle session there. The workspace judge already used `<tmp>/…/application`. Regression test: `test_lifecycle_agents_never_run_in_a_directory_named_after_the_benchmark_stage`. |
 | 11 | `TRAFFIC_AUTHORING` example used the hotel API (`/hotels`, `inDate`/`outDate`, 2015 dates) (`agents.py:148-149`), and the audit docstring used `/hotels`. | **(b) generic example** | The example is now `GET /items` with `from`/`to` date parameters. It still shows how to use `DateRange`/`DaysAfter`. |
 | 19 | Fastloop (dev only): Codex ran with `cwd` and `CODEX_HOME` under `<results>/<index>_<problem_id>/` (`fastloop/codex_agent.py:207-240`). | **(b) neutral path** | Codex now runs in a per-incident `<tmp>/codex-incident-*/workdir` with a fresh `codex_home` beside it. Logs and the prompt still go to the problem-named results directory, which Codex does not see. |
 | — | `docs/architecture.md` said the state diff hides "a benchmark's decoy ConfigMaps". | **reword** | This is a doc, not a prompt, but the wording framed a production mechanism around a decoy. |
+
+## Exec parity (2026-09-28, user-directed)
+
+**Decision.** Both phase-1 arms get the same production-realistic permissions, limited to the application
+namespace(s): read everything (get, list, watch, logs, events), edit workloads, Services, ConfigMaps and
+NetworkPolicies, and `pods/exec`, `pods/attach` and `pods/portforward`. Neither arm gets Secrets, RBAC
+objects, anything outside the application namespaces, or anything cluster-scoped.
+
+**Why.** Item 7 above left SDO's responder without exec while the Codex baseline, behind SREGym's agent proxy,
+was meant to work under a disclosure that exec was unavailable. Comparing arms with different verbs measures
+the permission difference, not memory. The user chose to give both arms exec rather than to remove it from
+both.
+
+**How.**
+
+- SDO: `controller/runtime/deploy/rbac.yaml` adds `pods/exec`, `pods/attach`, `pods/portforward` (get, create)
+  to the `sdo-responder` Role. Split-namespace installs copy that Role into the application namespace only;
+  the responder's Role in the SDO control namespace (`*-sdo`) still holds one ConfigMap rule. No ClusterRole
+  exists. The playbook validator no longer rejects `kubectl exec/attach/port-forward/cp`
+  (`RESPONDER_FORBIDDEN_KUBECTL_VERBS` is deleted) and the reflection prompt no longer tells the model those
+  verbs are unavailable.
+- Codex: SREGym's agent proxy (fork commit `e0803ea0`) forwards exec, attach and port-forward upgrades when
+  `SREGYM_AGENT_PROXY_ALLOW_EXEC=1`, scoped to the current problem's app namespaces, and denies hidden-label
+  pods. Our runner sets that variable from `[agent.codex] allow_exec = true` (default off) and records it in the
+  run manifest (`codex_prompt_appendix[].allow_exec`). Every phase-1 Codex config turns it on.
+- No disclosure text: `exec_disclosure` stays off, so both arms get the plain concise-verify prompt with no
+  environment note. The disclosure text says exec is unavailable and would now be false.
+- Tests: `test_responder_role_grants_exec_attach_and_portforward_in_the_application_namespace`,
+  `test_responder_role_still_denies_secrets_and_rbac_objects`,
+  `test_split_namespace_grants_exec_only_in_the_application_namespace`, and the runner tests in
+  `test_codex_verify_protocol.py` and `test_run_manifest.py`.
+
+**Trade-off.** `kubectl exec` can read Secret values that are mounted into a pod (as files or environment
+variables), so denying the Secrets API no longer keeps Secret values from an agent. The item 7 rationale
+("values must never reach a model") now holds for the API and not for mounted values. We accept this for
+parity with what a production on-call engineer's role usually allows, and both arms have the same reach. A
+result that cites a secret value read through exec would be a finding, not a pass.
 
 ## Regression guard
 

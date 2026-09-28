@@ -51,7 +51,6 @@ from sdo.operational_memory.validation import (
     PLACEHOLDER_RE,
     PLAYBOOK_INDEX_PATH,
     PLAYBOOK_SCRIPT_SUFFIX,
-    RESPONDER_FORBIDDEN_KUBECTL_VERBS,
     MemoryValidationError,
     MemoryValidator,
 )
@@ -67,7 +66,6 @@ __all__ = [
     "PLACEHOLDER_RE",
     "PLAYBOOK_INDEX_PATH",
     "PLAYBOOK_SCRIPT_SUFFIX",
-    "RESPONDER_FORBIDDEN_KUBECTL_VERBS",
     "REFLECTION_SESSION_MODES",
     "SOURCE_REPAIR_CHECK_COMMAND",
     "TRAFFIC_DIRECTORY",

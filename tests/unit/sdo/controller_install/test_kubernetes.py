@@ -169,6 +169,35 @@ def test_split_namespace_keeps_every_sdo_workload_and_state_out_of_the_applicati
     assert any("patch" in rule["verbs"] for rule in responder["rules"])
 
 
+def test_split_namespace_grants_exec_only_in_the_application_namespace() -> None:
+    """Exec parity: the responder may exec in the app namespace, never in the SDO control namespace."""
+    resources = controller_resources(_split_config())
+
+    def responder_role(namespace: str) -> dict[str, Any]:
+        return next(
+            resource
+            for resource in resources
+            if resource["kind"] == "Role"
+            and resource["metadata"]["name"] == "sdo-responder"
+            and resource["metadata"]["namespace"] == namespace
+        )
+
+    def subresources(role: dict[str, Any]) -> set[str]:
+        return {resource for rule in role["rules"] for resource in rule["resources"] if "/" in resource}
+
+    app = responder_role("demo")
+    assert {"pods/exec", "pods/attach", "pods/portforward"} <= subresources(app)
+    assert not {"pods/exec", "pods/attach", "pods/portforward"} & subresources(responder_role("demo-sdo"))
+    assert not any(resource["kind"] in {"ClusterRole", "ClusterRoleBinding"} for resource in resources)
+    for resource in resources:
+        if resource["kind"] != "Role" or "responder" not in resource["metadata"]["name"]:
+            continue
+        granted = {name for rule in resource["rules"] for name in rule["resources"]}
+        assert "secrets" not in granted
+        assert "roles" not in granted
+        assert "rolebindings" not in granted
+
+
 def test_split_namespace_controller_may_only_list_and_delete_pods_and_jobs_to_clean_responder_helpers() -> None:
     resources = controller_resources(_split_config())
     cleanup = next(

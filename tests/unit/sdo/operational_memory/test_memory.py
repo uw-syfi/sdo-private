@@ -19,11 +19,7 @@ from sdo.operational_memory.models import (
 )
 from sdo.operational_memory.repository import MemoryRepository
 from sdo.operational_memory.sandbox import KubernetesJobSandboxRunner, LocalSandboxRunner
-from sdo.operational_memory.validation import (
-    RESPONDER_FORBIDDEN_KUBECTL_VERBS,
-    MemoryValidationError,
-    MemoryValidator,
-)
+from sdo.operational_memory.validation import MemoryValidationError, MemoryValidator
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -823,88 +819,58 @@ RESPONSE=$(kubectl -n "$1" exec "deployment/$2" -- \\
         ("scripts/verify.sh", '#!/bin/sh\nset -eu\nkubectl port-forward -n "$1" svc/frontend 5000:5000 &\n'),
         ("scripts/verify.sh", '#!/bin/sh\nset -eu\nkubectl --namespace="$1" attach pod/x\n'),
         ("scripts/verify.sh", '#!/bin/sh\nset -eu\nkubectl cp "$1"/pod:/etc/config ./config\n'),
-        ("README.md", None),
     ],
 )
-def test_validator_rejects_playbook_steps_the_responder_rbac_forbids(
-    tmp_path: Path, relative: str, content: str | None
+def test_validator_accepts_playbook_steps_that_use_exec_the_responder_role_now_grants(
+    tmp_path: Path, relative: str, content: str
 ) -> None:
+    """Exec parity: the responder Role grants pods/exec, attach and portforward, so playbooks may use them."""
     baseline = tmp_path / "baseline"
     candidate = tmp_path / "candidate"
     _write_memory(baseline)
     shutil.copytree(baseline, candidate)
-    playbook = candidate / ".sdo" / "playbooks" / "missing-configmap"
-    target = playbook / relative
+    target = candidate / ".sdo" / "playbooks" / "missing-configmap" / relative
     target.parent.mkdir(parents=True, exist_ok=True)
-    if content is None:
-        content = target.read_text(encoding="utf-8") + (
-            "\nVerify: `kubectl -n <NAMESPACE> exec deploy/<ENTRYPOINT> -- wget -qO- http://localhost:5000/`\n"
-        )
     target.write_text(content, encoding="utf-8")
-
-    with pytest.raises(
-        MemoryValidationError, match=r"responder RBAC does not grant kubectl (exec|port-forward|attach|cp)"
-    ):
-        MemoryValidator(run_diagnostics=False).validate(
-            candidate,
-            actor=ArtifactOwner.RESPONDER,
-            changed_paths=[f".sdo/playbooks/missing-configmap/{relative}"],
-            baseline_root=baseline,
-        )
-
-
-def test_validator_accepts_read_only_kubectl_and_prose_mentions_of_forbidden_verbs(tmp_path: Path) -> None:
-    baseline = tmp_path / "baseline"
-    candidate = tmp_path / "candidate"
-    _write_memory(baseline)
-    shutil.copytree(baseline, candidate)
-    scripts = candidate / ".sdo" / "playbooks" / "missing-configmap" / "scripts"
-    scripts.mkdir()
-    (scripts / "verify.sh").write_text(
-        '#!/bin/sh\nset -eu\nkubectl -n "$1" get endpoints "$2"\nkubectl -n "$1" logs deployment/exec-proxy\n'
-        "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://frontend:5000/\")'\n",
-        encoding="utf-8",
-    )
-    readme = candidate / ".sdo" / "playbooks" / "missing-configmap" / "README.md"
-    readme.write_text(
-        readme.read_text(encoding="utf-8") + "\nThe responder cannot use `kubectl exec`; see `scripts/verify.sh`.\n",
-        encoding="utf-8",
-    )
 
     MemoryValidator(run_diagnostics=False).validate(
         candidate,
         actor=ArtifactOwner.RESPONDER,
-        changed_paths=[
-            ".sdo/playbooks/missing-configmap/README.md",
-            ".sdo/playbooks/missing-configmap/scripts/verify.sh",
-        ],
+        changed_paths=[f".sdo/playbooks/missing-configmap/{relative}"],
         baseline_root=baseline,
     )
 
 
-def test_validator_does_not_reject_outcomes_over_an_untouched_legacy_exec_playbook(tmp_path: Path) -> None:
-    baseline = tmp_path / "baseline"
-    _write_memory(baseline)
-    scripts = baseline / ".sdo" / "playbooks" / "missing-configmap" / "scripts"
-    scripts.mkdir()
-    (scripts / "verify.sh").write_text(_EXEC_VERIFY, encoding="utf-8")
-    candidate = tmp_path / "candidate"
-    shutil.copytree(baseline, candidate)
-    MemoryRepository(candidate).append_outcome(_outcome(), actor=ArtifactOwner.CONTROLLER)
-
-    MemoryValidator(run_diagnostics=False).validate(
-        candidate,
-        actor=ArtifactOwner.CONTROLLER,
-        changed_paths=[".sdo/outcomes.jsonl"],
-        baseline_root=baseline,
-    )
-
-
-def test_responder_rbac_grants_none_of_the_verbs_playbooks_may_not_use() -> None:
+def _rbac_role(name: str) -> dict:
     root = pathlib.Path(__file__).resolve().parents[4]
     documents = list(yaml.safe_load_all((root / "controller/runtime/deploy/rbac.yaml").read_text(encoding="utf-8")))
-    role = next(d for d in documents if d and d["kind"] == "Role" and d["metadata"]["name"] == "sdo-responder")
-    granted = {resource for rule in role["rules"] for resource in rule["resources"]}
-    subresources = {"exec": "pods/exec", "port-forward": "pods/portforward", "attach": "pods/attach", "cp": "pods/exec"}
-    assert set(RESPONDER_FORBIDDEN_KUBECTL_VERBS) == set(subresources)
-    assert not granted & set(subresources.values())
+    return next(d for d in documents if d and d["kind"] == "Role" and d["metadata"]["name"] == name)
+
+
+def _verbs_on(role: dict, group: str, resource: str) -> set[str]:
+    return {
+        verb
+        for rule in role["rules"]
+        if group in rule["apiGroups"] and resource in rule["resources"]
+        for verb in rule["verbs"]
+    }
+
+
+def test_responder_role_grants_exec_attach_and_portforward_in_the_application_namespace() -> None:
+    """Exec parity (fairness-DECISIONS.md): the same reach as the Codex baseline behind the agent proxy."""
+    role = _rbac_role("sdo-responder")
+
+    for subresource in ("pods/exec", "pods/attach", "pods/portforward"):
+        assert {"create", "get"} <= _verbs_on(role, "", subresource), subresource
+
+
+def test_responder_role_still_denies_secrets_and_rbac_objects() -> None:
+    role = _rbac_role("sdo-responder")
+    resources = {resource for rule in role["rules"] for resource in rule["resources"]}
+    groups = {group for rule in role["rules"] for group in rule["apiGroups"]}
+
+    assert "secrets" not in resources
+    assert not {"roles", "rolebindings", "clusterroles", "clusterrolebindings"} & resources
+    assert "rbac.authorization.k8s.io" not in groups
+    assert "*" not in resources
+    assert all("*" not in rule["verbs"] for rule in role["rules"])

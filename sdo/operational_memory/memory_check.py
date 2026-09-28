@@ -52,11 +52,6 @@ _HINTS: tuple[tuple[str, str], ...] = (
         "playbook scripts must use the",
         "rename files under `.sdo/playbooks/<fault-class>/scripts/` to end in `.sh`",
     ),
-    (
-        "responder RBAC does not grant",
-        "replace the step with kubectl get/describe/logs, or send the request from the responder pod to "
-        "`http://<SERVICE>.<NAMESPACE>.svc:<PORT>/` with python3 urllib",
-    ),
     ("invalid shell syntax", "fix the script until `bash -n <script>` succeeds"),
     (
         "responder may not rewrite provenance",

@@ -16,7 +16,6 @@ from sdo.operational_memory import (
     PLAYBOOK_INDEX_PATH,
     PLAYBOOK_SCRIPT_SUFFIX,
     REFLECTION_SESSION_MODES,
-    RESPONDER_FORBIDDEN_KUBECTL_VERBS,
     OutcomeClassification,
     OutcomeRecord,
     TopologyReview,
@@ -181,9 +180,8 @@ _RESPONDER_PERMISSIONS = (
     "namespace, which is namespace-scoped edit on application resources: it may get, list, watch, create, apply, "
     "patch, and delete configmaps, services, pods, persistentvolumeclaims, deployments, statefulsets, daemonsets, "
     "replicasets, networkpolicies, ingresses, and jobs (including `kubectl rollout restart`), and read pod logs, "
-    "events, endpoints, and endpointslices. It has no access to Secrets or RBAC objects, and it cannot run "
-    + ", ".join(f"`kubectl {verb}`" for verb in RESPONDER_FORBIDDEN_KUBECTL_VERBS)
-    + " against the application, and the broker's validator rejects playbook steps that need them. Send "
+    "events, endpoints, and endpointslices, and it may run `kubectl exec`, `kubectl attach`, and `kubectl "
+    "port-forward` against application pods. It has no access to Secrets or RBAC objects. Send "
     "representative requests from the responder pod to the Service DNS name with python3 (the image has no curl "
     "or wget), for example `python3 -c 'import urllib.request as u; r = u.urlopen(\"http://<SERVICE>.<NAMESPACE>"
     ".svc:<PORT>/\", timeout=10); print(r.status); print(r.read().decode())'`. "

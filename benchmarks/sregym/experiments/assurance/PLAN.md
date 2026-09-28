@@ -255,6 +255,19 @@ Phase 2's own stock/verify split is unchanged by the phase-1 no-stock decision; 
 - **Results.** Every phase-1 problem qualified 3/3 on `assure-q0`, and K1 and K2 passed the controller diff and partial-fix gate 3/3 each (`QUALIFICATION.md`). The lane, its private builder and the `*:assure-q` tags were removed afterwards.
 - **Pushes.** The fork branch (`bc7d51f4`, `7a3cd727`) and this branch up to `577ecf4` were pushed until the permission check began refusing pushes. The unpushed commits are listed in the hand-off report.
 
+### Exec parity for both arms (2026-09-28, user-directed)
+
+- **D18. Both arms get the same permissions, including exec, limited to the app namespace(s).** Read everything;
+  edit workloads, Services, ConfigMaps and NetworkPolicies; `pods/exec`, `pods/attach`, `pods/portforward`. No
+  Secrets, no RBAC objects, nothing outside the app namespaces, nothing cluster-scoped. SDO's responder Role
+  gains the three subresources (not in the `*-sdo` control namespace); the Codex arm runs with
+  `[agent.codex] allow_exec = true`, which sets `SREGYM_AGENT_PROXY_ALLOW_EXEC=1` for SREGym's agent proxy
+  (fork commit `e0803ea0`). No disclosure text: `exec_disclosure` stays off and both arms get the plain
+  concise-verify prompt. Full rationale and the trade-off (exec can read mounted secrets) are in
+  `docs/fairness-DECISIONS.md`, "Exec parity". The earlier no-exec phase-1 data was discarded; the run
+  was relaunched from stage 0 with configs in `experiments/assurance/phase1_exec/`. The old `phase1/` and
+  `phase1_codex_disclosed/` configs stay for provenance.
+
 ### Concise verify becomes the default; phase 1 drops its stock arm (2026-09-28, later)
 
 - **D17. Phase 1 has no stock (no-verify) Codex arm.** The Codex baseline now

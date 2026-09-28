@@ -36,7 +36,6 @@ from sdo.operational_memory.validation import (
     PLACEHOLDER_RE,
     PLAYBOOK_INDEX_PATH,
     PLAYBOOK_SCRIPT_SUFFIX,
-    RESPONDER_FORBIDDEN_KUBECTL_VERBS,
     MemoryValidator,
 )
 from tests.structured_turns import ScriptedAgent, reply, turn_schema
@@ -590,10 +589,11 @@ def test_resumed_and_retry_reflection_both_run_the_memory_check(tmp_path: Path) 
 def test_reflection_states_which_kubectl_verbs_the_responder_may_use(tmp_path: Path) -> None:
     prompt = _first_reflection_prompt(tmp_path)
 
-    # The responder's RBAC has no pods/exec, pods/portforward, or pods/attach; playbooks must not need them.
-    assert "`kubectl exec`" not in prompt.split("cannot", 1)[0]
-    for verb in RESPONDER_FORBIDDEN_KUBECTL_VERBS:
-        assert f"`kubectl {verb}`" in prompt
+    # Exec parity: the responder Role grants pods/exec, attach and portforward, so the prompt no longer forbids them.
+    assert "cannot run" not in prompt
+    assert "validator rejects playbook steps" not in prompt
+    for verb in ("exec", "port-forward", "attach"):
+        assert f"`kubectl {verb}`" in prompt.split("It has no access", 1)[0]
     assert "responder's RBAC" in prompt
     for allowed in ("get", "logs", "patch", "rollout restart", "delete"):
         assert allowed in prompt
@@ -608,7 +608,11 @@ def test_reflection_states_which_kubectl_verbs_the_responder_may_use(tmp_path: P
     )
     for rule in role["rules"]:
         for resource in rule["resources"]:
-            assert resource.replace("pods/log", "pod logs") in granted, resource
+            stated = {"pods/log": "pod logs", "pods/exec": "kubectl exec", "pods/attach": "kubectl attach"}.get(
+                resource, resource
+            )
+            stated = "kubectl port-forward" if resource == "pods/portforward" else stated
+            assert stated in granted, resource
     # The representative request comes from the responder's own pod, which has python3 but no curl or wget.
     assert "python3" in prompt
     assert ".svc" in prompt
