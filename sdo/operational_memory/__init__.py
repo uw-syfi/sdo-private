@@ -22,8 +22,10 @@ from sdo.operational_memory.detector_sdk import DETECTOR_SDK_REFERENCE
 from sdo.operational_memory.diagnosis import (
     DetectorFlip,
     DiagnosisVerdict,
+    RepairAttribution,
     EvidenceCheck,
     RootCauseVerification,
+    recovered_by_responder,
     verify_diagnosis,
 )
 from sdo.operational_memory.models import (
@@ -100,6 +102,8 @@ __all__ = [
     "DetectorFlip",
     "DiagnosisVerdict",
     "EvidenceCheck",
+    "RepairAttribution",
     "RootCauseVerification",
+    "recovered_by_responder",
     "verify_diagnosis",
 ]

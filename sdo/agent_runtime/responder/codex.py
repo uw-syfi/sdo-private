@@ -144,6 +144,7 @@ def _incident_result_schema() -> dict[str, object]:
                     "action_id": {"type": "string", "minLength": 1},
                     "kind": {"type": "string", "minLength": 1},
                     "target": {"type": "string", "minLength": 1},
+                    "resources": {"type": "array", "items": object_ref},
                     "summary": {"type": "string", "minLength": 1},
                     "details": {"type": "string", "minLength": 1},
                     "started_at": {"type": "string", "format": "date-time"},
@@ -155,6 +156,7 @@ def _incident_result_schema() -> dict[str, object]:
                     "action_id",
                     "kind",
                     "target",
+                    "resources",
                     "summary",
                     "details",
                     "started_at",
@@ -503,8 +505,11 @@ def _responder_prompt(request: IncidentRequest) -> str:
         "a same-session reflection turn with narrowly scoped write access. Return only the IncidentResult JSON "
         "required by the output schema.\n\n"
         f"Repair evidence mode: {request.repair_policy}. For every live mutation, return a repair action receipt "
-        "with its target, timing, result, and reversibility. In recorded-actions mode, a successful live-only "
-        "repair must have at least one successful receipt; repository changes are still committed when present.\n\n"
+        "with its target, the Kubernetes objects it mutated (`resources`), timing, result, and reversibility. SDO "
+        "confirms a root cause only when a successful action that started before health cleared mutated that "
+        "cause's resources, so list every object each action changed. In recorded-actions mode, a successful "
+        "live-only repair must have at least one successful receipt; repository changes are still committed when "
+        "present.\n\n"
         f"{additional_context}\n"
         f"{_inlined_health_objective(request)}"
         f"{_detector_evidence(request)}\n"

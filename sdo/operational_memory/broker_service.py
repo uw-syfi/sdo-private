@@ -33,6 +33,11 @@ from sdo.operational_memory.worktrees import IncidentWorktree, WorktreeManager
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
 
+#: Recoveries the responder is not credited with: health that cleared only
+#: after the verification window (F4), or that the responder's own repair
+#: does not back (F8). The broker never reflects on them.
+_UNCREDITED_RECOVERIES = frozenset({OutcomeClassification.PARTIAL, OutcomeClassification.EXTERNAL_RECOVERY})
+
 
 class BrokerServiceError(RuntimeError):
     """Raised when durable incident brokerage cannot advance safely."""
@@ -120,6 +125,10 @@ class BrokerClosure(BaseModel):
     dispatched_at: datetime
     responder_completed_at: datetime
     verified_at: datetime
+    # When the health detectors began their final clear streak (F8): only a
+    # repair action that started by then can back a root cause. None from
+    # controllers that predate it.
+    health_cleared_at: datetime | None = None
     # Responder helper objects the controller deleted, as Kind/namespace/name.
     cleaned_helpers: list[str] = Field(default_factory=list)
     # Set when health did not clear within the controller's verification
@@ -440,6 +449,7 @@ class BrokerService:
                 final_health_detector_state=closure.final_detector_states,
                 incident_detector_states=closure.incident_detector_states,
                 final_state_changes=closure.final_state_changes,
+                health_cleared_at=closure.health_cleared_at,
                 health_verified=health_verified,
                 fault_confirmed=bool(result and result.confirmed_root_causes),
                 inspected_playbooks=surfaced,
@@ -531,7 +541,11 @@ class BrokerService:
             self._save(ledger)
         session_id = None if closure.result is None else closure.result.responder_session_id
         health_verified = closure.health_verified
-        if not self.reflector.should_reflect(outcome, health_verified=health_verified, session_id=session_id):
+        # The broker owns learning: a recovery the responder is not credited
+        # with is never learned, whatever the reflector would decide (F4, F8).
+        if outcome.classification in _UNCREDITED_RECOVERIES or not self.reflector.should_reflect(
+            outcome, health_verified=health_verified, session_id=session_id
+        ):
             ledger.reflection_completed = True
             self._save(ledger)
             return ledger
