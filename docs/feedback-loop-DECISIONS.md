@@ -227,3 +227,150 @@ Setup: hotel-reservation with SREGym's `failure-admin-geo` and
 | Decoy fix (re-grant Mongo roles) | Still firing for 20 s; verify-burst unhealthy in 4.5–4.6 s |
 | Correct fix | First healthy verdict at 2.18, 2.52 and 2.47 s; cleared at 2.50, 2.83 and 2.77 s; verify-burst healthy in 3.0 s |
 | Prober cost | About 11 millicores of CPU and 13 MiB of memory |
+
+### D15. `sdo incident status` and the verify-before-submit rule (item 2)
+
+- **Decision.** `python3 -m sdo incident status [--workload] [--scenario]
+  [--json]` asks the prober for one verify burst. It exits 0 when healthy, 1
+  when unhealthy and 3 when the prober is unavailable. It lists the
+  incident's `scenario-slo.*` scenarios first. The burst counts only
+  *qualified* scenarios: ones the steady probe has seen pass at least once. A
+  scenario that never passed cannot block, because it would also block every
+  correct fix.
+- **Alternatives.** Re-run the detectors from the responder pod, which would
+  need controller internals and cluster-wide read access. Or trust the
+  agent's own `curl` checks, which are too easy to satisfy with the wrong
+  request.
+- **Why.** The prober already has the workload, seeds and SLOs, and a burst
+  takes about 3 s when healthy and about 4.6 s when unhealthy. The CLI stays
+  in production code because it only speaks to the prober's HTTP API.
+
+### D16. Prober address chosen at dispatch time
+
+- **Decision.** `KubernetesJobDispatcher.DispatchEnvironment` adds
+  `SDO_PROBER_URL` to each responder Job when it is created.
+  `ProberEnvironment` checks the prober within 2 s and leaves the variable out
+  if it cannot reach it, so the CLI then exits 3.
+- **Alternatives.** Hard-code the Service DNS name in the responder image or
+  the manifest.
+- **Why.** Controller namespaces can be split, and the prober is optional. A
+  prober address that does not resolve would turn every verify into a 2 s
+  timeout.
+
+### D17. Submission gate: exit 4 with no bypass
+
+- **Decision.** SREGym's `submission.py` runs the live incident status
+  before relaying a *mitigation* submission and refuses with exit code 4
+  (`EXIT_VERIFICATION_FAILED`) while it is unhealthy. When the check is
+  unavailable (exit 3), the submission goes through, and the receipt records
+  that it was not verified. Diagnosis submissions are not gated, and there is
+  no `--force` flag.
+- **Alternatives.** A bypass flag, which agents would learn to use. Or
+  blocking when the check is unavailable, which would turn a prober outage
+  into a failed benchmark run.
+- **Why.** A wrong fix, such as the Mongo-role re-grant decoy, is refused in
+  about 4.6 s. The gate lives in the benchmark adapter, so `controller/runtime`
+  stays transport-neutral.
+
+### D18. State baseline: informers, a 2-minute settle, and digests (item 1)
+
+- **Decision.** `StateTracker` runs namespace-scoped informers over Service,
+  Deployment, StatefulSet, DaemonSet, NetworkPolicy, ConfigMap, Secret, Role
+  and RoleBinding.
+  - **Settle.** The first healthy evaluation sets the baseline. After that, a
+    candidate snapshot taken at the start of a healthy stretch replaces the
+    baseline only after 2 minutes with no unhealthy evaluation. A maintenance
+    pause resets the baseline.
+  - **Digests.** ConfigMap and Secret data, and env values whose names look
+    secret, appear only as `sha256:` plus 12 hex characters.
+  - **Exclusions.** SDO's own objects, `kube-root-ca.crt`, service-account
+    token Secrets and Helm release Secrets are excluded.
+  - **Limits.** Output is capped at 40 changes, 12 fields per change and 160
+    characters per value.
+  - **RBAC and failure mode.** The controller's Role gains read access to
+    secrets, statefulsets, daemonsets, roles and rolebindings. A kind it
+    cannot list is reported as `unobserved_kinds` and does not fail.
+- **Alternatives.**
+  - Listing everything at dispatch: slower, and it lands on the critical path.
+  - A baseline taken once at install: stale after legitimate rollouts.
+  - Showing ConfigMap bodies: would leak secrets and invite the agent to read
+    decoy scripts as evidence.
+- **Why.** In the smoke, startup took 167 ms and a diff took 1 ms, off the
+  critical path. Decoys that existed at baseline can never appear. The settle
+  period keeps a half-broken rollout from becoming the new "healthy" state.
+
+### D19. Evidence contract (item 4)
+
+- **Decision.** Each `ConfirmedRootCause` now carries:
+  - `evidence`: at least one item, of kind `detector-finding`,
+    `synthetic-traffic`, `state-change` or `live-observation`;
+  - `explained_detectors`: at least one;
+  - `static_context`: optional.
+
+  The strict output schema has no static evidence kind. Scripts, manifests
+  and ConfigMap bodies can only go in `static_context`, which is recorded but
+  never counts as proof. Go's `ValidateFor` does not reject legacy results;
+  the fields are `omitempty`.
+- **Alternatives.** Free-text evidence, which cannot be checked. Or a
+  `static` kind that verification rejects, which lets the model try it
+  anyway.
+- **Why.** Leaving the category out of the schema is cheaper than rejecting
+  it after a turn has been spent. Old outcome records still load.
+
+### D20. Deterministic diagnosis verification is recorded, not gating
+
+- **Decision.** `verify_diagnosis` checks each cited detector, scenario and
+  state change against the incident request and the detector states. Each
+  root cause gets one verdict:
+  - `confirmed`: every explained detector fired at dispatch and cleared after
+    the fix, and nothing cited was contradicted;
+  - `contradicted`: something cited was never observed;
+  - `unverified`: nothing was contradicted, but not every detector flipped;
+  - `no-evidence`: a legacy cause.
+
+  The verdict goes into the outcome record and the SREGym receipt. It does
+  not block incident closure.
+- **Alternatives.** Refuse closure on `contradicted`.
+- **Why.** Closure follows health, and a correct fix with a sloppy
+  explanation should still close. The verdict matters for learning (D22) and
+  for analysis.
+
+### D21. Responder helper label and cleanup timing (item 5)
+
+- **Decision.** Responders label each helper pod or Job they create with
+  `sdo.dev/responder-helper=true`. When a responder completes successfully,
+  the controller deletes the labelled Jobs and pods, with background
+  propagation and a 10 s timeout, in the application namespace and the
+  controller namespace. This happens before the closure gate is evaluated.
+  The closure records `cleaned_helpers`. The flag
+  `--clean-responder-helpers` defaults to true.
+  - **RBAC.** In split-namespace mode, a narrow Role
+    `sdo-controller-helper-cleanup` (list and delete on pods and jobs) is
+    bound to the `sdo-controller` ServiceAccount. Shared mode already had
+    these verbs.
+- **Alternatives.**
+  - Clean up at closure: a helper pod such as a curl loop or a stuck Job can
+    itself keep a detector firing and block closure.
+  - Garbage-collect by owner reference: responders do not own the objects.
+- **Why.** A leftover helper is a red herring for the next incident and can
+  mask the health of the current one.
+
+### D22. Reflection learns only from confirmed causes (item 6)
+
+- **Decision.** The reflection prompt now includes the deterministic
+  verification. It tells reflection to write playbooks and incident detectors
+  only from `confirmed` causes, to record contradicted or unverified
+  explanations only as warnings, and to include a `## Verification` section
+  that names the detectors which flipped.
+- **Alternatives.** Skip reflection unless every cause is `confirmed`. That
+  would lose the "this was a decoy" lesson.
+- **Why.** It keeps red-herring explanations out of operational memory
+  without adding a turn.
+
+### D23. Process: the disk-full interruption
+
+`/mnt/data` ran out of space in the middle of the task. Work continued in a
+scratchpad clone. Committing from the clone was refused as out-of-place
+publication, so I stopped and reported it. After space was freed, the
+changes were applied to the worktree as a patch, tested, committed as
+separate commits, and the clone was deleted.
