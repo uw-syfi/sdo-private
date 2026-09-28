@@ -192,6 +192,8 @@ def test_sregym_adapter_delegates_execution_to_production_runtime(
     responder_instruction = calls[0][1].controller_args(config)[-1]
     assert responder_instruction.startswith("--responder-env=SDO_RESPONDER_EXTRA_INSTRUCTIONS=")
     assert "benchmarks.sregym.adapter.submission diagnosis" in responder_instruction
+    assert "`python3 -m sdo incident status`" in responder_instruction
+    assert "refuses to submit while it reports unhealthy" in responder_instruction
 
 
 def test_remote_conductor_address_is_not_rewritten() -> None:

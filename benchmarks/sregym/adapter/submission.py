@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from benchmarks.sregym.protocol.schema import TERMINAL_STAGES
+from sdo.agent_runtime.responder import IncidentStatus, IncidentStatusState, live_incident_status
 
 
 class SubmissionBridgeError(RuntimeError):
@@ -89,7 +90,11 @@ def submit_solution(
     return {"mitigation": result, "done": done}
 
 
-def main(argv: list[str] | None = None) -> int:
+#: Exit status when mitigation is withheld because verification failed.
+EXIT_VERIFICATION_FAILED = 4
+
+
+def main(argv: list[str] | None = None, *, status_check: Callable[[], IncidentStatus] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("diagnosis", "mitigation"))
     parser.add_argument("solution")
@@ -98,6 +103,17 @@ def main(argv: list[str] | None = None) -> int:
     if not api_base:
         print("SDO_SREGYM_API_BASE is required", file=sys.stderr)
         return 2
+    if args.phase == "mitigation":
+        # Verify before submit: mitigation ends the problem, so it waits for
+        # the same synthetic traffic the controller's closure gate requires.
+        status = (status_check or live_incident_status)()
+        if status.state == IncidentStatusState.UNHEALTHY:
+            print(
+                "mitigation not submitted: `python3 -m sdo incident status` reports the application unhealthy.\n"
+                + status.render(),
+                file=sys.stderr,
+            )
+            return EXIT_VERIFICATION_FAILED
     try:
         result = submit_solution(args.solution, phase=args.phase, api_base=api_base)
     except (OSError, ValueError, SubmissionBridgeError, urllib.error.URLError) as exc:
