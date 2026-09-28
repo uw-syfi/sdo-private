@@ -79,5 +79,17 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir --no-deps \
       idna==3.11 \
       requests==2.32.5 \
       urllib3==2.6.3
-COPY benchmarks /opt/sdo/benchmarks
+# Only the modules the responder's entry points actually import at runtime:
+# `adapter.submission` (the submission smoke test in scripts/build_sdo_images.sh) and
+# `adapter.submission_relay` (the in-cluster submission bridge Deployment,
+# benchmarks.sregym.adapter.runtime._submission_bridge_resources). Nothing under
+# experiments/, assurance/, fastloop/, analysis/, runner/, agents/, docs/ or tests/ is
+# copied: those hold the SREGym answer key (composites.toml, PLAN.md, QUALIFICATION.md,
+# *_DECISIONS.md, the phase-1 problem-order TOMLs, fastloop/assurance/catalog.py, and
+# assurance/scripted_codex/faults.py), which this image's `codex exec
+# --danger-full-access` responder must never be able to read.
+COPY benchmarks/__init__.py /opt/sdo/benchmarks/__init__.py
+COPY benchmarks/sregym/__init__.py /opt/sdo/benchmarks/sregym/__init__.py
+COPY benchmarks/sregym/adapter/__init__.py benchmarks/sregym/adapter/submission.py benchmarks/sregym/adapter/submission_relay.py /opt/sdo/benchmarks/sregym/adapter/
+COPY benchmarks/sregym/protocol/__init__.py benchmarks/sregym/protocol/_http.py benchmarks/sregym/protocol/benchmark.py benchmarks/sregym/protocol/conductor.py benchmarks/sregym/protocol/mcp_client.py benchmarks/sregym/protocol/receipt.py benchmarks/sregym/protocol/schema.py /opt/sdo/benchmarks/sregym/protocol/
 RUN chmod -R a+rX /opt/sdo/benchmarks
