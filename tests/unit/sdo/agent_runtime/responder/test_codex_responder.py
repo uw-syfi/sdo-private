@@ -282,6 +282,21 @@ def test_cold_prompt_is_unchanged_without_exact_incident_detector_match(tmp_path
         assert "Confirm a surfaced playbook against live state before applying it" in prompt
 
 
+def test_every_path_verifies_with_incident_status_before_submitting(tmp_path: Path) -> None:
+    _write_memory(tmp_path)
+    _own_playbook(tmp_path)
+    cold = IncidentRequest.model_validate_json(_fixture("incident_request.json"))
+
+    for prompt in (_responder_prompt(cold), _responder_prompt(_warm_request(tmp_path))):
+        assert "`python3 -m sdo incident status`" in prompt
+        assert "same synthetic traffic the controller requires before it closes this incident" in prompt
+        assert "Do not submit mitigation through any channel, and do not return a completed result" in prompt
+        assert "reports unavailable" in prompt
+        assert "`sdo-incident-status`" in prompt
+    warm = _responder_prompt(_warm_request(tmp_path))
+    assert "Run the playbook's verification and `python3 -m sdo incident status`" in warm
+
+
 def test_warm_path_requires_the_incident_playbook_to_exist(tmp_path: Path) -> None:
     _write_memory(tmp_path)
     _own_playbook(tmp_path)

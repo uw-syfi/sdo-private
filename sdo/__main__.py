@@ -33,9 +33,9 @@ def main(
     if args.command == "detector":
         return _check_detector(detector_check_runner)
     if args.command == "incident":
-        from sdo.agent_runtime.responder.incident_status import run_cli
+        from sdo.agent_runtime.responder import run_incident_status_cli
 
-        return run_cli(workload=args.workload, scenarios=tuple(args.scenario), as_json=args.json)
+        return run_incident_status_cli(workload=args.workload, scenarios=tuple(args.scenario), as_json=args.json)
     try:
         config = _operation_config(args)
         operation_runner(config)

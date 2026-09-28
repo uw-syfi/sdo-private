@@ -45,13 +45,13 @@ EXIT_UNAVAILABLE = 3
 _MAX_FAILURES_SHOWN = 3
 
 
-class StatusState(str, Enum):
+class IncidentStatusState(str, Enum):
     HEALTHY = "healthy"
     UNHEALTHY = "unhealthy"
     UNAVAILABLE = "unavailable"
 
 
-class ScenarioVerdict(BaseModel):
+class VerifyScenarioVerdict(BaseModel):
     """One scenario's judgement after a verify burst, as the prober reports it."""
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -72,7 +72,7 @@ class ScenarioVerdict(BaseModel):
         return self.qualified and not self.healthy
 
 
-class BurstResult(BaseModel):
+class VerifyBurstResult(BaseModel):
     """A verify burst's outcome; the prober's raw observation window is dropped."""
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -81,28 +81,28 @@ class BurstResult(BaseModel):
     healthy: bool
     started_at: str = Field(default="", alias="startedAt")
     duration_ns: int = Field(default=0, alias="durationNs")
-    verdicts: list[ScenarioVerdict] = Field(default_factory=list)
+    verdicts: list[VerifyScenarioVerdict] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class IncidentStatus:
-    state: StatusState
-    burst: BurstResult | None
+    state: IncidentStatusState
+    burst: VerifyBurstResult | None
     detail: str
     incident_scenarios: tuple[str, ...] = field(default=())
 
     def __post_init__(self) -> None:
-        if not isinstance(self.state, StatusState):
-            raise TypeError("state must be a StatusState")
-        if self.state != StatusState.UNAVAILABLE and self.burst is None:
+        if not isinstance(self.state, IncidentStatusState):
+            raise TypeError("state must be a IncidentStatusState")
+        if self.state != IncidentStatusState.UNAVAILABLE and self.burst is None:
             raise ValueError("a healthy or unhealthy status needs the verify burst that produced it")
 
     @property
     def exit_code(self) -> int:
         return {
-            StatusState.HEALTHY: EXIT_HEALTHY,
-            StatusState.UNHEALTHY: EXIT_UNHEALTHY,
-            StatusState.UNAVAILABLE: EXIT_UNAVAILABLE,
+            IncidentStatusState.HEALTHY: EXIT_HEALTHY,
+            IncidentStatusState.UNHEALTHY: EXIT_UNHEALTHY,
+            IncidentStatusState.UNAVAILABLE: EXIT_UNAVAILABLE,
         }[self.state]
 
     def to_json(self) -> dict[str, Any]:
@@ -145,7 +145,7 @@ class IncidentStatus:
                 text += "; never passed since the controller started, so it does not block closure"
             lines.append(text)
             lines.extend(f"          {failure}" for failure in verdict.recent_failures[:_MAX_FAILURES_SHOWN])
-        if self.state == StatusState.UNHEALTHY:
+        if self.state == IncidentStatusState.UNHEALTHY:
             lines.append(
                 "The controller will not close this incident while these scenarios fail. Keep repairing, then run "
                 "`sdo incident status` again before submitting mitigation or returning the result."
@@ -170,7 +170,7 @@ def incident_status(
     incident = _incident_scenarios(request_path)
     if not prober_url:
         return IncidentStatus(
-            state=StatusState.UNAVAILABLE,
+            state=IncidentStatusState.UNAVAILABLE,
             burst=None,
             detail=f"{PROBER_URL_ENVIRONMENT} is not set",
             incident_scenarios=incident,
@@ -188,25 +188,26 @@ def incident_status(
     )
     try:
         with opener(request, timeout=timeout_seconds) as response:
-            burst = BurstResult.model_validate_json(response.read())
+            burst = VerifyBurstResult.model_validate_json(response.read())
     except urllib.error.HTTPError as exc:
         message = exc.read().decode("utf-8", errors="replace").strip() or str(exc)
         return IncidentStatus(
-            state=StatusState.UNAVAILABLE,
+            state=IncidentStatusState.UNAVAILABLE,
             burst=None,
             detail=f"prober rejected the burst: {message}",
             incident_scenarios=incident,
         )
     except (OSError, ValidationError, ValueError) as exc:
         return IncidentStatus(
-            state=StatusState.UNAVAILABLE,
+            state=IncidentStatusState.UNAVAILABLE,
             burst=None,
             detail=f"prober unreachable: {exc}",
             incident_scenarios=incident,
         )
     blocking = any(verdict.blocking for verdict in burst.verdicts)
-    state = StatusState.UNHEALTHY if blocking or not burst.verdicts else StatusState.HEALTHY
-    detail = "every qualified scenario meets its SLO" if state == StatusState.HEALTHY else "scenarios violate their SLO"
+    state = IncidentStatusState.UNHEALTHY if blocking or not burst.verdicts else IncidentStatusState.HEALTHY
+    healthy = state == IncidentStatusState.HEALTHY
+    detail = "every qualified scenario meets its SLO" if healthy else "scenarios violate their SLO"
     return IncidentStatus(state=state, burst=burst, detail=detail, incident_scenarios=incident)
 
 
@@ -228,14 +229,20 @@ def _incident_scenarios(request_path: Path | None) -> tuple[str, ...]:
     )
 
 
-def run_cli(*, workload: str | None, scenarios: Sequence[str], as_json: bool) -> int:
-    """Entry point for ``sdo incident status``."""
+def live_incident_status(*, workload: str | None = None, scenarios: Sequence[str] = ()) -> IncidentStatus:
+    """The incident status for the responder's environment (prober URL and mounted request)."""
 
-    status = incident_status(
+    return incident_status(
         prober_url=os.environ.get(PROBER_URL_ENVIRONMENT, "").strip() or None,
         request_path=Path(os.environ.get(REQUEST_PATH_ENVIRONMENT, str(DEFAULT_REQUEST_PATH))),
         workload=workload,
         scenarios=scenarios,
     )
+
+
+def run_incident_status_cli(*, workload: str | None, scenarios: Sequence[str], as_json: bool) -> int:
+    """Entry point for ``sdo incident status``."""
+
+    status = live_incident_status(workload=workload, scenarios=scenarios)
     print(json.dumps(status.to_json(), indent=2) if as_json else status.render())
     return status.exit_code

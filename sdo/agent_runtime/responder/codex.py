@@ -376,12 +376,27 @@ def _warm_instructions(playbooks: list[WarmPlaybook], namespace: str) -> str:
         "playbook's repair exactly (use its scripts when present). After restoring a missing ConfigMap or Secret "
         "that a pod failed to mount, delete the stuck pods or rollout-restart their workload instead of waiting "
         "for the kubelet mount backoff.\n"
-        "3. Run the playbook's verification once, then submit mitigation through any configured channel and return "
+        "3. Run the playbook's verification and `python3 -m sdo incident status` together in one command, then, "
+        "once it reports healthy, submit mitigation through any configured channel and return "
         "the IncidentResult, listing the applied playbook's path exactly as shown above in applied_playbooks.\n"
         "Fall back to a full investigation only if the sanity check contradicts the playbook's preconditions, the "
         "repair fails, or the verification fails; then treat relevant_outcomes as hypotheses and confirm "
         "assumptions against live state. Investigate any other active finding the playbook's fault does not "
         "explain normally.\n\n" + "\n".join(sections) + "\n"
+    )
+
+
+def _verification_instructions() -> str:
+    return (
+        "Verify before you submit or return: after the repair, run `python3 -m sdo incident status` (exit 0 "
+        "healthy, 1 unhealthy, 3 unavailable; about 3-5 seconds). It runs the health judge's verify burst through "
+        "SDO's isolated prober, the same synthetic traffic the controller requires before it closes this incident. "
+        "Do not submit mitigation through any channel, and do not return a completed result, until it reports "
+        "healthy. When it reports unhealthy, its failing scenarios, status codes, and request paths are live "
+        "evidence: a change that leaves them failing did not fix the incident, however plausible the artifact it "
+        "addressed, so keep investigating along those request paths. Only when it reports unavailable, rely on "
+        "your own verification of the health objective. Record its final output as a verification_evidence entry "
+        "named `sdo-incident-status`.\n\n"
     )
 
 
@@ -396,6 +411,7 @@ def _responder_prompt(request: IncidentRequest) -> str:
         f"You are the SDO incident responder for incident {request.incident_id}.\n\n"
         "Work autonomously in the supplied repository and Kubernetes namespace to resolve every triggering finding. "
         f"{strategy}"
+        f"{_verification_instructions()}"
         "During this response, "
         "`.sdo/` is read-only. Do not create, edit, or delete any path under `.sdo/`. The controller independently "
         "verifies recovery after this response and records the authoritative outcome; only then may the broker open "

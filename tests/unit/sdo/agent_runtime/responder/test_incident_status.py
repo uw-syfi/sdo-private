@@ -16,7 +16,7 @@ from sdo.agent_runtime.responder.incident_status import (
     EXIT_UNAVAILABLE,
     EXIT_UNHEALTHY,
     IncidentStatus,
-    StatusState,
+    IncidentStatusState,
     incident_status,
 )
 from sdo.contracts import IncidentRequest
@@ -104,7 +104,7 @@ def _traffic_request(tmp_path: Path) -> Path:
 def test_status_is_unavailable_without_a_prober(tmp_path: Path) -> None:
     status = incident_status(prober_url=None, request_path=tmp_path / "missing.json")
 
-    assert status.state == StatusState.UNAVAILABLE
+    assert status.state == IncidentStatusState.UNAVAILABLE
     assert status.exit_code == EXIT_UNAVAILABLE
     assert "own verification" in status.render()
 
@@ -114,7 +114,7 @@ def test_healthy_burst_passes_verification(prober: tuple[_FakeProber, str], tmp_
 
     status = incident_status(prober_url=url, request_path=_traffic_request(tmp_path))
 
-    assert status.state == StatusState.HEALTHY
+    assert status.state == IncidentStatusState.HEALTHY
     assert status.exit_code == EXIT_HEALTHY
     assert fake.requests == [{"path": "/v1/bursts", "body": {}}]
     assert "search-hotels" in status.render()
@@ -128,7 +128,7 @@ def test_unhealthy_burst_names_failing_routes_and_incident_scenarios(
 
     status = incident_status(prober_url=url, request_path=_traffic_request(tmp_path))
 
-    assert status.state == StatusState.UNHEALTHY
+    assert status.state == IncidentStatusState.UNHEALTHY
     assert status.exit_code == EXIT_UNHEALTHY
     assert status.incident_scenarios == ("search-hotels",)
     text = status.render()
@@ -143,7 +143,7 @@ def test_unqualified_scenarios_are_reported_but_do_not_block(prober: tuple[_Fake
 
     status = incident_status(prober_url=url, request_path=tmp_path / "missing.json")
 
-    assert status.state == StatusState.HEALTHY
+    assert status.state == IncidentStatusState.HEALTHY
     assert "login" in status.render()
     assert "never passed" in status.render()
 
@@ -165,7 +165,7 @@ def test_prober_error_is_unavailable_not_healthy(prober: tuple[_FakeProber, str]
 
     status = incident_status(prober_url=url, request_path=tmp_path / "missing.json")
 
-    assert status.state == StatusState.UNAVAILABLE
+    assert status.state == IncidentStatusState.UNAVAILABLE
     assert "no verify-burst workload is defined" in status.render()
 
 
@@ -191,4 +191,4 @@ def test_cli_prints_json_and_exits_with_the_verdict(
 
 def test_status_model_rejects_a_healthy_state_without_a_burst() -> None:
     with pytest.raises(ValueError, match="burst"):
-        IncidentStatus(state=StatusState.HEALTHY, burst=None, detail="")
+        IncidentStatus(state=IncidentStatusState.HEALTHY, burst=None, detail="")
