@@ -569,6 +569,8 @@ class _Context:
     settings: PreflightSettings
     now: float
     facts: dict[str, Any] = field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
+    #: Images to probe instead of those the configs name (``check_images``).
+    images: Mapping[str, str] | None = None
 
     @property
     def agents(self) -> set[str]:
@@ -666,6 +668,8 @@ def _check_sdo_images(ctx: _Context) -> PreflightCheck | None:
         images.update({f"{key}:{ref}": ref for key, ref in sdo_images(config).items()})
     if "codex" in ctx.agents:
         images[f"agent_base:{AGENT_BASE_IMAGE}"] = AGENT_BASE_IMAGE
+    if ctx.images is not None:
+        images = {f"{key}:{ref}": ref for key, ref in ctx.images.items()}
     if not images:
         return None
     codex_pin = ctx.facts.get("codex_cli", {}).get("pin")
@@ -924,6 +928,32 @@ def run_preflight(
     return PreflightReport(tuple(check for check in checks if check is not None), ctx.facts, mode)
 
 
+def check_images(
+    images: Mapping[str, str],
+    *,
+    project_root: Path,
+    sregym_dir: Path,
+    host: HostProbe,
+) -> PreflightReport:
+    """Probe freshly built SDO images (``role -> ref``) against the pins, without any experiment config."""
+
+    unknown = sorted(set(images) - set(SDO_IMAGE_ENTRY_POINTS))
+    if unknown or not images:
+        raise ValueError(f"image roles must be among {sorted(SDO_IMAGE_ENTRY_POINTS)}, got {sorted(images)}")
+    ctx = _Context(
+        configs=[],
+        project_root=project_root,
+        sregym_dir=sregym_dir,
+        env={},
+        host=host,
+        settings=PreflightSettings(),
+        now=time.time(),
+        images=dict(images),
+    )
+    checks = [_check_codex_pins(ctx), _check_agentshim(ctx), _check_sdo_images(ctx)]
+    return PreflightReport(tuple(check for check in checks if check is not None), ctx.facts, "enforce")
+
+
 def preflight_mode(env: Mapping[str, str]) -> PreflightMode:
     raw = env.get(PREFLIGHT_MODE_ENV, "").strip().lower() or "enforce"
     if raw not in ("enforce", "warn"):
@@ -1032,20 +1062,43 @@ def load_arm_configs(paths: Iterable[Path], env: Mapping[str, str]) -> list[Expe
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the SREGym launch preflight over the arms of a comparison.")
-    parser.add_argument("configs", type=Path, nargs="+", help="experiment or pipeline TOMLs compared together")
+    parser.add_argument("configs", type=Path, nargs="*", help="experiment or pipeline TOMLs compared together")
+    parser.add_argument(
+        "--image",
+        action="append",
+        default=[],
+        metavar="ROLE=REF",
+        help=f"probe only these built images (roles: {', '.join(SDO_IMAGE_ENTRY_POINTS)}); used by CI",
+    )
     parser.add_argument("--json", type=Path, help="also write the report as JSON")
     args = parser.parse_args(argv)
+    if bool(args.configs) == bool(args.image):
+        parser.error("give either experiment configs or --image ROLE=REF, not both or neither")
     project_root = Path(__file__).resolve().parents[3]
     sregym_dir = Path(os.environ.get("SDO_SREGYM_DIR", project_root / "third_party" / "sregym")).resolve()
     env = dict(os.environ)
-    report = run_preflight(
-        load_arm_configs(args.configs, env),
-        project_root=project_root,
-        sregym_dir=sregym_dir,
-        env=env,
-        host=SystemHost(),
-        settings=PreflightSettings.from_env(env),
-    )
+    if args.image:
+        pairs = [str(item).partition("=") for item in args.image]
+        if any(not role or not ref for role, _, ref in pairs):
+            parser.error("--image takes ROLE=REF")
+        try:
+            report = check_images(
+                {role: ref for role, _, ref in pairs},
+                project_root=project_root,
+                sregym_dir=sregym_dir,
+                host=SystemHost(),
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+    else:
+        report = run_preflight(
+            load_arm_configs(args.configs, env),
+            project_root=project_root,
+            sregym_dir=sregym_dir,
+            env=env,
+            host=SystemHost(),
+            settings=PreflightSettings.from_env(env),
+        )
     print(render_report(report))
     if args.json:
         args.json.write_text(json.dumps(report.to_dict(), indent=2) + "\n", encoding="utf-8")

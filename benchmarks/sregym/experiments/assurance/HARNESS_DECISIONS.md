@@ -118,3 +118,20 @@ Code: `benchmarks/sregym/analysis/run_validity.py`. Run it with `uv run python -
 - **`reuse1` and `fresh1`** (`20260927_182519` and `20260927_184719`, pre-guard) are `valid`: they ran alone. The luna log reached the same judgement by hand.
 - **Token accounting reconciled exactly on every run that has token evidence.** No run was excluded for a token mismatch.
 
+
+## Image CI and version pins
+
+- **CI builds the images.** A new `images` job in `.github/workflows/ci.yml` runs `scripts/build_sdo_images.sh`, which builds the controller, responder, sregym-responder and validator images and smoke-runs the benchmark submission client. It then runs `python -m benchmarks.sregym.runner.preflight --image ROLE=REF ...`. That image-only preflight (`check_images`) imports each image's entry points (SDO, `libs.agent_cli`, agentshim, `controller.builder.check_cli`) and checks the Codex CLI and agentshim against the pins. It is the same probe a launch runs, so CI and the launch cannot disagree.
+- **Pip installs every Python package at its `uv.lock` version, with `--no-deps`.** Before this, pip resolved the transitive packages itself at build time: pydantic-core, typing-extensions, typing-inspection, annotated-types, and httpx and requests' dependencies. `tests/unit/controller/test_image_python_pins.py` computes the lock-graph closure for Linux x86_64 on each image's interpreter (3.11 for runtime, 3.12 for validator) and fails when any package is unpinned or any `pip install` lacks `--no-deps`. Verified by a local build with unique `assure-h-*` tags: `pip check` was clean in both images and the image-only preflight passed. The tags were removed afterwards, and no caches were pruned.
+- **CI pins every action to a commit SHA** (resolved from the tags with `gh api`), pins uv to 0.9.24 (the local version), and runs `uv sync --locked`. A test enforces all three.
+- **Already pinned and now tested:**
+  - base images by digest;
+  - npm `@openai/codex` and `@anthropic-ai/claude-code` to exact versions;
+  - the stock Codex arm's `agent_version` (submodule `cbb9715f`).
+
+### Still floating (not fixed here)
+
+- **Debian packages:** the apt packages (`git`, `python3`, `python3-pip`, `ca-certificates`) come from whatever bookworm serves on the build day, although the digest-pinned base limits the drift. Pinning them needs a snapshot.debian.org mirror.
+- **npm transitive dependencies of the Codex and Claude Code CLIs:** there is no lockfile. Codex ships a self-contained platform binary, so the exposure is small.
+- **SREGym agents that none of our arms use:** `claudecode`, `gemini`, `opencode` and `copilot` have `agent_version: null`, so they install the latest release. Pin one before using it in a comparison.
+- **The local `sregym-agent-base:latest` tag:** SREGym builds it from the checkout and refers to it by tag. The manifest records its image ID, so a rebuild between runs is still visible.
