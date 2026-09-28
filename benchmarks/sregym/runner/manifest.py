@@ -4,9 +4,10 @@
 either was dirty), the images (IDs and repo digests) and the Codex CLI and
 agentshim versions actually present, the model, provider and effort each agent
 role and the judge resolved to, the kind topology, the hash of the config
-snapshot (and of the source TOML), the host's load and free disk at launch, and
-the launch preflight report. A resumed run keeps its first manifest and appends
-each resume under ``resumes``.
+snapshot (and of the source TOML), the host's load and free disk at launch, a
+Codex baseline's resolved verify-protocol mode and a hash of its appendix text
+(``codex_prompt_appendix``), and the launch preflight report. A resumed run
+keeps its first manifest and appends each resume under ``resumes``.
 
 The validity checker (``benchmarks.sregym.analysis.run_validity``) requires a
 manifest, and treats a manifest whose preflight was waived as ``invalid_infra``.
@@ -89,6 +90,31 @@ def _topology(configs: Sequence[ExperimentConfig], env: Mapping[str, str], host:
     }
 
 
+def _codex_prompt_appendix(configs: Sequence[ExperimentConfig]) -> list[dict[str, Any]] | None:
+    """Each ``agent = "codex"`` config's resolved verify-protocol mode and appendix hash.
+
+    Recorded so a run manifest shows exactly what instruction text the agent
+    ran under (PLAN.md C11 needs to distinguish "concise" from "full" from
+    "none"), without embedding the whole appendix text in every manifest.
+    """
+
+    from benchmarks.sregym.runner.codex_baseline import CodexBaselineConfig
+
+    entries: list[dict[str, Any]] = []
+    for config in configs:
+        if config.agent != "codex":
+            continue
+        baseline = CodexBaselineConfig.from_agent_config(config.agent_config.get("codex") or {})
+        appendix = baseline.prompt_appendix()
+        entries.append(
+            {
+                "mode": baseline.verify_protocol,
+                "sha256": hashlib.sha256(appendix.encode("utf-8")).hexdigest() if appendix else None,
+            }
+        )
+    return entries or None
+
+
 def _host(host: HostProbe, sregym_dir: Path) -> dict[str, Any]:
     load = host.load_average()
     docker_root = host.docker_root()
@@ -148,6 +174,7 @@ def build_run_manifest(
             "source_sha256": _sha256(source) if source and source.is_file() else None,
         },
         "host": _host(host, sregym_dir),
+        "codex_prompt_appendix": _codex_prompt_appendix(configs),
         "codex_quota": report.facts.get("codex_quota"),
         "lanes": report.facts.get("lanes"),
         "preflight": report.to_dict(),
