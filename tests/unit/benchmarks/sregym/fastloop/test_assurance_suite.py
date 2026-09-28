@@ -378,3 +378,33 @@ def test_an_unanswered_request_is_an_open_incident(tmp_path: Path) -> None:
 
 def test_spool_names_are_file_safe() -> None:
     assert responder.spool_name("Hotel Reservation/1") == "Hotel_Reservation_1"
+
+
+def test_a_stray_incidents_answer_passes_the_brokers_recorded_actions_rule() -> None:
+    from benchmarks.sregym.fastloop.assurance.suite import stray_result
+    from sdo.operational_memory.broker_service import BrokerClosure
+
+    request = _request()
+    cleared = {
+        "detector_id": "traffic-health",
+        "evaluated_at": (T0 + timedelta(minutes=1)).isoformat(),
+        "status": "clear",
+    }
+
+    def closure(result: dict[str, Any]) -> BrokerClosure:
+        return BrokerClosure.model_validate(
+            {
+                "request": request,
+                "result": result,
+                "final_detector_states": [cleared],
+                "detected_at": T0.isoformat(),
+                "dispatched_at": T0.isoformat(),
+                "responder_completed_at": T0.isoformat(),
+                "verified_at": T0.isoformat(),
+            }
+        )
+
+    BrokerService._validate_recorded_actions(closure(stray_result(request)))
+    completed = {**stray_result(request), "status": "completed"}
+    with pytest.raises(Exception, match="successful recorded repair action"):
+        BrokerService._validate_recorded_actions(closure(completed))

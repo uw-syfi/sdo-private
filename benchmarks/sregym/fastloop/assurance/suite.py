@@ -183,6 +183,21 @@ def scripted_result(
     }
 
 
+def stray_result(request: dict[str, Any]) -> dict[str, Any]:
+    """The answer for an incident no injected fault explains: nothing repaired, so ``cancelled``.
+
+    A ``completed`` result with no successful repair action fails the broker's recorded-actions
+    rule on every retry, and a permanent closure failure blocks every later incident.
+    """
+
+    result = scripted_result(
+        request, objects=(), summary="no fault injected", actions=[], started_at=utcnow(), verification=[]
+    )
+    result["status"] = "cancelled"
+    result["confirmed_root_causes"] = []
+    return result
+
+
 def _action(action_id: str, *, target: str, summary: str, started: datetime, success: bool) -> dict[str, Any]:
     return {
         "action_id": action_id,
@@ -366,10 +381,7 @@ class AssuranceSuite:
             state_changes=diff_reading(request, ()).named,
         )
         logger.warning("stray incident %s after %s: %s", incident_id, self._last_case, stray.findings)
-        result = scripted_result(
-            request, objects=(), summary="no fault injected", actions=[], started_at=utcnow(), verification=[]
-        )
-        result["confirmed_root_causes"] = []
+        result = stray_result(request)
         result_path(self.spool, incident_id).write_text(json.dumps(result), encoding="utf-8")
         try:
             ledger = self.wait_closure(incident_id, timeout=self.bounds.verify_seconds + 120)
