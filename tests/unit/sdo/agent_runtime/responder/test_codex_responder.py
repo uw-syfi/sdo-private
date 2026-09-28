@@ -171,6 +171,17 @@ def test_recorded_actions_policy_is_explicit_in_responder_prompt() -> None:
     assert "repair action receipt" in prompt
 
 
+def test_prompt_tells_the_responder_to_cancel_an_already_healed_finding() -> None:
+    request = IncidentRequest.model_validate_json(_fixture("incident_request.json"))
+
+    prompt = _responder_prompt(request)
+
+    assert "self-heal" in prompt
+    assert "cancelled" in prompt
+    assert "no repair actions and no applied playbooks" in prompt
+    assert "Never return `completed` while the health objective is still failing" in prompt
+
+
 def _exact_match_outcome(match_reason: str = "exact-fingerprint") -> PriorOutcomeEvidence:
     return PriorOutcomeEvidence(
         incident_id="inc-prior",
