@@ -375,6 +375,19 @@ publication, so I stopped and reported it. After space was freed, the
 changes were applied to the worktree as a patch, tested, committed as
 separate commits, and the clone was deleted.
 
+### D24. Module-boundary edges for incident status
+
+- **Decision.** `tach.toml` now allows `benchmarks.sregym.adapter` and
+  `sdo.__main__` to depend on `sdo.agent_runtime.responder`. They use it only
+  for `live_incident_status` and `run_incident_status_cli`.
+- **Alternatives.**
+  - Move the status client into `sdo.operational_memory`: it is not memory.
+  - Route it through `sdo.operation`: that only adds a pass-through module.
+- **Why.** The adapter is allowed to consume the production API, and the
+  status client belongs to the responder that calls it. Both edges point from
+  benchmark or entry-point code into production code, so no production module
+  gains a benchmark dependency.
+
 ### Combined final smoke (no LLM, throwaway kind `sdo-smoke`, 3 runs)
 
 The same setup as above, with the decoys mounted. One driver runs the
