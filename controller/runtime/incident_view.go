@@ -113,11 +113,6 @@ func cloneIncidentView(view *IncidentView) *IncidentView {
 	// Empty lists stay empty, never null, for the responder's schema.
 	copy.BlockingDetectors = append(make([]string, 0, len(view.BlockingDetectors)), view.BlockingDetectors...)
 	copy.BlockingFindings = append(make([]sdk.Finding, 0, len(view.BlockingFindings)), view.BlockingFindings...)
-	if view.StateChanges != nil {
-		changes := *view.StateChanges
-		changes.Changes = append([]StateChange(nil), view.StateChanges.Changes...)
-		changes.UnobservedKinds = append([]string(nil), view.StateChanges.UnobservedKinds...)
-		copy.StateChanges = &changes
-	}
+	copy.StateChanges = cloneStateChanges(view.StateChanges)
 	return &copy
 }

@@ -296,6 +296,19 @@ func cloneIncidentClosure(closure *IncidentClosure) *IncidentClosure {
 	copy.Result = cloneIncidentResult(closure.Result)
 	copy.FinalDetectorStates = append([]DetectorEvaluation(nil), closure.FinalDetectorStates...)
 	copy.IncidentDetectorStates = append([]DetectorEvaluation(nil), closure.IncidentDetectorStates...)
+	copy.FinalStateChanges = cloneStateChanges(closure.FinalStateChanges)
+	return &copy
+}
+
+// cloneStateChanges deep-copies a StateChanges so a published or persisted
+// snapshot cannot be mutated through a shared slice.
+func cloneStateChanges(changes *StateChanges) *StateChanges {
+	if changes == nil {
+		return nil
+	}
+	copy := *changes
+	copy.Changes = append([]StateChange(nil), changes.Changes...)
+	copy.UnobservedKinds = append([]string(nil), changes.UnobservedKinds...)
 	return &copy
 }
 

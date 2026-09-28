@@ -157,10 +157,17 @@ type IncidentClosure struct {
 	// non-health detector that raised a finding in this incident. It is
 	// learning evidence for the broker, not a closure gate.
 	IncidentDetectorStates []DetectorEvaluation `json:"incident_detector_states,omitempty"`
-	DetectedAt             time.Time            `json:"detected_at"`
-	DispatchedAt           time.Time            `json:"dispatched_at"`
-	ResponderCompletedAt   time.Time            `json:"responder_completed_at"`
-	VerifiedAt             time.Time            `json:"verified_at"`
+	// FinalStateChanges is the configuration diff against the healthy
+	// baseline at verification time (N11): a composite fault's later
+	// component can land a few seconds after dispatch, while the incident is
+	// still open, so it is missing from Request.StateChanges but present
+	// here. nil without a baseline. Computed from the in-memory informer
+	// cache, so it adds no wall-clock time to closure.
+	FinalStateChanges    *StateChanges `json:"final_state_changes,omitempty"`
+	DetectedAt           time.Time     `json:"detected_at"`
+	DispatchedAt         time.Time     `json:"dispatched_at"`
+	ResponderCompletedAt time.Time     `json:"responder_completed_at"`
+	VerifiedAt           time.Time     `json:"verified_at"`
 	// CleanedHelpers are the responder helper objects the controller
 	// deleted after the responder completed, as Kind/namespace/name.
 	CleanedHelpers []string `json:"cleaned_helpers,omitempty"`
