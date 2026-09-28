@@ -129,7 +129,7 @@ unverified flag risks silently breaking every future run. Proposal only, pending
 
 ## Implemented
 
-- **`a2c5e...` (fill in commit SHA at commit time): inline `.sdo/arch.md` in the responder prompt.**
+- **`1816e9c`: inline `.sdo/arch.md` in the responder prompt, and steer away from manual poll turns.**
   `sdo/agent_runtime/responder/codex.py`: new `_inlined_architecture_summary()`, mirroring
   `_inlined_health_objective()`, capped at `_ARCH_INLINE_MAX_CHARS = 8_000` (goal.md's own cap is
   4,000; arch.md is deployer-owned, read-only for the responder, and empirically a bit longer, so it
