@@ -44,6 +44,7 @@ from benchmarks.sregym.runner.pipeline import (
     write_pipeline_snapshot,
     write_pipeline_state,
 )
+from benchmarks.sregym.runner.preflight import LaunchAssurance, default_assurance
 
 _APP_WORKSPACE_SEED_ENV_VAR = "SREGYM_APP_WORKSPACE_SEED_DIR"
 _PERSISTENT_STATE_ENV_VAR = "SDO_PERSISTENT_CONTROLLER_STATE"
@@ -168,20 +169,24 @@ def run_single_experiment(
     project_root: Path,
     sregym_dir: Path,
     lifecycle: ExpStageLifecycle | None = None,
+    assurance: LaunchAssurance | None = None,
 ) -> None:
-    """Run or resume a single experiment."""
+    """Run or resume a single experiment; the launch preflight runs first and raises on a failure."""
     lifecycle = lifecycle or NOOP_EXP_STAGE_LIFECYCLE
+    assurance = assurance or default_assurance()
 
     if target.is_dir():
         exp_dir = target.resolve()
         config = read_snapshot(exp_dir)
         config = resolve_config(config)
+        assurance.preflight([config], project_root=project_root, sregym_dir=sregym_dir, env=dict(os.environ))
         tasklist_path: Path | None = exp_dir / "tasklist.yml"
         if not tasklist_path.exists():
             tasklist_path = None
         print(f"Resuming experiment from: {exp_dir}")
     else:
         config = load_experiment_config_or_resolve(target)
+        assurance.preflight([config], project_root=project_root, sregym_dir=sregym_dir, env=dict(os.environ))
         exp_dir = _create_experiment_dir(config, sregym_dir)
         write_snapshot(config, exp_dir)
         tasklist_path = resolve_tasklist(config, sregym_dir, exp_dir)
@@ -441,11 +446,21 @@ def run_pipeline(
     pipeline_dir: Path | None = None,
     state: PipelineState | None = None,
     lifecycle: ExpStageLifecycle | None = None,
+    assurance: LaunchAssurance | None = None,
 ) -> int:
-    """Run a multi-stage pipeline with automatic KB chaining."""
+    """Run a multi-stage pipeline with automatic KB chaining.
+
+    The launch preflight covers every stage and runs before the pipeline
+    directory exists; a failure raises :class:`PreflightError`.
+    """
     lifecycle = lifecycle or NOOP_EXP_STAGE_LIFECYCLE
+    assurance = assurance or default_assurance()
 
     _verify_sregym(sregym_dir)
+    stage_configs = [
+        resolve_config(merge_stage_config(config.defaults, stage.runner_overrides)) for stage in config.stages
+    ]
+    assurance.preflight(stage_configs, project_root=project_root, sregym_dir=sregym_dir, env=dict(os.environ))
 
     if pipeline_dir is None:
         pipeline_dir = _create_pipeline_dir(config, sregym_dir)
