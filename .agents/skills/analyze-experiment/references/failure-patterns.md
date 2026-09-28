@@ -38,9 +38,9 @@ Compare trajectory actions with findings, surfaced playbooks, architecture, and 
 
 ## Red-herring diagnosis
 
-**Signature:** health verifies, but the outcome's or receipt's `diagnosis_verification` shows `contradicted` or `unverified`; or the diagnosis names a decoy such as a `failure-admin-*` ConfigMap that never appears in `request.state_changes`.
+**Signature:** health verifies, but the outcome's or receipt's `diagnosis_verification` shows `contradicted` or `unverified`; or the diagnosis names a decoy such as a `failure-admin-*` ConfigMap that never appears in `request.state_changes` or `final_state_changes`.
 
-Compare the cited evidence with the request's `state_changes` and `incident_detector_states`. A cause built on `static_context` alone, or one whose `explained_detectors` never cleared, is a lucky fix, not a learned one. Reflection should not have saved a playbook from it; check the reflection commit. Repeated exit-4 refusals from the submission helper before a successful mitigation show the verify-before-submit rule catching wrong fixes.
+Compare the cited evidence with the closure's `state_changes` (both `request.state_changes`, the dispatch-time snapshot, and `final_state_changes`, the verification-time diff) and `incident_detector_states`. A cause built on `static_context` alone, or one whose `explained_detectors` never cleared, is a lucky fix, not a learned one. Reflection should not have saved a playbook from it; check the reflection commit. On a composite fault, a `contradicted` state-change citation that appears in neither diff is a real red herring; one that appears only in `final_state_changes` (a later component landing after dispatch, as in K2) is expected to verify, not contradict — if it still shows `contradicted` in a ledger this old, the run predates N11's fix. Repeated exit-4 refusals from the submission helper before a successful mitigation show the verify-before-submit rule catching wrong fixes.
 
 ## Ownership or broker rejection
 

@@ -12,6 +12,8 @@ from sdo.contracts import (
     IncidentResult,
     ObjectRef,
     RootCauseEvidence,
+    StateChange,
+    StateChanges,
 )
 from sdo.operational_memory import DiagnosisVerdict, verify_diagnosis
 
@@ -112,6 +114,64 @@ def test_scenario_evidence_matches_the_traffic_detector_findings() -> None:
 
     assert verification.verdict == DiagnosisVerdict.CONFIRMED
     assert verification.evidence[0].verified is True
+
+
+def _final_state_changes(*changes: StateChange) -> StateChanges:
+    return StateChanges(
+        baseline_at=datetime(2026, 9, 27, 10, 0, tzinfo=timezone.utc),
+        observed_at=AFTER,
+        changes=list(changes),
+    )
+
+
+def test_a_composites_later_fault_is_confirmed_against_the_closing_views_diff() -> None:
+    """N11: K2's readiness-probe fault lands ~6s after the selector fault,
+
+    while the incident is still open, so it is missing from the request's
+    dispatch-time diff but present in the controller's diff as of
+    verification time.
+    """
+
+    cause = _cause(
+        RootCauseEvidence(kind="detector-finding", source="missing-configmap", observation="geo-config absent"),
+        RootCauseEvidence(
+            kind="state-change", source="Deployment/frontend", observation="readiness probe path changed"
+        ),
+    )
+    late_fault = StateChange(kind="Deployment", name="frontend", change="modified")
+
+    [verification] = verify_diagnosis(
+        _request(),
+        _result(cause),
+        final_detector_states=[_clear("missing-configmap")],
+        final_state_changes=_final_state_changes(late_fault),
+    )
+
+    assert verification.verdict == DiagnosisVerdict.CONFIRMED
+    assert [check.verified for check in verification.evidence] == [True, True]
+
+
+def test_a_change_absent_from_both_diffs_is_still_contradicted() -> None:
+    """The closing view must not turn every citation into a free pass:
+
+    a decoy or a change that never happened stays contradicted even when a
+    closing-time diff is available.
+    """
+
+    cause = _cause(
+        RootCauseEvidence(kind="state-change", source="ConfigMap/failure-admin-geo", observation="decoy script"),
+    )
+    unrelated_late_fault = StateChange(kind="Deployment", name="frontend", change="modified")
+
+    [verification] = verify_diagnosis(
+        _request(),
+        _result(cause),
+        final_detector_states=[_clear("missing-configmap")],
+        final_state_changes=_final_state_changes(unrelated_late_fault),
+    )
+
+    assert verification.verdict == DiagnosisVerdict.CONTRADICTED
+    assert [check.verified for check in verification.evidence] == [False]
 
 
 def test_legacy_results_without_evidence_are_reported_as_such() -> None:

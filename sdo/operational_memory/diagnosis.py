@@ -5,10 +5,18 @@ explains. After the controller's independent verification, SDO checks both
 claims against controller-owned facts:
 
 - every cited detector finding, synthetic scenario, or state change must
-  exist in the incident request (a live observation cannot be checked and is
-  accepted as live but unverified); and
+  exist in the incident request or in the controller's closing-time diff
+  (a live observation cannot be checked and is accepted as live but
+  unverified); and
 - every explained detector must have fired at dispatch and be clear after
   the fix.
+
+A composite fault's later component can land a few seconds after dispatch
+(N11), while the incident is still open, so the dispatch-time request diff
+alone can miss it even though the responder correctly cited it. Checking
+against the union of the request's diff and the controller's diff as of
+verification time closes that gap without weakening the check: a change that
+was never observed, by dispatch or by verification, is still contradicted.
 
 The verdict is recorded with the outcome. It does not gate closure, which
 the health detectors alone decide.
@@ -26,7 +34,13 @@ from sdo.contracts import DetectorEvaluationStatus, FindingStatus
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from sdo.contracts import ConfirmedRootCause, DetectorEvaluation, IncidentRequest, IncidentResult
+    from sdo.contracts import (
+        ConfirmedRootCause,
+        DetectorEvaluation,
+        IncidentRequest,
+        IncidentResult,
+        StateChanges,
+    )
 
 #: Rule-ID prefix of the synthetic-traffic detector's per-scenario findings.
 SCENARIO_RULE_PREFIX = "scenario-slo."
@@ -77,8 +91,17 @@ def verify_diagnosis(
     *,
     final_detector_states: Iterable[DetectorEvaluation],
     incident_detector_states: Iterable[DetectorEvaluation] = (),
+    final_state_changes: StateChanges | None = None,
 ) -> list[RootCauseVerification]:
-    """Verify each confirmed root cause of ``result`` against controller facts."""
+    """Verify each confirmed root cause of ``result`` against controller facts.
+
+    ``final_state_changes`` is the controller's diff against the healthy
+    baseline as of verification time (its closing view, N11), which can name
+    a composite's later fault that landed after the request's dispatch-time
+    snapshot was taken. State-change evidence is checked against the union of
+    the request's diff and this one; a change absent from both is still
+    contradicted.
+    """
 
     if result is None:
         return []
@@ -92,15 +115,30 @@ def verify_diagnosis(
         for finding in request.findings
         if finding.rule_id.startswith(SCENARIO_RULE_PREFIX)
     }
-    changed = (
-        None
-        if request.state_changes is None
-        else {f"{change.kind}/{change.name}" for change in request.state_changes.changes}
-    )
+    changed = _changed_object_keys(request.state_changes, final_state_changes)
     latest: dict[str, DetectorEvaluation] = {}
     for evaluation in sorted([*final_detector_states, *incident_detector_states], key=lambda item: item.evaluated_at):
         latest[evaluation.detector_id] = evaluation
     return [_verify(cause, fired, scenarios, changed, latest) for cause in result.confirmed_root_causes]
+
+
+def _changed_object_keys(
+    dispatch_state_changes: StateChanges | None,
+    final_state_changes: StateChanges | None,
+) -> set[str] | None:
+    """The ``kind/name`` of every object the controller ever saw change.
+
+    ``None`` only when neither diff is available, meaning state-change
+    evidence cannot be checked at all (no baseline was ever configured).
+    """
+
+    if dispatch_state_changes is None and final_state_changes is None:
+        return None
+    keys: set[str] = set()
+    for state_changes in (dispatch_state_changes, final_state_changes):
+        if state_changes is not None:
+            keys.update(f"{change.kind}/{change.name}" for change in state_changes.changes)
+    return keys
 
 
 def _verify(

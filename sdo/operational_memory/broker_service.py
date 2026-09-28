@@ -15,6 +15,7 @@ from sdo.contracts import (
     DetectorEvaluationStatus,
     IncidentRequest,
     IncidentResult,
+    StateChanges,
 )
 from sdo.operational_memory.commit_broker import CommitBroker, CommitBrokerError
 from sdo.operational_memory.models import (
@@ -111,6 +112,10 @@ class BrokerClosure(BaseModel):
     # Latest post-response evaluation of each non-health detector that raised a
     # finding; learning evidence only, never a closure gate.
     incident_detector_states: list[DetectorEvaluation] = Field(default_factory=list)
+    # The controller's configuration diff against the healthy baseline as of
+    # verification time (N11); can name a composite's later fault the
+    # dispatch-time request diff missed. None without a baseline.
+    final_state_changes: StateChanges | None = None
     detected_at: datetime
     dispatched_at: datetime
     responder_completed_at: datetime
@@ -419,6 +424,7 @@ class BrokerService:
                 dispatch_error=closure.dispatch_error,
                 final_health_detector_state=closure.final_detector_states,
                 incident_detector_states=closure.incident_detector_states,
+                final_state_changes=closure.final_state_changes,
                 health_verified=health_verified,
                 fault_confirmed=bool(result and result.confirmed_root_causes),
                 inspected_playbooks=surfaced,
