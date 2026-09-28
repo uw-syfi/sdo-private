@@ -148,6 +148,14 @@ third_party/sregym/logs/<run-or-pipeline>/
 
 A resumed run keeps its first manifest and appends each resume's manifest under `resumes`. Runs from before 2026-09-28 have no manifest.
 
+Classify runs before analyzing them: `uv run python -m benchmarks.sregym.analysis.run_validity <dir>... [--logs-root third_party/sregym/logs] [--legacy] [--json out.json]`. It labels each problem run:
+
+- `invalid_infra`, with reasons, for a harness or host fault. The causes are: no manifest or a waived preflight; no result row; a failed CLI install; exhausted Codex quota; tokens that do not reconcile between rollouts, usage records and result files; a passed stage without judge-free TTD/TTM, or a TTM before the TTD; an isolation-guard mismatch or no guard; another lane's kind nodes in agent output; an acknowledged submission the harness never graded; or a stopped pipeline that never published a stage's deferred receipt.
+- `agent_failure` for a real failure. The causes are: a failed oracle, `agent_error`, no valid SDO strict receipt, or leftover `sdo.dev/responder-helper=true` objects.
+- `valid` otherwise.
+
+A directory name prefix a person gave (`invalid_`, `sdobug_`, ...) is shown as `manual:` but never decides the class. `--legacy` accepts runs from before 2026-09-28: a missing manifest is noted instead of failing, and a missing guard is accepted when the run did not overlap another run in time. `incident_cost` applies the same classification and excludes `invalid_infra` runs, printing each one with its reasons. Pass `--legacy-runs` for pre-manifest runs, or `--include-invalid` to report every run.
+
 Current SREGym parallel runs instead write each run under `runs/<6-digit sequence>_<problem-id>/worker_<N>/results/`. A problem listed several times in `runner.problems` (kept in order, e.g. A B C D A B C D) and each of the `runner.repeat` independent attempts (passed as `--n-attempts`, expanded consecutively as A A B B; fresh fault injection and agent launch, not retries) gets its own sequence number, so group rows by `problem_id` across sequences rather than assuming one directory per problem.
 
 `controller_logs/` is written by the adapter's cleanup, so it also exists after a failed controller Job; an export failure is recorded in `controller_logs/export_error.txt` instead of failing the run. Each controller evaluation line (`controller_iteration`, `findings`) carries no timestamp of its own; use the `kubectl` timestamp prefix. The broker ledger's `closure.request.detector_history` is frozen when the incident opens and compacted to the last 12 evaluations, so evaluations after dispatch appear only in these logs.

@@ -398,6 +398,8 @@ class SdoStage:
     model: str | None = None
     responder_summary: UsageSummary | None = None
     reflection_summary: UsageSummary | None = None
+    #: The problem run's results directory (what the validity checker classifies).
+    source: str = ""
 
 
 @dataclass(frozen=True)
@@ -473,6 +475,8 @@ class Report:
     uncached: bool = False
     pricing: PricingInfo | None = None
     lifecycle_summary: UsageSummary | None = None
+    #: Runs left out as ``invalid_infra``, each with its reasons.
+    excluded: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
 
 # --------------------------------------------------------------------------- loading
@@ -497,40 +501,47 @@ def _float(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def read_verdict(results_dir: Path) -> Verdict | None:
-    """Read the last row of the problem run's ``*_ALL_results.csv`` (or any results CSV)."""
+def read_result_row(results_dir: Path) -> dict[str, str | None] | None:
+    """The last row of the problem run's ``*_ALL_results.csv`` (or any results CSV), ``None`` when absent."""
 
     candidates = sorted(results_dir.glob("*_ALL_results.csv")) or sorted(results_dir.rglob("*_results.csv"))
     for path in candidates:
         with path.open(encoding="utf-8", newline="") as stream:
             rows = list(csv.DictReader(stream))
-        if not rows:
-            continue
-        row = rows[-1]
-        injected = _float(row.get("fault_injected_at"))
-        submitted = _float(row.get("mitigation_submitted_at"))
-        raw = submitted - injected if injected is not None and submitted is not None else None
-        # The conductor records TTL when the diagnosis verdict completes, right before it opens the
-        # mitigation stage, on a clock that starts when the fault is injected.
-        diagnosed = _float(row.get("diagnosis_submitted_at"))
-        ttl = _float(row.get("TTL"))
-        grading_wait = (
-            max(0.0, injected + ttl - diagnosed)
-            if injected is not None and diagnosed is not None and ttl is not None
-            else None
-        )
-        if _truthy(row.get("diagnosis_grading_deferred")) is True:
-            # defer_diagnosis_grading opens the mitigation stage at the diagnosis POST and grades
-            # it in the background, so the mitigation POST never waits on the judge.
-            grading_wait = 0.0
-        return Verdict(
-            diagnosis=_truthy(row.get("Diagnosis.success")),
-            mitigation=_truthy(row.get("Mitigation.success")),
-            raw_incl_judge_seconds=raw,
-            grading_wait_seconds=grading_wait,
-            diagnosis_seconds=diagnosed - injected if injected is not None and diagnosed is not None else None,
-        )
+        if rows:
+            return rows[-1]
     return None
+
+
+def read_verdict(results_dir: Path) -> Verdict | None:
+    """Read the last row of the problem run's ``*_ALL_results.csv`` (or any results CSV)."""
+
+    row = read_result_row(results_dir)
+    if row is None:
+        return None
+    injected = _float(row.get("fault_injected_at"))
+    submitted = _float(row.get("mitigation_submitted_at"))
+    raw = submitted - injected if injected is not None and submitted is not None else None
+    # The conductor records TTL when the diagnosis verdict completes, right before it opens the
+    # mitigation stage, on a clock that starts when the fault is injected.
+    diagnosed = _float(row.get("diagnosis_submitted_at"))
+    ttl = _float(row.get("TTL"))
+    grading_wait = (
+        max(0.0, injected + ttl - diagnosed)
+        if injected is not None and diagnosed is not None and ttl is not None
+        else None
+    )
+    if _truthy(row.get("diagnosis_grading_deferred")) is True:
+        # defer_diagnosis_grading opens the mitigation stage at the diagnosis POST and grades
+        # it in the background, so the mitigation POST never waits on the judge.
+        grading_wait = 0.0
+    return Verdict(
+        diagnosis=_truthy(row.get("Diagnosis.success")),
+        mitigation=_truthy(row.get("Mitigation.success")),
+        raw_incl_judge_seconds=raw,
+        grading_wait_seconds=grading_wait,
+        diagnosis_seconds=diagnosed - injected if injected is not None and diagnosed is not None else None,
+    )
 
 
 _KUBECTL_WRITES = frozenset(
@@ -668,15 +679,10 @@ def last_mutation_done_at(rollouts: list[Path], *, after: float, before: float) 
     return last
 
 
-def _with_mitigation_applied(verdict: Verdict, results_dir: Path, rollouts: list[Path]) -> Verdict:
-    injected = submitted = None
-    for path in sorted(results_dir.glob("*_ALL_results.csv")) or sorted(results_dir.rglob("*_results.csv")):
-        with path.open(encoding="utf-8", newline="") as stream:
-            rows = list(csv.DictReader(stream))
-        if rows:
-            injected = _float(rows[-1].get("fault_injected_at"))
-            submitted = _float(rows[-1].get("mitigation_submitted_at"))
-            break
+def with_mitigation_applied(verdict: Verdict, results_dir: Path, rollouts: list[Path]) -> Verdict:
+    row = read_result_row(results_dir) or {}
+    injected = _float(row.get("fault_injected_at"))
+    submitted = _float(row.get("mitigation_submitted_at"))
     if injected is None or not rollouts:
         return verdict
     applied = first_mutation_at(rollouts, after=injected)
@@ -688,7 +694,7 @@ def _with_mitigation_applied(verdict: Verdict, results_dir: Path, rollouts: list
     )
 
 
-def _problem_results_dirs(experiment_dir: Path) -> list[tuple[str, Path]]:
+def problem_results_dirs(experiment_dir: Path) -> list[tuple[str, Path]]:
     """Return ``(problem_id, results_dir)`` in sequence order for one experiment directory."""
 
     return [
@@ -878,6 +884,8 @@ def pipeline_stage_dirs(pipeline_dir: Path) -> list[tuple[int, str, Path]]:
     if state_path.is_file():
         state = json.loads(state_path.read_text(encoding="utf-8"))
         for stage in state.get("stages", []):
+            if not stage.get("experiment_dir"):
+                continue  # a stage that never started
             recorded = Path(str(stage.get("experiment_dir", "")))
             local = pipeline_dir / recorded.name
             directory = local if local.is_dir() else recorded
@@ -914,7 +922,7 @@ def load_sdo_pipeline(pipeline_dir: Path) -> list[SdoStage]:
     for index, name, stage_dir in pipeline_stage_dirs(pipeline_dir):
         provider, model = experiment_model(stage_dir)
         memory = memory_size(stage_dir / "application_workspace")
-        for problem_id, results in _problem_results_dirs(stage_dir):
+        for problem_id, results in problem_results_dirs(stage_dir):
             receipts = sorted(results.rglob(RECEIPT_NAME))
             receipt: dict[str, Any] = (
                 json.loads(receipts[-1].read_text(encoding="utf-8")) if receipts else _stage_end_record(results)
@@ -939,7 +947,7 @@ def load_sdo_pipeline(pipeline_dir: Path) -> list[SdoStage]:
             reflection_rollouts = [
                 path for path in all_rollouts if any(own in path.name for own in reflection_sessions)
             ]
-            verdict = _with_mitigation_applied(
+            verdict = with_mitigation_applied(
                 read_verdict(results) or Verdict(None, None, None), results, responder_rollouts
             )
             stages.append(
@@ -962,6 +970,7 @@ def load_sdo_pipeline(pipeline_dir: Path) -> list[SdoStage]:
                     lifecycle=lifecycle,
                     provider=provider,
                     model=model,
+                    source=str(results),
                 )
             )
     return stages
@@ -1042,12 +1051,12 @@ def load_codex_runs(directory: Path) -> list[CodexRun]:
     runs: list[CodexRun] = []
     for experiment_dir in experiment_dirs:
         provider, model = experiment_model(experiment_dir)
-        for problem_id, results in _problem_results_dirs(experiment_dir):
+        for problem_id, results in problem_results_dirs(experiment_dir):
             verdict = read_verdict(results)
             if verdict is None:
                 continue
             rollouts = sorted(results.rglob("sessions/**/rollout-*.jsonl"))
-            verdict = _with_mitigation_applied(verdict, results, rollouts)
+            verdict = with_mitigation_applied(verdict, results, rollouts)
             claude = provider == "claude" or any(results.rglob("claudecode_results_*.json"))
             tokens = _claude_tokens(results) if claude else _codex_tokens(results)
             runs.append(
@@ -1386,6 +1395,14 @@ def render_breakdown(report: Report) -> str:
     return _table(["arm", "#", "problem", "part", *_BREAKDOWN_HEADERS], rows)
 
 
+def render_excluded(excluded: list[str]) -> str:
+    if not excluded:
+        return ""
+    lines = [f"Excluded runs (invalid_infra, {len(excluded)}):"]
+    lines.extend(f"  {line}" for line in excluded)
+    return "\n".join(lines) + "\n\n"
+
+
 def render(report: Report) -> str:
     uncached = report.uncached
     unit = "uncached tokens" if uncached else "tokens"
@@ -1563,6 +1580,37 @@ def _pricing_context(table_path: Path | None, weights: list[str]) -> PricingCont
     return PricingContext(table, table_source=f"pricing table {table_path}", weight_overrides=overrides)
 
 
+def exclude_invalid_runs(
+    sdo_pipeline: Path,
+    codex_dirs: list[Path],
+    stages: list[SdoStage],
+    codex_runs: list[CodexRun],
+    *,
+    legacy: bool,
+) -> tuple[list[SdoStage], list[CodexRun], list[str]]:
+    """Drop the stages and baseline runs the validity checker classifies ``invalid_infra``.
+
+    ``agent_failure`` runs stay: they are real outcomes and count as failures.
+    Returns the kept stages and runs, and one line per excluded run with its reasons.
+    """
+
+    from benchmarks.sregym.analysis.run_validity import ValidityPolicy, validity_by_results_dir
+
+    validity = validity_by_results_dir([sdo_pipeline, *codex_dirs], policy=ValidityPolicy(legacy=legacy))
+    excluded: list[str] = []
+
+    def keep(source: str, label: str) -> bool:
+        result = validity.get(source)
+        if result is None or not result.excluded:
+            return True
+        excluded.append(f"{label} ({source}): {'; '.join(result.reasons)}")
+        return False
+
+    kept_stages = [stage for stage in stages if keep(stage.source, f"SDO stage {stage.index} {stage.name}")]
+    kept_runs = [run for run in codex_runs if keep(run.source, f"baseline {run.problem_id}")]
+    return kept_stages, kept_runs, excluded
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     parser.add_argument("sdo_pipeline", type=Path, help="SDO pipeline log directory")
@@ -1599,6 +1647,16 @@ def main(argv: list[str] | None = None) -> int:
         help="PROVIDER:MODEL the baseline arm ran (default: its experiment_config.toml)",
     )
     parser.add_argument("--json", type=Path, help="also write the report as JSON")
+    parser.add_argument(
+        "--legacy-runs",
+        action="store_true",
+        help="accept runs from before the run manifest and the lane isolation guard (run_validity --legacy)",
+    )
+    parser.add_argument(
+        "--include-invalid",
+        action="store_true",
+        help="report invalid_infra runs too instead of excluding them (the default excludes them and says why)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -1608,6 +1666,20 @@ def main(argv: list[str] | None = None) -> int:
     except (IncidentCostError, ValueError, TypeError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    excluded: list[str] = []
+    if not args.include_invalid:
+        stages, codex_runs, excluded = exclude_invalid_runs(
+            args.sdo_pipeline, args.codex, stages, codex_runs, legacy=args.legacy_runs
+        )
+        for line in excluded:
+            print(f"excluded: {line}", file=sys.stderr)
+        if not stages:
+            print(
+                "error: every SDO stage is invalid_infra (see the exclusions above); "
+                "pass --legacy-runs for runs from before 2026-09-28, or --include-invalid to report them anyway",
+                file=sys.stderr,
+            )
+            return 2
     lifecycle = _sum_usage_jsonl(args.lifecycle_usage)[0] if args.lifecycle_usage else None
     report = build_report(
         stages,
@@ -1618,7 +1690,8 @@ def main(argv: list[str] | None = None) -> int:
         sdo_model=args.sdo_model,
         codex_model=args.codex_model,
     )
-    print(render(report))
+    report.excluded = excluded
+    print(render_excluded(excluded) + render(report))
     if args.json:
         args.json.write_text(json.dumps(_report_json(report), indent=2), encoding="utf-8")
     return 0

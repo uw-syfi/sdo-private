@@ -66,3 +66,55 @@ Code: `benchmarks/sregym/runner/manifest.py`. The runner writes `run_manifest.js
 - **Resumes append; they never overwrite.** A resumed run keeps its first manifest as the top-level document and adds each later launch under `resumes`. A resume from a different commit or image is therefore visible.
 - **Writes are atomic** (write a temporary file, then rename). A killed launcher never leaves a truncated manifest for the checker to trip on.
 
+## Run validity checker
+
+Code: `benchmarks/sregym/analysis/run_validity.py`. Run it with `uv run python -m benchmarks.sregym.analysis.run_validity <dir>... | --logs-root <root> [--legacy] [--json]`. It exits 1 when any run is `invalid_infra`. `incident_cost` runs the same classification by default.
+
+- **The unit is one problem run** (`runs/<seq>_<problem>/worker_<n>/results`), the unit `incident_cost` reports. A directory's verdict is not all-or-nothing. In the superseded Codex x5, only attempt 4 lost its mitigation to the harness; the other four attempts are sound.
+- **Three classes, and who is to blame decides between the last two.**
+  - `invalid_infra`: the measurement says nothing about the agent, so the run is excluded and the reason printed.
+  - `agent_failure`: the measurement is sound and the agent did not succeed. It stays in every report as a failure. Excluding it would flatter the agent.
+  - `valid`: everything passed.
+- **Missing SDO evidence counts against SDO.** No valid strict receipt, a rejected receipt, or leftover `sdo.dev/responder-helper=true` objects are `agent_failure`, not infrastructure. The one exception is a persistent-controller stage whose pipeline was stopped before the next stage's drain or teardown could publish its deferred receipt. Its receipt was never due, so it is `invalid_infra` with that reason.
+  - Consequence: `sdobug_20260927_200838` stage 0 is `invalid_infra` (the pipeline was stopped), as the human decision had it. `20260927_163003` (teardown failed, so no receipt was published) is `agent_failure`, which is stricter than excluding it.
+- **Timing uses `incident_cost`'s own `Verdict`,** so the checker validates the TTD and TTM that get reported, never a reimplementation.
+  - A passed stage without judge-free TTD (needs `fault_injected_at` and `diagnosis_submitted_at`) or TTM (also `mitigation_submitted_at` and `TTL`) is `invalid_infra`.
+  - So is a TTM earlier than the TTD. It means the grading window subtracted for judge time overlaps the agent's own work, so judge time was not removed correctly.
+- **Token reconciliation is exact** on input, cache-read and output tokens:
+  - Codex: the per-request rollout sum against the rollout's final `total_token_usage` and the driver's `usage_metrics`.
+  - SDO: the responder's receipt `usage` against its rollout's first turn and its `responder-turns.jsonl` record.
+
+  Reasoning tokens are left out, because receipts written before agentshim 0.7 record zero. On every existing run the sources agree exactly, so any difference means an accounting bug. A run with no token evidence at all is `invalid_infra`: its cost cannot be reported.
+  - Not reconciled: reflection tokens. A resumed reflection's receipt usage is session-cumulative by design, and `incident_cost` already rebuilds it from the rollout.
+- **Isolation, three signals.**
+  1. The in-run guard's `verified: port P reaches only <cluster>` lines in `worker.log`. A mismatch line, or a verified cluster other than the lane's, is `invalid_infra`. No verification at all is `invalid_infra` in strict mode.
+  2. Kind node names of *other* lanes in what the agent's commands printed: rollout tool outputs, or Codex `--json` command output when there are no rollouts. This is the direct symptom of the shared-kubeconfig incident (`luna-w1-worker3` inside a `luna-w0` run). Only tool outputs are scanned, not prompts, because an SDO prompt may quote operational memory from another lane. JSON escapes are undone first; a raw `\nluna-w3` once parsed as the fake cluster `nluna-w3`.
+  3. Legacy runs only: with no guard evidence, a run that overlapped another run's active window under the same logs root is `invalid_infra`. The contamination needed two concurrent runs. The window is the stage's config snapshot mtime to the last `worker.log` or result CSV mtime.
+- **A submission the harness acknowledged but never graded is `invalid_infra`.** A missing `Diagnosis.success` or `Mitigation.success` column, when the agent's own `POST /submit` commands got `Submission received` at least as many times as needed, is the conductor bug of `dec0e283`. Without those acknowledgements, the missing verdict means the agent never submitted: `agent_failure`.
+- **Codex quota exhaustion is matched only in Codex's own `--json` `error` and `turn.failed` events.** Grepping logs for "429" or "rate limit" matched image-pull timings and MongoDB log lines.
+- **Helper leftovers are checked where the evidence records them.** The runtime on `vic/feat/robust-feedback-loop` (`c4a548c`) deletes labelled helpers and records `cleaned_helpers` in the closure. A failed cleanup is reported as `clean up responder helpers: ...` in the controller log. The checker fails on that line, or on a receipt `leftover_helpers` / `remaining_helpers` list. Runs from before that change record nothing, which is `not_recorded`, not a pass.
+- **`--legacy` exists because every run before 2026-09-28 lacks a manifest.** In strict mode (the default) all 81 existing problem runs are `invalid_infra` for exactly that reason. `incident_cost --legacy-runs` applies the legacy policy. A waived preflight is `invalid_infra` even under `--legacy`.
+- **A person's prefix (`invalid_`, `sdobug_`, ...) is shown as `manual:` and never used.** The checker must reach the same answer from evidence alone.
+- **Also fixed:** `incident_cost.pipeline_stage_dirs` returned the pipeline directory itself for a stage that never started (empty `experiment_dir`). It now skips such stages.
+
+### What it found on the existing runs (2026-09-28, `--legacy`, `third_party/sregym/logs`)
+
+81 problem runs in 40 directories: 41 `valid`, 12 `agent_failure`, 28 `invalid_infra`.
+
+- **Every run a person had renamed was classified `invalid_infra` from evidence alone:** `invalid_` 11/11, `sdobug_` 2/2, `stopped_` 1/1, `stopped_userdirected_` 3/3, `aborted_` 1/1.
+  - For the five `invalid_` directories, the reason is the one the humans found: they ran without the isolation guard, concurrently with each other.
+  - In `invalid_20260927_190901_codex`, attempts 1 and 4 also show nodes of `luna-w1` and `luna-w2` in a `luna-w0` run.
+  - Attempt 4 of that run also lost its mitigation to the grading-time submission bug.
+- **`superseded_prefix_20260927_195049_codex`:** attempt 4 is `invalid_infra` (the harness dropped its acknowledged mitigation). The other four attempts are `valid`. Humans superseded the whole directory because it predates the fix; the checker shows which attempt was actually affected.
+- **Unlabelled but `invalid_infra` (9):**
+  - three SDO attempts that never produced a result row (`20260927_090342`, `093811` and `102206`, each excluded in the luna decisions log);
+  - the July and September development runs without result rows;
+  - `20260913_182622_pipeline_sdo-claude-haiku-reuse`, whose CSV predates the submission timestamps, so its judge-free TTD/TTM cannot be computed.
+- **`agent_failure` (12):**
+  - 8 stock Codex attempts with a failed oracle;
+  - SDO `20260927_163003` (both stages: teardown failed, so no strict receipt was published);
+  - SDO `20260927_165936` stage 1 (receipt rejected, `completed=false`);
+  - one development run from 2026-09-14.
+- **`reuse1` and `fresh1`** (`20260927_182519` and `20260927_184719`, pre-guard) are `valid`: they ran alone. The luna log reached the same judgement by hand.
+- **Token accounting reconciled exactly on every run that has token evidence.** No run was excluded for a token mismatch.
+
