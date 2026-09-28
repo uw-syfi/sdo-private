@@ -311,6 +311,13 @@ def test_every_path_verifies_with_incident_status_before_submitting(tmp_path: Pa
     assert "Run the playbook's verification and `python3 -m sdo incident status`" in warm
 
 
+def test_prompt_requires_helper_objects_to_carry_the_cleanup_label() -> None:
+    prompt = _responder_prompt(IncidentRequest.model_validate_json(_fixture("incident_request.json")))
+
+    assert "sdo.dev/responder-helper=true" in prompt
+    assert "deletes them when you finish" in prompt
+
+
 def test_prompt_requires_live_evidence_for_every_root_cause() -> None:
     prompt = _responder_prompt(IncidentRequest.model_validate_json(_fixture("incident_request.json")))
 

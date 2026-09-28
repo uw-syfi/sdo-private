@@ -584,8 +584,19 @@ def _rbac_resources(config: ControllerInstallConfig) -> list[dict[str, Any]]:
         for rule in roles["sdo-controller"]["rules"]
         if not set(rule.get("apiGroups", [])) & {"coordination.k8s.io", "batch"}
     ]
+    # Beyond observation, the controller may only delete the responder's
+    # labelled helper pods and Jobs (the label is enforced in the controller).
+    helper_cleanup_rules = [
+        {"apiGroups": [""], "resources": ["pods"], "verbs": ["list", "delete"]},
+        {"apiGroups": ["batch"], "resources": ["jobs"], "verbs": ["list", "delete"]},
+    ]
     app_grants: list[dict[str, Any]] = []
-    for name, rules in (("sdo-controller", observer_rules), ("sdo-responder", _app_responder_rules(path))):
+    for name, rules in (
+        ("sdo-controller", observer_rules),
+        ("sdo-responder", _app_responder_rules(path)),
+        ("sdo-controller-helper-cleanup", helper_cleanup_rules),
+    ):
+        subject = "sdo-controller" if name == "sdo-controller-helper-cleanup" else name
         app_grants.append(
             {
                 "apiVersion": "rbac.authorization.k8s.io/v1",
@@ -599,7 +610,7 @@ def _rbac_resources(config: ControllerInstallConfig) -> list[dict[str, Any]]:
                 "apiVersion": "rbac.authorization.k8s.io/v1",
                 "kind": "RoleBinding",
                 "metadata": {"name": name, "namespace": config.namespace},
-                "subjects": [{"kind": "ServiceAccount", "name": name, "namespace": control}],
+                "subjects": [{"kind": "ServiceAccount", "name": subject, "namespace": control}],
                 "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": name},
             }
         )
