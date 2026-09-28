@@ -285,6 +285,37 @@ func TestProberPodEnsureReusesAMatchingProberAndReplacesAStaleOne(t *testing.T) 
 	}
 }
 
+// A responder can run for many minutes. A pod IP handed to it at dispatch goes
+// stale when the prober pod is replaced, and every `sdo incident status` then
+// times out, so the responder gets the prober's stable Service address.
+func TestResponderGetsAStableProberAddressThatSurvivesPodReplacement(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	config := proberPodConfig(t, client)
+	_, desired, err := config.Manifests()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := desired.DeepCopy()
+	ready.Status = corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.0.0.7",
+		Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
+	if _, err := client.CoreV1().Pods("hotel-reservation-sdo").Create(context.Background(), ready, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	environment := ProberEnvironment(config.ServiceAddress)(context.Background())
+
+	if got := environment[ProberURLEnvironment]; got != "http://sdo-prober.hotel-reservation-sdo.svc:8080" {
+		t.Fatalf("responder must get the prober Service address, got %q", got)
+	}
+	service, err := client.CoreV1().Services("hotel-reservation-sdo").Get(context.Background(), ProberName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("the prober Service must exist: %v", err)
+	}
+	if service.Spec.Selector["app.kubernetes.io/name"] != ProberName || service.Spec.Ports[0].Port != 8080 {
+		t.Fatalf("the Service must select the prober pod on its API port: %+v", service.Spec)
+	}
+}
+
 func TestProberEnvironmentTellsTheResponderWhereToVerify(t *testing.T) {
 	environment := ProberEnvironment(StaticProberURL("http://10.0.0.7:8080"))(context.Background())
 	if environment[ProberURLEnvironment] != "http://10.0.0.7:8080" || len(environment) != 1 {

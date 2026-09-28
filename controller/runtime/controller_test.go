@@ -1,9 +1,12 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -153,8 +156,10 @@ func TestDispatchErrorRetriesTheSameIncidentInsteadOfOpeningADuplicate(t *testin
 	interval := time.Second
 	detector := controllerDetector("health", interval, stateFinding("fault"), stateFinding("fault"), stateFinding("fault"))
 	dispatcher := &retryingDispatcher{requests: make(chan IncidentRequest, 2)}
+	config := testControllerConfig()
+	config.DispatchRetry = DispatchRetryPolicy{InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}
 	controller, err := NewController(
-		testControllerConfig(),
+		config,
 		[]sdk.Detector{detector},
 		staticProvider{snapshot: sdktest.Snapshot{}},
 		dispatcher,
@@ -163,6 +168,8 @@ func TestDispatchErrorRetriesTheSameIncidentInsteadOfOpeningADuplicate(t *testin
 	if err != nil {
 		t.Fatalf("new controller: %v", err)
 	}
+	now := time.Unix(1000, 0).UTC()
+	controller.now = func() time.Time { return now }
 	for sample := 0; sample < 2; sample++ {
 		if err := controller.Step(context.Background(), time.Unix(int64(sample), 0), nil); err != nil {
 			t.Fatalf("firing step: %v", err)
@@ -178,6 +185,11 @@ func TestDispatchErrorRetriesTheSameIncidentInsteadOfOpeningADuplicate(t *testin
 		incidentID: "stale-incident",
 		result:     completedResult("stale-incident"),
 	}, time.Unix(3, 0))
+	if _, ok := controller.PendingDispatchEffect(); ok {
+		t.Fatal("a transient dispatch failure retried without backoff")
+	}
+	// The bounded backoff (capped at 1ms here) is over; the retry stays pending.
+	now = now.Add(2 * time.Millisecond)
 	retry, ok := controller.PendingDispatchEffect()
 	if !ok {
 		t.Fatal("transient dispatch failure did not remain pending for retry")
@@ -462,6 +474,14 @@ func TestResponderCompletionDoesNotCloseIncidentUntilAllHealthFindingsClear(t *t
 	if !ok || pending.Request.IncidentID != closure.Request.IncidentID {
 		t.Fatalf("verified closure was not persisted for outcome handling: %#v", pending)
 	}
+	// An in-time verification must not carry a (zero) detector review time.
+	encoded, err := json.Marshal(closure)
+	if err != nil {
+		t.Fatalf("encode closure: %v", err)
+	}
+	if strings.Contains(string(encoded), "detector_review") {
+		t.Fatalf("in-time closure carries a detector review marker: %s", encoded)
+	}
 }
 
 func TestControllerRequiresDetectorReviewWhenPostResponseHealthNeverClears(t *testing.T) {
@@ -511,6 +531,197 @@ func TestControllerRequiresDetectorReviewWhenPostResponseHealthNeverClears(t *te
 	state := controller.ExportState()
 	if !state.DetectorReviewRequired || state.DetectorReviewRequiredAt.IsZero() || state.DetectorReviewReason == "" {
 		t.Fatalf("detector review state was not durable: %#v", state)
+	}
+}
+
+type failedJobDispatcher struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (d *failedJobDispatcher) Dispatch(_ context.Context, request IncidentRequest) (IncidentResult, error) {
+	d.mu.Lock()
+	d.calls++
+	d.mu.Unlock()
+	return IncidentResult{}, &ResponderJobFailedError{JobName: IncidentJobName(request.IncidentID)}
+}
+
+// A responder Job that failed (its pod was killed, say) is terminal: the
+// dispatcher rejoins the same Job by name, so retrying it hot-looped forever
+// and the incident could never close. The controller must record the failure
+// once and let health decide the closure.
+func TestAFailedResponderJobIsATerminalDispatchFailure(t *testing.T) {
+	interval := time.Second
+	health := controllerDetector(
+		"health", interval, stateFinding("health"), stateFinding("health"), sdk.Finding{}, sdk.Finding{},
+	)
+	health.spec.Class = sdk.DetectorClassHealth
+	health.spec.Owner = sdk.DetectorOwnerHealthJudge
+	health.spec.Persistence = sdk.PersistencePolicy{Firing: 2, Clearing: 2}
+	health.spec.Batching = sdk.BatchingPolicy{Severity: sdk.SeverityCritical}
+	health.spec.OriginatingCommit = "health-objective"
+	for index := range health.samples {
+		if len(health.samples[index]) > 0 {
+			health.samples[index][0].Severity = sdk.SeverityCritical
+		}
+	}
+	dispatcher := &failedJobDispatcher{}
+	controller, err := NewController(
+		testControllerConfig(), []sdk.Detector{health}, staticProvider{snapshot: sdktest.Snapshot{}}, dispatcher,
+		time.Unix(0, 0),
+	)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	closed := make(chan IncidentClosure, 1)
+	controller.OnIncidentClosed = func(closure IncidentClosure) { closed <- closure }
+	for sample := 0; sample < 2; sample++ {
+		if err := controller.Step(context.Background(), time.Unix(int64(sample), 0), nil); err != nil {
+			t.Fatalf("firing step: %v", err)
+		}
+	}
+	executePendingEffect(t, controller)
+	awaitDispatchCompletionQueued(t, controller)
+	if err := controller.Step(context.Background(), time.Unix(2, 0), nil); err != nil {
+		t.Fatalf("completion step: %v", err)
+	}
+	if _, pending := controller.PendingDispatchEffect(); pending {
+		t.Fatal("a failed responder Job was scheduled for another dispatch")
+	}
+	if err := controller.Step(context.Background(), time.Unix(3, 0), nil); err != nil {
+		t.Fatalf("clear step: %v", err)
+	}
+	var closure IncidentClosure
+	select {
+	case closure = <-closed:
+	case <-time.After(time.Second):
+		t.Fatalf("incident with a failed responder never closed: %#v", controller.ExportState())
+	}
+	if closure.Result != nil || !strings.Contains(closure.DispatchError, "failed") {
+		t.Fatalf("closure must record the terminal dispatch failure: %#v", closure)
+	}
+	dispatcher.mu.Lock()
+	defer dispatcher.mu.Unlock()
+	if dispatcher.calls != 1 {
+		t.Fatalf("failed responder Job dispatched %d times", dispatcher.calls)
+	}
+}
+
+// A persistent controller's Job restarts it on exit. Exiting on detector
+// review crash-looped the Job past its backoff limit, which stopped detection
+// for every later incident; only a one-shot run ends on review.
+func TestDetectorReviewEndsOnlyOneShotRuns(t *testing.T) {
+	interval := time.Second
+	health := controllerDetector(
+		"health", interval,
+		stateFinding("health"), stateFinding("health"), stateFinding("health"), stateFinding("health"),
+	)
+	health.spec.Class = sdk.DetectorClassHealth
+	health.spec.Owner = sdk.DetectorOwnerHealthJudge
+	health.spec.Persistence = sdk.PersistencePolicy{Firing: 2, Clearing: 2}
+	health.spec.Batching = sdk.BatchingPolicy{Severity: sdk.SeverityCritical}
+	health.spec.OriginatingCommit = "health-objective"
+	for index := range health.samples {
+		health.samples[index][0].Severity = sdk.SeverityCritical
+	}
+	dispatcher := &recordingDispatcher{requests: make(chan IncidentRequest, 1)}
+	config := testControllerConfig()
+	config.VerificationTimeout = 2 * time.Second
+	controller, err := NewController(
+		config, []sdk.Detector{health}, staticProvider{snapshot: sdktest.Snapshot{}}, dispatcher, time.Unix(0, 0),
+	)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	for sample := 0; sample < 2; sample++ {
+		if err := controller.Step(context.Background(), time.Unix(int64(sample), 0), nil); err != nil {
+			t.Fatalf("firing step: %v", err)
+		}
+	}
+	executePendingEffect(t, controller)
+	awaitRequest(t, dispatcher.requests)
+	awaitDispatchCompletionQueued(t, controller)
+	for sample := 2; sample < 5; sample++ {
+		if err := controller.Step(context.Background(), time.Unix(int64(sample), 0), nil); err != nil {
+			t.Fatalf("step %d: %v", sample, err)
+		}
+	}
+	if !controller.DetectorReviewRequired() {
+		t.Fatal("setup: detector review was not required")
+	}
+
+	oneShot := detectorReviewGate{exit: true, log: &bytes.Buffer{}}
+	if err := oneShot.check(controller); err == nil || !strings.Contains(err.Error(), "detector review required") {
+		t.Fatalf("one-shot run did not end on detector review: %v", err)
+	}
+	var log bytes.Buffer
+	persistent := detectorReviewGate{log: &log}
+	for range 3 {
+		if err := persistent.check(controller); err != nil {
+			t.Fatalf("persistent controller ended on detector review: %v", err)
+		}
+	}
+	if got := strings.Count(log.String(), "detector review required"); got != 1 {
+		t.Fatalf("persistent controller must report the review once, got %d reports: %q", got, log.String())
+	}
+}
+
+// Health that clears only after the verification window elapsed was not
+// restored by the responder within its window (a human or an unrelated
+// change may have fixed it), so the closure must say so.
+func TestClosureAfterDetectorReviewRecordsTheLateVerification(t *testing.T) {
+	interval := time.Second
+	health := controllerDetector(
+		"health", interval,
+		stateFinding("health"), stateFinding("health"), stateFinding("health"), stateFinding("health"),
+		stateFinding("health"), sdk.Finding{}, sdk.Finding{},
+	)
+	health.spec.Class = sdk.DetectorClassHealth
+	health.spec.Owner = sdk.DetectorOwnerHealthJudge
+	health.spec.Persistence = sdk.PersistencePolicy{Firing: 2, Clearing: 2}
+	health.spec.Batching = sdk.BatchingPolicy{Severity: sdk.SeverityCritical}
+	health.spec.OriginatingCommit = "health-objective"
+	for index := range health.samples {
+		if len(health.samples[index]) > 0 {
+			health.samples[index][0].Severity = sdk.SeverityCritical
+		}
+	}
+	dispatcher := &recordingDispatcher{requests: make(chan IncidentRequest, 1)}
+	config := testControllerConfig()
+	config.VerificationTimeout = 2 * time.Second
+	controller, err := NewController(
+		config, []sdk.Detector{health}, staticProvider{snapshot: sdktest.Snapshot{}}, dispatcher, time.Unix(0, 0),
+	)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	closed := make(chan IncidentClosure, 1)
+	controller.OnIncidentClosed = func(closure IncidentClosure) { closed <- closure }
+
+	for sample := 0; sample < 2; sample++ {
+		if err := controller.Step(context.Background(), time.Unix(int64(sample), 0), nil); err != nil {
+			t.Fatalf("firing step: %v", err)
+		}
+	}
+	executePendingEffect(t, controller)
+	awaitRequest(t, dispatcher.requests)
+	awaitDispatchCompletionQueued(t, controller)
+	for sample := 2; sample < 7; sample++ {
+		if err := controller.Step(context.Background(), time.Unix(int64(sample), 0), nil); err != nil {
+			t.Fatalf("step %d: %v", sample, err)
+		}
+	}
+	var closure IncidentClosure
+	select {
+	case closure = <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("late health recovery did not close the incident")
+	}
+	if closure.DetectorReviewRequiredAt == nil || closure.DetectorReviewReason == "" {
+		t.Fatalf("closure hid that verification came after detector review: %#v", closure)
+	}
+	if !closure.VerifiedAt.After(*closure.DetectorReviewRequiredAt) {
+		t.Fatalf("closure verified before its review deadline: %#v", closure)
 	}
 }
 

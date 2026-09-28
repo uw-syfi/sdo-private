@@ -289,6 +289,44 @@ func (p *ProberPod) Address(ctx context.Context, refresh bool) (string, error) {
 	return p.Ensure(ctx)
 }
 
+// ServiceAddress ensures the prober runs and returns its Service address.
+// Responders get this address, not the pod IP: they may run for many minutes,
+// and the controller replaces a deleted or failed prober pod with a new IP.
+func (p *ProberPod) ServiceAddress(ctx context.Context, refresh bool) (string, error) {
+	if _, err := p.Address(ctx, refresh); err != nil {
+		return "", err
+	}
+	if err := p.ensureService(ctx); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("http://%s.%s.svc:%d", ProberName, p.Namespace, prober.DefaultPort), nil
+}
+
+func (p *ProberPod) ensureService(ctx context.Context) error {
+	desired := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: ProberName, Namespace: p.Namespace,
+			Labels: map[string]string{"app.kubernetes.io/name": ProberName, "app.kubernetes.io/managed-by": "sdo"},
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app.kubernetes.io/name": ProberName},
+			Ports: []corev1.ServicePort{{
+				Name: "api", Port: prober.DefaultPort, TargetPort: intstr.FromInt32(prober.DefaultPort),
+			}},
+		},
+	}
+	services := p.Client.CoreV1().Services(p.Namespace)
+	if _, err := services.Get(ctx, ProberName, metav1.GetOptions{}); err == nil {
+		return nil
+	} else if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("get prober Service: %w", err)
+	}
+	if _, err := services.Create(ctx, desired, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("create prober Service: %w", err)
+	}
+	return nil
+}
+
 func podReady(pod *corev1.Pod) bool {
 	if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
 		return false

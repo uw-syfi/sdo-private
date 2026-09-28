@@ -21,7 +21,12 @@ type outcomeMemoryRecord struct {
 	RepairActions       []RepairActionReceipt `json:"repair_actions"`
 }
 
-func relevantOutcomeEvidence(repository string, findings []sdk.Finding, sourceCommit string) []PriorOutcomeEvidence {
+// relevantOutcomeEvidence returns up to maxRelevantOutcomes prior successes
+// related to findings, newest first. origins maps a learned incident
+// detector to the incident it was learned from.
+func relevantOutcomeEvidence(
+	repository string, findings []sdk.Finding, sourceCommit string, origins map[string]string,
+) []PriorOutcomeEvidence {
 	file, err := os.Open(filepath.Join(repository, ".sdo", "outcomes.jsonl"))
 	if err != nil {
 		return nil
@@ -41,7 +46,7 @@ func relevantOutcomeEvidence(repository string, findings []sdk.Finding, sourceCo
 	evidence := make([]PriorOutcomeEvidence, 0, maxRelevantOutcomes)
 	for index := len(records) - 1; index >= 0 && len(evidence) < maxRelevantOutcomes; index-- {
 		record := records[index]
-		match := outcomeMatch(record.Findings, findings)
+		match := outcomeMatch(record, findings, origins)
 		if match == "" {
 			continue
 		}
@@ -64,11 +69,26 @@ func relevantOutcomeEvidence(repository string, findings []sdk.Finding, sourceCo
 	return evidence
 }
 
-func outcomeMatch(previous []sdk.Finding, current []sdk.Finding) string {
+func outcomeMatch(record outcomeMemoryRecord, current []sdk.Finding, origins map[string]string) string {
+	previous := record.Findings
 	for _, left := range previous {
 		for _, right := range current {
 			if left.DetectorID == right.DetectorID && left.Fingerprint != "" && left.Fingerprint == right.Fingerprint {
 				return "exact-fingerprint"
+			}
+		}
+	}
+	// A detector learned from this outcome fires on its first match, often
+	// before the health detectors that opened the original incident, so the
+	// repeat shares no fingerprint with it. Same learned detector, same
+	// resource: the same fault again.
+	for _, right := range current {
+		if origin := origins[right.DetectorID]; origin == "" || origin != record.IncidentID {
+			continue
+		}
+		for _, left := range previous {
+			if sameObject(left.PrimaryResource, right.PrimaryResource) {
+				return "learned-detector-origin"
 			}
 		}
 	}
@@ -81,4 +101,9 @@ func outcomeMatch(previous []sdk.Finding, current []sdk.Finding) string {
 		}
 	}
 	return ""
+}
+
+func sameObject(left sdk.ObjectRef, right sdk.ObjectRef) bool {
+	return left.Kind != "" && left.Name != "" && left.Kind == right.Kind &&
+		left.Namespace == right.Namespace && left.Name == right.Name
 }

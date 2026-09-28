@@ -752,6 +752,31 @@ def test_failed_or_unverified_outcome_never_reflects_as_success(tmp_path: Path) 
     assert backend.calls == []
 
 
+def test_health_that_cleared_only_after_detector_review_is_not_a_responder_success(tmp_path: Path) -> None:
+    """A responder that claimed a wrong fix must not be credited when health recovers after its window."""
+
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = RecordingSessionBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+    payload = _closure(workspace.path, workspace.base_commit).model_dump(mode="json")
+    payload["detector_review_required_at"] = "2026-07-09T18:05:30Z"
+    payload["detector_review_reason"] = "health detectors did not clear within 2m0s after responder completion"
+    closure = BrokerClosure.model_validate(payload)
+
+    receipt = service.process_closure(closure)
+
+    outcome = MemoryRepository(target).outcomes()[-1]
+    assert outcome.classification == OutcomeClassification.PARTIAL
+    assert outcome.timestamps.verified_at is None
+    assert receipt.reflection_commit is None
+    assert backend.calls == []
+
+
 def test_reflection_retries_after_backend_failure_before_any_edit(tmp_path: Path) -> None:
     target = tmp_path / "target"
     worktrees = tmp_path / "worktrees"
@@ -776,6 +801,100 @@ def test_reflection_retries_after_backend_failure_before_any_edit(tmp_path: Path
     assert state.closure == closure
     assert state.responder_session_id == "019c-session-0001"
     assert state.reflection_backend_completed is True
+
+
+class AlwaysFailingBackend(RecordingSessionBackend):
+    def resume(self, *, session_id: str, worktree: Path, prompt: str, idempotency_key: str) -> ReflectionTurn:
+        del worktree, prompt
+        self.calls.append((session_id, idempotency_key))
+        raise RuntimeError("codex exited with status 1")
+
+
+def test_a_reflection_backend_that_always_fails_is_bounded_and_the_closure_completes(tmp_path: Path) -> None:
+    """Unbounded backend failures spent the controller's closure retries and wedged a persistent controller."""
+
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    validator = AcceptRepairValidator()
+    backend = AlwaysFailingBackend()
+    service = _service(target, worktrees, validator, reflector=SessionReflector(backend), max_reflection_attempts=2)
+    workspace = service.prepare_incident("inc-20260709-0001")
+    closure = _closure(workspace.path, workspace.base_commit)
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="status 1"):
+            service.process_closure(closure)
+    receipt = service.process_closure(closure)
+
+    assert len(backend.calls) == 2
+    assert receipt.reflection_commit is not None
+    state = service.completion_state("inc-20260709-0001")
+    assert state.reflection_attempts == 2
+    assert state.reflection_learning_decision == "no_change"
+    assert "codex exited with status 1" in str(state.reflection_no_change_reason)
+    assert "failed independent validation" not in str(state.reflection_no_change_reason)
+
+
+class KilledMidTurnBackend(RecordingSessionBackend):
+    """A reflection turn the broker process never finishes: for example a
+    SIGKILL during `resume()`. SystemExit is not caught by `except Exception`,
+    so it models a process death that runs no Python cleanup at all, only
+    whatever the broker already made durable before the call."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls_started = 0
+
+    def resume(self, *, session_id: str, worktree: Path, prompt: str, idempotency_key: str) -> ReflectionTurn:
+        del session_id, worktree, prompt, idempotency_key
+        self.calls_started += 1
+        raise SystemExit("broker process killed mid-reflection")
+
+
+def test_broker_killed_mid_reflection_counts_the_attempt(tmp_path: Path) -> None:
+    """A broker killed while a reflection turn is in flight must still count
+
+    the attempt, so repeated kills cannot retry the same incident forever.
+    """
+
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    validator = AcceptRepairValidator()
+    backend = KilledMidTurnBackend()
+    service = _service(target, worktrees, validator, reflector=SessionReflector(backend), max_reflection_attempts=2)
+    workspace = service.prepare_incident("inc-20260709-0001")
+    closure = _closure(workspace.path, workspace.base_commit)
+
+    with pytest.raises(SystemExit):
+        service.process_closure(closure)
+    state = service.completion_state("inc-20260709-0001")
+    assert state.reflection_attempts == 1, "a broker kill mid-turn must still count as an attempt"
+
+    # A broker restart is a fresh process reading the same persisted ledger.
+    restarted = _service(target, worktrees, validator, reflector=SessionReflector(backend), max_reflection_attempts=2)
+    with pytest.raises(SystemExit):
+        restarted.recover("inc-20260709-0001")
+    state = restarted.completion_state("inc-20260709-0001")
+    assert state.reflection_attempts == 2, "a second broker kill must also count, bounding the retries"
+    assert backend.calls_started == 2
+
+    # The retry budget is spent: a third restart must not call the backend
+    # again, and must complete the closure without learning.
+    final_service = _service(
+        target, worktrees, validator, reflector=SessionReflector(backend), max_reflection_attempts=2
+    )
+    receipt = final_service.recover("inc-20260709-0001")
+
+    assert backend.calls_started == 2
+    assert receipt.reflection_commit is not None
+    final_state = final_service.completion_state("inc-20260709-0001")
+    assert final_state.reflection_learning_decision == "no_change"
 
 
 def test_recovery_rolls_back_partial_reflection_edits_before_resuming_same_session(tmp_path: Path) -> None:

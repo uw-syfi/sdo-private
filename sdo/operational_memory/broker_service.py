@@ -122,6 +122,20 @@ class BrokerClosure(BaseModel):
     verified_at: datetime
     # Responder helper objects the controller deleted, as Kind/namespace/name.
     cleaned_helpers: list[str] = Field(default_factory=list)
+    # Set when health did not clear within the controller's verification
+    # window after the responder completed; later recovery is not credited to it.
+    detector_review_required_at: datetime | None = None
+    detector_review_reason: str | None = None
+
+    @property
+    def health_verified(self) -> bool:
+        """Every final health detector is clear, within the responder's verification window."""
+
+        return (
+            self.detector_review_required_at is None
+            and bool(self.final_detector_states)
+            and all(evaluation.status.value == "clear" for evaluation in self.final_detector_states)
+        )
 
 
 class ClosureReceipt(BaseModel):
@@ -201,6 +215,9 @@ class BrokerLedger(BaseModel):
     # Provider accounting summed over every reflection attempt for the incident.
     reflection_usage: dict[str, int | float] = Field(default_factory=dict)
     reflection_validation_error: str | None = None
+    # The last reflection backend failure (a crashed or failed model turn).
+    # Failed turns count as attempts, so a backend that always fails is bounded.
+    reflection_backend_error: str | None = None
     # Set when the broker recorded a deterministic no-op reflection instead of
     # running an LLM turn (a repeated exact-match success).
     reflection_skipped_reason: str | None = None
@@ -412,9 +429,7 @@ class BrokerService:
 
     def _outcome(self, closure: BrokerClosure, ledger: BrokerLedger) -> OutcomeRecord:
         result = closure.result
-        health_verified = bool(closure.final_detector_states) and all(
-            evaluation.status.value == "clear" for evaluation in closure.final_detector_states
-        )
+        health_verified = closure.health_verified
         surfaced = [playbook.path for playbook in closure.request.surfaced_playbooks]
         applied = [] if result is None else [playbook.path for playbook in result.applied_playbooks]
         return derive_outcome(
@@ -444,9 +459,7 @@ class BrokerService:
     @staticmethod
     def _validate_recorded_actions(closure: BrokerClosure) -> None:
         result = closure.result
-        health_verified = bool(closure.final_detector_states) and all(
-            evaluation.status.value == "clear" for evaluation in closure.final_detector_states
-        )
+        health_verified = closure.health_verified
         if not health_verified or result is None or result.status.value != "completed":
             return
         if not any(action.success for action in result.repair_actions):
@@ -517,9 +530,7 @@ class BrokerService:
             ledger.stale_memory_detected = architecture_fingerprint != source_fingerprint
             self._save(ledger)
         session_id = None if closure.result is None else closure.result.responder_session_id
-        health_verified = bool(closure.final_detector_states) and all(
-            evaluation.status.value == "clear" for evaluation in closure.final_detector_states
-        )
+        health_verified = closure.health_verified
         if not self.reflector.should_reflect(outcome, health_verified=health_verified, session_id=session_id):
             ledger.reflection_completed = True
             self._save(ledger)
@@ -546,15 +557,21 @@ class BrokerService:
             ledger.reflection_started = False
             self._save(ledger)
         if ledger.reflection_attempts >= self.max_reflection_attempts:
-            failure = ledger.reflection_validation_error or "unknown validation failure"
             if changed_paths:
                 self._rollback_incomplete_reflection(worktree)
             ledger.reflection_backend_completed = True
             ledger.reflection_summary = "No operational-memory update was accepted after bounded validation."
             ledger.reflection_learning_decision = "no_change"
-            ledger.reflection_no_change_reason = (
-                "Learning was attempted, but every proposed update failed independent validation: " + failure
-            )
+            if ledger.reflection_validation_error is None and ledger.reflection_backend_error is not None:
+                ledger.reflection_no_change_reason = (
+                    "Learning was attempted, but the reflection backend failed on every attempt: "
+                    + ledger.reflection_backend_error
+                )
+            else:
+                ledger.reflection_no_change_reason = (
+                    "Learning was attempted, but every proposed update failed independent validation: "
+                    + (ledger.reflection_validation_error or "unknown validation failure")
+                )
             ledger.reflection_proposed_changes = []
             self._save(ledger)
             return self._commit_noop_reflection(ledger, worktree)
@@ -562,21 +579,36 @@ class BrokerService:
             if ledger.reflection_session_mode is None:
                 ledger.reflection_session_mode = self.reflection_session
             ledger.reflection_started = True
-            self._save(ledger)
-            turn = self.reflector.resume(
-                session_id=session_id or "",
-                incident_id=ledger.incident_id,
-                worktree=worktree,
-                outcome=outcome,
-                history=outcomes,
-                outcome_commit=ledger.outcome_commit or "",
-                validation_feedback=retry_feedback,
-                topology_review=self._topology_review(ledger),
-                rejected_proposal_diff=self._rejected_reflection_diff(ledger) if retry_feedback else None,
-                session_mode=ledger.reflection_session_mode,
-                closure=closure,
-            )
+            # The attempt is counted here, before the backend call, and saved
+            # durably: a broker killed mid-turn (SIGKILL, say) never reaches
+            # the exception handler below, or any other code in this
+            # process, so counting the attempt only after the call returns
+            # or raises would let repeated kills retry the same incident
+            # forever. Counting it before the call bounds that regardless of
+            # when the process dies.
             ledger.reflection_attempts += 1
+            self._save(ledger)
+            try:
+                turn = self.reflector.resume(
+                    session_id=session_id or "",
+                    incident_id=ledger.incident_id,
+                    worktree=worktree,
+                    outcome=outcome,
+                    history=outcomes,
+                    outcome_commit=ledger.outcome_commit or "",
+                    validation_feedback=retry_feedback,
+                    topology_review=self._topology_review(ledger),
+                    rejected_proposal_diff=self._rejected_reflection_diff(ledger) if retry_feedback else None,
+                    session_mode=ledger.reflection_session_mode,
+                    closure=closure,
+                )
+            except Exception as exc:
+                if self.broker.proposal_changed_paths(worktree):
+                    self._rollback_incomplete_reflection(worktree)
+                ledger.reflection_backend_error = f"{type(exc).__name__}: {exc}"[:2000]
+                ledger.reflection_started = False
+                self._save(ledger)
+                raise
             if retry_feedback:
                 ledger.reflection_fresh_retry_attempts += 1
             for key, value in turn.usage.items():

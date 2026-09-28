@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math/rand/v2"
 	"sort"
 	"strings"
 	"sync"
@@ -40,6 +42,9 @@ type ControllerConfig struct {
 	RepairPolicy         string
 	// ClosureRetry bounds resubmission of a closure the broker rejects.
 	ClosureRetry ClosureRetryPolicy
+	// DispatchRetry bounds how quickly a transient dispatch failure
+	// re-executes the dispatch effect.
+	DispatchRetry DispatchRetryPolicy
 }
 
 type dispatchCompletion struct {
@@ -85,6 +90,8 @@ type Controller struct {
 	closureState               string
 	closureReceipt             *ClosureReceipt
 	closureFailure             *ClosureFailure
+	dispatchFailureAttempts    int
+	dispatchNextRetryAt        time.Time
 	lastAcknowledgedIncidentID string
 	incidentView               *IncidentView
 	broker                     IncidentBroker
@@ -106,8 +113,12 @@ type Controller struct {
 	OnClosureFailed  func(ClosureFailure)
 	CanAct           func() bool
 	GuardAction      func(context.Context) (context.Context, context.CancelFunc, error)
-	// now overrides the wall clock for closure retry backoff in tests.
+	// now overrides the wall clock for closure and dispatch retry backoff in
+	// tests.
 	now func() time.Time
+	// dispatchJitter overrides the dispatch retry jitter source in tests; it
+	// must return a value in [0, 1). Nil defaults to a real random source.
+	dispatchJitter func() float64
 }
 
 func NewController(
@@ -149,6 +160,11 @@ func NewController(
 		return nil, err
 	}
 	config.ClosureRetry = closureRetry
+	dispatchRetry, err := config.DispatchRetry.withDefaults()
+	if err != nil {
+		return nil, err
+	}
+	config.DispatchRetry = dispatchRetry
 	if err := core.ValidateDetectors(detectors); err != nil {
 		return nil, err
 	}
@@ -174,6 +190,7 @@ func NewController(
 		detectorSpecs:    detectorSpecs,
 		workspaceResults: make(chan workspaceCompletion, 1), closureResults: make(chan closureCompletion, 1),
 		acknowledgmentResults: make(chan acknowledgmentCompletion, 1),
+		dispatchJitter:        rand.Float64,
 	}, nil
 }
 
@@ -334,7 +351,7 @@ func (c *Controller) attachBeforeLaunch(findings []sdk.Finding) bool {
 	sortFindings(request.Findings)
 	request.SurfacedPlaybooks = surfacedPlaybooks(request.Findings)
 	request.RelevantOutcomes = relevantOutcomeEvidence(
-		c.config.RepositoryWorktree, request.Findings, c.config.SourceCommit,
+		c.config.RepositoryWorktree, request.Findings, c.config.SourceCommit, c.detectorOrigins(),
 	)
 	request.DetectorHistory = compactDetectorHistory(c.history)
 	c.incidentFindingKeys = findingKeys(request.Findings)
@@ -396,6 +413,7 @@ func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 	c.detectorReviewRequired = false
 	c.detectorReviewRequiredAt = time.Time{}
 	c.detectorReviewReason = ""
+	c.resetDispatchRetryLocked()
 	c.dispatchState = "pending"
 	if c.broker != nil {
 		c.dispatchState = "workspace_pending"
@@ -431,7 +449,7 @@ func (c *Controller) NextWake() time.Time {
 	if verificationPending && (next.IsZero() || verificationDeadline.Before(next)) {
 		return verificationDeadline
 	}
-	return c.closureRetryWake(next)
+	return c.closureRetryWake(c.dispatchRetryWake(next))
 }
 
 func (c *Controller) IncidentOpen() bool {
@@ -468,14 +486,28 @@ func (c *Controller) recordDetectorError(detectorID string, now time.Time, err e
 	}
 }
 
+// detectorOrigins maps each learned incident detector to the incident it was
+// learned from.
+func (c *Controller) detectorOrigins() map[string]string {
+	origins := make(map[string]string)
+	for id, spec := range c.detectorSpecs {
+		if spec.Class == sdk.DetectorClassIncident && spec.OriginatingIncident != "" {
+			origins[id] = spec.OriginatingIncident
+		}
+	}
+	return origins
+}
+
 func (c *Controller) incidentRequest(now time.Time, findings []sdk.Finding) IncidentRequest {
 	incidentID := fmt.Sprintf("%s-%d", c.config.Application, now.UnixNano())
 	return IncidentRequest{
 		SchemaVersion: ProtocolSchemaVersion, Application: c.config.Application, Namespace: c.config.Namespace,
 		IncidentID: incidentID, Findings: findings,
 		DetectorHistory: compactDetectorHistory(c.history), SurfacedPlaybooks: surfacedPlaybooks(findings),
-		RelevantOutcomes: relevantOutcomeEvidence(c.config.RepositoryWorktree, findings, c.config.SourceCommit),
-		SourceCommit:     c.config.SourceCommit, DeployedCommit: c.config.DeployedCommit,
+		RelevantOutcomes: relevantOutcomeEvidence(
+			c.config.RepositoryWorktree, findings, c.config.SourceCommit, c.detectorOrigins(),
+		),
+		SourceCommit: c.config.SourceCommit, DeployedCommit: c.config.DeployedCommit,
 		ArchitectureSummaryPath: c.config.ArchitectureSummaryPath, HealthObjectivePath: c.config.HealthObjectivePath,
 		RepositoryWorktree: c.config.RepositoryWorktree, RepositoryBaseCommit: c.config.SourceCommit,
 		ResponseDeadline:  now.Add(c.config.ResponseTimeout).UTC(),
@@ -544,16 +576,33 @@ func (c *Controller) handleDispatchCompletion(completion dispatchCompletion, obs
 		)
 		return
 	}
-	if completion.err != nil {
+	var jobFailed *ResponderJobFailedError
+	if errors.As(completion.err, &jobFailed) {
+		// A failed Job is terminal and exactly-once dispatch forbids a second
+		// responder, so the responder is done without a result. Health alone
+		// decides closure, and the broker records the outcome as failed.
+		c.responderDone = true
+		c.responderCompletedAt = observedAt.UTC()
+		if c.responderCompletedAt.Before(c.incidentDispatchedAt) {
+			c.responderCompletedAt = c.incidentDispatchedAt
+		}
+		c.dispatchState = "completed"
+		c.dispatchError = completion.err.Error()
+		c.currentIncidentResult = nil
+		c.resetDispatchRetryLocked()
+	} else if completion.err != nil {
 		// A watcher, transport, or leadership-guard failure does not prove that
 		// the durable responder Job stopped. Retry the same incident effect so
 		// the idempotent dispatcher rejoins its existing Job/result instead of
-		// clearing the incident lock and opening a duplicate responder.
+		// clearing the incident lock and opening a duplicate responder. Bounded,
+		// jittered backoff keeps a persistent outage (an API-server pause) from
+		// spinning the dispatch effect in a hot loop.
 		c.responderDone = false
 		c.responderCompletedAt = time.Time{}
 		c.dispatchState = "pending"
 		c.dispatchError = completion.err.Error()
 		c.currentIncidentResult = nil
+		c.recordDispatchFailureLocked()
 	} else {
 		c.responderDone = true
 		c.responderCompletedAt = observedAt.UTC()
@@ -563,6 +612,7 @@ func (c *Controller) handleDispatchCompletion(completion dispatchCompletion, obs
 		c.dispatchState = "completed"
 		c.dispatchError = ""
 		c.currentIncidentResult = cloneIncidentResult(&completion.result)
+		c.resetDispatchRetryLocked()
 	}
 	c.mu.Unlock()
 	if completion.err == nil && c.Helpers != nil {
@@ -625,7 +675,12 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 		FinalStateChanges:      c.finalStateChangesLocked(now),
 		DetectedAt:             c.incidentDetectedAt, DispatchedAt: c.incidentDispatchedAt,
 		ResponderCompletedAt: c.responderCompletedAt, VerifiedAt: verifiedAt,
-		CleanedHelpers: append([]string(nil), c.cleanedHelpers...),
+		CleanedHelpers:       append([]string(nil), c.cleanedHelpers...),
+		DetectorReviewReason: c.detectorReviewReason,
+	}
+	if !c.detectorReviewRequiredAt.IsZero() {
+		reviewAt := c.detectorReviewRequiredAt
+		closure.DetectorReviewRequiredAt = &reviewAt
 	}
 	c.pendingClosure = cloneIncidentClosure(&closure)
 	c.closureState = "pending"
