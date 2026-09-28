@@ -63,7 +63,7 @@ class _RepairActionReceipt(BaseModel):
     action_id: str = Field(min_length=1)
     kind: str = Field(min_length=1)
     target: str = Field(min_length=1)
-    resources: list[dict[str, Any]] = Field(default_factory=list)
+    resources: list[dict[str, Any]] = Field(default_factory=lambda: cast("list[dict[str, Any]]", []))
     summary: str = Field(min_length=1)
     details: str = Field(min_length=1)
     started_at: datetime

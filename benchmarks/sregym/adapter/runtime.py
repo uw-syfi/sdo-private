@@ -562,7 +562,7 @@ def _recovery_attribution(verification: list[dict[str, Any]]) -> str | None:
     ``None`` when no cause carries a repair attribution.
     """
 
-    attributions = [item.get("repair") for item in verification if isinstance(item.get("repair"), dict)]
+    attributions = [repair for item in verification if isinstance(repair := item.get("repair"), dict)]
     if not attributions:
         return None
     return "responder" if any(attribution.get("attributed") is True for attribution in attributions) else "external"
