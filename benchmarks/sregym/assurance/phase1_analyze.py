@@ -39,7 +39,7 @@ import argparse
 import io
 import sys
 from contextlib import redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypeVar
 
@@ -48,6 +48,7 @@ from agentshim.core.usage import TokenWeights
 from benchmarks.sregym.analysis.incident_cost import (
     CodexRun,
     SdoStage,
+    Verdict,
     build_report,
     load_codex_runs,
     load_sdo_pipeline,
@@ -143,6 +144,62 @@ def ttm_values(items: Iterable[SdoStage | CodexRun]) -> list[float]:
 
 def ttd_values(items: Iterable[SdoStage | CodexRun]) -> list[float]:
     return [item.verdict.diagnosis_seconds for item in items if item.verdict.diagnosis_seconds is not None]
+
+
+#: The coordinator's 15-minute cap (2026-09-28): a stage or attempt whose TTM exceeds it, on either arm, is a
+#: censored failure, and an SDO stage whose controller opened no incident within it is a censored detection miss.
+DEFAULT_TTM_CAP_SECONDS = 900.0
+
+
+@dataclass(frozen=True)
+class CensorSummary:
+    total: int
+    #: Runs whose judge-free TTM exceeded the cap.
+    over_cap: int
+    #: Runs with no graded diagnosis or mitigation at all (for SDO, a detection miss).
+    no_verdict: int
+
+    def render(self, arm: str, cap_seconds: float) -> str:
+        return (
+            f"{arm}: {self.over_cap} of {self.total} run(s) censored at TTM > {cap_seconds:.0f}s; "
+            f"{self.no_verdict} with no verdict (detection miss or agent crash), counted as failures"
+        )
+
+
+def _censored_verdict(verdict: Verdict) -> Verdict:
+    return replace(
+        verdict,
+        mitigation=False,
+        raw_incl_judge_seconds=None,
+        mitigation_applied_seconds=None,
+        last_mitigation_seconds=None,
+    )
+
+
+def censor_runs(items: Sequence[_Run], *, cap_seconds: float) -> tuple[list[_Run], CensorSummary]:
+    """Apply the TTM cap identically to either arm: runs over it fail and contribute no TTM."""
+
+    if cap_seconds <= 0:
+        raise ValueError(f"the TTM cap must be positive, got {cap_seconds}")
+    out: list[_Run] = []
+    over_cap = no_verdict = 0
+    for item in items:
+        verdict = item.verdict
+        if verdict.diagnosis is None and verdict.mitigation is None:
+            no_verdict += 1
+        ttm = verdict.ttm_seconds
+        if ttm is not None and ttm > cap_seconds:
+            over_cap += 1
+            item = replace(item, verdict=_censored_verdict(verdict))
+        out.append(item)
+    return out, CensorSummary(total=len(out), over_cap=over_cap, no_verdict=no_verdict)
+
+
+def exclude_sources(items: Sequence[_Run], excluded: Sequence[Path]) -> list[_Run]:
+    """Drop runs whose results directory is, or lies under, one of *excluded* (e.g. confounded attempts)."""
+
+    roots = [Path(path) for path in excluded]
+    return [item for item in items if not any(Path(item.source).is_relative_to(root) for root in roots)]
 
 
 def success_counts(items: Iterable[SdoStage | CodexRun]) -> tuple[int, int]:
@@ -657,12 +714,15 @@ class PhaseOneAnalysis:
     validity_summary: str
     incident_cost_reports: list[str]
     claims: list[ClaimReport]
+    censoring_summary: str = ""
 
     def render(self) -> str:
         parts = [
             "# Phase-1 assurance matrix: analysis report\n",
             "## Run validity\n",
             self.validity_summary,
+            "\n## Censoring\n",
+            self.censoring_summary,
             "\n## Per-pipeline incident_cost\n",
         ]
         parts.extend(f"```\n{report}\n```\n" for report in self.incident_cost_reports)
@@ -676,6 +736,8 @@ def analyze(
     codex_dirs: Sequence[Path],
     *,
     legacy: bool = False,
+    cap_seconds: float = DEFAULT_TTM_CAP_SECONDS,
+    exclude_codex: Sequence[Path] = (),
 ) -> PhaseOneAnalysis:
     """*codex_dirs* are phase-1's sole Codex arm's run directories: the default, concise-verify baseline."""
 
@@ -702,7 +764,27 @@ def analyze(
     sdo_pipelines = [
         [stage for stage in load_sdo_pipeline(pipeline_dir) if keep_stage(stage)] for pipeline_dir in sdo_pipeline_dirs
     ]
-    codex_runs = [run for d in codex_dirs for run in load_codex_runs(d) if keep_run(run)]
+    codex_runs = exclude_sources(
+        [run for d in codex_dirs for run in load_codex_runs(d) if keep_run(run)], exclude_codex
+    )
+    censored_pipelines: list[list[SdoStage]] = []
+    sdo_over = sdo_none = sdo_total = 0
+    for stages in sdo_pipelines:
+        kept, summary = censor_runs(stages, cap_seconds=cap_seconds)
+        censored_pipelines.append(kept)
+        sdo_over += summary.over_cap
+        sdo_none += summary.no_verdict
+        sdo_total += summary.total
+    sdo_pipelines = censored_pipelines
+    codex_runs, codex_summary = censor_runs(codex_runs, cap_seconds=cap_seconds)
+    censoring_summary = "\n".join(
+        [
+            "- " + CensorSummary(sdo_total, sdo_over, sdo_none).render("SDO", cap_seconds),
+            "- " + codex_summary.render("Codex", cap_seconds),
+            f"- {len(exclude_codex)} Codex path(s) excluded as confounded: "
+            + (", ".join(str(path) for path in exclude_codex) or "none"),
+        ]
+    )
 
     incident_cost_reports: list[str] = []
     for pipeline_dir, stages in zip(sdo_pipeline_dirs, sdo_pipelines, strict=True):
@@ -717,7 +799,10 @@ def analyze(
 
     claims = compute_all_claims(sdo_pipelines, codex_runs)
     return PhaseOneAnalysis(
-        validity_summary=validity_summary, incident_cost_reports=incident_cost_reports, claims=claims
+        validity_summary=validity_summary,
+        incident_cost_reports=incident_cost_reports,
+        claims=claims,
+        censoring_summary=censoring_summary,
     )
 
 
@@ -731,6 +816,19 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=[],
         help="Codex (concise verify) run directories: phase 1's sole Codex arm",
     )
+    parser.add_argument(
+        "--ttm-cap-sec",
+        type=float,
+        default=DEFAULT_TTM_CAP_SECONDS,
+        help="censor any stage or attempt, on either arm, whose judge-free TTM exceeds this",
+    )
+    parser.add_argument(
+        "--exclude-codex",
+        type=Path,
+        nargs="*",
+        default=[],
+        help="Codex results directories to drop (e.g. confounded_stream_proxy attempts)",
+    )
     parser.add_argument("--legacy-runs", action="store_true", help="run_validity --legacy (pre-manifest runs)")
     parser.add_argument("--out", type=Path, help="write the Markdown report here (also printed to stdout)")
     return parser
@@ -738,7 +836,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_arg_parser().parse_args(argv)
-    analysis = analyze(args.sdo, args.codex, legacy=args.legacy_runs)
+    analysis = analyze(
+        args.sdo,
+        args.codex,
+        legacy=args.legacy_runs,
+        cap_seconds=args.ttm_cap_sec,
+        exclude_codex=args.exclude_codex,
+    )
     rendered = analysis.render()
     print(rendered)
     if args.out:

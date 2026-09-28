@@ -2,24 +2,25 @@ from __future__ import annotations
 
 import csv
 import json
-from typing import TYPE_CHECKING
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 from benchmarks.sregym.analysis.incident_cost import CodexRun, MemorySize, SdoStage, TokenUsage, Verdict
 from benchmarks.sregym.assurance.phase1_analyze import (
     PHASE1_PROBLEMS,
     analyze,
+    censor_runs,
     compute_all_claims,
     compute_c1,
     compute_c4,
     compute_c5,
     compute_c8,
     compute_c11_verify_ratio,
+    exclude_sources,
     split_rounds,
+    ttm_values,
     weighted_incident_tokens,
 )
 
@@ -373,3 +374,50 @@ def test_analyze_wires_run_validity_incident_cost_and_claims_over_synthetic_dire
         assert f"C{n}:" in rendered
         assert "Takeaways" in rendered
     assert "valid problem run" in analysis.validity_summary
+    assert "censored at TTM > 900s" in rendered
+    assert "0 Codex path(s) excluded" in rendered
+
+
+# --------------------------------------------------------------------------- censoring (15-minute TTM cap)
+
+
+def test_censor_marks_a_run_over_the_cap_as_a_failure_without_a_ttm() -> None:
+    slow = _codex_run(S1, ttm=901.0)
+    fast = _codex_run(S1, ttm=890.0)
+    censored, summary = censor_runs([slow, fast], cap_seconds=900.0)
+    assert [run.verdict.passed for run in censored] == [False, True]
+    assert ttm_values(censored) == [895.0]
+    assert summary.over_cap == 1
+    assert summary.total == 2
+
+
+def test_censor_counts_a_stage_without_any_verdict_as_a_detection_miss() -> None:
+    miss = _stage(S3, index=2, ttm=20.0)
+    miss = replace(miss, verdict=Verdict(None, None, None))
+    censored, summary = censor_runs([miss], cap_seconds=900.0)
+    assert not censored[0].verdict.passed
+    assert summary.no_verdict == 1
+    assert summary.over_cap == 0
+
+
+def test_censor_applies_the_same_rule_to_both_arms() -> None:
+    sdo = [_stage(S1, index=0, ttm=1000.0)]
+    codex = [_codex_run(S1, ttm=1000.0)]
+    (sdo_out, sdo_summary), (codex_out, codex_summary) = (
+        censor_runs(sdo, cap_seconds=900.0),
+        censor_runs(codex, cap_seconds=900.0),
+    )
+    assert sdo_summary.over_cap == codex_summary.over_cap == 1
+    assert not sdo_out[0].verdict.passed
+    assert not codex_out[0].verdict.passed
+
+
+def test_censor_rejects_a_non_positive_cap() -> None:
+    with pytest.raises(ValueError, match="cap"):
+        censor_runs([], cap_seconds=0.0)
+
+
+def test_exclude_sources_drops_runs_under_an_excluded_directory() -> None:
+    kept = _codex_run(S1, ttm=10.0, source="/logs/a/results/x")
+    dropped = _codex_run(S1, ttm=10.0, source="/logs/b/results/y")
+    assert exclude_sources([kept, dropped], [Path("/logs/b")]) == [kept]
