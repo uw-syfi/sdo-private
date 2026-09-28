@@ -115,6 +115,8 @@ class BrokerClosure(BaseModel):
     dispatched_at: datetime
     responder_completed_at: datetime
     verified_at: datetime
+    # Responder helper objects the controller deleted, as Kind/namespace/name.
+    cleaned_helpers: list[str] = Field(default_factory=list)
 
 
 class ClosureReceipt(BaseModel):

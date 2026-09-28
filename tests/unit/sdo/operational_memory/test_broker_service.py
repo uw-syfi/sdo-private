@@ -280,6 +280,14 @@ def _closure(worktree: Path, base_commit: str) -> BrokerClosure:
     )
 
 
+def test_closure_accepts_the_controllers_cleaned_helper_record(tmp_path: Path) -> None:
+    payload = _closure(tmp_path, "0" * 40).model_dump(mode="json")
+    payload["cleaned_helpers"] = ["Pod/hotel-reservation/curl-debug"]
+
+    assert BrokerClosure.model_validate(payload).cleaned_helpers == ["Pod/hotel-reservation/curl-debug"]
+    assert BrokerClosure.model_validate(_closure(tmp_path, "0" * 40).model_dump()).cleaned_helpers == []
+
+
 def _unlearned_closure(worktree: Path, base_commit: str) -> BrokerClosure:
     """A closure whose finding came from no registered incident detector."""
 

@@ -124,6 +124,10 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	)
 	proberImage := flags.String("prober-image", "", "image that runs the prober binary; defaults to --responder-image")
 	proberURL := flags.String("prober-url", "", "use an already running prober at this URL instead of starting one")
+	cleanResponderHelpers := flags.Bool(
+		"clean-responder-helpers", true,
+		"delete pods and Jobs labelled "+ResponderHelperLabel+"=true once the responder completes",
+	)
 	stateBaseline := flags.Bool(
 		"state-baseline", true,
 		"attach the application's configuration changes since its last healthy baseline to each incident",
@@ -304,6 +308,11 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		stateTracker = NewStateTracker(StateTrackerConfig{Client: bootstrapProvider.Client, Namespace: *namespace})
 		controller.Baseline = stateTracker
 		defer stateTracker.Stop()
+	}
+	if *cleanResponderHelpers {
+		controller.Helpers = KubernetesHelperCleaner{
+			Client: bootstrapProvider.Client, Namespaces: []string{*namespace, *controlNamespace},
+		}
 	}
 	controller.CanAct = elector.IsLeader
 	controller.GuardAction = elector.GuardContext
