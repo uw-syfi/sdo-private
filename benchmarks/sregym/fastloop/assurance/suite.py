@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 from benchmarks.sregym.fastloop.assurance.catalog import DECOYS, CompositeCase, FaultCase, WrongFix
 from benchmarks.sregym.fastloop.assurance.harness import (
     HELPER_LABEL,
+    STATE_CONFIGMAP,
     ControllerProcess,
     HarnessError,
     Kubectl,
@@ -127,8 +128,13 @@ def scripted_result(
     """An incident result a careful responder would write: live evidence for each cited object."""
 
     fired = sorted({str(finding["detector_id"]) for finding in request.get("findings") or []})
+    # Only the request's own diff is state-change evidence; an object the diff lacks (a fault
+    # that landed after dispatch) was seen live, through `sdo incident status` or kubectl.
+    in_diff = set(diff_reading(request, objects).named)
     evidence = [
         {"kind": "state-change", "source": item, "observation": f"{item} differs from the healthy baseline"}
+        if item in in_diff
+        else {"kind": "live-observation", "source": item, "observation": f"{item} is faulty now"}
         for item in objects
     ] + [
         {"kind": "detector-finding", "source": detector, "observation": f"{detector} fired for this incident"}
@@ -209,7 +215,9 @@ class AssuranceSuite:
     # --- probes -----------------------------------------------------------------------------------
 
     def _env(self, request_file: Path | None) -> dict[str, str]:
-        env = {**os.environ, "SDO_PROBER_URL": self.prober_url}
+        # The environment the controller gives a local responder: the prober and its state ConfigMap.
+        env = {**os.environ, "SDO_PROBER_URL": self.prober_url, "KUBECONFIG": str(self.kubectl.kubeconfig)}
+        env["SDO_CONTROLLER_STATE"] = f"{self.control_namespace}/{STATE_CONFIGMAP}"
         env["SDO_REQUEST_PATH"] = str(request_file) if request_file is not None else str(self.spool / "absent.json")
         return env
 
@@ -401,10 +409,8 @@ class AssuranceSuite:
         return self._run(
             name=case.name,
             kind="single",
-            problems=[case.problem_id],
-            objects=case.faulted_objects,
+            faults=(case,),
             wrong_fixes=case.wrong_fixes,
-            known_gap=case.known_gap,
             iteration=iteration,
             hold=hold,
         )
@@ -413,10 +419,8 @@ class AssuranceSuite:
         return self._run(
             name=case.name,
             kind="composite",
-            problems=[fault.problem_id for fault in case.faults],
-            objects=case.faulted_objects,
+            faults=case.faults,
             wrong_fixes=case.wrong_fixes,
-            known_gap="; ".join(fault.known_gap for fault in case.faults if fault.known_gap),
             iteration=iteration,
             hold=False,
         )
@@ -433,13 +437,16 @@ class AssuranceSuite:
         *,
         name: str,
         kind: str,
-        problems: list[str],
-        objects: tuple[str, ...],
+        faults: tuple[FaultCase, ...],
         wrong_fixes: tuple[WrongFix, ...],
-        known_gap: str,
         iteration: int,
         hold: bool,
     ) -> FaultRun:
+        problems = [fault.problem_id for fault in faults]
+        objects = tuple(item for fault in faults for item in fault.faulted_objects)
+        known_gap = "; ".join(fault.known_gap for fault in faults if fault.known_gap)
+        # SREGym's recovery rolls each broken service's Deployment out again.
+        recovered = {f"Deployment/{fault.service}" for fault in faults}
         self._runs += 1
         tag = f"{self._runs}-{int(time.time())}"
         bounds = self.bounds
@@ -597,7 +604,6 @@ class AssuranceSuite:
                         )
                     )
 
-            helpers, bystander = self.create_helpers(tag)
             began = utcnow()
             run.correct_fix_seconds = round(self.driver.recover(), 3)
             fixed_at = utcnow()
@@ -636,6 +642,9 @@ class AssuranceSuite:
                 )
             )
 
+            # Some SREGym recoveries delete every pod in the namespace, so the responder's helpers
+            # are created after the correct fix, just before it returns.
+            helpers, bystander = self.create_helpers(tag)
             result = scripted_result(
                 request,
                 objects=objects,
@@ -737,7 +746,7 @@ class AssuranceSuite:
                 )
             )
             if hold:
-                run.absorption = self._absorption(problems, objects, touched, held_from)
+                run.absorption = self._absorption(problems, objects, touched | recovered, held_from)
                 checks.append(
                     Check(
                         name="baseline did not absorb the held fault",
@@ -770,8 +779,7 @@ class AssuranceSuite:
             request_file, request = self.wait_request(known=known, timeout=self.bounds.detect_seconds + 120)
             # The baseline still predates the first fault, so what the wrong fixes and the recovery
             # rolled out also shows; those objects are allowed, nothing else is.
-            recovered = {f"Deployment/{item.split('/', 1)[1]}" for item in objects}
-            diff = diff_reading(request, objects, allowed=tuple(touched | recovered))
+            diff = diff_reading(request, objects, allowed=tuple(sorted(touched)))
         finally:
             self.driver.recover()
         incident_id = str(request["incident_id"])

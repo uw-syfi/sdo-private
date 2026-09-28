@@ -160,6 +160,30 @@ def test_the_scripted_result_is_a_valid_result_whose_diagnosis_verifies_as_confi
     assert parsed.usage.llm_calls == 0
 
 
+def test_a_fault_missing_from_the_requests_diff_is_cited_as_a_live_observation_not_contradicted() -> None:
+    request = _request()
+    result = scripted_result(
+        request,
+        objects=("Service/frontend", "ConfigMap/mongo-rate-script"),
+        summary="two faults",
+        actions=[],
+        started_at=T0,
+        verification=[],
+    )
+    parsed = IncidentResult.model_validate(result)
+    request_model = IncidentRequest.model_validate(request)
+    cleared = type(request_model.detector_history[0]).model_validate(
+        {"detector_id": "traffic-health", "evaluated_at": (T0 + timedelta(minutes=1)).isoformat(), "status": "clear"}
+    )
+
+    kinds = {item.source: item.kind for item in parsed.confirmed_root_causes[0].evidence}
+    verdicts = verify_diagnosis(request_model, parsed, final_detector_states=[cleared])
+
+    assert kinds["Service/frontend"] == "state-change"
+    assert kinds["ConfigMap/mongo-rate-script"] == "live-observation"
+    assert [verdict.verdict.value for verdict in verdicts] == ["confirmed"]
+
+
 def test_every_catalog_case_is_well_formed_and_findable() -> None:
     assert {case.problem_id for case in SINGLE_FAULTS} >= {
         "wrong_service_selector_hotel_reservation",
