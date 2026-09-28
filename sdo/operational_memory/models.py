@@ -14,6 +14,7 @@ from sdo.contracts import (
     RepairActionReceipt,
     UsageMetrics,
 )
+from sdo.operational_memory.diagnosis import RootCauseVerification  # noqa: TC001 - resolved at runtime.
 
 MEMORY_SCHEMA_VERSION = 1
 #: Playbook ``fault_class`` values, also the playbook directory naming convention.
@@ -318,3 +319,6 @@ class OutcomeRecord(MemoryModel):
     responder_model: str = Field(min_length=1)
     usage: UsageMetrics = Field(default_factory=lambda: UsageMetrics(llm_calls=0, input_tokens=0, output_tokens=0))
     timestamps: OutcomeTimestamps
+    # Deterministic check of each root cause's evidence and explained
+    # detectors; empty in outcomes recorded before diagnoses carried evidence.
+    diagnosis_verification: list[RootCauseVerification] = Field(default_factory=list)

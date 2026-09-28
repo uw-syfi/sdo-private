@@ -49,7 +49,7 @@ class EvidenceCheck(BaseModel):
     kind: str
     source: str
     #: True when the reference exists, False when it does not, None when it cannot be checked.
-    verified: bool | None
+    verified: bool | None = None
 
 
 class DetectorFlip(BaseModel):
@@ -58,7 +58,7 @@ class DetectorFlip(BaseModel):
     detector_id: str
     fired_at_dispatch: bool
     #: None when no post-response evaluation of the detector exists.
-    cleared_after_fix: bool | None
+    cleared_after_fix: bool | None = None
     flipped: bool
 
 

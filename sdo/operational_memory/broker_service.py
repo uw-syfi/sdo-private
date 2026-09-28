@@ -416,6 +416,7 @@ class BrokerService:
                 result=result,
                 dispatch_error=closure.dispatch_error,
                 final_health_detector_state=closure.final_detector_states,
+                incident_detector_states=closure.incident_detector_states,
                 health_verified=health_verified,
                 fault_confirmed=bool(result and result.confirmed_root_causes),
                 inspected_playbooks=surfaced,
