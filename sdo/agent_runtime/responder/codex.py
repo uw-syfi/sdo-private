@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_structured_turn, turn_usage
+from sdo.agent_runtime.responder.reflection import INCIDENT_REASONING_EFFORT
 from sdo.contracts import DetectorEvaluation, DetectorEvaluationStatus, Finding, IncidentRequest, IncidentResult
 from sdo.operational_memory import MemoryRepository, MemoryRepositoryError, WarmPlaybookMatch, warm_playbook_matches
 
@@ -54,7 +55,7 @@ def execute_incident(
             cwd=request.repository_worktree,
             access="danger-full-access",
             model=model or os.getenv("SDO_RESPONDER_MODEL") or None,
-            reasoning_effort="medium",
+            reasoning_effort=INCIDENT_REASONING_EFFORT,
             executor=executor,
         )
     except StructuredTurnError as exc:

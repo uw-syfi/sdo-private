@@ -106,6 +106,10 @@ class StatefulResponderBackend(Protocol):
 #: Upper bound on the rejected diff quoted into a retry prompt.
 _MAX_REJECTED_DIFF_CHARS = 48_000
 
+#: Reasoning effort of the incident agents (responder and reflection). A
+#: benchmark comparing SDO against a stock agent declares the same effort.
+INCIDENT_REASONING_EFFORT = "medium"
+
 _INCIDENT_DETECTOR_SKELETON = """Incident detector layout (an existing incident detector under
 `.sdo/diagnostics/detectors/incidents/` is the closest concrete example; do not explore SDK source):
 - files `.sdo/diagnostics/detectors/incidents/<snake_name>/detector.go` and `detector_test.go`, `package <snake_name>`,
@@ -397,7 +401,7 @@ class CodexSessionBackend:
         self,
         *,
         model: str | None = None,
-        reasoning_effort: str = "medium",
+        reasoning_effort: str = INCIDENT_REASONING_EFFORT,
         timeout_seconds: int = 900,
         executor: CommandExecutor | None = None,
     ) -> None:

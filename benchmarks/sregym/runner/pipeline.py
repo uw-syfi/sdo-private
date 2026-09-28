@@ -192,6 +192,7 @@ def merge_stage_config(
         sequence_len=merged.get("sequence_len", 0),
         sequence_seed=merged.get("sequence_seed", 42),
         require_strict_receipt=merged.get("require_strict_receipt", False),
+        reasoning_effort=str(merged.get("reasoning_effort", "")),
         tasklist=merged.get("tasklist", ""),
         problems=merged.get("problems", []),
         spec_names=merged.get("spec_names", []),

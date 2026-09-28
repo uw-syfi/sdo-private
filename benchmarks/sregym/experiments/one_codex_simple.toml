@@ -1,6 +1,7 @@
 [runner]
 agent = "codex"
 model = "gpt-5.5"
+reasoning_effort = "medium"  # explicit on both arms; SDO pins its incident agents to medium
 parallel = 1
 enable_summary = false
 no_inject_summary = true

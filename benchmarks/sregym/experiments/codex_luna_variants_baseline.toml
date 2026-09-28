@@ -7,6 +7,7 @@
 [runner]
 agent = "codex"
 model = "gpt-6-luna"
+reasoning_effort = "medium"  # explicit on both arms; SDO pins its incident agents to medium
 parallel = 1
 agent_timeout = 3600
 app_filter = "hotel_reservation"

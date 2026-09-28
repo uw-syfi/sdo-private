@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from sdo.agent_runtime.responder import (
+    INCIDENT_REASONING_EFFORT,
     ClaudeSessionBackend,
     CodexSessionBackend,
     SessionReflector,
@@ -86,7 +87,7 @@ def _argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--agent-provider", choices=("codex", "claude"), default="codex")
     parser.add_argument("--repair-policy", choices=("commit", "recorded-actions"), default="commit")
     parser.add_argument("--reflection-model")
-    parser.add_argument("--reflection-reasoning-effort", default="medium")
+    parser.add_argument("--reflection-reasoning-effort", default=INCIDENT_REASONING_EFFORT)
     parser.add_argument("--reflection-timeout-seconds", type=int, default=900)
     parser.add_argument(
         "--reflection-session",

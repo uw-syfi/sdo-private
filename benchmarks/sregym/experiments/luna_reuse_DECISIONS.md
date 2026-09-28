@@ -1195,3 +1195,18 @@ Coordinator-directed, 2026-09-27. Four harness items from 3.4, each test-first, 
   - Publishing from the runner after each stage: rejected. The runner would need a new CLI round-trip, and a stop during stage N+1 would still lose stage N's receipt, which is drained at the start of N+1.
   - Writing strict receipts at stage end: rejected. The receipt needs the finished reflection and the acknowledged closure.
 - `.agents/skills/analyze-experiment/references/trajectory-schema.md` documents the new fields, the early publication and the analysis fallback.
+
+### 3.4-c: Codex reasoning effort pinned on both arms
+
+- **Root cause.** Setting `AGENT_REASONING_EFFORT` in the environment is not enough. SREGym's `_configure_model_environment` sets it from `--reasoning-effort` and *removes* it when the flag is absent, and our runner never passed the flag. The Codex CLI therefore fell back to the catalog default, `medium` for `gpt-6-luna`. Copying the host `config.toml` would not have been a reliable route either, because only `auth.json` is mounted.
+- **Decision: a `reasoning_effort` runner field (`[runner]` or pipeline `[defaults]`), which the runner passes as `--reasoning-effort`.** SREGym then exports `AGENT_REASONING_EFFORT`, and it reaches the Codex container through the container runner's passthrough list. Codex receives `-c model_reasoning_effort=medium`.
+  - Values are checked against SREGym's choices (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`).
+  - The value is kept in the experiment snapshot. Empty (the default) leaves the agent default, so older configs are unchanged.
+- **SDO side:** the responder and reflection effort, previously three `"medium"` literals, is now one constant, `sdo.agent_runtime.responder.INCIDENT_REASONING_EFFORT`. It is used by the responder, the Codex reflection backend and the broker CLI's `--reflection-reasoning-effort` default. The value is unchanged.
+- **Configs:** every `codex` and `sdo_codex` config now declares `reasoning_effort = "medium"`: the four `codex_luna_*` baselines, `one_codex_simple`, and all nine `sdo_*` configs. For `sdo_codex` the flag only records the effort in SREGym's provenance, because SDO's agents take theirs from the constant.
+- **Config test** (`tests/unit/benchmarks/sregym/runner/test_reasoning_effort.py`):
+  - Every compared arm (agent `codex` or `sdo_codex`, including every pipeline stage) declares an effort.
+  - The `gpt-6-luna` SDO and Codex arms declare one value, and that value equals `INCIDENT_REASONING_EFFORT`.
+  - The flag reaches `main.py`, the value survives the snapshot, and an unknown value is rejected.
+- **Alternative rejected:** having the runner import the SDO constant and reject a mismatched SDO arm at load time. `tach` limits `benchmarks.sregym.runner` to `benchmarks.sregym.protocol`, and the test enforces the same invariant on every committed config.
+- **No runs:** nothing changes for runs already done. The Codex arm ran at the catalog default, which is also `medium` (see "Reasoning effort: both arms at `medium`"). The next round's rollouts should show `reasoning_effort: "medium"` in `turn_context` instead of `null`, and that check belongs in the first smoke run.

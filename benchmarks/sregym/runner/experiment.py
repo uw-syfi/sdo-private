@@ -26,6 +26,8 @@ except ModuleNotFoundError:
 import yaml
 
 _VARIANT_ORDERS = ("flat", "round_robin", "grouped", "adaptive")
+#: The efforts SREGym's --reasoning-effort accepts.
+REASONING_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
 VariantOrder = Literal["flat", "round_robin", "grouped", "adaptive"]
 ApplicationWorkspaceMode = Literal["persistent", "ephemeral"]
 ApplicationWorkspaceSetting = ApplicationWorkspaceMode | bool
@@ -148,6 +150,11 @@ class ExperimentConfig:
     sequence_len: int = 0
     sequence_seed: int = 42
     require_strict_receipt: bool = False
+    # Agent reasoning effort, passed to SREGym as --reasoning-effort. Empty
+    # leaves the agent's default. SDO's incident agents pin theirs in code
+    # (sdo.agent_runtime.responder.INCIDENT_REASONING_EFFORT); a config test
+    # keeps every compared arm declaring that value.
+    reasoning_effort: str = ""
 
     # Problem selection (mutually exclusive with variants)
     tasklist: str = ""  # named set or path to YAML
@@ -167,6 +174,10 @@ class ExperimentConfig:
     def _validate_mutual_exclusion(self) -> ExperimentConfig:
         if self.repeat < 1:
             raise ValueError(f"runner.repeat must be at least 1, got {self.repeat}")
+        if self.reasoning_effort and self.reasoning_effort not in REASONING_EFFORTS:
+            raise ValueError(
+                f"runner.reasoning_effort must be one of {sorted(REASONING_EFFORTS)}, got {self.reasoning_effort!r}"
+            )
         if self.variants.enabled and (self.tasklist or self.problems):
             raise ValueError("runner.variants.enabled is mutually exclusive with runner.tasklist and runner.problems")
         if self.tasklist and self.problems:
@@ -259,6 +270,7 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         sequence_len=runner.get("sequence_len", 0),
         sequence_seed=runner.get("sequence_seed", 42),
         require_strict_receipt=runner.get("require_strict_receipt", False),
+        reasoning_effort=str(runner.get("reasoning_effort", "")),
         tasklist=runner.get("tasklist", ""),
         problems=runner.get("problems", []),
         spec_names=runner.get("spec_names", []),
@@ -456,6 +468,9 @@ def config_to_main_args(
         args.append("--application-workspace")
     if config.repeat > 1:
         args.extend(["--n-attempts", str(config.repeat)])
+    if config.reasoning_effort:
+        # SREGym clears AGENT_REASONING_EFFORT unless this flag is passed.
+        args.extend(["--reasoning-effort", config.reasoning_effort])
 
     if tasklist_path is not None:
         args.extend(["--tasklist", str(tasklist_path)])
@@ -585,6 +600,8 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"sequence_len = {_toml_value(config.sequence_len)}")
     lines.append(f"sequence_seed = {_toml_value(config.sequence_seed)}")
     lines.append(f"require_strict_receipt = {_toml_value(config.require_strict_receipt)}")
+    if config.reasoning_effort:
+        lines.append(f"reasoning_effort = {_toml_value(config.reasoning_effort)}")
 
     if config.tasklist:
         lines.append(f"tasklist = {_toml_value(config.tasklist)}")
