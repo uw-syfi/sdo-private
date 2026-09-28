@@ -139,8 +139,16 @@ def _manifest_detectors(workspace: Path) -> set[str]:
     manifest = workspace / ".sdo" / "diagnostics" / "manifest.yaml"
     if not manifest.is_file():
         return set()
-    document = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
+    return _detector_ids(manifest.read_text(encoding="utf-8"))
+
+
+def _detector_ids(manifest: str) -> set[str]:
+    document = yaml.safe_load(manifest) or {}
     return {str(item.get("id")) for item in document.get("detectors") or [] if isinstance(item, dict)}
+
+
+def _jsonl_text(text: str) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
 def _git(workspace: Path, *args: str) -> str:
@@ -325,15 +333,18 @@ class ScriptedAgent:
                 "idle" if settled else f"still open after {SETTLE_TIMEOUT_SECONDS}s: {_open_summary(state)}",
             )
         )
-        record.checks.extend(self._memory_checks(spec, incident_id))
+        manifest = self._operational_file(".sdo/diagnostics/manifest.yaml")
+        outcomes_text = self._operational_file(".sdo/outcomes.jsonl")
+        record.checks.append(
+            Check("operational-repository-readable", manifest is not None and outcomes_text is not None, "via pod")
+        )
+        record.checks.extend(
+            self._memory_checks(spec, incident_id, None if manifest is None else _detector_ids(manifest))
+        )
         if incident_id:
             turns = self._turns_for(incident_id)
             record.turns = turns
-            outcomes = [
-                item
-                for item in _jsonl(self._workspace / ".sdo" / "outcomes.jsonl")
-                if item.get("incident_id") == incident_id
-            ]
+            outcomes = [item for item in _jsonl_text(outcomes_text or "") if item.get("incident_id") == incident_id]
             classes = [item.get("classification") for item in outcomes]
             record.metrics["outcome_classifications"] = classes
             # An abandoned incident must still reach memory exactly once; a lost one is silent.
@@ -395,9 +406,32 @@ class ScriptedAgent:
                 return candidate
         return None
 
-    def _memory_checks(self, spec: IncidentSpec, incident_id: str | None) -> list[Check]:
+    def _operational_file(self, relative: str) -> str | None:
+        """A file of the operational repository as the controller pod sees it.
+
+        The host workspace is synced only when a receipt is collected, so an
+        abandoned incident's outcome and memory exist only in the pod until then.
+        """
+
+        pods = kubectl(
+            ["get", "pods", "-l", "job-name=sdo-controller-run", "--field-selector=status.phase=Running", "-o", "name"],
+            namespace=self._control,
+            check=False,
+        ).stdout.split()
+        if not pods:
+            return None
+        completed = kubectl(
+            ["exec", pods[0], "-c", "controller", "--", "cat", f"/workspace/application/{relative}"],
+            namespace=self._control,
+            check=False,
+        )
+        return completed.stdout if completed.returncode == 0 else None
+
+    def _memory_checks(
+        self, spec: IncidentSpec, incident_id: str | None, detectors: set[str] | None = None
+    ) -> list[Check]:
         del incident_id
-        detectors = _manifest_detectors(self._workspace)
+        detectors = _manifest_detectors(self._workspace) if detectors is None else detectors
         checks = [
             Check(f"learned:{detector}", detector in detectors, "registered" if detector in detectors else "missing")
             for detector in spec.expect.learned
