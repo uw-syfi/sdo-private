@@ -45,11 +45,21 @@ class StageConfig:
     runner_overrides: dict[str, Any] = dataclasses.field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
 
 
+#: Environment variable SREGym reads to seed a stage's application workspace.
+APP_WORKSPACE_SEED_ENV_VAR = "SREGYM_APP_WORKSPACE_SEED_DIR"
+
+#: ``[pipeline] workspace_seed`` value for a seed that must still be produced; the
+#: runner refuses to launch stage 0 until it is replaced with a real directory.
+WORKSPACE_SEED_PLACEHOLDER = "PENDING-FRESH-LIFECYCLE-SEED"
+
+
 @dataclasses.dataclass
 class PipelineConfig:
     """Multi-stage experiment pipeline."""
 
     name: str = ""
+    #: Application workspace that seeds a stage-0 run which does not chain one.
+    workspace_seed: str = ""
     defaults: dict[str, Any] = dataclasses.field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
     stages: list[StageConfig] = dataclasses.field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
@@ -127,9 +137,31 @@ def load_pipeline_config(path: Path) -> PipelineConfig:
 
     return PipelineConfig(
         name=pipeline_raw.get("name", ""),
+        workspace_seed=str(pipeline_raw.get("workspace_seed", "")),
         defaults=defaults_raw,
         stages=stages,
     )
+
+
+def initial_workspace_seed_env(config: PipelineConfig) -> dict[str, str]:
+    """Return the environment that seeds stage 0 from ``[pipeline] workspace_seed``.
+
+    An empty value adds nothing (a seed exported at launch still applies). The
+    placeholder, or a path that is not a directory, stops the launch.
+    """
+
+    seed = config.workspace_seed.strip()
+    if not seed:
+        return {}
+    if seed == WORKSPACE_SEED_PLACEHOLDER:
+        raise ValueError(
+            f"pipeline {config.name!r} workspace_seed is still {WORKSPACE_SEED_PLACEHOLDER!r}: run a fresh lifecycle "
+            "on the current SDO code and set workspace_seed to its application workspace before launching"
+        )
+    path = Path(seed).expanduser().resolve()
+    if not path.is_dir():
+        raise FileNotFoundError(f"pipeline {config.name!r} workspace_seed is not a directory: {path}")
+    return {APP_WORKSPACE_SEED_ENV_VAR: str(path)}
 
 
 # ---------------------------------------------------------------------------

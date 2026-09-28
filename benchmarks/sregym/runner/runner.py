@@ -36,9 +36,11 @@ from benchmarks.sregym.runner.experiment import (
     write_snapshot,
 )
 from benchmarks.sregym.runner.pipeline import (
+    APP_WORKSPACE_SEED_ENV_VAR,
     PipelineConfig,
     PipelineState,
     StageState,
+    initial_workspace_seed_env,
     merge_stage_config,
     reconcile_pipeline_state,
     write_pipeline_snapshot,
@@ -46,7 +48,7 @@ from benchmarks.sregym.runner.pipeline import (
 )
 from benchmarks.sregym.runner.preflight import LaunchAssurance, default_assurance
 
-_APP_WORKSPACE_SEED_ENV_VAR = "SREGYM_APP_WORKSPACE_SEED_DIR"
+_APP_WORKSPACE_SEED_ENV_VAR = APP_WORKSPACE_SEED_ENV_VAR
 _PERSISTENT_STATE_ENV_VAR = "SDO_PERSISTENT_CONTROLLER_STATE"
 _PERSISTENT_STATE_FILENAME = "sdo_persistent_controller.json"
 
@@ -570,6 +572,10 @@ def run_pipeline(
                 print(f"  KB seed: {prev_kb_dir}")
             stage_extra_env: dict[str, str] = {}
             try:
+                if i == 0 and not stage_cfg.chain_application_workspace:
+                    stage_extra_env = initial_workspace_seed_env(config)
+                    if stage_extra_env:
+                        print(f"  Application workspace seed: {stage_extra_env[_APP_WORKSPACE_SEED_ENV_VAR]}")
                 if stage_cfg.chain_application_workspace:
                     stage_extra_env = _resolve_workspace_seed_env(
                         current_stage=i,

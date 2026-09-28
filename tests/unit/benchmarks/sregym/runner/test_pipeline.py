@@ -1432,3 +1432,54 @@ def test_persistent_mode_is_off_by_default_for_sdo_codex(tmp_path: Path) -> None
     env = config_to_env(ExperimentConfig(agent="sdo_codex"), tmp_path)
 
     assert "SREGYM_PRESERVE_NAMESPACE_LABEL" not in env
+
+
+# ---------------------------------------------------------------------------
+# Stage-0 application-workspace seed
+# ---------------------------------------------------------------------------
+
+SEEDED_TOML = """\
+[pipeline]
+name = "seeded"
+workspace_seed = "{seed}"
+
+[defaults]
+agent = "sdo_codex"
+application_workspace = "persistent"
+
+[[stages]]
+name = "first"
+chain_application_workspace = false
+"""
+
+
+def test_pipeline_without_a_workspace_seed_adds_no_seed_environment(tmp_path: Path) -> None:
+    from benchmarks.sregym.runner.pipeline import initial_workspace_seed_env
+
+    config = load_pipeline_config(_write_toml(tmp_path, PIPELINE_TOML))
+
+    assert config.workspace_seed == ""
+    assert initial_workspace_seed_env(config) == {}
+
+
+def test_pipeline_refuses_to_launch_on_the_placeholder_workspace_seed(tmp_path: Path) -> None:
+    from benchmarks.sregym.runner.pipeline import WORKSPACE_SEED_PLACEHOLDER, initial_workspace_seed_env
+
+    config = load_pipeline_config(_write_toml(tmp_path, SEEDED_TOML.format(seed=WORKSPACE_SEED_PLACEHOLDER)))
+
+    with pytest.raises(ValueError, match="fresh lifecycle"):
+        initial_workspace_seed_env(config)
+
+
+def test_pipeline_seeds_stage_zero_from_an_existing_workspace_seed(tmp_path: Path) -> None:
+    from benchmarks.sregym.runner.pipeline import initial_workspace_seed_env
+
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    config = load_pipeline_config(_write_toml(tmp_path, SEEDED_TOML.format(seed=seed)))
+
+    assert initial_workspace_seed_env(config) == {"SREGYM_APP_WORKSPACE_SEED_DIR": str(seed.resolve())}
+
+    missing = load_pipeline_config(_write_toml(tmp_path, SEEDED_TOML.format(seed=tmp_path / "absent"), "m.toml"))
+    with pytest.raises(FileNotFoundError, match="absent"):
+        initial_workspace_seed_env(missing)
