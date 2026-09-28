@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/client-go/kubernetes"
+
 	"sdo.dev/controller/core"
 	"sdo.dev/controller/sdk"
 	"sdo.dev/controller/sdk/traffic"
@@ -24,7 +26,16 @@ type RuntimeOptions struct {
 	Stdout   io.Writer
 	Stderr   io.Writer
 	Provider SnapshotProvider
+	// Client, when set, replaces the kubeconfig clients of the long-running
+	// controller (observation, state, dispatch, and leader election), so the
+	// production wiring can run against a fake API server.
+	Client kubernetes.Interface
+	// StateBaselineStartTimeout bounds the state tracker's RBAC probes and
+	// initial sync; zero means defaultStateBaselineStartTimeout.
+	StateBaselineStartTimeout time.Duration
 }
+
+const defaultStateBaselineStartTimeout = 30 * time.Second
 
 type repeatedFlag []string
 
@@ -171,13 +182,21 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err != nil {
 		return err
 	}
-	bootstrapProvider, err := core.NewKubernetesSnapshotProvider(*namespace)
-	if err != nil {
-		return fmt.Errorf("create Kubernetes snapshot provider: %w", err)
+	bootstrapProvider := &core.KubernetesSnapshotProvider{Namespace: *namespace, Client: options.Client}
+	leaseClient := options.Client
+	if options.Client == nil {
+		bootstrapProvider, err = core.NewKubernetesSnapshotProvider(*namespace)
+		if err != nil {
+			return fmt.Errorf("create Kubernetes snapshot provider: %w", err)
+		}
+		leaseClient, err = core.NewKubernetesClient()
+		if err != nil {
+			return fmt.Errorf("create dedicated leader-election client: %w", err)
+		}
 	}
-	leaseClient, err := core.NewKubernetesClient()
-	if err != nil {
-		return fmt.Errorf("create dedicated leader-election client: %w", err)
+	stateStartTimeout := options.StateBaselineStartTimeout
+	if stateStartTimeout <= 0 {
+		stateStartTimeout = defaultStateBaselineStartTimeout
 	}
 	elector := NewLeaseElector(leaseClient, *controlNamespace, *leaseName, *identity, *leaseDuration)
 	for {
@@ -412,7 +431,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		started := time.Now()
 		done := make(chan error, 1)
 		go func() {
-			startCtx, cancelStart := context.WithTimeout(runCtx, 30*time.Second)
+			startCtx, cancelStart := context.WithTimeout(runCtx, stateStartTimeout)
 			defer cancelStart()
 			done <- stateTracker.Start(startCtx)
 		}()
