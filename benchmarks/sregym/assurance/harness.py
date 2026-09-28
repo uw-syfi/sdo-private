@@ -259,8 +259,24 @@ class ScriptedAgent:
 
     def learn(self, outcome: AgentOutcome) -> AgentOutcome:
         record = next(r for r in self._records.values() if r.incident_id == outcome.incident_id)
-        learned = self._inner.learn(outcome)
-        self._check(record, self._specs[record.index], learned)
+        spec = self._specs[record.index]
+        try:
+            learned = self._inner.learn(outcome)
+        except Exception as exc:
+            record.resolve_error = f"learning failed: {type(exc).__name__}: {exc}"
+            record.checks.append(Check("failure-is-loud", bool(str(exc).strip()), record.resolve_error))
+            record.checks.append(
+                Check("resolution", spec.expect.resolution == "loud-failure", f"expected {spec.expect.resolution}")
+            )
+            record.checks.extend(self._memory_checks(spec, outcome.incident_id))
+            self._append(record)
+            raise
+        if learned.error and spec.expect.resolution == "loud-failure":
+            record.checks.append(Check("failure-is-loud", True, learned.error))
+            record.checks.extend(self._memory_checks(spec, outcome.incident_id))
+            self._append(record)
+            return learned
+        self._check(record, spec, learned)
         self._append(record)
         return learned
 
@@ -474,6 +490,47 @@ class ScriptedAgent:
                 ),
             }
         )
+        record.metrics.update(self._resource_sample())
+
+    def _resource_sample(self) -> dict[str, Any]:
+        """Controller process memory and threads, and the size of operational memory, after this incident."""
+
+        sample: dict[str, Any] = {}
+        pods = kubectl(
+            ["get", "pods", "-l", "job-name=sdo-controller-run", "-o", "jsonpath={.items[*].metadata.name}"],
+            namespace=self._control,
+            check=False,
+        ).stdout.split()
+        if pods:
+            script = (
+                "for p in /proc/[0-9]*; do "
+                'c=$(tr "\\0" " " < $p/cmdline 2>/dev/null | cut -c1-80); [ -n "$c" ] || continue; '
+                "r=$(awk '/^VmRSS/{print $2}' $p/status); t=$(awk '/^Threads/{print $2}' $p/status); "
+                'echo "$r|$t|$c"; done'
+            )
+            completed = kubectl(
+                ["exec", pods[0], "-c", "controller", "--", "sh", "-c", script], namespace=self._control, check=False
+            )
+            processes = []
+            for line in completed.stdout.splitlines():
+                rss, threads, command = (line.split("|", 2) + ["", ""])[:3]
+                if rss.isdigit():
+                    processes.append({"rss_kb": int(rss), "threads": int(threads or 0), "command": command.strip()})
+            sample["controller_pod"] = pods[0]
+            sample["controller_processes"] = processes
+        sdo = self._workspace / ".sdo"
+        sample["sdo_bytes"] = sum(path.stat().st_size for path in sdo.rglob("*") if path.is_file())
+        sample["sdo_files"] = sum(1 for path in sdo.rglob("*") if path.is_file())
+        sample["operational_commits"] = int(_git(self._workspace, "rev-list", "--count", "HEAD") or 0)
+        objects = dict(
+            line.split(": ", 1) for line in _git(self._workspace, "count-objects", "-v").splitlines() if ": " in line
+        )
+        sample["git_size_kb"] = int(objects.get("size", 0)) + int(objects.get("size-pack", 0))
+        outcomes = _jsonl(sdo / "outcomes.jsonl")
+        ids = [str(item.get("incident_id")) for item in outcomes]
+        sample["outcomes"] = len(ids)
+        sample["duplicate_outcomes"] = sorted({i for i in ids if ids.count(i) > 1})
+        return sample
 
     def _token_checks(
         self, receipt: dict[str, Any], outcome: AgentOutcome, turns: list[dict[str, Any]], artifacts: Path

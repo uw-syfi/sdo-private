@@ -113,5 +113,100 @@ SCENARIOS: dict[str, tuple[IncidentSpec, ...]] = {
 }
 
 
+_RECOVERS_NP = Expectation(learned=(NP_DETECTOR,))
+_RECOVERS_MCM = Expectation(learned=(MCM_DETECTOR,))
+
+#: One incident per chaos action; each must end in durable recovery or a loud, actionable failure.
+CHAOS_SCENARIOS: dict[str, tuple[IncidentSpec, ...]] = {
+    "chaos-kill-controller": (
+        incident(
+            NP,
+            "chaos/kill-controller",
+            21,
+            chaos="kill-controller",
+            pause_before_repair_seconds=45,
+            expect=_RECOVERS_NP,
+        ),
+    ),
+    "chaos-kill-responder": (
+        incident(
+            MCM_GEO,
+            "chaos/kill-responder",
+            22,
+            chaos="kill-responder",
+            pause_before_repair_seconds=60,
+            expect=_RECOVERS_MCM,
+        ),
+    ),
+    "chaos-kill-prober": (
+        incident(NP, "chaos/kill-prober", 23, chaos="kill-prober", pause_before_repair_seconds=20, expect=_RECOVERS_NP),
+    ),
+    "chaos-broker-reject": (
+        incident(
+            MCM_GEO,
+            "chaos/broker-reject",
+            24,
+            reflection="invalid_then_learn",
+            expect=Expectation(learned=(MCM_DETECTOR,), min_reflection_attempts=2),
+        ),
+    ),
+    "chaos-reflection-crash": (
+        incident(NP, "chaos/reflection-crash-once", 25, reflection="crash_once", expect=_RECOVERS_NP),
+    ),
+    "chaos-reflection-crash-always": (
+        incident(
+            MCM_GEO,
+            "chaos/reflection-crash-always",
+            26,
+            reflection="crash_always",
+            expect=Expectation(resolution="loud-failure", not_learned=(MCM_DETECTOR,)),
+        ),
+    ),
+    "chaos-pause-apiserver": (
+        incident(
+            NP,
+            "chaos/pause-apiserver",
+            27,
+            chaos="pause-apiserver",
+            pause_before_repair_seconds=45,
+            expect=_RECOVERS_NP,
+        ),
+    ),
+    "chaos-concurrent-commit": (
+        incident(
+            MCM_GEO,
+            "chaos/concurrent-commit",
+            28,
+            chaos="concurrent-commit",
+            pause_before_repair_seconds=30,
+            expect=_RECOVERS_MCM,
+        ),
+    ),
+}
+SCENARIOS.update(CHAOS_SCENARIOS)
+
+
+def soak(count: int) -> tuple[IncidentSpec, ...]:
+    """``count`` mixed incidents on one controller: every fault class, first encounters, repeats and variants."""
+
+    cycle = [
+        (NP, {}),
+        (MCM_GEO, {}),
+        (NP, {}),
+        (MCM_RATE, {}),
+        (MCM_GEO, {"mitigation": "wrong_then_correct"}),
+        (NP, {"reflection": "no_change"}),
+        (MCM_RATE, {}),
+    ]
+    specs = []
+    for index in range(count):
+        problem, extra = cycle[index % len(cycle)]
+        specs.append(incident(problem, f"soak/{index:02d}", 100 + index, **extra))
+    return tuple(specs)
+
+
+SCENARIOS["soak"] = soak(21)
+
+
 def with_expectation(spec: IncidentSpec, **changes: object) -> IncidentSpec:
     return replace(spec, expect=replace(spec.expect, **changes))  # type: ignore[arg-type]
