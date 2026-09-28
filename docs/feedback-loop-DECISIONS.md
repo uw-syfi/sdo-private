@@ -419,3 +419,57 @@ here because every scenario qualifies on the healthy application.
 - **Closure.** Helper cleanup adds about 10 ms before the closure gate.
 - **Verification.** Diagnosis verification is pure Python over data the
   broker already holds.
+
+### D25. N11 fix: verification-time state diff, not a wider request or a settle window
+
+- **Found.** Phase-1 qualification (`QUALIFICATION.md`, `NO_LLM_SUITE_DECISIONS.md`
+  N11): on a composite fault the second component can land after the
+  incident already opened (K2's readiness-probe fault about 6 s after its
+  selector fault; K1 in 1 of 3 runs), so `IncidentRequest.state_changes`, an
+  immutable dispatch-time snapshot, never names it. `verify_diagnosis`
+  checked `state-change` evidence only against that snapshot, so a
+  responder that correctly cited the late fault got `contradicted` or
+  `unverified` instead of `confirmed`, and D22's reflection rule then
+  learned nothing from it.
+- **Decision.** Keep the request an immutable dispatch snapshot (per N11's
+  original note: holding dispatch for a batching window slows every
+  incident, not only composites). Instead, `Controller.maybeCloseIncident`
+  now also computes `Baseline.Changes(now)` at verification time and carries
+  it on `IncidentClosure.FinalStateChanges` (Go), threaded through
+  `BrokerClosure`/`OutcomeFacts.final_state_changes` (Python) into
+  `verify_diagnosis`, which checks `state-change` evidence against the union
+  of `request.state_changes` and `final_state_changes`. A change absent from
+  both is still `contradicted`.
+- **Alternatives considered.**
+  - **Refresh the diff into the request.** Would mutate a value already
+    handed to the responder and cited in its own reasoning; the request
+    stays a snapshot of what the responder saw, by design (same reasoning as
+    the "no bypass" gate in D17 and the immutable-request choice already
+    made in N11).
+  - **Hold dispatch for a short settle window** so both components of a
+    composite land before the snapshot is taken. Rejected: it adds
+    wall-clock time to every single-fault incident too, and D18 already
+    rejected a similar settle-before-dispatch tradeoff for the baseline
+    itself for the same reason.
+  - **Widen `verify_diagnosis` to accept any evidence unconditionally**
+    (drop the state-change check). Rejected: it would stop rejecting decoys
+    and never-happened changes, which is exactly what N10/N11's qualification
+    run showed the check catching.
+- **Why this design adds no wall-clock time.** `Baseline.Changes(now)` is the
+  same in-memory informer-cache diff already computed for the live
+  `incident_view` (N10) at every evaluation; computing it once more at
+  closure, which already happens synchronously, costs no additional wait and
+  keeps verification deterministic (no LLM, no benchmark-verdict inspection).
+- **Tests (test-first).** `controller/runtime/controller_closure_state_diff_test.go`
+  reproduces the K2 timeline (selector fault at dispatch, readiness fault
+  landing before the health detectors clear) and asserts
+  `IncidentClosure.FinalStateChanges` carries both while
+  `IncidentClosure.Request.StateChanges` keeps only the first; a second test
+  asserts a closure without a configured baseline never fabricates a diff.
+  `tests/unit/sdo/operational_memory/test_diagnosis.py` and `test_outcomes.py`
+  add the Python-side pair: a late-landing state change is `confirmed`
+  against the closing view, and a decoy or never-happened change absent from
+  both diffs is still `contradicted`.
+- **Docs.** `.agents/skills/analyze-experiment/references/trajectory-schema.md`
+  and `failure-patterns.md` now describe `final_state_changes` and how it
+  changes what a `contradicted` state-change citation means on a composite.
