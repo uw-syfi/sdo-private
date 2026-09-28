@@ -92,6 +92,12 @@ Branch `vic/feat/no-llm-assurance-suite`, based on `vic/exp/feedback-loop-e2e`
 | Correct fix end → controller verified | 90 s | Clearing needs 2 clear evaluations of every health detector (intervals 10–30 s) |
 | Responder exit → helpers gone | 15 s | Cleanup has a 10 s timeout; the earlier smoke took 10–13 ms |
 
+Detection latencies are measured from the **start** of the SREGym injection
+call. The call itself takes 4–6 s (it waits for rollouts), and the shakedown
+showed the detectors firing before it returned, so latencies measured from its
+end were negative. Measuring from the start gives an upper bound on the true
+latency and makes the 30 s bound stricter.
+
 The traffic prober's own first finding is reported per fault. For
 network_policy_block it is a **known gap** (coordinator-directed, below) and
 does not fail the run.

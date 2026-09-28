@@ -463,9 +463,9 @@ class AssuranceSuite:
             request_file, request = self.wait_request(known=known, timeout=bounds.detect_seconds + 120)
             received = utcnow()
             run.incident_id = str(request["incident_id"])
-            run.request_received_seconds = round((received - run.injection_finished_at).total_seconds(), 3)
+            run.request_received_seconds = round((received - run.injection_started_at).total_seconds(), 3)
             run.first_finding_seconds = first_findings(
-                self.controller, since=started, reference=run.injection_finished_at
+                self.controller, since=started, reference=run.injection_started_at
             )
             run.diff = diff_reading(request, objects)
             checks.append(
@@ -667,7 +667,7 @@ class AssuranceSuite:
             verified_at = datetime.fromisoformat(str(closure["verified_at"]).replace("Z", "+00:00"))
             detected_at = datetime.fromisoformat(str(closure["detected_at"]).replace("Z", "+00:00"))
             run.verified_seconds = round((verified_at - fixed_at).total_seconds(), 3)
-            run.incident_opened_seconds = round((detected_at - run.injection_finished_at).total_seconds(), 3)
+            run.incident_opened_seconds = round((detected_at - run.injection_started_at).total_seconds(), 3)
             run.closure_acknowledged = True
             run.final_detector_states = {
                 str(state["detector_id"]): str(state["status"]) for state in closure.get("final_detector_states") or []
@@ -690,7 +690,7 @@ class AssuranceSuite:
                 Check(
                     name="incident opened within the detect bound",
                     passed=run.incident_opened_seconds <= bounds.detect_seconds,
-                    detail=f"opened {run.incident_opened_seconds}s after injection",
+                    detail=f"opened {run.incident_opened_seconds}s after injection started",
                 )
             )
             checks.append(
