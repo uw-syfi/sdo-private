@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -104,11 +105,16 @@ def test_lane_offset_parses_the_trailing_worker_number() -> None:
 
 
 class TestQuotaGate:
-    def test_starts_only_at_or_below_the_threshold(self) -> None:
-        gate = QuotaGate(start_max_percent=50.0)
-        assert gate.can_start_matrix(50.0)
-        assert not gate.can_start_matrix(50.1)
-        assert gate.can_start_matrix(None)  # unknown quota does not block a launch
+    def test_starts_only_if_current_plus_planned_worst_case_clears_the_stop_line(self) -> None:
+        gate = QuotaGate(stop_percent=96.0)
+        assert gate.can_start_matrix(90.0, 6.0)  # 90 + 6 == 96
+        assert not gate.can_start_matrix(90.1, 6.0)  # 90.1 + 6 > 96
+        assert gate.can_start_matrix(None, 6.0)  # unknown quota does not block a launch
+
+    def test_can_start_matrix_rejects_a_negative_planned_worst_case(self) -> None:
+        gate = QuotaGate()
+        with pytest.raises(ValueError, match="planned_worst_case_percent"):
+            gate.can_start_matrix(50.0, -1.0)
 
     def test_stops_at_or_above_the_threshold(self) -> None:
         gate = QuotaGate(stop_percent=97.0)
@@ -122,8 +128,8 @@ class TestQuotaGate:
         assert gate.lane_over_budget(1.51, budget_percent=1.0)
 
     def test_rejects_an_inconsistent_or_degenerate_configuration(self) -> None:
-        with pytest.raises(ValueError, match="start_max_percent"):
-            QuotaGate(start_max_percent=60.0, stop_percent=50.0)
+        with pytest.raises(ValueError, match="stop_percent"):
+            QuotaGate(stop_percent=150.0)
         with pytest.raises(ValueError, match="lane_abort_multiplier"):
             QuotaGate(lane_abort_multiplier=1.0)
 
@@ -268,17 +274,36 @@ def test_run_matrix_aborts_the_whole_matrix_on_any_failing_lane_preflight(tmp_pa
     assert process_runner.started == []  # nothing launched once one lane fails
 
 
-def test_run_matrix_does_not_start_above_the_quota_start_threshold(tmp_path: Path) -> None:
+def test_run_matrix_does_not_start_when_current_plus_planned_worst_case_exceeds_the_stop_line(tmp_path: Path) -> None:
+    # Default gate (stop_percent=97.0) + default planned budget (the full
+    # matrix, worst case ~15.4 pt): 90% used leaves no room (90 + 15.4 > 97).
     clock = FakeClock()
     process_runner = FakeProcessRunner()
     state, _, _ = _run(
         tmp_path,
         clock_obj=clock,
-        quota_reader=FakeQuotaReader(clock, start=60.0),
+        quota_reader=FakeQuotaReader(clock, start=90.0),
         process_runner=process_runner,
     )
     assert state.matrix_status == "aborted_quota_start"
     assert process_runner.started == []
+
+
+def test_run_matrix_starts_when_current_plus_planned_worst_case_clears_the_stop_line(tmp_path: Path) -> None:
+    clock = FakeClock()
+    state, _, _ = _run(tmp_path, clock_obj=clock, quota_reader=FakeQuotaReader(clock, start=10.0))
+    assert state.matrix_status == "completed"
+
+
+def test_run_matrix_logs_the_gate_decision(tmp_path: Path) -> None:
+    clock = FakeClock()
+    state, phase1, _ = _run(tmp_path, clock_obj=clock, quota_reader=FakeQuotaReader(clock, start=90.0))
+    assert state.matrix_status == "aborted_quota_start"
+    decision = json.loads((tmp_path / "launch" / "gate_decision.json").read_text(encoding="utf-8"))
+    assert decision["used_percent_at_start"] == 90.0
+    assert decision["decision"] == "abort_quota_start"
+    assert decision["stop_percent"] == 97.0
+    assert decision["planned_worst_case_percent"] > 0
 
 
 def test_run_matrix_stops_hard_at_the_quota_stop_threshold_and_terminates_running_lanes(tmp_path: Path) -> None:
@@ -472,9 +497,9 @@ def test_run_matrix_logs_quota_for_every_completed_run(tmp_path: Path) -> None:
         max_ticks=20,
     )
     lines = (launch_dir / "quota_log.jsonl").read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 8  # one completion record per lane
-    import json
-
     records = [json.loads(line) for line in lines]
-    assert {record["lane"] for record in records} == {f"assure-w{n}" for n in range(8)}
-    assert all(record["used_percent_before"] is not None for record in records)
+    completion_records = [record for record in records if record.get("event") != "gate_decision"]
+    assert len(completion_records) == 8  # one completion record per lane
+    assert sum(1 for record in records if record.get("event") == "gate_decision") == 1
+    assert {record["lane"] for record in completion_records} == {f"assure-w{n}" for n in range(8)}
+    assert all(record["used_percent_before"] is not None for record in completion_records)

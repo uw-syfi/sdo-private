@@ -8,9 +8,13 @@ rebuild step (`benchmarks.sregym.assurance.rebuild_v010_images`) and the
 analysis step (`benchmarks.sregym.assurance.phase1_analyze`) built alongside
 this file, on branch `vic/exp/phase1-launch`.
 
-**No LLM or Codex run may start before the weekly quota resets at
-2026-10-03 18:19 UTC, and only if `used_percent <= 50%` at that point
-(PLAN.md (d)).**
+**2026-10 update: this run does not wait for the 2026-10-03 18:19 UTC quota
+reset.** The user asked to run as soon as RC2 lands, with the shared Codex
+weekly window already at about 90% used. The start gate is no longer the
+fixed "`used_percent <= 50%`" rule PLAN.md (d) states; see "Quota budget
+correction (2026-10)" below for the budget-aware gate this launcher actually
+enforces, and its own hard stop at `used_percent >= 97%` is kept, with this
+run's own stop line set one point under it, at 96%.
 
 ## Preconditions
 
@@ -48,8 +52,15 @@ below, because they are branch/merge decisions outside its scope.
      after its first correct repair. Do not skip this.
 3. **Preflight is green for every lane.**
    - `uv run python -m benchmarks.sregym.runner.preflight benchmarks/sregym/experiments/assurance/phase1/*.toml`
-     must show every check `ok` except `codex-quota`, which is expected to
-     read the pre-reset 90%+ figure until 2026-10-03 18:19 UTC.
+     must show every check `ok`. `codex-quota` will read the pre-reset ~90%
+     figure; that is expected and, run by hand like this, uses preflight's
+     own default 85% ceiling and will show `fail`. The launcher itself does
+     **not** use that default: it computes an effective ceiling from its own
+     quota gate (`stop_percent` minus the selected matrix's worst-case
+     percent) and passes that to preflight instead, recording which ceiling
+     was used (`preflight_max_quota_used_percent`,
+     `preflight_max_quota_used_percent_source`) in the report's facts. See
+     "Quota budget correction (2026-10)" below.
    - The launcher (step 2 below) re-runs this per lane in enforcing mode and
      aborts the whole matrix on any failure, but running it by hand first is
      the fast way to catch a problem before the 2 h window opens.
@@ -68,12 +79,18 @@ uv run python -m benchmarks.sregym.assurance.rebuild_v010_images <post-RC2-main-
 
 # 3. Launch the matrix. One command; resumable if interrupted (rerun the same
 #    command — it reads .launch/state.json and continues, never restarts a
-#    lane already done).
-bash benchmarks/sregym/experiments/assurance/phase1/launch.sh
+#    lane already done). Prints the smoke + matrix token budget, the
+#    current-quota gate decision, and (if the plan does not fit) the
+#    auto-shrunk plan, before anything starts. --matrix defaults to "full"
+#    (PLAN.md's own matrix); pass --matrix reduced for the smaller 2026-10
+#    preset instead.
+bash benchmarks/sregym/experiments/assurance/phase1/launch.sh --stop-percent 96
 
 # 3'. Rehearse first with --dry-run: stubs cluster, quota and process calls,
-#     touches no real cluster or quota, and exercises lane binding + preflight.
-bash benchmarks/sregym/experiments/assurance/phase1/launch.sh --dry-run
+#     touches no real cluster or quota, and exercises lane binding + preflight
+#     + the budget/gate printout (quota reads as unknown, so the gate always
+#     lets a dry run through).
+bash benchmarks/sregym/experiments/assurance/phase1/launch.sh --dry-run --stop-percent 96
 
 # 4. After the matrix finishes (or is stopped), analyze.
 uv run python -m benchmarks.sregym.assurance.phase1_analyze \
@@ -120,17 +137,66 @@ about 14 minutes after the first.
 - **Per-lane subprocess logs:** `.launch/logs/<lane>.log` (real run only;
   `--dry-run` starts nothing).
 
+## Quota budget correction (2026-10)
+
+`PLAN.md` (d)'s per-unit quota costs (SDO stage 0.13%, Codex attempt 0.07%,
+"good to about x2") are **wrong by several times over**. Evidence: a live
+`network_policy_block` eval (lifecycle bootstrap + 3 SDO warm attempts + 3
+Codex-stock attempts + 3 Codex+verify attempts, run 2026-09-28 05:04-08:30
+UTC) consumed on the order of 8-13M raw tokens total, and the shared
+window's `used_percent` read exactly `90.0` at every single `QUOTA-READ`
+checkpoint across that window — unmoved. `(delta used_percent) / (delta
+tokens)` is therefore unmeasurable as a positive rate (every observed delta
+was exactly zero even at multi-million-token scale).
+
+`benchmarks/sregym/assurance/phase1_budget.py` now budgets the matrix in
+**tokens**, using per-unit token costs measured directly from that same run
+(`SDO_STAGE_TOKENS`, `SDO_LIFECYCLE_BOOTSTRAP_TOKENS`,
+`CODEX_ATTEMPT_TOKENS`), and converts tokens to quota points at a
+conservative fallback rate, `POINTS_PER_TOKEN = 1e-7` (1 point per
+10,000,000 tokens) — higher (more cautious) than either observed upper bound
+so it will not under-budget. PLAN.md (d)'s relative multipliers (composite
+x1.5, verify x1.3, worst case x2) are unchanged; only the absolute
+weekly-percent conversion was wrong.
+
+The launcher now (a) **defaults to the full phase-1 matrix** from PLAN.md
+(the `reduced` 2026-10 preset is available via `--matrix reduced` but is no
+longer the default), (b) reserves a small, non-shrinking smoke budget (1 SDO
+pipeline + 1 attempt/Codex arm, 1 problem) ahead of the matrix, (c)
+auto-shrinks the matrix's pipeline/attempt counts — most expensive component
+first, down to a floor, never below 1 SDO pipeline, verify droppable to 0 —
+until `current used_percent + combined worst case <= --stop-percent`, and
+(d) prints the plan (and, if it shrank, exactly what changed and why)
+before anything launches. `--stop-percent` defaults to 96%, one point under
+PLAN.md's own 97% hard stop, for this run specifically (quota was already
+around 90% used when this correction was made).
+
+**Not yet wired**: the smoke run's own `run_validity`-gated execution (the
+launcher reserves its token budget and will not start the matrix if the
+combined plan does not fit, but does not yet actually run 1 SDO pipeline + 1
+Codex attempt/arm and check their runs are `valid` before proceeding — that
+remains a manual step for this launch). The `reduced` preset's own lane
+configs (a 4-lane subset) also do not exist yet; `--matrix reduced` sizes
+the budget correctly but the launcher still binds and runs all 8 phase-1
+lanes.
+
 ## Abort criteria (enforced by the launcher; also watch for them by hand)
 
-- **Matrix-wide hard stop at `used_percent >= 97%`** (`PLAN.md` (d)
-  `run.sh` `QUOTA-STOP`): the launcher terminates every running lane and
-  sets `matrix_status = "stopped_quota"`. If you see this, the run is over;
-  do not restart until the next quota window.
-- **Matrix does not start** if `used_percent > 50%` at launch time
-  (`matrix_status = "aborted_quota_start"`), or if **any** lane's own
-  preflight fails (`matrix_status = "aborted_preflight"`) — the whole matrix
-  aborts before any lane starts, by design (one bad lane must not silently
-  run a partial comparison).
+- **Matrix-wide hard stop at `used_percent >= --stop-percent`** (default 96
+  for this run; `PLAN.md` (d) `run.sh` `QUOTA-STOP`'s own hard stop is 97%):
+  the launcher terminates every running lane and sets
+  `matrix_status = "stopped_quota"`. If you see this, the run is over; do not
+  restart until the next quota window.
+- **Matrix does not start** if `current used_percent + the planned matrix's
+  worst-case percent > --stop-percent` at launch time
+  (`matrix_status = "aborted_quota_start"`; see "Quota budget correction
+  (2026-10)" below for how the worst case is computed and auto-shrunk), or if
+  **any** lane's own preflight fails (`matrix_status = "aborted_preflight"`)
+  — the whole matrix aborts before any lane starts, by design (one bad lane
+  must not silently run a partial comparison). Every start-gate decision
+  (current quota, planned nominal/worst-case tokens and percent, the stop
+  line, and the outcome) is written to `.launch/gate_decision.json` and
+  appended to `.launch/quota_log.jsonl` before anything launches.
 - **Per-lane abort** when a lane's own attributed quota spend exceeds 1.5x
   its budgeted share of its arm's `PLAN.md` (d) row (SDO ~1.55%/lane,
   threshold ~2.33%; Codex stock ~1.05%/lane, threshold ~1.58%; Codex +
