@@ -509,7 +509,9 @@ def controller_state(kubectl: Kubectl, control_namespace: str) -> dict[str, Any]
 
 
 def broker_ledger(app_root: Path, incident_id: str) -> dict[str, Any] | None:
-    path = app_root / ".git" / "sdo-broker" / f"{incident_id}.json"
+    # BrokerService names each ledger by the SHA-256 of its incident id.
+    digest = hashlib.sha256(incident_id.encode()).hexdigest()
+    path = app_root / ".git" / "sdo-broker" / f"{digest}.json"
     if not path.is_file():
         return None
     decoded = json.loads(path.read_text(encoding="utf-8"))

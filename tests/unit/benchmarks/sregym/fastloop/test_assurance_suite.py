@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -21,9 +22,15 @@ from benchmarks.sregym.fastloop.assurance.catalog import (
     composite,
     single_fault,
 )
-from benchmarks.sregym.fastloop.assurance.harness import ControllerSettings, controller_argv, prober_manifests
+from benchmarks.sregym.fastloop.assurance.harness import (
+    ControllerSettings,
+    broker_ledger,
+    controller_argv,
+    prober_manifests,
+)
 from benchmarks.sregym.fastloop.assurance.suite import Bounds, diff_reading, scripted_result
 from sdo.contracts.models import IncidentRequest, IncidentResult
+from sdo.operational_memory import BrokerService, CommitBroker
 from sdo.operational_memory.diagnosis import verify_diagnosis
 
 if TYPE_CHECKING:
@@ -231,7 +238,7 @@ def test_the_controller_runs_the_scripted_responder_and_the_reflection_free_brok
 def test_the_responder_publishes_the_request_and_returns_the_scripted_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    request = _request()
+    request = _request(response_deadline=(datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat())
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(request)))
     monkeypatch.setattr(responder, "POLL_SECONDS", 0.01)
     incident = request["incident_id"]
@@ -259,6 +266,34 @@ def test_the_responder_gives_up_at_the_response_deadline(tmp_path: Path, monkeyp
 
     assert responder.main(["--spool", str(tmp_path)]) == 1
     assert responder.exited_path(tmp_path, request["incident_id"]).is_file()
+
+
+def test_the_harness_reads_the_ledger_the_broker_service_writes(tmp_path: Path) -> None:
+    repository = tmp_path / "app"
+    (repository / ".sdo").mkdir(parents=True)
+    (repository / ".sdo" / "outcomes.jsonl").write_text("", encoding="utf-8")
+    for command in (
+        ["init", "-q", "-b", "main"],
+        ["add", "-A"],
+        ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "seed"],
+    ):
+        subprocess.run(["git", "-C", str(repository), *command], check=True)
+    service = BrokerService(
+        repository,
+        tmp_path / "worktrees",
+        broker=CommitBroker(repository),
+        responder_backend="assurance-scripted",
+        responder_model="none",
+        repair_policy="recorded-actions",
+        reflector=None,
+    )
+    service.prepare_incident("hotel-reservation-1")
+
+    ledger = broker_ledger(repository, "hotel-reservation-1")
+
+    assert ledger is not None
+    assert ledger["incident_id"] == "hotel-reservation-1"
+    assert broker_ledger(repository, "hotel-reservation-2") is None
 
 
 def test_spool_names_are_file_safe() -> None:
