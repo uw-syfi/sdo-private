@@ -218,6 +218,11 @@ does not fail the run.
   change as a state change gets `contradicted`. The scripted responder cites
   it as a `live-observation`. Carrying the final view's diff into the closure
   would close this; not done here.
+- **Closed on integration (RC1).** `vic/fix/late-fault-diff` carries the
+  closing view's diff into the closure (`final_state_changes`), and
+  `verify_diagnosis` checks state-change evidence against the union of both
+  diffs (`docs/feedback-loop-DECISIONS.md` D26, renumbered from D25). See
+  `RC1.md` for how this interacts with F8.
 
 ## N12. Stray incidents after closure (harness fixed; SDO behaviour recorded)
 
@@ -282,6 +287,10 @@ does not fail the run.
   traffic findings would suppress these without delaying real faults much
   (the suite's traffic detection is 3–5 s). That is the judge's policy to
   change; it is recommended, not applied.
+- **Applied on integration (RC1).** `vic/fix/traffic-min-duration` adds
+  `PersistencePolicy.MinDuration` and a 9 s default for traffic-health
+  detectors (`docs/feedback-loop-DECISIONS.md` D27). `RC1.md` reruns
+  `churn1` against it.
 - **Harness bug found on the way.** The suite answered strays with a
   `completed` result with no repair action. The broker rejects that on every
   retry, the closure fails permanently, and a permanent closure failure
