@@ -1064,6 +1064,44 @@ def test_repository_audit_allows_safe_non_external_paths(tmp_path: Path, command
     assert not _command_escapes_repository(command, repository)
 
 
+# Health-judge commands from a live lifecycle (2026-09-28): route strings inside quoted
+# search patterns are regex alternatives, not filesystem paths.
+_ROUTE_PATTERN_COMMANDS = [
+    """/bin/bash -lc "rg --files | rg '("'^|/)(frontend|main|server|handler|route|.*'"\\\\.go"'$)'"' | head -100 && """
+    """rg -n 'HandleFunc|/hotels|/recommendations' services\"""",
+    """/bin/bash -lc "ls -la .sdo/diagnostics/detectors/health/objective; """
+    """sed -n '1,240p' services/frontend/frontend.go; """
+    """rg -n 'HandleFunc|http\\\\.Handle|ListenAndServe|/hotels|/recommendations|/user|/reservation|/search' """
+    """services/frontend cmd\"""",
+    """/bin/bash -lc "sed -n '1,280p' services/frontend/server.go && """
+    """rg -n 'inDate|outDate|/hotels|HandleFunc|ServeMux|Post\\\\(|GET\\\\(' services\"""",
+    'grep -nE "(/hotels|/user)" services/frontend/server.go',
+]
+
+
+@pytest.mark.parametrize("command", _ROUTE_PATTERN_COMMANDS)
+def test_repository_audit_allows_route_alternatives_in_quoted_search_patterns(tmp_path: Path, command: str) -> None:
+    repository = _repository(tmp_path)
+
+    assert not _command_escapes_repository(command, repository)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("""/bin/bash -lc "rg -n 'a|/hotels' /etc\"""", id="unquoted-path-after-pattern"),
+        pytest.param("""/bin/bash -lc "rg -n HandleFunc services|/opt/tool\"""", id="unquoted-pipe-to-absolute"),
+        pytest.param("""/bin/bash -lc "cat '/etc/passwd'\"""", id="quoted-path"),
+        pytest.param("""/bin/bash -lc "cat /etc/passwd\"""", id="wrapped-path"),
+        pytest.param("grep -n 'x' '/etc/hosts'", id="quoted-path-argument"),
+    ],
+)
+def test_repository_audit_still_rejects_external_paths_near_search_patterns(tmp_path: Path, command: str) -> None:
+    repository = _repository(tmp_path)
+
+    assert _command_escapes_repository(command, repository)
+
+
 def test_repository_audit_still_rejects_external_path_after_git_object_path(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
 

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Protocol
@@ -560,6 +561,46 @@ def _first_repository_escape(
     )
 
 
+_SHELL_WRAPPERS = frozenset({"bash", "sh", "/bin/bash", "/bin/sh", "/usr/bin/bash", "/usr/bin/sh"})
+
+
+def _unwrap_shell_command(command: str) -> str:
+    """Return the script of a ``bash -c``/``-lc`` wrapper, which Codex puts around every command."""
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return command
+    if len(argv) == 3 and argv[0] in _SHELL_WRAPPERS and argv[1] in {"-c", "-lc"}:
+        return argv[2]
+    return command
+
+
+def _mask_quoted_pattern_alternatives(script: str) -> str:
+    """Hide ``/route`` alternatives inside quoted strings, such as ``rg 'HandleFunc|/hotels'``.
+
+    Inside a quoted argument a ``/`` right after ``|`` or ``(`` starts a regular-expression
+    alternative or group, not a path the shell opens. Unquoted text, including a pipe into an
+    absolute command, is left for the path audit.
+    """
+    masked: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for char in script:
+        if escaped:
+            escaped = False
+        elif char == "\\" and quote != "'":
+            escaped = True
+        elif quote is None and char in {"'", '"'}:
+            quote = char
+        elif char == quote:
+            quote = None
+        elif quote is not None and char == "/" and masked and masked[-1] in {"|", "("}:
+            masked.append(" ")
+            continue
+        masked.append(char)
+    return "".join(masked)
+
+
 def _command_escapes_repository(
     command: str, repository: Path, *, task_outputs: ClaudeTaskOutputs | None = None
 ) -> bool:
@@ -571,6 +612,7 @@ def _command_escapes_repository(
     audited_command = _GIT_OBJECT_PATH.sub(
         lambda match: match.group(0).replace(match.group(1), ".git-object-path"), command
     )
+    audited_command = _mask_quoted_pattern_alternatives(_unwrap_shell_command(audited_command))
     write_only_paths = {match.group(1) for match in _WRITE_REDIRECT_ABSOLUTE_PATH.finditer(audited_command)}
     for raw_path in _ABSOLUTE_PATH.findall(audited_command):
         if raw_path in write_only_paths:
