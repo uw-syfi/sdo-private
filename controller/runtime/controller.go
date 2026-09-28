@@ -175,7 +175,7 @@ func NewController(
 		spec := detector.Spec()
 		detectorSpecs[spec.ID] = spec
 		if spec.Persistence.Firing > 0 && spec.Persistence.Clearing > 0 {
-			tracker.SetPolicy(spec.ID, spec.Persistence.Firing, spec.Persistence.Clearing)
+			tracker.SetPolicy(spec.ID, spec.Persistence.Firing, spec.Persistence.Clearing, spec.Persistence.MinDuration)
 		}
 		if spec.Class == sdk.DetectorClassHealth {
 			healthDetectorIDs = append(healthDetectorIDs, spec.ID)
@@ -249,7 +249,7 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 		if !valid {
 			continue
 		}
-		changes := c.tracker.Observe(spec.ID, validFindings)
+		changes := c.tracker.Observe(now, spec.ID, validFindings)
 		sampleFindings = append(sampleFindings, validFindings...)
 		c.recordEvaluation(spec.ID, now, validFindings)
 		c.batcher.RemoveKeys(changes.Cleared)

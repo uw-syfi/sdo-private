@@ -16,6 +16,18 @@ from controller.builder.traffic import write_generated_traffic
 
 MODULE_RE = re.compile(r"^\s*module\s+(\S+)\s*$", re.MULTILINE)
 DEFAULT_MODULE_PATH = "app-diagnostics"
+# Mirrors controller/sdk/traffic.Watch: the watch kind emitted by the
+# controller runtime's synthetic-traffic prober, not by a Kubernetes
+# informer. A detector that declares it is constructed through
+# traffic.NewDetector.
+_TRAFFIC_WATCH_API_VERSION = "sdo.dev/v1alpha1"
+_TRAFFIC_WATCH_KIND = "SyntheticTraffic"
+# Mirrors controller/sdk/traffic.DefaultHealthMinDuration (9s in
+# nanoseconds): traffic.NewDetector applies this to any health-class spec
+# that leaves Persistence.MinDuration unset, so the registration contract
+# below must expect the same value the SDK actually applies at runtime,
+# even though manifest.yaml never declares it.
+_TRAFFIC_HEALTH_DEFAULT_MIN_DURATION_NS = 9_000_000_000
 SERVICE_NAME_RE = re.compile(r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?")
 EXTERNALNAME_PROBE_SERVICE = "sdo-externalname-probe"
 _SOURCE_SCAN_SKIPPED_DIRS = frozenset({"node_modules", "vendor"})
@@ -201,6 +213,13 @@ def _write_generated_contract_test(generated_dir: Path, manifest: DetectorManife
             for watch in detector.watches
         )
         playbooks = ", ".join(json.dumps(path) for path in detector.possible_playbooks)
+        watches_synthetic_traffic = any(
+            watch.api_version == _TRAFFIC_WATCH_API_VERSION and watch.kind == _TRAFFIC_WATCH_KIND
+            for watch in detector.watches
+        )
+        persistence_fields = f"Firing: {detector.persistence.firing}, Clearing: {detector.persistence.clearing}"
+        if detector.detector_class == "health" and watches_synthetic_traffic:
+            persistence_fields += f", MinDuration: {_TRAFFIC_HEALTH_DEFAULT_MIN_DURATION_NS}"
         registrations.append(
             "\tassertRegistration(t, detectors["
             + str(index)
@@ -209,8 +228,7 @@ def _write_generated_contract_test(generated_dir: Path, manifest: DetectorManife
             + f"owner: {json.dumps(detector.owner)},\n"
             + f"\t\twatches: []sdk.WatchKind{{{watches}}}, "
             + f"interval: time.Duration({duration_nanoseconds(detector.interval)}),\n"
-            + f"\t\tpersistence: sdk.PersistencePolicy{{Firing: {detector.persistence.firing}, "
-            + f"Clearing: {detector.persistence.clearing}}},\n"
+            + f"\t\tpersistence: sdk.PersistencePolicy{{{persistence_fields}}},\n"
             + "\t\tbatching: sdk.BatchingPolicy{Severity: sdk.FindingSeverity("
             + json.dumps(detector.batching.severity)
             + "), "

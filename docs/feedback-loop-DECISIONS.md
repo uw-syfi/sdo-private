@@ -563,3 +563,56 @@ here because every scenario qualifies on the healthy application.
 - **Docs.** `.agents/skills/analyze-experiment/references/trajectory-schema.md`
   and `failure-patterns.md` now describe `final_state_changes` and how it
   changes what a `contradicted` state-change citation means on a composite.
+
+### D27. Minimum-duration firing policy for traffic findings
+
+- **Decision.** `sdk.PersistencePolicy` (`controller/sdk/detector.go`) gains
+  `MinDuration time.Duration`: a finding must additionally have been observed
+  continuously for at least this long before it activates, checked in
+  `FindingStateTracker.Observe` (`controller/runtime/finding_state.go`)
+  against a per-finding `FirstSeenAt` timestamp. `traffic.NewDetector`
+  (`controller/sdk/traffic/detector.go`) defaults it to
+  `DefaultHealthMinDuration` (9s) for any health-class spec that leaves it
+  unset, so this reaches judge-authored, lifecycle-generated, and already
+  seeded `.sdo/` traffic-health detectors alike with no template or seed edit.
+  `TRAFFIC_AUTHORING` (`sdo/agent_runtime/lifecycle/agents.py`) now documents
+  the policy so a health judge does not set it back down.
+- **Why 9s.** Per N13
+  (`benchmarks/sregym/experiments/assurance/NO_LLM_SUITE_DECISIONS.md`), the
+  traffic-health detector fired on kind-worker data-plane stalls of about 3s
+  (roughly 1 in 6-10 pod-network changes) because its window is
+  re-evaluated on every 500ms probe poll, reaching the 2-evaluation firing
+  threshold in about 0.5s; the same suite detects real faults in 3-5s. 9s
+  clears the observed stalls with about 3x headroom while adding at most one
+  more 500ms poll beyond real-fault detection, so a live evaluation no longer
+  loses a responder session to a stray stall.
+- **Alternatives.**
+  - Raise `Firing` (evaluation count) instead of adding a duration: the
+    window's re-evaluation rate is itself variable (poll cadence, prober
+    scheduling), so a count threshold cannot target a specific wall-clock
+    stall length the way a duration can.
+  - Apply the default to every detector, not just health-class traffic ones:
+    would silently delay responder-authored incident detectors, which the
+    validator already requires to fire on their first match
+    (`INCIDENT_DETECTOR_MAX_FIRING`).
+  - Put the default in the Python lifecycle templates
+    (`_traffic_detector_source`/`_GENERIC_SPEC_FIELDS`) instead of the Go SDK:
+    would require rewriting already-seeded `.sdo/diagnostics/` detector.go
+    files (marked "DO NOT EDIT" and independently validated) to take effect;
+    the SDK default reaches them for free since they already call
+    `traffic.NewDetector`.
+- **Tests.** `controller/runtime/finding_state_test.go`
+  (`TestFindingStateMinDurationSuppressesBriefStall`,
+  `TestFindingStateMinDurationFiresSustainedFault`) simulate a 3s burst at
+  the suite's 500ms poll cadence (never activates) and a sustained fault
+  (activates within the 9s minimum plus one poll).
+  `controller/sdk/traffic/detector_test.go` covers the default being applied,
+  overridable, and scoped to health-class specs.
+  `controller/core/validation_test.go` covers the new negative-duration
+  rejection. `TestControllerOpensIncidentFromFailingSyntheticTraffic`
+  (`controller/runtime/traffic_observer_test.go`) was extended to step past
+  the new default so it still exercises incident assembly.
+- **Pending.** Rerunning the no-LLM suite's `churn1` soak and a
+  NetworkPolicy/selector case on a live kind cluster to measure the effect
+  directly was in scope but skipped: no `assure-s0`/`assure-s1` cluster was
+  reachable from this worktree, and cluster creation was out of scope.

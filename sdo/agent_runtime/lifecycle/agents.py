@@ -158,6 +158,13 @@ when the same scenarios recover. Every scenario must therefore succeed against t
    `verify` (purpose verify-burst, ratePerSecond about 12, duration 3s, the same scenarios). Optional: timeout (2s),
    slo {window, minSamples, maxErrorRate, maxTimeoutRate, latencyPercentile, maxLatency}, and journey workloads
    (purpose journey, bounded duration) for writes that should not run continuously.
+3. Firing policy: a traffic-health detector's window is re-evaluated on every probe poll (about every 500ms), far
+   faster than the 2-evaluation firing threshold, so a brief data-plane stall (observed around 3s, roughly 1 in
+   6-10 pod-network changes on a small cluster) can otherwise reach it and dispatch a responder for nothing.
+   `traffic.NewDetector` therefore defaults `Persistence.MinDuration` to `traffic.DefaultHealthMinDuration` (9s) for
+   any health-class detector that leaves it unset, so a scenario must violate its SLO continuously for that long,
+   not just reach the evaluation count, before it fires; real faults still fire within it plus about one poll. Do
+   not set `Persistence.MinDuration` back to a lower value for a traffic-health detector.
 Omit synthetic traffic only for an application that serves no HTTP."""
 
 

@@ -112,6 +112,35 @@ func TestDetectorDeclaresItsWorkload(t *testing.T) {
 	}
 }
 
+func TestDetectorDefaultsHealthMinDurationWhenUnset(t *testing.T) {
+	spec := detectorSpec()
+	spec.Persistence.MinDuration = 0
+	detector := traffic.NewDetector(spec, "health")
+	if got := detector.Spec().Persistence.MinDuration; got != traffic.DefaultHealthMinDuration {
+		t.Fatalf("health detector must default MinDuration, got %s want %s", got, traffic.DefaultHealthMinDuration)
+	}
+}
+
+func TestDetectorKeepsAnExplicitMinDuration(t *testing.T) {
+	spec := detectorSpec()
+	spec.Persistence.MinDuration = 3 * time.Second
+	detector := traffic.NewDetector(spec, "health")
+	if got := detector.Spec().Persistence.MinDuration; got != 3*time.Second {
+		t.Fatalf("explicit MinDuration must not be overridden, got %s", got)
+	}
+}
+
+func TestDetectorLeavesNonHealthMinDurationUnset(t *testing.T) {
+	spec := detectorSpec()
+	spec.Class = sdk.DetectorClassIncident
+	spec.Owner = sdk.DetectorOwnerResponder
+	spec.Persistence.MinDuration = 0
+	detector := traffic.NewDetector(spec, "health")
+	if got := detector.Spec().Persistence.MinDuration; got != 0 {
+		t.Fatalf("an incident detector must not get the health default, got %s", got)
+	}
+}
+
 func TestDetectorIsSilentWithoutProbeObservations(t *testing.T) {
 	if findings := detect(t, hotelSnapshot(nil)); len(findings) != 0 {
 		t.Fatalf("no observations must mean no judgement, got %v", findings)
