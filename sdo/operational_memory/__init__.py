@@ -22,8 +22,8 @@ from sdo.operational_memory.detector_sdk import DETECTOR_SDK_REFERENCE
 from sdo.operational_memory.diagnosis import (
     DetectorFlip,
     DiagnosisVerdict,
-    RepairAttribution,
     EvidenceCheck,
+    RepairAttribution,
     RootCauseVerification,
     recovered_by_responder,
     verify_diagnosis,

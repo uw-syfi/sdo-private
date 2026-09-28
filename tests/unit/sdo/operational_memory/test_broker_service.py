@@ -1390,7 +1390,8 @@ def _attribution_closure(worktree: Path, base_commit: str, *, cause: str, repair
 
     closure = _closure(worktree, base_commit)
     state_changes = IncidentRequest.model_validate_json(_fixture("incident_request_state_changes.json")).state_changes
-    assert state_changes is not None and closure.result is not None
+    assert state_changes is not None
+    assert closure.result is not None
     cause_kind, cause_name = cause.split("/")
     repaired_kind, repaired_name = repaired.split("/")
     result = closure.result

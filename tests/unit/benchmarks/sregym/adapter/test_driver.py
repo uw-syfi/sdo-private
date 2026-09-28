@@ -27,10 +27,10 @@ from benchmarks.sregym.adapter.runtime import (
     RuntimeConfig,
     _controller_update_rollout_succeeded,
     _diagnosis_verification,
-    _recovery_attribution,
     _load_incident_ledger,
     _memory_reuse_summary,
     _phase_timings,
+    _recovery_attribution,
     _resolve_responder_dispatch,
     _validated_controller_rollout_record,
     run_production_runtime,
@@ -1583,8 +1583,7 @@ def test_receipt_diagnosis_uses_every_controller_fact_and_withholds_credit_from_
     assert [item["verdict"] for item in verification] == ["unattributed"]
     assert "NetworkPolicy/deny-all" in verification[0]["repair"]["externally_reverted"]
     assert _recovery_attribution(verification) == "external"
-    assert _recovery_attribution([{**verification[0], "repair": {**verification[0]["repair"], "attributed": True}}]) == (
-        "responder"
-    )
+    assert _recovery_attribution(
+        [{**verification[0], "repair": {**verification[0]["repair"], "attributed": True}}]
+    ) == ("responder")
     assert _recovery_attribution([]) is None
-

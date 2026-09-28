@@ -221,9 +221,7 @@ def test_health_restored_by_someone_else_is_an_external_recovery_not_a_success()
     outcome = derive_outcome(_attribution_facts(wrong, repaired=("Deployment/frontend",)))
 
     assert outcome.classification == OutcomeClassification.EXTERNAL_RECOVERY
-    assert [verification.verdict for verification in outcome.diagnosis_verification] == [
-        DiagnosisVerdict.UNATTRIBUTED
-    ]
+    assert [verification.verdict for verification in outcome.diagnosis_verification] == [DiagnosisVerdict.UNATTRIBUTED]
     # Health really was verified in time; only the credit is withheld.
     assert outcome.timestamps.verified_at is not None
 

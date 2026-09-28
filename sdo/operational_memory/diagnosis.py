@@ -384,10 +384,8 @@ class _Repairs:
         return cls(actions, tuple(dispatch), tuple(sorted(set(reverted))), health_cleared_at)
 
     def attribute(self, cause: ConfirmedRootCause) -> RepairAttribution:
-        blamed = [_ObjectKey.of(ref) for ref in cause.resources]
-        for item in cause.evidence:
-            if item.kind == "state-change" and (parsed := _ObjectKey.parse(item.source)) is not None:
-                blamed.append(parsed)
+        cited = [_ObjectKey.parse(item.source) for item in cause.evidence if item.kind == "state-change"]
+        blamed = [_ObjectKey.of(ref) for ref in cause.resources] + [key for key in cited if key is not None]
         action_ids: list[str] = []
         repaired: list[_ObjectKey] = []
         for action_id, keys in self.actions:
@@ -407,8 +405,7 @@ class _Repairs:
                 attributed=False,
                 externally_reverted=list(self.externally_reverted),
                 reason=(
-                    f"the responder's successful repair actions{timing} touched none of the cause's resources "
-                    f"({names})"
+                    f"the responder's successful repair actions{timing} touched none of the cause's resources ({names})"
                 ),
             )
         changed = [
