@@ -43,6 +43,10 @@ func TestRunHelperDispatcher(t *testing.T) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+	if err := os.WriteFile(output+".controller-state", []byte(os.Getenv(ControllerStateEnvironment)), 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	if err := os.WriteFile(output, payload, 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -227,5 +231,35 @@ func TestRunAttachesStateChangesMadeAfterStartupToIncident(t *testing.T) {
 		if strings.HasPrefix(other.Name, "failure-admin") {
 			t.Fatalf("decoys present at baseline must not appear: %+v", request.StateChanges.Changes)
 		}
+	}
+
+	// The responder learns where the controller publishes its live view.
+	location, err := os.ReadFile(requestPath + ".controller-state")
+	if err != nil || string(location) != hotel+"-sdo/sdo-controller-state" {
+		t.Fatalf("the responder must be told where the controller state lives, got %q (%v)", location, err)
+	}
+	// A second fault after dispatch appears in the live view, not the request.
+	if err := client.CoreV1().ConfigMaps(hotel).Delete(ctx, "mongo-geo-script", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	var view *IncidentView
+	eventually(t, "the live view to name the second fault", func() bool {
+		configMap, getErr := client.CoreV1().ConfigMaps(hotel+"-sdo").Get(ctx, "sdo-controller-state", metav1.GetOptions{})
+		if getErr != nil {
+			return false
+		}
+		var state RuntimeState
+		if json.Unmarshal([]byte(configMap.Data[stateDataKey]), &state) != nil || state.IncidentView == nil {
+			return false
+		}
+		view = state.IncidentView
+		return view.StateChanges != nil && findChange(view.StateChanges, "ConfigMap", "mongo-geo-script") != nil
+	})
+	if view.IncidentID != request.IncidentID || len(view.BlockingDetectors) != 1 ||
+		view.BlockingDetectors[0] != "service-endpoints" {
+		t.Fatalf("the view must name the open incident and its blocking health detector: %+v", view)
+	}
+	if findChange(request.StateChanges, "ConfigMap", "mongo-geo-script") != nil {
+		t.Fatalf("the dispatched request keeps its own snapshot: %+v", request.StateChanges.Changes)
 	}
 }

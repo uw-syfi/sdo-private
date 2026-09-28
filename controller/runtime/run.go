@@ -232,7 +232,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	renewalErrors := maintainLeadership(renewalCtx, elector, renewalInterval)
 	stateConfigMapName := ""
 	if *controlNamespace == *namespace {
-		stateConfigMapName = "sdo-controller-state"
+		stateConfigMapName = controllerStateConfigMap
 	}
 	kubernetesCache, err := NewKubernetesCache(KubernetesCacheConfig{
 		Namespace: *namespace, Client: bootstrapProvider.Client, StateConfigMapName: stateConfigMapName,
@@ -272,6 +272,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err != nil {
 		return err
 	}
+	jobEnvironment[ControllerStateEnvironment] = controllerStateLocation(*controlNamespace)
 	var dispatcher Dispatcher
 	switch *dispatcherMode {
 	case "local":
@@ -279,6 +280,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		if proberAPI != nil && *proberURL != "" {
 			environment = append(environment, ProberURLEnvironment+"="+*proberURL)
 		}
+		environment = append(environment, ControllerStateEnvironment+"="+controllerStateLocation(*controlNamespace))
 		dispatcher = SubprocessDispatcher{Argv: argv, Env: environment, Timeout: *responseTimeout}
 	case "job":
 		dispatcher = KubernetesJobDispatcher{
@@ -335,7 +337,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	}
 	controller.CanAct = elector.IsLeader
 	controller.GuardAction = elector.GuardContext
-	stateStore := NewConfigMapStateStore(bootstrapProvider.Client, *controlNamespace, "sdo-controller-state")
+	stateStore := NewConfigMapStateStore(bootstrapProvider.Client, *controlNamespace, controllerStateConfigMap)
 	if err := controller.AttachStateStore(ctx, stateStore); err != nil {
 		return fmt.Errorf("restore controller state: %w", err)
 	}
@@ -781,9 +783,10 @@ var namespacePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
 
 func parseResponderEnvironment(entries []string) (map[string]string, error) {
 	reserved := map[string]bool{
-		"SDO_REQUEST_CONFIGMAP": true,
-		"SDO_RESULT_CONFIGMAP":  true,
-		"SDO_NAMESPACE":         true,
+		"SDO_REQUEST_CONFIGMAP":    true,
+		"SDO_RESULT_CONFIGMAP":     true,
+		"SDO_NAMESPACE":            true,
+		ControllerStateEnvironment: true,
 	}
 	result := make(map[string]string, len(entries))
 	for _, entry := range entries {
