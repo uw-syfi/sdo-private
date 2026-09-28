@@ -1299,3 +1299,39 @@ Wrapper scripts, lane events (`queue.events`, with a quota, disk and load readin
 | verify | 1 | fail (0) | fail | 145.1 | 3 | 0 | no | "Mongo startup race"; patched `recommendation` initContainer | none |
 | verify | 2 | fail (0) | fail | 118.8 | 0 | 0 | no | "user Mongo startup race"; toggled frontend Service NodePort | none |
 | verify | 3 | fail (7.33) | fail | 96.0 | 0 | 0 | no | "Consul startup race"; patched frontend | none (`--rm` + delete) |
+
+### Lifecycle seed (`30e023d`, run `20260928_074550_pipeline_…`, luna-w0, after `0d42e22`)
+
+- **The lifecycle succeeded in about 13 min** (deploy 07:45:55, lifecycle commit 07:58:26). The health judge authored:
+  - one generator file `.sdo/diagnostics/traffic/generators/hotel_reservation.go` with three scenarios: `hotel-search`, `hotel-recommendations` (depends on frontend, recommendation, profile and their Mongo) and `user-login-check`;
+  - `workloads/health.yaml` (health-probe, 3 req/s) and `workloads/verify.yaml` (verify-burst, 12 req/s for 3 s);
+  - health detectors `objective`, `service-endpoints` and `traffic-health`.
+- **Checks:**
+  - **Generators compile.** The lifecycle's isolated validator accepted them, and the controller built and started the prober from them.
+  - **The healthy probe is quiet and warm.** `synthetic_traffic_warm: true` came in 2.27 s, with all three scenarios `qualified`. There were no findings before injection, and no findings in the 25 evaluations (about 80 s) after the repair.
+  - **The diff tracker was running, but the check exposed SDO bug 2 (below).** `state_baseline_startup_ms: 2273`, no unobserved kinds.
+- **Decision: the seed is `30e023d` exactly** (lifecycle commit only: empty `outcomes.jsonl`, only the lifecycle `health-objective` playbook, no incident detectors). It was cloned into `<scratch>/np/seed/lifecycle_workspace` and set through `SREGYM_APP_WORKSPACE_SEED_DIR` for every counted SDO run, as with `64b3ac2` before. The workspace's later reflection commits (`7eef8e9`, `992fe9d`) were excluded.
+- **One-time lifecycle cost** (from `sdo_turn_usage.jsonl`, reported separately in the analysis). The failed first attempt's 3.63M tokens are waste from bug 1, not lifecycle cost.
+- **This run then answered the incident, unseeded. Decision: report it as supplementary run "SDO-0", not as one of the 3.** Two reasons: its lifecycle was part of the same stage, and its healthy-state diff was broken by bug 2. Result: diagnosis pass and mitigation pass. The diagnosis was POSTed 23.4 s after injection, and the mitigation was submitted 56.8 s after.
+
+### SDO bug 2: the healthy-state diff was frozen at startup (fixed in `13d5613`, images rebuilt)
+
+- **Symptom (SDO-0's responder prompt):** "No Service, workload, NetworkPolicy, ConfigMap, Secret, or RBAC object changed since the last healthy state (baseline 07:58:48.995Z, observed 07:58:51.723Z). The fault is likely not a configuration change … (for example a process, data, permission-inside-a-database …)". `deny-all-recommendation` had been created at 07:58:50.22Z, inside that window.
+  - This is the worst failure mode for a red-herring defence: it points the agent at the decoy's story ("revoked DB roles").
+  - The responder was not misled, because the static `network-policy-total-isolation` finding named the policy.
+- **Root cause.** `run.go` starts the tracker as `Start(startCtx)` with a 30 s startup context and `defer cancelStart()`. `StateTracker.Start` derived the informers' lifetime from that context, so the informers stopped the moment `Start` returned, and every later diff read the initial list.
+  - The feedback agent's combined smoke passed because its driver called `Start` with a long-lived context.
+  - The Go unit tests never cancelled the start context.
+- **Fix, test-first.** `ctx` now bounds only the RBAC probes and the initial sync, and `Stop` ends observation (`context.WithoutCancel`).
+  - `TestStateTrackerKeepsObservingAfterItsStartContextEnds` reproduces the run.go pattern and failed before the fix.
+  - `TestStateTrackerStopEndsObservation` keeps `Stop` authoritative.
+  - `startTraffic` already uses `runCtx` and is unaffected.
+  - **Rejected:** changing only run.go to pass `runCtx`. It would leave a trap in the API for the next caller.
+- **The SDO images were rebuilt after the fix** (`sdo-controller` `47af54578ec6`, `sdo-sregym-responder` `70b4113ee18d`, `sdo-detector-validator` `aba7b255eb0c`). The kind image preflight reloads changed digests on each lane.
+- **Runs before the fix:** SDO-0 only (supplementary). **Runs after:** SDO-1..3.
+
+### SDO runs (user-directed speed-up: three lanes at once)
+
+- **Decision (user-directed): run the 3 SDO runs concurrently, one per lane, staggered 1 min.** sdo1 is on luna-w0 (08:19Z), sdo2 on luna-w1 (08:20Z) and sdo3 on luna-w2 (08:21Z), each seeded from `30e023d`, with load averages of 7.9, 5.3 and 9.0 at start.
+  - The arms rotate across clusters: w1 ran stock Codex and w2 ran Codex + verify, before each hosted one SDO run.
+  - No new lanes were needed, since w0 to w2 were idle.
