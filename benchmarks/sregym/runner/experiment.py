@@ -25,6 +25,8 @@ except ModuleNotFoundError:
 
 import yaml
 
+from benchmarks.sregym.runner.codex_baseline import PROMPT_APPENDIX_ENV, CodexBaselineConfig
+
 _VARIANT_ORDERS = ("flat", "round_robin", "grouped", "adaptive")
 #: The efforts SREGym's --reasoning-effort accepts.
 REASONING_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
@@ -194,6 +196,8 @@ class ExperimentConfig:
             raise ValueError("runner.spec_names cannot be used with runner.variants.enabled")
         if self.spec_names and (self.tasklist or self.problems):
             raise ValueError("runner.spec_names is mutually exclusive with runner.tasklist and runner.problems")
+        if self.agent == "codex":
+            CodexBaselineConfig.from_agent_config(self.agent_config.get("codex") or {})
         if application_workspace_enabled(self.application_workspace):
             if not self.app_filter:
                 raise ValueError("application_workspace requires runner.app_filter")
@@ -565,6 +569,13 @@ def config_to_env(config: ExperimentConfig, project_root: Path, exp_dir: Path | 
     agent_cfg = effective_agent_config(config)
     if agent_cfg:
         env["SREGYM_EXPERIMENT_AGENT_CONFIG"] = json.dumps(agent_cfg)
+    # Only an arm that asks for a prompt appendix gets one; a value left in the
+    # shell must never alter a stock baseline.
+    env.pop(PROMPT_APPENDIX_ENV, None)
+    if config.agent == "codex":
+        appendix = CodexBaselineConfig.from_agent_config(config.agent_config.get("codex") or {}).prompt_appendix()
+        if appendix:
+            env[PROMPT_APPENDIX_ENV] = appendix
     if config.agent == "sdo_codex":
         sdo_cfg = config.agent_config.get("sdo_codex") or {}
         validator_image = str(sdo_cfg.get("validator_image", "sdo-detector-validator:v0.1.0"))

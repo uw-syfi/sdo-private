@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
 from benchmarks.sregym.protocol import ProductionReceiptValidationError, validate_production_receipt
+from benchmarks.sregym.runner.codex_baseline import ensure_agent_image_supports_prompt_appendix
 from benchmarks.sregym.runner.experiment import (
     ExperimentConfig,
     application_workspace_mode,
@@ -191,6 +192,7 @@ def run_single_experiment(
     cli_args = config_to_main_args(config, exp_dir, tasklist_path)
     cli_args.extend(extra_args)
     env = config_to_env(config, project_root, exp_dir=exp_dir)
+    ensure_agent_image_supports_prompt_appendix(env)
 
     _print_experiment_info(config, env)
     print()
@@ -250,6 +252,7 @@ def _run_stage(
     env = config_to_env(exp_config, project_root, exp_dir=stage_exp_dir)
     if extra_env:
         env.update(extra_env)
+    ensure_agent_image_supports_prompt_appendix(env)
 
     _print_experiment_info(exp_config, env)
 
