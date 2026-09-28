@@ -100,6 +100,10 @@ path = "benchmarks.sregym.assurance"
 depends_on = [
     "benchmarks.sregym.adapter",
     "benchmarks.sregym.fastloop",
+    # phase1_launch/phase1_analyze/rebuild_v010_images (the live-matrix launcher,
+    # analysis and image-rebuild tooling) reuse the runner's preflight, quota
+    # reading and experiment-config loading rather than re-implementing them.
+    "benchmarks.sregym.runner",
     "sdo.agent_runtime.lifecycle",
     "sdo.controller_install",
 ]
