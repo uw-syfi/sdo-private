@@ -62,6 +62,7 @@ def _luna(agent: str = "sdo_codex", **overrides: object) -> ExperimentConfig:
 def sregym_dir(tmp_path: Path) -> Path:
     directory = tmp_path / "sregym"
     (directory / "logs").mkdir(parents=True)
+    (directory / "SREGym-applications" / "hotelReservation" / "helm-chart").mkdir(parents=True)
     _write_agents_yaml(directory, CODEX_PIN)
     return directory
 
@@ -113,6 +114,38 @@ def test_luna_arms_on_a_healthy_host_pass_and_resolve_every_role(fake_host: Fake
     assert {"sdo-controller:v0.1.0", "sdo-sregym-responder:v0.1.0", "sdo-detector-validator:v0.1.0"} <= set(
         fake_host.probed
     )
+
+
+def _empty_applications(sregym_dir: Path) -> Path:
+    applications = sregym_dir / "SREGym-applications"
+    for child in sorted(applications.rglob("*"), reverse=True):
+        child.rmdir()
+    return applications
+
+
+def test_an_uninitialized_applications_submodule_aborts_a_source_deploy(fake_host: FakeHost, sregym_dir: Path) -> None:
+    """A fresh worktree whose nested submodules were never initialized has an empty
+    ``SREGym-applications``; every source deploy then fails on a missing Helm chart."""
+
+    applications = _empty_applications(sregym_dir)
+
+    report = _preflight([_luna()], fake_host, sregym_dir)
+
+    check = _check(report, "application-sources")
+    assert check.status == "fail"
+    assert str(applications) in check.detail
+    assert "--recursive" in check.remedy
+    assert not report.ok
+
+
+def test_application_sources_are_not_checked_when_no_arm_deploys_from_source(
+    fake_host: FakeHost, sregym_dir: Path
+) -> None:
+    _empty_applications(sregym_dir)
+
+    report = _preflight([_luna("codex", deploy_from_source=False)], fake_host, sregym_dir)
+
+    assert all(check.name != "application-sources" for check in report.checks)
 
 
 def test_less_than_100_gb_free_on_the_logs_disk_aborts_with_the_path(fake_host: FakeHost, sregym_dir: Path) -> None:

@@ -602,6 +602,30 @@ def _check_disk(ctx: _Context) -> PreflightCheck:
     return PreflightCheck("disk", "pass", ", ".join(f"{n} {v / GB:.0f} GB free" for n, v in free.items() if v))
 
 
+def _check_application_sources(ctx: _Context) -> PreflightCheck | None:
+    """A source deploy needs SREGym's nested ``SREGym-applications`` submodule checked out.
+
+    A fresh worktree that initialized only the top-level SREGym submodule has
+    an empty directory there, and every deploy attempt then fails on a
+    missing Helm chart after the lane has already started.
+    """
+
+    if not any(config.deploy_from_source for config in ctx.configs):
+        return None
+    applications = ctx.sregym_dir / "SREGym-applications"
+    entries = (
+        [entry for entry in applications.iterdir() if not entry.name.startswith(".")] if applications.is_dir() else []
+    )
+    if not entries:
+        return PreflightCheck(
+            "application-sources",
+            "fail",
+            f"{applications} is empty or missing; source deploys have no Helm charts",
+            f"run `git -C {ctx.sregym_dir} submodule update --init --recursive`",
+        )
+    return PreflightCheck("application-sources", "pass", f"{len(entries)} application sources present")
+
+
 def _check_codex_pins(ctx: _Context) -> PreflightCheck:
     dockerfile = ctx.project_root / "controller" / "Dockerfile.runtime"
     pin = dockerfile_arg(dockerfile, "CODEX_VERSION") if dockerfile.is_file() else None
@@ -917,6 +941,7 @@ def run_preflight(
     )
     checks = [
         _check_disk(ctx),
+        _check_application_sources(ctx),
         _check_codex_pins(ctx),
         _check_agentshim(ctx),
         _check_sdo_images(ctx),
