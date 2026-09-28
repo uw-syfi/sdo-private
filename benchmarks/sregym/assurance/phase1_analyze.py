@@ -1,10 +1,16 @@
 """Analyze the phase-1 live assurance matrix (``experiments/assurance/PLAN.md`` (a)).
 
+Phase 1 has no stock (no-verify) Codex arm (user decision, 2026-09-28,
+PLAN.md decisions log): its sole Codex arm is the default, concise-verify
+baseline. Every claim below compares SDO against that one arm. Where the
+paper's own comparisons were against a stock baseline, the claim's summary
+notes that phase 1 has no stock arm to compare against.
+
 One command, after the matrix finishes:
 
 1. classifies every run with :mod:`benchmarks.sregym.analysis.run_validity`;
 2. runs :mod:`benchmarks.sregym.analysis.incident_cost` per SDO pipeline
-   against the Codex baselines, over the valid runs only;
+   against the Codex arm, over the valid runs only;
 3. computes each PLAN.md claim (C1-C11) against its pre-registered pass
    criterion, with the CI method the plan names for it (a stratified
    bootstrap for ratios, Wilson for a proportion, Newcombe for a difference
@@ -22,8 +28,8 @@ Usage::
 
     uv run python -m benchmarks.sregym.assurance.phase1_analyze \\
         --sdo third_party/sregym/logs/<pipeline_a> ... \\
-        --codex-stock third_party/sregym/logs/<w4> third_party/sregym/logs/<w5> \\
-        --codex-verify third_party/sregym/logs/<w6> third_party/sregym/logs/<w7> \\
+        --codex third_party/sregym/logs/<w4> third_party/sregym/logs/<w5> \\
+                third_party/sregym/logs/<w6> third_party/sregym/logs/<w7> \\
         --out report.md [--json report.json] [--legacy-runs]
 """
 
@@ -72,6 +78,16 @@ PHASE1_PROBLEMS = (
 COMPOSITE_PROBLEMS = (
     "composite_policy_and_rate_configmap_hotel_reservation",
     "composite_frontend_selector_and_readiness_hotel_reservation",
+)
+
+#: User decision (2026-09-28, PLAN.md decisions log): phase 1 has no stock
+#: (no-verify) Codex arm. The paper's own C1-C4 and C8 comparisons were
+#: against a stock baseline; every claim here compares against the default,
+#: concise-verify arm instead, and says so.
+NO_STOCK_ARM_NOTE = (
+    "Phase 1 has no stock (no-verify) Codex arm to compare against for paper comparability: the default "
+    "baseline verifies its own work, so this comparison already shows whether SDO's win reflects memory and "
+    "learned detectors rather than a missing verification instruction."
 )
 
 
@@ -172,7 +188,10 @@ def _ratio_cells(
 
 
 def compute_c1(
-    sdo_pipelines: Sequence[Sequence[SdoStage]], codex_runs: Sequence[CodexRun], *, arm_label: str = "Codex stock"
+    sdo_pipelines: Sequence[Sequence[SdoStage]],
+    codex_runs: Sequence[CodexRun],
+    *,
+    arm_label: str = "Codex (concise verify)",
 ) -> ClaimReport:
     """C1: recurring faults resolve faster (TTM ratio, Codex-median / SDO-warm-median)."""
 
@@ -224,7 +243,7 @@ def compute_c1(
 
 
 def compute_c2(sdo_pipelines: Sequence[Sequence[SdoStage]], codex_runs: Sequence[CodexRun]) -> ClaimReport:
-    """C2: recurring faults use fewer tokens (weighted, SDO-warm / Codex-stock)."""
+    """C2: recurring faults use fewer tokens (weighted, SDO-warm / Codex (concise verify))."""
 
     warm_by_problem: dict[str, list[float]] = {}
     for stages in sdo_pipelines:
@@ -243,7 +262,7 @@ def compute_c2(sdo_pipelines: Sequence[Sequence[SdoStage]], codex_runs: Sequence
     if not result.known:
         return ClaimReport(
             "C2",
-            "recurring faults use fewer weighted tokens than Codex stock",
+            "recurring faults use fewer weighted tokens than Codex (concise verify)",
             "direction: ratio <= 0.8, upper bound < 1.0; paper magnitude: ratio <= 0.4",
             "insufficient data",
             "insufficient_data",
@@ -260,13 +279,13 @@ def compute_c2(sdo_pipelines: Sequence[Sequence[SdoStage]], codex_runs: Sequence
     magnitude_pass = result.point <= 0.4
     verdict: ClaimVerdict = direction_ok
     summary = (
-        f"pooled weighted-token ratio (SDO warm / Codex stock) = {result.point:.3f} "
+        f"pooled weighted-token ratio (SDO warm / Codex (concise verify)) = {result.point:.3f} "
         f"(95% CI [{result.ci_low:.3f}, {result.ci_high:.3f}]); paper magnitude (<=0.4) "
-        f"{'met' if magnitude_pass else 'not met'}"
+        f"{'met' if magnitude_pass else 'not met'}. {NO_STOCK_ARM_NOTE}"
     )
     return ClaimReport(
         "C2",
-        "recurring faults use fewer weighted tokens than Codex stock",
+        "recurring faults use fewer weighted tokens than Codex (concise verify)",
         "direction: ratio <= 0.8, upper bound < 1.0; paper magnitude: ratio <= 0.4 (expected to fail per Step 3)",
         summary,
         verdict,
@@ -275,7 +294,7 @@ def compute_c2(sdo_pipelines: Sequence[Sequence[SdoStage]], codex_runs: Sequence
 
 
 def compute_c3(sdo_pipelines: Sequence[Sequence[SdoStage]], codex_runs: Sequence[CodexRun]) -> ClaimReport:
-    """C3: novel faults are not degraded (round-1/cold SDO vs Codex stock)."""
+    """C3: novel faults are not degraded (round-1/cold SDO vs Codex (concise verify))."""
 
     cold_stages = [
         stage for stages in sdo_pipelines for stage in split_rounds(stages)[0] if stage.problem_id in PHASE1_PROBLEMS
@@ -307,7 +326,7 @@ def compute_c3(sdo_pipelines: Sequence[Sequence[SdoStage]], codex_runs: Sequence
             "insufficient data",
             "insufficient_data",
             "Meaning: cannot assess cold-path parity without both arms present. Confidence: n/a. "
-            "Implication: none yet. Next step: rerun once round-1 SDO stages and Codex stock attempts exist.",
+            "Implication: none yet. Next step: rerun once round-1 SDO stages and Codex attempts exist.",
         )
 
     assert time_result.point is not None  # narrows for the type checker; the `time_result.known` guard above did this
@@ -339,12 +358,12 @@ def compute_c3(sdo_pipelines: Sequence[Sequence[SdoStage]], codex_runs: Sequence
         overall = "directional"
 
     summary = (
-        f"time ratio (SDO cold / {'Codex stock'}) = {time_result.point:.2f} "
+        f"time ratio (SDO cold / Codex (concise verify)) = {time_result.point:.2f} "
         f"(CI [{time_result.ci_low:.2f}, {time_result.ci_high:.2f}]) -> {time_verdict}; "
         f"e2e success diff (SDO - Codex) = {accuracy.point:.2f} "
         f"(Newcombe CI [{accuracy.low:.2f}, {accuracy.high:.2f}]) -> {accuracy_verdict}; "
         f"responder-token ratio = {token_result.point if token_result.known else 'n/a'} -> {token_verdict} "
-        f"(a token fail here reproduces Step 3's ~1.9x and is a known, expected gap)"
+        f"(a token fail here reproduces Step 3's ~1.9x and is a known, expected gap). {NO_STOCK_ARM_NOTE}"
     )
     return ClaimReport(
         "C3",
@@ -357,17 +376,21 @@ def compute_c3(sdo_pipelines: Sequence[Sequence[SdoStage]], codex_runs: Sequence
     )
 
 
-def compute_c4(
-    sdo_stages: Sequence[SdoStage], codex_stock: Sequence[CodexRun], codex_verify: Sequence[CodexRun]
-) -> ClaimReport:
-    """C4: SDO solve rate >= memoryless (end-to-end success, Wilson; false closures deferred)."""
+def compute_c4(sdo_stages: Sequence[SdoStage], codex_runs: Sequence[CodexRun]) -> ClaimReport:
+    """C4: SDO solve rate >= memoryless (end-to-end success, Wilson; false closures deferred).
+
+    Phase 1 has no stock arm, so this compares SDO against the default,
+    concise-verify Codex arm only, at the verify tolerance (SDO can trail by
+    up to 0.05 on the point estimate): the paper's stricter stock comparison
+    (SDO - Codex-stock >= 0) is not available here (``NO_STOCK_ARM_NOTE``).
+    """
 
     sdo_passed, sdo_total = success_counts(sdo_stages)
     if sdo_total == 0:
         return ClaimReport(
             "C4",
             "SDO solve rate >= memoryless Codex",
-            "SDO e2e >= 0.90 (Wilson lower >= 0.75); SDO - Codex-stock >= 0; SDO >= Codex+verify - 0.05; "
+            "SDO e2e >= 0.90 (Wilson lower >= 0.75); SDO >= Codex (concise verify) - 0.05; "
             "zero SDO false closures (hard)",
             "insufficient data: no SDO stages",
             "insufficient_data",
@@ -378,32 +401,22 @@ def compute_c4(
         sdo_wilson.point, sdo_wilson.low, point_ok=sdo_wilson.point >= 0.90, ci_ok=sdo_wilson.low >= 0.75
     )
 
-    stock_passed, stock_total = success_counts(codex_stock)
-    verify_passed, verify_total = success_counts(codex_verify)
-    stock_diff = None
-    verify_diff = None
-    if stock_total:
+    codex_passed, codex_total = success_counts(codex_runs)
+    codex_diff = None
+    if codex_total:
         from benchmarks.sregym.analysis.stats import newcombe_interval
 
-        stock_diff = newcombe_interval(sdo_passed, sdo_total, stock_passed, stock_total)
-    if verify_total:
-        from benchmarks.sregym.analysis.stats import newcombe_interval
+        codex_diff = newcombe_interval(sdo_passed, sdo_total, codex_passed, codex_total)
 
-        verify_diff = newcombe_interval(sdo_passed, sdo_total, verify_passed, verify_total)
-
-    stock_ok = stock_diff is not None and stock_diff.point >= 0.0
-    verify_ok = verify_diff is not None and verify_diff.point >= -0.05
+    codex_ok = codex_diff is not None and codex_diff.point >= -0.05
 
     overall: ClaimVerdict = sdo_verdict
-    if stock_total and not stock_ok:
-        overall = "fail"
-    if verify_total and not verify_ok:
+    if codex_total and not codex_ok:
         overall = "fail"
 
     summary = (
         f"SDO e2e = {sdo_wilson.point:.2f} (Wilson [{sdo_wilson.low:.2f}, {sdo_wilson.high:.2f}], n={sdo_total}); "
-        f"SDO - Codex-stock = {stock_diff.point if stock_diff else 'n/a'}; "
-        f"SDO - Codex+verify = {verify_diff.point if verify_diff else 'n/a'}. "
+        f"SDO - Codex (concise verify) = {codex_diff.point if codex_diff else 'n/a'}. {NO_STOCK_ARM_NOTE} "
         "False-closure count is NOT computed here: it needs the controller's closure/receipt evidence "
         "(sdo.dev/responder-helper, BrokerClosure), which is outside incident_cost's SdoStage/Verdict model; "
         "check it separately against run_validity's own checks before reporting this claim as a pass."
@@ -411,7 +424,7 @@ def compute_c4(
     return ClaimReport(
         "C4",
         "SDO solve rate >= memoryless Codex",
-        "SDO e2e >= 0.90 (Wilson lower >= 0.75); SDO - Codex-stock >= 0; SDO >= Codex+verify - 0.05; "
+        "SDO e2e >= 0.90 (Wilson lower >= 0.75); SDO >= Codex (concise verify) - 0.05; "
         "zero SDO false closures (hard, not computed by this tool)",
         summary,
         overall,
@@ -479,18 +492,18 @@ def compute_c5(sdo_pipelines: Sequence[Sequence[SdoStage]]) -> ClaimReport:
     )
 
 
-def compute_c8(sdo_stages: Sequence[SdoStage], codex_stock: Sequence[CodexRun]) -> ClaimReport:
+def compute_c8(sdo_stages: Sequence[SdoStage], codex_runs: Sequence[CodexRun]) -> ClaimReport:
     """C8: composite full-mitigation rate (K1, K2 stages; false closures and the gate check deferred)."""
 
     composite_stages = [stage for stage in sdo_stages if stage.problem_id in COMPOSITE_PROBLEMS]
-    composite_codex = [run for run in codex_stock if run.problem_id in COMPOSITE_PROBLEMS]
+    composite_codex = [run for run in codex_runs if run.problem_id in COMPOSITE_PROBLEMS]
     sdo_passed, sdo_total = success_counts(composite_stages)
     if sdo_total == 0:
         return ClaimReport(
             "C8",
             "composite incidents are fully mitigated",
-            "SDO full-mitigation >= 0.75 (Wilson) and >= Codex-stock point estimate; SDO false closures = 0; "
-            "scripted partial-fix gate 3/3 per composite",
+            "SDO full-mitigation >= 0.75 (Wilson) and >= Codex (concise verify) point estimate; SDO false "
+            "closures = 0; scripted partial-fix gate 3/3 per composite",
             "insufficient data: no composite SDO stages",
             "insufficient_data",
             "Meaning: no data. Confidence: n/a. Implication: none yet. Next step: rerun after K1/K2 stages complete.",
@@ -505,7 +518,8 @@ def compute_c8(sdo_stages: Sequence[SdoStage], codex_stock: Sequence[CodexRun]) 
     overall: ClaimVerdict = rate_verdict if beats_codex else "fail"
     summary = (
         f"SDO full-mitigation rate = {sdo_wilson.point:.2f} (Wilson [{sdo_wilson.low:.2f}, {sdo_wilson.high:.2f}], "
-        f"n={sdo_total}); Codex-stock rate = {codex_rate if codex_rate is not None else 'n/a'}. "
+        f"n={sdo_total}); Codex (concise verify) rate = {codex_rate if codex_rate is not None else 'n/a'}. "
+        f"{NO_STOCK_ARM_NOTE} "
         "False closures and the scripted partial-fix gate (3/3 unhealthy, then 3/3 cleared) are NOT computed here: "
         "the gate is a no-LLM fastloop check (PLAN.md (e)), already exercised in QUALIFICATION.md/RC1.md before "
         "this live matrix; false closures need controller closure evidence outside SdoStage/Verdict."
@@ -513,8 +527,8 @@ def compute_c8(sdo_stages: Sequence[SdoStage], codex_stock: Sequence[CodexRun]) 
     return ClaimReport(
         "C8",
         "composite incidents are fully mitigated",
-        "SDO full-mitigation >= 0.75 (Wilson) and >= Codex-stock point estimate; SDO false closures = 0 (not "
-        "computed here); scripted partial-fix gate 3/3 per composite (fastloop, not computed here)",
+        "SDO full-mitigation >= 0.75 (Wilson) and >= Codex (concise verify) point estimate; SDO false closures = 0 "
+        "(not computed here); scripted partial-fix gate 3/3 per composite (fastloop, not computed here)",
         summary,
         overall,
         _takeaways_for_ratio(overall, "SDO fully mitigates composite incidents", "success"),
@@ -522,11 +536,18 @@ def compute_c8(sdo_stages: Sequence[SdoStage], codex_stock: Sequence[CodexRun]) 
 
 
 def compute_c11_verify_ratio(
-    sdo_pipelines: Sequence[Sequence[SdoStage]], codex_verify: Sequence[CodexRun]
+    sdo_pipelines: Sequence[Sequence[SdoStage]], codex_runs: Sequence[CodexRun]
 ) -> ClaimReport:
-    """C11 (partial): SDO's warm advantage over Codex + verify (decoy-citation scan deferred)."""
+    """C11 (partial): SDO's warm advantage over Codex (concise verify) (decoy-citation scan deferred).
 
-    report = compute_c1(sdo_pipelines, codex_verify, arm_label="Codex + verify")
+    Phase 1's sole Codex arm already is the concise-verify baseline (user
+    decision, 2026-09-28), so this claim's comparison is exactly C1's; C11 is
+    the claim that reads it as a memory-safety result: a high ratio here
+    shows SDO's speedup comes from memory and learned detectors, not from
+    verification alone (the baseline already verifies its own work).
+    """
+
+    report = compute_c1(sdo_pipelines, codex_runs, arm_label="Codex (concise verify)")
     summary = (
         f"{report.summary} Decoy-driven-failure counting (a trace showing a decoy acted on as the cause) is NOT "
         "computed here: it needs a diagnosis-text scan against the known decoy markers "
@@ -535,11 +556,13 @@ def compute_c11_verify_ratio(
     )
     return ClaimReport(
         "C11",
-        "memory is safe (partial: SDO vs Codex + verify)",
-        "SDO decoy-driven failures = 0 (not computed here); C1-style ratio against Codex + verify >= 2.0",
+        "memory is safe (partial: SDO vs Codex (concise verify))",
+        "SDO decoy-driven failures = 0 (not computed here); C1-style ratio against Codex (concise verify) >= 2.0",
         summary,
         report.verdict,
-        "Meaning: the ratio component shows whether SDO's speedup is memory, not only the verify loop. "
+        "Meaning: the ratio component shows whether SDO's speedup is memory, not only the verify loop -- and "
+        "phase 1's baseline already verifies concisely by default, so a high ratio here directly supports that "
+        "SDO's win is memory and learned detectors, not a missing verification instruction. "
         "Confidence: only as strong as C1's own bootstrap. Implication: a low ratio here would suggest verify "
         "alone explains most of the gain. Next step: add a decoy-citation scanner over diagnosis text before "
         "reporting the zero-false-positive half of this claim.",
@@ -580,15 +603,18 @@ def _takeaways_for_ratio(verdict: ClaimVerdict, subject: str, metric: str) -> st
 
 def compute_all_claims(
     sdo_pipelines: Sequence[Sequence[SdoStage]],
-    codex_stock: Sequence[CodexRun],
-    codex_verify: Sequence[CodexRun],
+    codex_runs: Sequence[CodexRun],
 ) -> list[ClaimReport]:
+    """Every claim compares SDO against ``codex_runs``: phase 1's sole Codex arm, the default concise-verify
+    baseline (user decision, 2026-09-28; ``NO_STOCK_ARM_NOTE``).
+    """
+
     sdo_stages_flat = [stage for stages in sdo_pipelines for stage in stages]
     return [
-        compute_c1(sdo_pipelines, codex_stock, arm_label="Codex stock"),
-        compute_c2(sdo_pipelines, codex_stock),
-        compute_c3(sdo_pipelines, codex_stock),
-        compute_c4(sdo_stages_flat, codex_stock, codex_verify),
+        compute_c1(sdo_pipelines, codex_runs),
+        compute_c2(sdo_pipelines, codex_runs),
+        compute_c3(sdo_pipelines, codex_runs),
+        compute_c4(sdo_stages_flat, codex_runs),
         compute_c5(sdo_pipelines),
         _deferred(
             "C6",
@@ -604,7 +630,7 @@ def compute_all_claims(
             "the primary check (variant V1) is phase-2 only (PLAN.md (b)); phase 1 only has K1's partial "
             "rate-ConfigMap variant, which this tool does not isolate from the rest of K1's composite verdict.",
         ),
-        compute_c8(sdo_stages_flat, codex_stock),
+        compute_c8(sdo_stages_flat, codex_runs),
         _deferred(
             "C9",
             "token cost scales with incidents, not operating time",
@@ -619,7 +645,7 @@ def compute_all_claims(
             "phase-1's SDO lanes seed from an existing lifecycle workspace (PLAN.md (d) stage 0) and spend no "
             "lifecycle quota; C10 is phase-2 only (PLAN.md (b)).",
         ),
-        compute_c11_verify_ratio(sdo_pipelines, codex_verify),
+        compute_c11_verify_ratio(sdo_pipelines, codex_runs),
     ]
 
 
@@ -647,13 +673,14 @@ class PhaseOneAnalysis:
 
 def analyze(
     sdo_pipeline_dirs: Sequence[Path],
-    codex_stock_dirs: Sequence[Path],
-    codex_verify_dirs: Sequence[Path],
+    codex_dirs: Sequence[Path],
     *,
     legacy: bool = False,
 ) -> PhaseOneAnalysis:
+    """*codex_dirs* are phase-1's sole Codex arm's run directories: the default, concise-verify baseline."""
+
     policy = ValidityPolicy(legacy=legacy)
-    all_dirs = [*sdo_pipeline_dirs, *codex_stock_dirs, *codex_verify_dirs]
+    all_dirs = [*sdo_pipeline_dirs, *codex_dirs]
     validity = validity_by_results_dir(all_dirs, policy=policy)
     excluded = [f"{source}: {'; '.join(result.reasons)}" for source, result in validity.items() if result.excluded]
     valid_count = sum(1 for result in validity.values() if not result.excluded)
@@ -675,21 +702,20 @@ def analyze(
     sdo_pipelines = [
         [stage for stage in load_sdo_pipeline(pipeline_dir) if keep_stage(stage)] for pipeline_dir in sdo_pipeline_dirs
     ]
-    codex_stock = [run for d in codex_stock_dirs for run in load_codex_runs(d) if keep_run(run)]
-    codex_verify = [run for d in codex_verify_dirs for run in load_codex_runs(d) if keep_run(run)]
+    codex_runs = [run for d in codex_dirs for run in load_codex_runs(d) if keep_run(run)]
 
     incident_cost_reports: list[str] = []
     for pipeline_dir, stages in zip(sdo_pipeline_dirs, sdo_pipelines, strict=True):
         if not stages:
             continue
-        report = build_report(stages, [*codex_stock, *codex_verify])
+        report = build_report(stages, codex_runs)
         buffer = io.StringIO()
         with redirect_stdout(buffer):
             print(f"# {pipeline_dir.name}")
             print(render(report))
         incident_cost_reports.append(buffer.getvalue())
 
-    claims = compute_all_claims(sdo_pipelines, codex_stock, codex_verify)
+    claims = compute_all_claims(sdo_pipelines, codex_runs)
     return PhaseOneAnalysis(
         validity_summary=validity_summary, incident_cost_reports=incident_cost_reports, claims=claims
     )
@@ -698,8 +724,13 @@ def analyze(
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n", 1)[0])
     parser.add_argument("--sdo", type=Path, nargs="+", required=True, help="SDO pipeline directories (one per lane)")
-    parser.add_argument("--codex-stock", type=Path, nargs="+", default=[], help="Codex stock run directories")
-    parser.add_argument("--codex-verify", type=Path, nargs="+", default=[], help="Codex + verify run directories")
+    parser.add_argument(
+        "--codex",
+        type=Path,
+        nargs="+",
+        default=[],
+        help="Codex (concise verify) run directories: phase 1's sole Codex arm",
+    )
     parser.add_argument("--legacy-runs", action="store_true", help="run_validity --legacy (pre-manifest runs)")
     parser.add_argument("--out", type=Path, help="write the Markdown report here (also printed to stdout)")
     return parser
@@ -707,7 +738,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_arg_parser().parse_args(argv)
-    analysis = analyze(args.sdo, args.codex_stock, args.codex_verify, legacy=args.legacy_runs)
+    analysis = analyze(args.sdo, args.codex, legacy=args.legacy_runs)
     rendered = analysis.render()
     print(rendered)
     if args.out:

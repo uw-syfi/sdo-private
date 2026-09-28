@@ -126,6 +126,10 @@ def test_weighted_incident_tokens_includes_reflection() -> None:
     assert weighted == pytest.approx((800 * 1.0 + 200 * 0.1 + 100 * 8.0) + (500 * 1.0 + 50 * 8.0))
 
 
+# Phase 1 has no stock (no-verify) Codex arm (user decision, 2026-09-28): the
+# sole Codex arm below stands in for the default, concise-verify baseline.
+
+
 def test_compute_c1_passes_when_sdo_warm_is_much_faster_than_codex() -> None:
     pipelines = _all_pipelines(ttm_cold=100.0, ttm_warm=15.0)
     codex = _codex_arm(list(PHASE1_PROBLEMS), n=5, ttm=100.0)
@@ -177,12 +181,12 @@ def test_compute_c1_is_insufficient_without_any_matching_problem() -> None:
 def test_compute_c4_reports_e2e_success_and_notes_the_false_closure_gap() -> None:
     pipelines = _all_pipelines()
     stages = [stage for pipeline in pipelines for stage in pipeline]
-    stock = _codex_arm(list(PHASE1_PROBLEMS), n=5, passed=True, ttm=100.0)
-    verify = _codex_arm(list(PHASE1_PROBLEMS), n=5, passed=True, ttm=100.0)
-    report = compute_c4(stages, stock, verify)
+    codex = _codex_arm(list(PHASE1_PROBLEMS), n=5, passed=True, ttm=100.0)
+    report = compute_c4(stages, codex)
     assert report.verdict == "pass"
     assert "false-closure" in report.summary.lower()
     assert "false closure" in report.pass_criterion.lower()
+    assert "no stock" in report.summary.lower()
 
 
 def test_compute_c4_fails_when_sdo_underperforms_codex() -> None:
@@ -193,9 +197,14 @@ def test_compute_c4_fails_when_sdo_underperforms_codex() -> None:
         SdoStage(**{**stage.__dict__, "verdict": _verdict(ttm=stage.verdict.ttm_seconds, passed=False)})
         for stage in stages
     ]
-    stock = _codex_arm(list(PHASE1_PROBLEMS), n=5, passed=True, ttm=100.0)
-    report = compute_c4(failing_stages, stock, [])
+    codex = _codex_arm(list(PHASE1_PROBLEMS), n=5, passed=True, ttm=100.0)
+    report = compute_c4(failing_stages, codex)
     assert report.verdict == "fail"
+
+
+def test_compute_c4_is_insufficient_without_any_sdo_stages() -> None:
+    report = compute_c4([], [])
+    assert report.verdict == "insufficient_data"
 
 
 def test_compute_c5_reports_the_learning_ratio_and_memory_growth() -> None:
@@ -216,8 +225,8 @@ def test_compute_c5_fails_when_memory_growth_is_absent() -> None:
 def test_compute_c8_scores_only_composite_problems() -> None:
     pipelines = _all_pipelines()
     stages = [stage for pipeline in pipelines for stage in pipeline]
-    stock = _codex_arm([K1, K2], n=5, passed=True, ttm=100.0)
-    report = compute_c8(stages, stock)
+    codex = _codex_arm([K1, K2], n=5, passed=True, ttm=100.0)
+    report = compute_c8(stages, codex)
     assert report.verdict in ("pass", "directional", "fail")
     assert "gate" in report.summary.lower()
 
@@ -237,9 +246,8 @@ def test_compute_c11_verify_ratio_notes_the_decoy_scan_gap() -> None:
 
 def test_compute_all_claims_returns_exactly_the_eleven_plan_claims() -> None:
     pipelines = _all_pipelines()
-    stock = _codex_arm(list(PHASE1_PROBLEMS), n=5)
-    verify = _codex_arm(list(PHASE1_PROBLEMS), n=5)
-    claims = compute_all_claims(pipelines, stock, verify)
+    codex = _codex_arm(list(PHASE1_PROBLEMS), n=5)
+    claims = compute_all_claims(pipelines, codex)
     assert [claim.claim for claim in claims] == [f"C{n}" for n in range(1, 12)]
     for claim in claims:
         assert claim.takeaways.strip()  # every claim has a mandatory takeaway
@@ -248,7 +256,7 @@ def test_compute_all_claims_returns_exactly_the_eleven_plan_claims() -> None:
 
 def test_deferred_claims_are_marked_deferred_not_silently_dropped() -> None:
     pipelines = _all_pipelines()
-    claims = {claim.claim: claim for claim in compute_all_claims(pipelines, [], [])}
+    claims = {claim.claim: claim for claim in compute_all_claims(pipelines, [])}
     for claim_id in ("C6", "C7", "C9", "C10"):
         assert claims[claim_id].verdict == "deferred"
 
@@ -354,10 +362,10 @@ def _write_codex_experiment_dir(root: Path, problems: list[str]) -> Path:
 
 def test_analyze_wires_run_validity_incident_cost_and_claims_over_synthetic_directories(tmp_path: Path) -> None:
     sdo_dirs = [_write_sdo_pipeline_dir(tmp_path / f"sdo_{letter}", order) for letter, order in ROTATIONS.items()]
-    stock_dir = _write_codex_experiment_dir(tmp_path / "codex_stock", list(PHASE1_PROBLEMS) * 3)
-    verify_dir = _write_codex_experiment_dir(tmp_path / "codex_verify", list(PHASE1_PROBLEMS) * 2)
+    codex_dir_1 = _write_codex_experiment_dir(tmp_path / "codex_1", list(PHASE1_PROBLEMS) * 3)
+    codex_dir_2 = _write_codex_experiment_dir(tmp_path / "codex_2", list(PHASE1_PROBLEMS) * 2)
 
-    analysis = analyze(sdo_dirs, [stock_dir], [verify_dir], legacy=True)
+    analysis = analyze(sdo_dirs, [codex_dir_1, codex_dir_2], legacy=True)
 
     assert len(analysis.claims) == 11
     rendered = analysis.render()
