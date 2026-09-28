@@ -110,6 +110,7 @@ def _codex_prompt_appendix(configs: Sequence[ExperimentConfig]) -> list[dict[str
             {
                 "mode": baseline.verify_protocol,
                 "exec_disclosure": baseline.exec_disclosure,
+                "allow_exec": baseline.allow_exec,
                 "sha256": hashlib.sha256(appendix.encode("utf-8")).hexdigest() if appendix else None,
             }
         )

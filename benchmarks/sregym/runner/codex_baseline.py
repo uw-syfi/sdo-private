@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
 PROMPT_APPENDIX_ENV = "SREGYM_AGENT_PROMPT_APPENDIX"
+#: SREGym's agent proxy forwards pod exec/attach/port-forward only when this is truthy.
+ALLOW_EXEC_ENV = "SREGYM_AGENT_PROXY_ALLOW_EXEC"
 
 #: SREGym's agent container image and the hook module the appendix needs in it.
 AGENT_IMAGE = "sregym-agent-base:latest"
@@ -64,9 +66,9 @@ gone.
 """
 
 #: Environment disclosure (``exec_disclosure = true``), kept separate from the
-#: verify text. It states the same limit SDO's responder works under (its RBAC
-#: has no exec/attach/port-forward, and its prompt says so), so both arms know
-#: the environment's real capabilities. It names no fault, resource or decoy.
+#: verify text. It states that exec/attach/port-forward are unavailable, so it is
+#: only true when ``allow_exec`` is off; exec parity (fairness-DECISIONS.md)
+#: gives both arms exec, so phase 1 leaves it off. It names no fault, resource or decoy.
 EXEC_DISCLOSURE_PROMPT = """\
 ENVIRONMENT: `kubectl exec`, `kubectl attach`, `kubectl port-forward` and `kubectl cp` are unavailable in this \
 environment. Inspect state through the Kubernetes API, logs, and HTTP requests from a helper pod.
@@ -89,8 +91,14 @@ class CodexBaselineConfig:
     verify_protocol: VerifyProtocolMode = "concise"
     #: Append :data:`EXEC_DISCLOSURE_PROMPT` (off by default; phase-1 configs turn it on).
     exec_disclosure: bool = False
+    #: Let the Codex agent's kubectl exec/attach/port-forward through SREGym's agent proxy,
+    #: matching SDO's responder Role (exec parity). Scoped by the proxy to the problem's
+    #: app namespaces. Off by default; every phase-1 Codex config turns it on.
+    allow_exec: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(cast("object", self.allow_exec), bool):
+            raise TypeError(f"agent.codex.allow_exec must be a boolean, got {self.allow_exec!r}")
         if not isinstance(cast("object", self.exec_disclosure), bool):
             raise TypeError(f"agent.codex.exec_disclosure must be a boolean, got {self.exec_disclosure!r}")
         value = cast("object", self.verify_protocol)  # TOML input: a legacy bool or any other type may arrive

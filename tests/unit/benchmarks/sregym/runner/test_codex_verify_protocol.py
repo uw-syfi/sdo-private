@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from benchmarks.sregym.runner.codex_baseline import (
+    ALLOW_EXEC_ENV,
     CONCISE_VERIFY_PROMPT,
     EXEC_DISCLOSURE_PROMPT,
     FULL_VERIFY_PROMPT,
@@ -203,13 +204,6 @@ def test_the_exec_disclosure_names_the_neutral_alternatives(alternative: str) ->
     assert alternative in EXEC_DISCLOSURE_PROMPT
 
 
-def test_the_exec_disclosure_covers_the_verbs_sdo_forbids_its_responder() -> None:
-    from sdo.operational_memory.validation import RESPONDER_FORBIDDEN_KUBECTL_VERBS
-
-    for verb in RESPONDER_FORBIDDEN_KUBECTL_VERBS:
-        assert verb in EXEC_DISCLOSURE_PROMPT
-
-
 def test_the_exec_disclosure_rejects_a_non_boolean() -> None:
     with pytest.raises(TypeError, match="exec_disclosure"):
         CodexBaselineConfig(exec_disclosure="yes")  # type: ignore[arg-type]
@@ -218,6 +212,38 @@ def test_the_exec_disclosure_rejects_a_non_boolean() -> None:
 def test_the_exec_disclosure_reaches_sregym_in_the_appendix(tmp_path: Path) -> None:
     env = config_to_env(_codex({"codex": {"verify_protocol": "concise", "exec_disclosure": True}}), tmp_path)
     assert env[PROMPT_APPENDIX_ENV].endswith(EXEC_DISCLOSURE_PROMPT)
+
+
+# --------------------------------------------------------------------------- exec parity
+
+
+def test_exec_through_the_agent_proxy_is_off_unless_asked_for(tmp_path: Path) -> None:
+    assert CodexBaselineConfig().allow_exec is False
+    env = config_to_env(_codex({"codex": {"verify_protocol": "concise"}}), tmp_path)
+    assert ALLOW_EXEC_ENV not in env
+
+
+def test_allow_exec_reaches_sregym_as_the_proxy_switch(tmp_path: Path) -> None:
+    env = config_to_env(_codex({"codex": {"verify_protocol": "concise", "allow_exec": True}}), tmp_path)
+    assert env[ALLOW_EXEC_ENV] == "1"
+    assert ALLOW_EXEC_ENV == "SREGYM_AGENT_PROXY_ALLOW_EXEC"
+
+
+def test_allow_exec_does_not_change_the_prompt() -> None:
+    assert CodexBaselineConfig(allow_exec=True).prompt_appendix() == CONCISE_VERIFY_PROMPT
+
+
+def test_a_switch_left_in_the_shell_never_enables_exec_for_an_arm_that_did_not_ask(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(ALLOW_EXEC_ENV, "1")
+    assert ALLOW_EXEC_ENV not in config_to_env(_codex({"codex": {"verify_protocol": "concise"}}), tmp_path)
+    assert ALLOW_EXEC_ENV not in config_to_env(ExperimentConfig(agent="crucible", model="m"), tmp_path)
+
+
+def test_allow_exec_rejects_a_non_boolean() -> None:
+    with pytest.raises(TypeError, match="allow_exec"):
+        CodexBaselineConfig(allow_exec="yes")  # type: ignore[arg-type]
 
 
 def test_no_codex_baseline_prompt_carries_a_benchmark_tailored_token() -> None:

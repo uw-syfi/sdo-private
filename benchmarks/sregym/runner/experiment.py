@@ -25,7 +25,7 @@ except ModuleNotFoundError:
 
 import yaml
 
-from benchmarks.sregym.runner.codex_baseline import PROMPT_APPENDIX_ENV, CodexBaselineConfig
+from benchmarks.sregym.runner.codex_baseline import ALLOW_EXEC_ENV, PROMPT_APPENDIX_ENV, CodexBaselineConfig
 
 _VARIANT_ORDERS = ("flat", "round_robin", "grouped", "adaptive")
 #: The efforts SREGym's --reasoning-effort accepts.
@@ -576,10 +576,14 @@ def config_to_env(config: ExperimentConfig, project_root: Path, exp_dir: Path | 
     # Only an arm that asks for a prompt appendix gets one; a value left in the
     # shell must never alter a stock baseline.
     env.pop(PROMPT_APPENDIX_ENV, None)
+    env.pop(ALLOW_EXEC_ENV, None)
     if config.agent == "codex":
-        appendix = CodexBaselineConfig.from_agent_config(config.agent_config.get("codex") or {}).prompt_appendix()
+        baseline = CodexBaselineConfig.from_agent_config(config.agent_config.get("codex") or {})
+        appendix = baseline.prompt_appendix()
         if appendix:
             env[PROMPT_APPENDIX_ENV] = appendix
+        if baseline.allow_exec:
+            env[ALLOW_EXEC_ENV] = "1"
     if config.agent == "sdo_codex":
         sdo_cfg = config.agent_config.get("sdo_codex") or {}
         validator_image = str(sdo_cfg.get("validator_image", "sdo-detector-validator:v0.1.0"))

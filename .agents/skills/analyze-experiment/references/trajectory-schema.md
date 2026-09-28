@@ -139,6 +139,7 @@ third_party/sregym/logs/<run-or-pipeline>/
 `run_manifest.json` (`benchmarks/sregym/runner/manifest.py`, `schema_version` 1) is written by the runner at launch into the experiment directory, the pipeline directory and each stage directory. Its fields:
 
 - `kind`: `experiment`, `pipeline` or `stage`.
+- `codex_prompt_appendix`: for each `agent = "codex"` config, `mode` (verify protocol), `exec_disclosure`, `allow_exec` (true when SREGym's agent proxy forwards `kubectl exec`, attach and port-forward for that arm; phase-1 exec parity, `docs/fairness-DECISIONS.md`) and `sha256` of the appendix text.
 - `git`: `sha`, `dirty` and `dirty_paths`, plus `submodule` with `sha`, `recorded_sha` and `dirty`.
 - `images`: keyed by `<role>:<ref>`. Each entry has `id`, `repo_digests` and `id_at_preflight`; agent images also carry the probed `codex` and `agentshim` versions and `import_error`.
 - `versions`: `codex_cli` (`pin`, `host`, `stock_arm`) and `agentshim` (`pin`, `host`).

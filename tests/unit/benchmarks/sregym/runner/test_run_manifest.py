@@ -140,6 +140,32 @@ def test_manifest_records_whether_the_exec_disclosure_was_on(
     assert entry["sha256"] == hashlib.sha256(expected.encode("utf-8")).hexdigest()
 
 
+def test_manifest_records_whether_exec_through_the_proxy_was_on(
+    fake_host: FakeHost, sregym_dir: Path, tmp_path: Path
+) -> None:
+    _git(fake_host)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    config = _codex_config({"codex": {"verify_protocol": "concise", "allow_exec": True}})
+    snapshot = write_snapshot(config, run_dir)
+    env = {"SREGYM_KIND_CLUSTER_PREFIX": "luna-w"}
+    report = run_preflight([config], project_root=REPO_ROOT, sregym_dir=sregym_dir, env=env, host=fake_host)
+
+    manifest = build_run_manifest(
+        run_dir=run_dir,
+        configs=[config],
+        snapshot=snapshot,
+        report=report,
+        host=fake_host,
+        project_root=REPO_ROOT,
+        sregym_dir=sregym_dir,
+        env=env,
+    )
+
+    (entry,) = manifest["codex_prompt_appendix"]
+    assert entry["allow_exec"] is True
+
+
 @pytest.mark.parametrize(
     ("agent_config", "expected_mode", "expected_text"),
     [
