@@ -53,9 +53,9 @@ backend = "agent-cli"
 provider = "codex"
 model = "gpt-6-luna"
 timeout_sec = 3600
-controller_image = "sdo-controller:v0.1.0"
-responder_image = "sdo-sregym-responder:v0.1.0"
-validator_image = "sdo-detector-validator:v0.1.0"
+controller_image = "sdo-controller:p1"
+responder_image = "sdo-sregym-responder:p1"
+validator_image = "sdo-detector-validator:p1"
 credentials_secret = "sdo-agent-credentials"
 persistent_controller = true
 
