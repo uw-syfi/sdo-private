@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -539,7 +540,20 @@ func (c *Controller) handleDispatchCompletion(completion dispatchCompletion, obs
 		)
 		return
 	}
-	if completion.err != nil {
+	var jobFailed *ResponderJobFailedError
+	if errors.As(completion.err, &jobFailed) {
+		// A failed Job is terminal and exactly-once dispatch forbids a second
+		// responder, so the responder is done without a result. Health alone
+		// decides closure, and the broker records the outcome as failed.
+		c.responderDone = true
+		c.responderCompletedAt = observedAt.UTC()
+		if c.responderCompletedAt.Before(c.incidentDispatchedAt) {
+			c.responderCompletedAt = c.incidentDispatchedAt
+		}
+		c.dispatchState = "completed"
+		c.dispatchError = completion.err.Error()
+		c.currentIncidentResult = nil
+	} else if completion.err != nil {
 		// A watcher, transport, or leadership-guard failure does not prove that
 		// the durable responder Job stopped. Retry the same incident effect so
 		// the idempotent dispatcher rejoins its existing Job/result instead of

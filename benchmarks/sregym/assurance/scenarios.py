@@ -135,7 +135,9 @@ CHAOS_SCENARIOS: dict[str, tuple[IncidentSpec, ...]] = {
             22,
             chaos="kill-responder",
             pause_before_repair_seconds=60,
-            expect=_RECOVERS_MCM,
+            # Exactly-once dispatch forbids a second responder: the incident must fail loudly,
+            # be recorded as failed once health recovers, and teach nothing.
+            expect=Expectation(resolution="not-mitigated", not_learned=(MCM_DETECTOR,)),
         ),
     ),
     "chaos-kill-prober": (

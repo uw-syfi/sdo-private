@@ -525,6 +525,79 @@ func TestControllerRequiresDetectorReviewWhenPostResponseHealthNeverClears(t *te
 	}
 }
 
+type failedJobDispatcher struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (d *failedJobDispatcher) Dispatch(_ context.Context, request IncidentRequest) (IncidentResult, error) {
+	d.mu.Lock()
+	d.calls++
+	d.mu.Unlock()
+	return IncidentResult{}, &ResponderJobFailedError{JobName: IncidentJobName(request.IncidentID)}
+}
+
+// A responder Job that failed (its pod was killed, say) is terminal: the
+// dispatcher rejoins the same Job by name, so retrying it hot-looped forever
+// and the incident could never close. The controller must record the failure
+// once and let health decide the closure.
+func TestAFailedResponderJobIsATerminalDispatchFailure(t *testing.T) {
+	interval := time.Second
+	health := controllerDetector(
+		"health", interval, stateFinding("health"), stateFinding("health"), sdk.Finding{}, sdk.Finding{},
+	)
+	health.spec.Class = sdk.DetectorClassHealth
+	health.spec.Owner = sdk.DetectorOwnerHealthJudge
+	health.spec.Persistence = sdk.PersistencePolicy{Firing: 2, Clearing: 2}
+	health.spec.Batching = sdk.BatchingPolicy{Severity: sdk.SeverityCritical}
+	health.spec.OriginatingCommit = "health-objective"
+	for index := range health.samples {
+		if len(health.samples[index]) > 0 {
+			health.samples[index][0].Severity = sdk.SeverityCritical
+		}
+	}
+	dispatcher := &failedJobDispatcher{}
+	controller, err := NewController(
+		testControllerConfig(), []sdk.Detector{health}, staticProvider{snapshot: sdktest.Snapshot{}}, dispatcher,
+		time.Unix(0, 0),
+	)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	closed := make(chan IncidentClosure, 1)
+	controller.OnIncidentClosed = func(closure IncidentClosure) { closed <- closure }
+	for sample := 0; sample < 2; sample++ {
+		if err := controller.Step(context.Background(), time.Unix(int64(sample), 0), nil); err != nil {
+			t.Fatalf("firing step: %v", err)
+		}
+	}
+	executePendingEffect(t, controller)
+	awaitDispatchCompletionQueued(t, controller)
+	if err := controller.Step(context.Background(), time.Unix(2, 0), nil); err != nil {
+		t.Fatalf("completion step: %v", err)
+	}
+	if _, pending := controller.PendingDispatchEffect(); pending {
+		t.Fatal("a failed responder Job was scheduled for another dispatch")
+	}
+	if err := controller.Step(context.Background(), time.Unix(3, 0), nil); err != nil {
+		t.Fatalf("clear step: %v", err)
+	}
+	var closure IncidentClosure
+	select {
+	case closure = <-closed:
+	case <-time.After(time.Second):
+		t.Fatalf("incident with a failed responder never closed: %#v", controller.ExportState())
+	}
+	if closure.Result != nil || !strings.Contains(closure.DispatchError, "failed") {
+		t.Fatalf("closure must record the terminal dispatch failure: %#v", closure)
+	}
+	dispatcher.mu.Lock()
+	defer dispatcher.mu.Unlock()
+	if dispatcher.calls != 1 {
+		t.Fatalf("failed responder Job dispatched %d times", dispatcher.calls)
+	}
+}
+
 // A persistent controller's Job restarts it on exit. Exiting on detector
 // review crash-looped the Job past its backoff limit, which stopped detection
 // for every later incident; only a one-shot run ends on review.
