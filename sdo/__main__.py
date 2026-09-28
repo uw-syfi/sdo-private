@@ -32,6 +32,10 @@ def main(
     args = parser.parse_args(argv)
     if args.command == "detector":
         return _check_detector(detector_check_runner)
+    if args.command == "incident":
+        from sdo.agent_runtime.responder.incident_status import run_cli
+
+        return run_cli(workload=args.workload, scenarios=tuple(args.scenario), as_json=args.json)
     try:
         config = _operation_config(args)
         operation_runner(config)
@@ -80,6 +84,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "check",
         help="compile and test this checkout using the locked-down validator",
     )
+    incident_parser = subparsers.add_parser("incident", help="inspect the incident being responded to")
+    incident_commands = incident_parser.add_subparsers(dest="incident_command", required=True)
+    status_parser = incident_commands.add_parser(
+        "status",
+        help="run the health judge's verify burst now and report whether the closure gate would pass "
+        "(exit 0 healthy, 1 unhealthy, 3 unavailable)",
+    )
+    status_parser.add_argument("--workload", help="verify-burst or journey workload; defaults to the verify burst")
+    status_parser.add_argument(
+        "--scenario", action="append", default=[], help="restrict the burst to this scenario; may be repeated"
+    )
+    status_parser.add_argument("--json", action="store_true", help="print the machine-readable status")
     return parser
 
 
