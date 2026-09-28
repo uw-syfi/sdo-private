@@ -54,3 +54,15 @@ Code: `benchmarks/sregym/runner/preflight.py`. The runner calls it before `run_s
   - On 2026-09-28 the real host passes every check except this one: `primary window 90% used (resets 2026-10-03 18:19 UTC)`. That is the correct answer: live runs wait for the reset.
 - **Tests never touch the host.** All probes go through a `HostProbe` protocol. The tests use a fake host that is healthy by default and break one thing at a time. The runner tests get a warn-mode fake through an autouse fixture, so orchestration tests with stub Crucible configs keep running.
 
+## Run manifest
+
+Code: `benchmarks/sregym/runner/manifest.py`. The runner writes `run_manifest.json` right after the config snapshot: into a single experiment's directory, into a pipeline's directory, and into each stage directory when that stage starts. The field list is in `.agents/skills/analyze-experiment/references/trajectory-schema.md`.
+
+- **One manifest per stage, not only per pipeline.** A pipeline runs for hours. Host load, free disk and even image IDs can change between stages, and the validity checker judges each stage's problem runs on their own. The pipeline-level manifest records every stage's resolved roles at launch.
+- **Image IDs are re-read when each manifest is written.** The versions and import results come from the preflight probe, and `id_at_preflight` keeps the ID at probe time. An ID that changed between the two readings means someone rebuilt an image mid-pipeline.
+- **The config hash is of the snapshot written into the run** (`experiment_config.toml` or `pipeline_config.toml`), which is what a resume reads. The source TOML's path and hash are recorded too when the run was launched from a file.
+- **Git state: the SDO commit, `dirty` for tracked changes only, and the dirty paths.** Untracked files are ignored, because scratch files would flag every run as dirty. The submodule entry records both its checked-out commit and the commit SDO records for it. A mismatch means the harness ran with a submodule other than the one the SDO commit pins.
+- **Resolved models per role.** The resolution is the one the preflight enforces (see Model policy above), so the manifest shows the model each role actually got, not only what the TOML said.
+- **Resumes append; they never overwrite.** A resumed run keeps its first manifest as the top-level document and adds each later launch under `resumes`. A resume from a different commit or image is therefore visible.
+- **Writes are atomic** (write a temporary file, then rename). A killed launcher never leaves a truncated manifest for the checker to trip on.
+

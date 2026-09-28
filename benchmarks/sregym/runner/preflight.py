@@ -967,6 +967,38 @@ class LaunchAssurance:
             raise PreflightError(report)
         return report
 
+    def write_manifest(
+        self,
+        run_dir: Path,
+        configs: Sequence[ExperimentConfig],
+        *,
+        snapshot: Path,
+        report: PreflightReport,
+        project_root: Path,
+        sregym_dir: Path,
+        env: Mapping[str, str],
+        kind: Literal["experiment", "pipeline", "stage"],
+        source: Path | None = None,
+    ) -> Path:
+        """Write ``run_manifest.json`` into *run_dir* (see :mod:`benchmarks.sregym.runner.manifest`)."""
+
+        from benchmarks.sregym.runner.manifest import build_run_manifest, write_run_manifest
+
+        manifest = build_run_manifest(
+            run_dir=run_dir,
+            configs=configs,
+            snapshot=snapshot,
+            report=report,
+            host=self.host,
+            project_root=project_root,
+            sregym_dir=sregym_dir,
+            env=env,
+            kind=kind,
+            source=source,
+            settings=self.settings,
+        )
+        return write_run_manifest(run_dir, manifest)
+
 
 def default_assurance(env: Mapping[str, str] | None = None) -> LaunchAssurance:
     env = os.environ if env is None else env
