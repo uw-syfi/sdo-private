@@ -7,9 +7,12 @@
 # Stage 0 is seeded from [pipeline] workspace_seed: a lifecycle-only application
 # workspace (no incident memory) from a FRESH lifecycle run on the de-tailored SDO
 # code (docs/fairness-DECISIONS.md). The earlier seed was built with
-# benchmark-tailored hints and must not be used. The placeholder below makes the
-# runner refuse to launch until the launch agent sets the new seed's directory
-# (RUNBOOK.md, "Seed"). Every later stage chains the previous stage's workspace.
+# benchmark-tailored hints and must not be used. The seed below was produced by
+# the launch agent on 2026-09-28 (RUNBOOK.md, "Seed"): lifecycle commit dd6bc81
+# ("sdo: capture goal, architecture, and independent health judge") on
+# hotel_reservation, from an unseeded single-stage run of
+# missing_configmap_hotel_reservation on private images (:seed-fresh) and kind
+# cluster assure-seed0. Every later stage chains the previous stage's workspace.
 #
 # Models (user rule, 2026-09-28): every SDO agent role runs Codex gpt-6-luna at
 # medium effort; the SREGym judge is codex-gpt-6-luna at the Codex CLI backend's
@@ -22,7 +25,7 @@
 
 [pipeline]
 name = "assure-p1-sdo-b"
-workspace_seed = "PENDING-FRESH-LIFECYCLE-SEED"
+workspace_seed = "/mnt/data/shli/assure-runs/seed-dd6bc81"
 
 [defaults]
 agent = "sdo_codex"
