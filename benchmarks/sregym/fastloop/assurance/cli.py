@@ -231,13 +231,14 @@ def format_table(results: SuiteResults) -> str:
     )
     rows = [header]
     for run in results.runs:
+        missing = [] if run.diff is None else sorted(set(run.diff.missing) - set(run.live_named))
         diff = (
             "-"
             if run.diff is None
             else (
-                "exact"
-                if not (run.diff.missing or run.diff.unexpected or run.diff.decoys_named)
-                else f"miss={run.diff.missing} extra={run.diff.unexpected} decoy={run.diff.decoys_named}"
+                ("exact" if not run.live_named else f"exact+live({','.join(run.live_named)})")
+                if not (missing or run.diff.unexpected or run.diff.decoys_named)
+                else f"miss={missing} extra={run.diff.unexpected} decoy={run.diff.decoys_named}"
             )
         )
         wrong = "/".join(

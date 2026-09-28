@@ -32,6 +32,11 @@ class GateProbe(BaseModel):
     status_seconds: float
     gate_exit: int | None = None
     unhealthy_scenarios: list[str] = Field(default_factory=list)
+    #: Non-traffic health detectors the controller still reports firing.
+    blocking_detectors: list[str] = Field(default_factory=list)
+    #: Objects the controller sees changed that the request's diff lacks.
+    new_state_changes: list[str] = Field(default_factory=list)
+    controller_detail: str = ""
 
 
 class DiffReading(BaseModel):
@@ -100,6 +105,8 @@ class FaultRun(BaseModel):
     incident_opened_seconds: float | None = None
     request_received_seconds: float | None = None
     diff: DiffReading | None = None
+    #: Faulted objects the request's diff lacked that the controller's live view reported.
+    live_named: list[str] = Field(default_factory=list)
     on_fault: GateProbe | None = None
     wrong_fixes: list[WrongFixResult] = Field(default_factory=list)
     partial_fixes: list[PartialFixResult] = Field(default_factory=list)

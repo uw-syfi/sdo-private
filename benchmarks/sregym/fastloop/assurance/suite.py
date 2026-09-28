@@ -27,7 +27,7 @@ import os
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -64,6 +64,18 @@ logger = logging.getLogger(__name__)
 #: ``controller/runtime.DefaultStateSettle``: a new state replaces the baseline after this long healthy.
 STATE_SETTLE_SECONDS = 120.0
 EXIT_HEALTHY, EXIT_UNHEALTHY, EXIT_GATE_REFUSED = 0, 1, 4
+
+
+@dataclass
+class StatusReading:
+    """One ``sdo incident status --json`` run."""
+
+    exit_code: int
+    seconds: float
+    unhealthy: list[str] = field(default_factory=list)
+    blocking_detectors: list[str] = field(default_factory=list)
+    new_state_changes: list[str] = field(default_factory=list)
+    controller_detail: str = ""
 
 
 @dataclass(frozen=True)
@@ -221,7 +233,7 @@ class AssuranceSuite:
         env["SDO_REQUEST_PATH"] = str(request_file) if request_file is not None else str(self.spool / "absent.json")
         return env
 
-    def status(self, request_file: Path | None) -> tuple[int, float, list[str]]:
+    def status(self, request_file: Path | None) -> StatusReading:
         started = time.monotonic()
         completed = subprocess.run(
             [sys.executable, "-m", "sdo", "incident", "status", "--json"],
@@ -231,17 +243,26 @@ class AssuranceSuite:
             timeout=120,
             check=False,
         )
-        unhealthy: list[str] = []
+        reading = StatusReading(exit_code=completed.returncode, seconds=round(time.monotonic() - started, 3))
         try:
-            burst = json.loads(completed.stdout).get("burst") or {}
-            unhealthy = [
+            payload = json.loads(completed.stdout)
+            burst = payload.get("burst") or {}
+            reading.unhealthy = [
                 str(verdict.get("scenario"))
                 for verdict in burst.get("verdicts", [])
                 if isinstance(verdict, dict) and verdict.get("healthy") is False
             ]
+            controller = payload.get("controller") or {}
+            reading.controller_detail = str(controller.get("detail", ""))
+            reading.blocking_detectors = [str(item) for item in controller.get("blocking_detectors", [])]
+            reading.new_state_changes = [
+                f"{change.get('kind')}/{change.get('name')}"
+                for change in controller.get("new_state_changes", [])
+                if isinstance(change, dict)
+            ]
         except (json.JSONDecodeError, AttributeError):
             pass
-        return completed.returncode, round(time.monotonic() - started, 3), unhealthy
+        return reading
 
     def gate(self, request_file: Path | None) -> int:
         """Submit a mitigation through the SREGym submission bridge against a grading-free stub."""
@@ -257,15 +278,28 @@ class AssuranceSuite:
 
     def probe(self, label: str, request_file: Path | None, *, gate: bool = True) -> GateProbe:
         at = utcnow()
-        status_exit, seconds, unhealthy = self.status(request_file)
+        reading = self.status(request_file)
         return GateProbe(
             label=label,
             at=at,
-            status_exit=status_exit,
-            status_seconds=seconds,
+            status_exit=reading.exit_code,
+            status_seconds=reading.seconds,
             gate_exit=self.gate(request_file) if gate else None,
-            unhealthy_scenarios=unhealthy,
+            unhealthy_scenarios=reading.unhealthy,
+            blocking_detectors=reading.blocking_detectors,
+            new_state_changes=reading.new_state_changes,
+            controller_detail=reading.controller_detail,
         )
+
+    def wait_live_diff(self, request_file: Path, missing: list[str], *, timeout: float) -> list[str]:
+        """Faults the request's diff lacks, as the controller's live view reports them through status."""
+
+        deadline = time.monotonic() + timeout
+        while True:
+            seen = self.status(request_file).new_state_changes
+            if set(missing) <= set(seen) or time.monotonic() >= deadline:
+                return sorted(set(missing) & set(seen))
+            time.sleep(1.0)
 
     # --- controller -------------------------------------------------------------------------------
 
@@ -475,11 +509,19 @@ class AssuranceSuite:
                 self.controller, since=started, reference=run.injection_started_at
             )
             run.diff = diff_reading(request, objects)
+            # A fault that lands after dispatch cannot be in the request's snapshot; the responder
+            # sees it in the controller's live view, which `sdo incident status` reports.
+            run.live_named = (
+                self.wait_live_diff(request_file, run.diff.missing, timeout=bounds.detect_seconds)
+                if run.diff.missing
+                else []
+            )
+            unnamed = sorted(set(run.diff.missing) - set(run.live_named))
             checks.append(
                 Check(
                     name="diff names every faulted object",
-                    passed=not run.diff.missing,
-                    detail=f"named {run.diff.named}, missing {run.diff.missing}",
+                    passed=not unnamed,
+                    detail=f"request diff named {run.diff.named}, live view added {run.live_named}, missing {unnamed}",
                 )
             )
             checks.append(
@@ -619,8 +661,7 @@ class AssuranceSuite:
             )
             clear_deadline = time.monotonic() + bounds.clear_seconds + 60
             while True:
-                status_exit, _, _ = self.status(request_file)
-                if status_exit == EXIT_HEALTHY:
+                if self.status(request_file).exit_code == EXIT_HEALTHY:
                     run.clear_seconds = round((utcnow() - fixed_at).total_seconds(), 3)
                     break
                 if time.monotonic() >= clear_deadline:

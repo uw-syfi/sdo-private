@@ -105,7 +105,7 @@ def run_soak(
         if now >= deadline:
             break
         if time.monotonic() >= next_status:
-            exit_code, _, _ = suite.status(None)
+            exit_code = suite.status(None).exit_code
             status_probes += 1
             status_unhealthy += int(exit_code != 0)
             next_status = time.monotonic() + status_every_seconds
