@@ -48,6 +48,15 @@ const (
 type PersistencePolicy struct {
 	Firing   int
 	Clearing int
+	// MinDuration, when positive, additionally requires a finding to have
+	// been continuously observed for at least this long before it fires.
+	// A finding that reaches Firing evaluations sooner stays pending until
+	// MinDuration also elapses, then activates on its next observation. Zero
+	// keeps the evaluation-count-only policy. This absorbs findings whose
+	// evaluation count crosses the firing threshold within one brief stall
+	// (for example a synthetic-traffic window re-evaluated on every poll),
+	// while a persistent fault still fires once both conditions hold.
+	MinDuration time.Duration
 }
 
 type BatchingPolicy struct {

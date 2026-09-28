@@ -41,6 +41,30 @@ func TestValidateDetectorsRejectsInvalidIntervals(t *testing.T) {
 	}
 }
 
+func TestValidateDetectorsRejectsNegativePersistenceMinDuration(t *testing.T) {
+	detector := validationDetector{spec: sdk.DetectorSpec{
+		ID: "health", Interval: time.Second, Class: sdk.DetectorClassHealth, Owner: sdk.DetectorOwnerHealthJudge,
+		Persistence: sdk.PersistencePolicy{Firing: 2, Clearing: 2, MinDuration: -time.Second},
+		Batching:    sdk.BatchingPolicy{Severity: sdk.SeverityCritical},
+		OriginatingCommit: "commit",
+	}}
+	if err := ValidateDetectors([]sdk.Detector{detector}); err == nil {
+		t.Fatal("expected negative persistence min duration to be rejected")
+	}
+}
+
+func TestValidateDetectorsAcceptsPositivePersistenceMinDuration(t *testing.T) {
+	detector := validationDetector{spec: sdk.DetectorSpec{
+		ID: "health", Interval: time.Second, Class: sdk.DetectorClassHealth, Owner: sdk.DetectorOwnerHealthJudge,
+		Persistence: sdk.PersistencePolicy{Firing: 2, Clearing: 2, MinDuration: 9 * time.Second},
+		Batching:    sdk.BatchingPolicy{Severity: sdk.SeverityCritical},
+		OriginatingCommit: "commit",
+	}}
+	if err := ValidateDetectors([]sdk.Detector{detector}); err != nil {
+		t.Fatalf("positive persistence min duration must be accepted: %v", err)
+	}
+}
+
 func TestValidateDetectorsRejectsUnsupportedAndDuplicateWatches(t *testing.T) {
 	tests := []struct {
 		name    string

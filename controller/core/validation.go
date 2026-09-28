@@ -64,6 +64,9 @@ func validateDetectorSpec(spec sdk.DetectorSpec) error {
 		if spec.Persistence.Firing < 1 || spec.Persistence.Clearing < 1 {
 			return fmt.Errorf("persistence firing and clearing counts must be positive")
 		}
+		if spec.Persistence.MinDuration < 0 {
+			return fmt.Errorf("persistence min duration must not be negative")
+		}
 		if spec.Batching.Severity != sdk.SeverityInfo && spec.Batching.Severity != sdk.SeverityWarning &&
 			spec.Batching.Severity != sdk.SeverityCritical {
 			return fmt.Errorf("unsupported batching severity %q", spec.Batching.Severity)
