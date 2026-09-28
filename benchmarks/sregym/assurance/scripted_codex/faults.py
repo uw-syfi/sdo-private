@@ -292,12 +292,12 @@ class MissingConfigMap:
                 break
         if missing is None:
             raise PlanError(f"every ConfigMap {target} mounts exists ({names})")
-        manifest = _configmap_manifest(worktree, missing)
-        run(f"grep -rl 'name: {missing}' kubernetes/")
+        source, restore = _configmap_source(worktree, namespace, missing)
+        run(f"grep -rlE 'name: {missing}|k8s-.*-mongo.sh' kubernetes/ .")
         return Facts(
             namespace=namespace,
             target=target,
-            objects={"configmap": missing, "manifest": manifest},
+            objects={"configmap": missing, "manifest": source, "restore": restore},
             observations=(
                 (
                     f"kubectl -n {namespace} get configmap {missing} -o name",
@@ -313,7 +313,7 @@ class MissingConfigMap:
         ns, target = facts.namespace, facts.target
         configmap, manifest = facts.objects["configmap"], facts.objects["manifest"]
         return [
-            (f"kubectl -n {ns} apply -f {manifest}", f"restored ConfigMap {configmap} from {manifest}"),
+            (facts.objects["restore"], f"restored ConfigMap {configmap} from {manifest}"),
             (
                 f"kubectl -n {ns} delete pod -l {SERVICE_LABEL}={target} --wait=false && "
                 f"kubectl -n {ns} rollout status deployment/{target} --timeout=180s",
@@ -389,14 +389,25 @@ class MissingConfigMap:
         return _claimed_proposal(incident_id=incident_id, outcome_commit=outcome_commit)
 
 
-def _configmap_manifest(worktree: Path, name: str) -> str:
+def _configmap_source(worktree: Path, namespace: str, name: str) -> tuple[str, str]:
+    """The source file that defines ConfigMap ``name`` and the command that restores it from that file.
+
+    A manifest under ``kubernetes/`` wins; otherwise hotel_reservation builds ``mongo-<svc>-script``
+    from the root ``k8s-<svc>-mongo.sh`` init script.
+    """
+
     pattern = re.compile(rf"^\s*name:\s*['\"]?{re.escape(name)}['\"]?\s*$", re.MULTILINE)
     root = worktree / "kubernetes"
     for path in sorted(root.rglob("*.y*ml")) if root.is_dir() else []:
         text = path.read_text(encoding="utf-8", errors="replace")
         if re.search(r"^kind:\s*ConfigMap\s*$", text, re.MULTILINE) and pattern.search(text):
-            return path.relative_to(worktree).as_posix()
-    raise PlanError(f"no manifest under kubernetes/ defines ConfigMap {name}")
+            manifest = path.relative_to(worktree).as_posix()
+            return manifest, f"kubectl -n {namespace} apply -f {manifest}"
+    script = re.fullmatch(r"mongo-([a-z0-9-]+)-script", name)
+    if script and (worktree / f"k8s-{script.group(1)}-mongo.sh").is_file():
+        source = f"k8s-{script.group(1)}-mongo.sh"
+        return source, f"kubectl -n {namespace} create configmap {name} --from-file={source}"
+    raise PlanError(f"no manifest under kubernetes/ or init script defines ConfigMap {name}")
 
 
 PLANS: dict[str, FaultPlan] = {"network_policy_block": NetworkPolicyBlock(), "missing_configmap": MissingConfigMap()}
@@ -791,7 +802,7 @@ func TestIgnoresNearMissWhenConfigMapExists(t *testing.T) {
 _CM_README = """
 The incident detector establishes that `<DEPLOYMENT>` in `<NAMESPACE>` mounts the absent ConfigMap `<CONFIGMAP>`
 and that its pods report `FailedMount`. Restore the ConfigMap from the manifest under `kubernetes/` that defines it,
-then replace the stuck pods.
+or, for `mongo-<svc>-script`, from the root init script `k8s-<svc>-mongo.sh`; then replace the stuck pods.
 
 Sanity check (fails while the ConfigMap is missing):
 
@@ -842,12 +853,17 @@ CONFIGMAP=$3
 if [ "$CONFIGMAP" = "-" ]; then
   CONFIGMAP=$(missing_configmap "$1" "$2")
 fi
-MANIFEST=$(grep -rlE "^[[:space:]]*name:[[:space:]]*$CONFIGMAP[[:space:]]*$" kubernetes/ | head -n 1)
-if [ -z "$MANIFEST" ]; then
-  echo "no manifest defines ConfigMap $CONFIGMAP" >&2
+MANIFEST=$(grep -rlE "^[[:space:]]*name:[[:space:]]*$CONFIGMAP[[:space:]]*$" kubernetes/ | xargs -r grep -lE "^kind:[[:space:]]*ConfigMap" | head -n 1)
+SCRIPT="k8s-${CONFIGMAP#mongo-}"
+SCRIPT="${SCRIPT%-script}-mongo.sh"
+if [ -n "$MANIFEST" ]; then
+  kubectl -n "$1" apply -f "$MANIFEST"
+elif [ -f "$SCRIPT" ]; then
+  kubectl -n "$1" create configmap "$CONFIGMAP" --from-file="$SCRIPT"
+else
+  echo "no manifest or init script defines ConfigMap $CONFIGMAP" >&2
   exit 1
 fi
-kubectl -n "$1" apply -f "$MANIFEST"
 kubectl -n "$1" delete pod -l "io.kompose.service=$2" --wait=false
 kubectl -n "$1" rollout status "deployment/$2" --timeout=180s
 """

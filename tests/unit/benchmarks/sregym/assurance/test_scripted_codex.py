@@ -284,3 +284,47 @@ def test_every_scripted_memory_proposal_passes_the_detector_gateway(tmp_path: Pa
         cwd=REPO_ROOT,
     )
     assert gateway.returncode == 0, gateway.stdout + gateway.stderr
+
+
+def test_missing_configmap_rebuilds_a_script_configmap_that_has_no_manifest(tmp_path: Path) -> None:
+    """hotel_reservation creates ``mongo-geo-script`` from the root ``k8s-geo-mongo.sh``; no manifest defines it."""
+
+    from benchmarks.sregym.assurance.scripted_codex.faults import MissingConfigMap
+
+    worktree = tmp_path / "app"
+    (worktree / "kubernetes" / "geo").mkdir(parents=True)
+    (worktree / "kubernetes" / "geo" / "mongodb-geo-deployment.yaml").write_text(
+        "kind: Deployment\nspec:\n  volumes:\n    - configMap:\n        name: mongo-geo-script\n", encoding="utf-8"
+    )
+    (worktree / "k8s-geo-mongo.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (worktree / "k8s-rate-mongo.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    deployment = {"spec": {"template": {"spec": {"volumes": [{"configMap": {"name": "mongo-geo-script"}}]}}}}
+
+    def run(command: str, *, timeout: float = 60) -> tuple[int, str]:
+        if "get deployment" in command:
+            return 0, json.dumps(deployment)
+        if "get configmap" in command:
+            return 1, "NotFound"
+        return 0, ""
+
+    plan = MissingConfigMap()
+    facts = plan.diagnose(run, NAMESPACE, "mongodb-geo", {}, worktree)
+    (restore, _), _ = plan.correct_repair(facts)
+
+    assert restore == f"kubectl -n {NAMESPACE} create configmap mongo-geo-script --from-file=k8s-geo-mongo.sh"
+    assert plan.root_cause(facts, {})["static_context"] == ["k8s-geo-mongo.sh"]
+
+
+def test_a_failed_plan_records_why_it_stopped(scripted: dict[str, Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    worktree = _memory_worktree(scripted["tmp"])
+    _request(worktree, scripted["tmp"], monkeypatch)
+    (scripted["state"] / "policies.json").write_text(json.dumps({"items": []}), encoding="utf-8")
+    _directive(scripted["store"])
+    request = _request(worktree, scripted["tmp"], monkeypatch)
+
+    result = execute_incident(request, model="gpt-6-luna", provider="codex")
+
+    assert result.status.value == "failed"
+    (turn,) = _turn_records(scripted["store"])
+    assert turn["outcome"] == "failed"
+    assert "scripted plan stopped" in str(turn["plan_error"])

@@ -155,6 +155,10 @@ def run(argv: list[str], *, stdin: str, store: Store | None = None) -> int:
         store.record_turn(f"{rollout.session_id}:{turn.started_at}", turn.record(outcome="crashed", **record_extra))
         print(f"scripted codex: {exc}", file=sys.stderr)
         return 1
+    stopped = [note for note in answer.get("repair_changes") or [] if str(note).startswith("scripted plan stopped")]
+    if stopped:
+        record_extra["plan_error"] = stopped[0]
+        print(f"scripted codex: {stopped[0]}", file=sys.stderr)
     text = json.dumps(answer)
     turn.finish(text)
     store.record_turn(
