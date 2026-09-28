@@ -404,12 +404,14 @@ def test_a_stray_incidents_answer_passes_the_brokers_recorded_actions_rule() -> 
         "status": "clear",
     }
 
-    def closure(result: dict[str, Any]) -> BrokerClosure:
+    firing = {**cleared, "status": "firing", "fingerprints": ["x"]}
+
+    def closure(result: dict[str, Any], final: dict[str, Any] = cleared) -> BrokerClosure:
         return BrokerClosure.model_validate(
             {
                 "request": request,
                 "result": result,
-                "final_detector_states": [cleared],
+                "final_detector_states": [final],
                 "detected_at": T0.isoformat(),
                 "dispatched_at": T0.isoformat(),
                 "responder_completed_at": T0.isoformat(),
@@ -419,5 +421,8 @@ def test_a_stray_incidents_answer_passes_the_brokers_recorded_actions_rule() -> 
 
     BrokerService._validate_recorded_actions(closure(stray_result(request)))
     completed = {**stray_result(request), "status": "completed"}
+    # F16: with health clear, a no-action completion closes (as cancelled);
+    # while health is not verified clear it is still rejected.
+    BrokerService._validate_recorded_actions(closure(completed))
     with pytest.raises(Exception, match="successful recorded repair action"):
-        BrokerService._validate_recorded_actions(closure(completed))
+        BrokerService._validate_recorded_actions(closure(completed, firing))
