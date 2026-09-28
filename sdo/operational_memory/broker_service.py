@@ -210,6 +210,9 @@ class BrokerLedger(BaseModel):
     # Provider accounting summed over every reflection attempt for the incident.
     reflection_usage: dict[str, int | float] = Field(default_factory=dict)
     reflection_validation_error: str | None = None
+    # The last reflection backend failure (a crashed or failed model turn).
+    # Failed turns count as attempts, so a backend that always fails is bounded.
+    reflection_backend_error: str | None = None
     # Set when the broker recorded a deterministic no-op reflection instead of
     # running an LLM turn (a repeated exact-match success).
     reflection_skipped_reason: str | None = None
@@ -548,15 +551,21 @@ class BrokerService:
             ledger.reflection_started = False
             self._save(ledger)
         if ledger.reflection_attempts >= self.max_reflection_attempts:
-            failure = ledger.reflection_validation_error or "unknown validation failure"
             if changed_paths:
                 self._rollback_incomplete_reflection(worktree)
             ledger.reflection_backend_completed = True
             ledger.reflection_summary = "No operational-memory update was accepted after bounded validation."
             ledger.reflection_learning_decision = "no_change"
-            ledger.reflection_no_change_reason = (
-                "Learning was attempted, but every proposed update failed independent validation: " + failure
-            )
+            if ledger.reflection_validation_error is None and ledger.reflection_backend_error is not None:
+                ledger.reflection_no_change_reason = (
+                    "Learning was attempted, but the reflection backend failed on every attempt: "
+                    + ledger.reflection_backend_error
+                )
+            else:
+                ledger.reflection_no_change_reason = (
+                    "Learning was attempted, but every proposed update failed independent validation: "
+                    + (ledger.reflection_validation_error or "unknown validation failure")
+                )
             ledger.reflection_proposed_changes = []
             self._save(ledger)
             return self._commit_noop_reflection(ledger, worktree)
@@ -565,19 +574,29 @@ class BrokerService:
                 ledger.reflection_session_mode = self.reflection_session
             ledger.reflection_started = True
             self._save(ledger)
-            turn = self.reflector.resume(
-                session_id=session_id or "",
-                incident_id=ledger.incident_id,
-                worktree=worktree,
-                outcome=outcome,
-                history=outcomes,
-                outcome_commit=ledger.outcome_commit or "",
-                validation_feedback=retry_feedback,
-                topology_review=self._topology_review(ledger),
-                rejected_proposal_diff=self._rejected_reflection_diff(ledger) if retry_feedback else None,
-                session_mode=ledger.reflection_session_mode,
-                closure=closure,
-            )
+            try:
+                turn = self.reflector.resume(
+                    session_id=session_id or "",
+                    incident_id=ledger.incident_id,
+                    worktree=worktree,
+                    outcome=outcome,
+                    history=outcomes,
+                    outcome_commit=ledger.outcome_commit or "",
+                    validation_feedback=retry_feedback,
+                    topology_review=self._topology_review(ledger),
+                    rejected_proposal_diff=self._rejected_reflection_diff(ledger) if retry_feedback else None,
+                    session_mode=ledger.reflection_session_mode,
+                    closure=closure,
+                )
+            except Exception as exc:
+                # A failed turn is an attempt, so a backend that always fails is bounded.
+                if self.broker.proposal_changed_paths(worktree):
+                    self._rollback_incomplete_reflection(worktree)
+                ledger.reflection_attempts += 1
+                ledger.reflection_backend_error = f"{type(exc).__name__}: {exc}"[:2000]
+                ledger.reflection_started = False
+                self._save(ledger)
+                raise
             ledger.reflection_attempts += 1
             if retry_feedback:
                 ledger.reflection_fresh_retry_attempts += 1

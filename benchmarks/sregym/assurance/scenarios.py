@@ -161,7 +161,9 @@ CHAOS_SCENARIOS: dict[str, tuple[IncidentSpec, ...]] = {
             "chaos/reflection-crash-always",
             26,
             reflection="crash_always",
-            expect=Expectation(resolution="loud-failure", not_learned=(MCM_DETECTOR,)),
+            # The broker bounds failing reflection turns, records no_change and completes the
+            # closure, so the controller moves on without learning.
+            expect=Expectation(not_learned=(MCM_DETECTOR,), min_reflection_attempts=2),
         ),
     ),
     "chaos-pause-apiserver": (
