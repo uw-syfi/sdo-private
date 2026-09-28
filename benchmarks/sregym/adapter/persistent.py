@@ -743,7 +743,15 @@ def _open_incident_summary(state: dict[str, Any]) -> str:
     """Why the controller's open incident has not closed, from its last runtime state."""
 
     if not state.get("incident_open"):
-        return f"; no incident open (dispatch state {state.get('dispatch_state') or 'unknown'!r})"
+        summary = f"; no incident open (dispatch state {state.get('dispatch_state') or 'unknown'!r})"
+        failure = state.get("closure_failure")
+        if isinstance(failure, dict) and failure.get("permanent"):
+            # A permanently failed closure blocks every later incident.
+            summary += (
+                f"; closure of {failure.get('incident_id')!r} failed permanently: "
+                f"{str(failure.get('last_error') or '').strip()[:500]}"
+            )
+        return summary
     request = state.get("incident_request") if isinstance(state.get("incident_request"), dict) else {}
     parts = [f"; incident {request.get('incident_id') or 'unknown'!r} is open"]
     result = state.get("incident_result")

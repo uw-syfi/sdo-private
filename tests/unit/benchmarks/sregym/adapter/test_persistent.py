@@ -601,6 +601,31 @@ class _StuckOps(FakeOps):
         return {}
 
 
+@dataclass
+class _ClosureFailedOps(FakeOps):
+    """A previous closure failed permanently, so the controller opens no new incident."""
+
+    def inject_after_resume(
+        self, control_namespace: str, generation: str, inject: Callable[[], None]
+    ) -> dict[str, float]:
+        inject()
+        self.states[control_namespace].update(
+            {
+                "dispatch_state": "idle",
+                "closure_state": "failed",
+                "closure_failure": {"incident_id": "incident-0", "permanent": True, "last_error": "broker exited 1"},
+            }
+        )
+        return {}
+
+
+def test_a_timeout_behind_a_permanently_failed_closure_says_so(tmp_path: Path) -> None:
+    with pytest.raises(PersistentControllerError) as raised:
+        _run(tmp_path, _ClosureFailedOps(), "s0", [])
+
+    assert "closure of 'incident-0' failed permanently: broker exited 1" in str(raised.value)
+
+
 def test_an_unverified_incident_timeout_names_the_open_incident_and_why_it_is_stuck(tmp_path: Path) -> None:
     with pytest.raises(PersistentControllerError) as raised:
         _run(tmp_path, _StuckOps(), "s0", [])
