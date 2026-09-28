@@ -1,0 +1,12 @@
+apiVersion: sdo.dev/v1alpha1
+kind: TrafficWorkload
+name: health
+purpose: health-probe
+ratePerSecond: 3
+scenarios:
+  - id: hotel-search
+    weight: 1
+  - id: hotel-recommendations
+    weight: 1
+  - id: user-login-check
+    weight: 1

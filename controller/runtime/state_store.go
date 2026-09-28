@@ -50,6 +50,8 @@ type RuntimeState struct {
 	ClosureReceipt             *ClosureReceipt         `json:"closure_receipt,omitempty"`
 	ClosureFailure             *ClosureFailure         `json:"closure_failure,omitempty"`
 	LastAcknowledgedIncidentID string                  `json:"last_acknowledged_incident_id,omitempty"`
+	// IncidentView is published for responders and never restored.
+	IncidentView *IncidentView `json:"incident_view,omitempty"`
 }
 
 func (state RuntimeState) Validate() error {

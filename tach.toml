@@ -80,6 +80,7 @@ path = "benchmarks.sregym.adapter"
 depends_on = [
     "benchmarks.sregym.protocol",
     "sdo.agent_runtime.lifecycle",
+    "sdo.agent_runtime.responder",
     "sdo.operational_memory",
     "sdo.controller_install",
 ]
@@ -88,8 +89,10 @@ depends_on = [
 path = "benchmarks.sregym.fastloop"
 depends_on = [
     "benchmarks.sregym.adapter",
+    "controller.builder",
     "sdo.agent_runtime.lifecycle",
     "sdo.controller_install",
+    "sdo.operational_memory",
 ]
 
 [[modules]]
@@ -114,6 +117,7 @@ depends_on = [
 [[modules]]
 path = "sdo.__main__"
 depends_on = [
+    "sdo.agent_runtime.responder",
     "sdo.operation",
 ]
 

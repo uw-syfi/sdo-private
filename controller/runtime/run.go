@@ -14,8 +14,11 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/client-go/kubernetes"
+
 	"sdo.dev/controller/core"
 	"sdo.dev/controller/sdk"
+	"sdo.dev/controller/sdk/traffic"
 )
 
 type RuntimeOptions struct {
@@ -23,7 +26,16 @@ type RuntimeOptions struct {
 	Stdout   io.Writer
 	Stderr   io.Writer
 	Provider SnapshotProvider
+	// Client, when set, replaces the kubeconfig clients of the long-running
+	// controller (observation, state, dispatch, and leader election), so the
+	// production wiring can run against a fake API server.
+	Client kubernetes.Interface
+	// StateBaselineStartTimeout bounds the state tracker's RBAC probes and
+	// initial sync; zero means defaultStateBaselineStartTimeout.
+	StateBaselineStartTimeout time.Duration
 }
+
+const defaultStateBaselineStartTimeout = 30 * time.Second
 
 type repeatedFlag []string
 
@@ -111,6 +123,26 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	resumeSyncTimeout := flags.Duration(
 		"resume-sync-timeout", time.Minute, "maximum wait for a fresh application cache when maintenance ends",
 	)
+	syntheticTraffic := flags.Bool(
+		"synthetic-traffic", true, "run the health judge's synthetic-traffic workloads in an isolated prober",
+	)
+	syntheticWarmup := flags.Duration(
+		"synthetic-traffic-warmup", 5*time.Second,
+		"maximum wait for a first sample of every synthetic scenario before the first evaluation after start or resume",
+	)
+	proberBinary := flags.String(
+		"prober-binary", "", "compiled traffic prober on the shared repository volume; the controller runs it as an isolated pod",
+	)
+	proberImage := flags.String("prober-image", "", "image that runs the prober binary; defaults to --responder-image")
+	proberURL := flags.String("prober-url", "", "use an already running prober at this URL instead of starting one")
+	cleanResponderHelpers := flags.Bool(
+		"clean-responder-helpers", true,
+		"delete pods and Jobs labelled "+ResponderHelperLabel+"=true once the responder completes",
+	)
+	stateBaseline := flags.Bool(
+		"state-baseline", true,
+		"attach the application's configuration changes since its last healthy baseline to each incident",
+	)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -150,13 +182,21 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err != nil {
 		return err
 	}
-	bootstrapProvider, err := core.NewKubernetesSnapshotProvider(*namespace)
-	if err != nil {
-		return fmt.Errorf("create Kubernetes snapshot provider: %w", err)
+	bootstrapProvider := &core.KubernetesSnapshotProvider{Namespace: *namespace, Client: options.Client}
+	leaseClient := options.Client
+	if options.Client == nil {
+		bootstrapProvider, err = core.NewKubernetesSnapshotProvider(*namespace)
+		if err != nil {
+			return fmt.Errorf("create Kubernetes snapshot provider: %w", err)
+		}
+		leaseClient, err = core.NewKubernetesClient()
+		if err != nil {
+			return fmt.Errorf("create dedicated leader-election client: %w", err)
+		}
 	}
-	leaseClient, err := core.NewKubernetesClient()
-	if err != nil {
-		return fmt.Errorf("create dedicated leader-election client: %w", err)
+	stateStartTimeout := options.StateBaselineStartTimeout
+	if stateStartTimeout <= 0 {
+		stateStartTimeout = defaultStateBaselineStartTimeout
 	}
 	elector := NewLeaseElector(leaseClient, *controlNamespace, *leaseName, *identity, *leaseDuration)
 	for {
@@ -192,7 +232,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	renewalErrors := maintainLeadership(renewalCtx, elector, renewalInterval)
 	stateConfigMapName := ""
 	if *controlNamespace == *namespace {
-		stateConfigMapName = "sdo-controller-state"
+		stateConfigMapName = controllerStateConfigMap
 	}
 	kubernetesCache, err := NewKubernetesCache(KubernetesCacheConfig{
 		Namespace: *namespace, Client: bootstrapProvider.Client, StateConfigMapName: stateConfigMapName,
@@ -200,22 +240,55 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err != nil {
 		return fmt.Errorf("create Kubernetes informer cache: %w", err)
 	}
+	trafficWorkloads := TrafficWorkloadNames(detectors)
+	var proberAPI ProberAPI
+	var proberAddress func(context.Context, bool) (string, error)
+	switch {
+	case !*syntheticTraffic || len(trafficWorkloads) == 0:
+	case *proberURL != "":
+		proberAddress = StaticProberURL(*proberURL)
+		proberAPI = HTTPProberClient{BaseURL: proberAddress}
+	case *proberBinary != "":
+		image := *proberImage
+		if image == "" {
+			image = *responderImage
+		}
+		pod := &ProberPod{
+			Client: bootstrapProvider.Client, Namespace: *controlNamespace, AppNamespace: *namespace, Image: image,
+			RepositoryPVC: *repositoryPVC, RepositoryMountPath: *repositoryMountPath,
+			RepositoryPVCSubPath: *repositoryPVCSubPath, Binary: *proberBinary,
+		}
+		proberAddress = pod.Address
+		proberAPI = HTTPProberClient{BaseURL: proberAddress}
+	}
+	trafficObserver := NewTrafficObserver(proberAPI, trafficWorkloads, func() { kubernetesCache.Notify(traffic.Watch) }, 0)
+	var snapshotProvider SnapshotProvider = kubernetesCache
+	if trafficObserver != nil {
+		snapshotProvider = TrafficSnapshotProvider{Base: kubernetesCache, Observer: trafficObserver}
+		defer trafficObserver.Stop()
+	}
 	argv := append([]string{*dispatcherCommand}, dispatcherArgs...)
 	jobEnvironment, err := parseResponderEnvironment(responderEnvironment)
 	if err != nil {
 		return err
 	}
+	jobEnvironment[ControllerStateEnvironment] = controllerStateLocation(*controlNamespace)
 	var dispatcher Dispatcher
 	switch *dispatcherMode {
 	case "local":
-		dispatcher = SubprocessDispatcher{Argv: argv, Timeout: *responseTimeout}
+		var environment []string
+		if proberAPI != nil && *proberURL != "" {
+			environment = append(environment, ProberURLEnvironment+"="+*proberURL)
+		}
+		environment = append(environment, ControllerStateEnvironment+"="+controllerStateLocation(*controlNamespace))
+		dispatcher = SubprocessDispatcher{Argv: argv, Env: environment, Timeout: *responseTimeout}
 	case "job":
 		dispatcher = KubernetesJobDispatcher{
 			Client: bootstrapProvider.Client, Namespace: *controlNamespace, Image: *responderImage,
 			Command: argv, ServiceAccount: "sdo-responder", RepositoryPVC: *repositoryPVC,
 			RepositoryMountPath: *repositoryMountPath, RepositoryPVCSubPath: *repositoryPVCSubPath,
 			CredentialsSecret: *credentialsSecret, PollInterval: time.Second,
-			Environment: jobEnvironment,
+			Environment: jobEnvironment, DispatchEnvironment: ProberEnvironment(proberAddress),
 		}
 	default:
 		return fmt.Errorf("unsupported dispatcher mode %q", *dispatcherMode)
@@ -230,7 +303,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		RepairPolicy:        *repairPolicy,
 		FiringThreshold:     2, ClearThreshold: 2, BatchDebounce: 500 * time.Millisecond,
 		ConfirmationInterval: time.Second,
-	}, detectors, kubernetesCache, dispatcher, start)
+	}, detectors, snapshotProvider, dispatcher, start)
 	if err != nil {
 		return err
 	}
@@ -251,9 +324,20 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			return err
 		}
 	}
+	var stateTracker *StateTracker
+	if *stateBaseline {
+		stateTracker = NewStateTracker(StateTrackerConfig{Client: bootstrapProvider.Client, Namespace: *namespace})
+		controller.Baseline = stateTracker
+		defer stateTracker.Stop()
+	}
+	if *cleanResponderHelpers {
+		controller.Helpers = KubernetesHelperCleaner{
+			Client: bootstrapProvider.Client, Namespaces: []string{*namespace, *controlNamespace},
+		}
+	}
 	controller.CanAct = elector.IsLeader
 	controller.GuardAction = elector.GuardContext
-	stateStore := NewConfigMapStateStore(bootstrapProvider.Client, *controlNamespace, "sdo-controller-state")
+	stateStore := NewConfigMapStateStore(bootstrapProvider.Client, *controlNamespace, controllerStateConfigMap)
 	if err := controller.AttachStateStore(ctx, stateStore); err != nil {
 		return fmt.Errorf("restore controller state: %w", err)
 	}
@@ -302,12 +386,87 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err := encoder.Encode(desired.Record()); err != nil {
 		fmt.Fprintln(stderr, err)
 	}
+	// startTraffic makes sure the prober runs, clears its observations, and
+	// waits briefly for a first sample of every scenario, so the next
+	// evaluation, which may be the all-clear that precedes a fault, judges
+	// observed traffic.
+	startTraffic := func() {
+		if trafficObserver == nil {
+			if len(trafficWorkloads) > 0 {
+				if err := encoder.Encode(map[string]any{
+					"synthetic_traffic": "disabled", "synthetic_traffic_workloads": trafficWorkloads,
+				}); err != nil {
+					fmt.Fprintln(stderr, err)
+				}
+			}
+			return
+		}
+		started := time.Now()
+		resetErr := trafficObserver.Reset(runCtx)
+		trafficObserver.Start(runCtx)
+		warm := trafficObserver.WaitWarm(runCtx, *syntheticWarmup)
+		record := map[string]any{
+			"synthetic_traffic": trafficObserver.Summary(), "synthetic_traffic_warm": warm,
+			"synthetic_traffic_startup_ms": time.Since(started).Milliseconds(),
+		}
+		if resetErr != nil {
+			record["synthetic_traffic_error"] = resetErr.Error()
+		}
+		if err := encoder.Encode(record); err != nil {
+			fmt.Fprintln(stderr, err)
+		}
+	}
+	stopTraffic := func() {
+		if trafficObserver != nil {
+			trafficObserver.Stop()
+		}
+	}
+	// startState begins observing the application's configuration, in
+	// parallel with the traffic warm-up, so the first quiet evaluation
+	// becomes its healthy baseline. The returned wait joins it and logs the
+	// outcome. It never fails operation: without it incidents simply carry
+	// no state changes.
+	startState := func() (wait func()) {
+		if stateTracker == nil {
+			return func() {}
+		}
+		started := time.Now()
+		done := make(chan error, 1)
+		go func() {
+			startCtx, cancelStart := context.WithTimeout(runCtx, stateStartTimeout)
+			defer cancelStart()
+			done <- stateTracker.Start(startCtx)
+		}()
+		return func() {
+			err := <-done
+			record := map[string]any{"state_baseline_startup_ms": time.Since(started).Milliseconds()}
+			if err != nil {
+				record["state_baseline_error"] = err.Error()
+			} else if unobserved := stateTracker.UnobservedKinds(); len(unobserved) > 0 {
+				record["state_baseline_unobserved_kinds"] = unobserved
+			}
+			if err := encoder.Encode(record); err != nil {
+				fmt.Fprintln(stderr, err)
+			}
+		}
+	}
+	stopState := func() {
+		if stateTracker != nil {
+			// A maintenance window may redeploy the application, so the old
+			// baseline no longer describes it.
+			stateTracker.Stop()
+			stateTracker.Reset()
+		}
+	}
 	if !desired.Paused {
 		kubernetesCache.Start(runCtx)
 		cacheStarted = true
 		if err := kubernetesCache.WaitForSync(runCtx); err != nil {
 			return fmt.Errorf("sync Kubernetes informer cache: %w", err)
 		}
+		waitState := startState()
+		startTraffic()
+		waitState()
 		if err := controller.Step(runCtx, time.Now().UTC(), nil); err != nil {
 			if runCtx.Err() != nil {
 				return nil
@@ -349,6 +508,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			fmt.Fprintf(stderr, "resume observation of namespace %s: %v\n", *namespace, syncErr)
 			return nil
 		}
+		waitState := startState()
+		startTraffic()
+		waitState()
 		kubernetesCache.TakeEvents()
 		applied = desired
 		if err := encoder.Encode(applied.Record()); err != nil {
@@ -402,6 +564,10 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			}
 			desired = change
 			if desired.Paused {
+				// A redeploying application would fail synthetic requests;
+				// resume starts again from empty windows.
+				stopTraffic()
+				stopState()
 				kubernetesCache.Stop()
 				kubernetesCache.TakeEvents()
 				applied = desired
@@ -617,9 +783,10 @@ var namespacePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
 
 func parseResponderEnvironment(entries []string) (map[string]string, error) {
 	reserved := map[string]bool{
-		"SDO_REQUEST_CONFIGMAP": true,
-		"SDO_RESULT_CONFIGMAP":  true,
-		"SDO_NAMESPACE":         true,
+		"SDO_REQUEST_CONFIGMAP":    true,
+		"SDO_RESULT_CONFIGMAP":     true,
+		"SDO_NAMESPACE":            true,
+		ControllerStateEnvironment: true,
 	}
 	result := make(map[string]string, len(entries))
 	for _, entry := range entries {

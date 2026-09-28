@@ -19,6 +19,7 @@ from benchmarks.sregym.runner.pipeline import load_pipeline_config, merge_stage_
 EXPERIMENTS = Path(__file__).resolve().parents[5] / "benchmarks" / "sregym" / "experiments"
 
 ORIGINAL = "missing_configmap_hotel_reservation"
+NETWORK_POLICY_BLOCK = "network_policy_block"
 VARIANTS = [
     ORIGINAL,
     "missing_configmap_mongodb_rate_hotel_reservation",
@@ -28,16 +29,18 @@ FOUR_FAULTS = [
     "readiness_probe_misconfiguration_hotel_reservation",
     ORIGINAL,
     "wrong_service_selector_hotel_reservation",
-    "network_policy_block",
+    NETWORK_POLICY_BLOCK,
 ]
 PIPELINES = {
     "sdo_codex_luna_variants.toml": VARIANTS,
     "sdo_codex_luna_sequence.toml": FOUR_FAULTS + FOUR_FAULTS,
+    "sdo_codex_luna_network_policy_block.toml": [NETWORK_POLICY_BLOCK],
 }
 BASELINES = {
     "codex_luna_variants_baseline.toml": (VARIANTS, 1),
     "codex_luna_sequence_baseline.toml": (FOUR_FAULTS + FOUR_FAULTS, 1),
     "codex_luna_baseline_x5.toml": ([ORIGINAL], 5),
+    "codex_luna_network_policy_block_baseline.toml": ([NETWORK_POLICY_BLOCK], 3),
 }
 
 
@@ -127,6 +130,7 @@ def test_fresh_reflection_arm_differs_from_its_reference_only_in_reflection_sess
 VERIFY_BASELINES = {
     "codex_luna_verify_baseline.toml": "codex_luna_baseline_x5.toml",
     "codex_luna_verify_sequence_baseline.toml": "codex_luna_sequence_baseline.toml",
+    "codex_luna_verify_network_policy_block_baseline.toml": "codex_luna_network_policy_block_baseline.toml",
 }
 
 

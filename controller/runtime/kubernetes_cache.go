@@ -16,6 +16,7 @@ import (
 
 	controllercore "sdo.dev/controller/core"
 	"sdo.dev/controller/sdk"
+	"sdo.dev/controller/sdk/traffic"
 )
 
 type KubernetesCacheConfig struct {
@@ -65,6 +66,10 @@ func NewKubernetesCache(config KubernetesCacheConfig, detectors []sdk.Detector) 
 		for _, watch := range detector.Spec().Watches {
 			if watch.Namespace != "" && watch.Namespace != config.Namespace {
 				return nil, fmt.Errorf("watch namespace %q does not match cache namespace %q", watch.Namespace, config.Namespace)
+			}
+			if watch.APIVersion == traffic.Watch.APIVersion && watch.Kind == traffic.Watch.Kind {
+				// Synthetic-traffic results arrive through Notify, not an informer.
+				continue
 			}
 			watch.Namespace = config.Namespace
 			declared[watch.APIVersion+"/"+watch.Kind] = watch
@@ -179,6 +184,13 @@ func (c *KubernetesCache) TakeEvents() []sdk.WatchKind {
 	c.pending = make(map[string]sdk.WatchKind)
 	c.order = nil
 	return events
+}
+
+// Notify queues a watch event that no informer produces, such as a synthetic
+// traffic result, for the observed namespace.
+func (c *KubernetesCache) Notify(watch sdk.WatchKind) {
+	watch.Namespace = c.config.Namespace
+	c.enqueue(watch)
 }
 
 func (c *KubernetesCache) enqueue(watch sdk.WatchKind) {

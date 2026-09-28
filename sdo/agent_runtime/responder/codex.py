@@ -10,7 +10,15 @@ from typing import TYPE_CHECKING
 
 from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_structured_turn, turn_usage
 from sdo.agent_runtime.responder.reflection import INCIDENT_REASONING_EFFORT
-from sdo.contracts import DetectorEvaluation, DetectorEvaluationStatus, Finding, IncidentRequest, IncidentResult
+from sdo.contracts import (
+    ROOT_CAUSE_EVIDENCE_KINDS,
+    DetectorEvaluation,
+    DetectorEvaluationStatus,
+    Finding,
+    IncidentRequest,
+    IncidentResult,
+    StateFieldChange,
+)
 from sdo.operational_memory import MemoryRepository, MemoryRepositoryError, WarmPlaybookMatch, warm_playbook_matches
 
 if TYPE_CHECKING:
@@ -85,6 +93,17 @@ def _incident_result_schema() -> dict[str, object]:
         "required": ["api_version", "kind", "namespace", "name"],
         "additionalProperties": False,
     }
+    # Only live evidence qualifies; static artifacts go to static_context.
+    evidence_item = {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string", "enum": list(ROOT_CAUSE_EVIDENCE_KINDS)},
+            "source": {"type": "string", "minLength": 1},
+            "observation": {"type": "string", "minLength": 1},
+        },
+        "required": ["kind", "source", "observation"],
+        "additionalProperties": False,
+    }
     properties: dict[str, object] = {
         "incident_id": {"type": "string", "minLength": 1},
         "status": {"type": "string", "enum": ["completed", "failed", "cancelled"]},
@@ -95,8 +114,15 @@ def _incident_result_schema() -> dict[str, object]:
                 "properties": {
                     "summary": {"type": "string", "minLength": 1},
                     "resources": {"type": "array", "items": object_ref, "minItems": 1},
+                    "evidence": {"type": "array", "items": evidence_item, "minItems": 1},
+                    "explained_detectors": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                        "minItems": 1,
+                    },
+                    "static_context": {"type": "array", "items": {"type": "string", "minLength": 1}},
                 },
-                "required": ["summary", "resources"],
+                "required": ["summary", "resources", "evidence", "explained_detectors", "static_context"],
                 "additionalProperties": False,
             },
         },
@@ -376,12 +402,86 @@ def _warm_instructions(playbooks: list[WarmPlaybook], namespace: str) -> str:
         "playbook's repair exactly (use its scripts when present). After restoring a missing ConfigMap or Secret "
         "that a pod failed to mount, delete the stuck pods or rollout-restart their workload instead of waiting "
         "for the kubelet mount backoff.\n"
-        "3. Run the playbook's verification once, then submit mitigation through any configured channel and return "
+        "3. Run the playbook's verification and `python3 -m sdo incident status` together in one command, then, "
+        "once it reports healthy, submit mitigation through any configured channel and return "
         "the IncidentResult, listing the applied playbook's path exactly as shown above in applied_playbooks.\n"
         "Fall back to a full investigation only if the sanity check contradicts the playbook's preconditions, the "
         "repair fails, or the verification fails; then treat relevant_outcomes as hypotheses and confirm "
         "assumptions against live state. Investigate any other active finding the playbook's fault does not "
         "explain normally.\n\n" + "\n".join(sections) + "\n"
+    )
+
+
+def _field_change(field: StateFieldChange) -> str:
+    if field.before is None and field.after is None:
+        return field.field
+    if field.before is None:
+        return f"{field.field}: {field.after}"
+    return f"{field.field}: {field.before} -> {field.after or '(none)'}"
+
+
+def _state_changes_section(request: IncidentRequest) -> str:
+    """Render the controller's configuration diff against the last healthy baseline."""
+
+    changes = request.state_changes
+    if changes is None:
+        return ""
+    window = f"baseline {_timestamp(changes.baseline_at)}, observed {_timestamp(changes.observed_at)}"
+    unobserved = (
+        f"(not observed: {', '.join(changes.unobserved_kinds)}; changes to these kinds are unknown)\n"
+        if changes.unobserved_kinds
+        else ""
+    )
+    if not changes.changes and not changes.omitted:
+        return (
+            "No Service, workload, NetworkPolicy, ConfigMap, Secret, or RBAC object changed since the last healthy "
+            f"state ({window}). The fault is likely not a configuration change in these kinds (for example a "
+            "process, data, permission-inside-a-database, or dependency fault); objects present then existed "
+            "unchanged while the application was healthy.\n"
+            f"{unobserved}\n"
+        )
+    lines = []
+    for change in changes.changes:
+        line = f"- {change.kind}/{change.name} {change.change}"
+        if change.fields:
+            line += ": " + "; ".join(_field_change(field) for field in change.fields)
+        lines.append(line + "\n")
+    omitted = f"({changes.omitted} more changes omitted)\n" if changes.omitted else ""
+    return (
+        f"Changes since the last healthy state ({window}; SDO's deterministic configuration diff, with "
+        "ConfigMap and Secret values shown only as digests):\n"
+        f"{''.join(lines)}{omitted}{unobserved}"
+        "A change listed here happened after the application was last verified healthy and is a prime suspect. "
+        "Objects not listed existed unchanged while the application was healthy: however suspicious their names "
+        "or contents look, they did not cause this incident on their own. If no listed change explains the "
+        "symptoms, the fault is likely not a configuration change in these kinds.\n\n"
+    )
+
+
+def _verification_instructions() -> str:
+    return (
+        "Verify before you submit or return: after the repair, run `python3 -m sdo incident status` (exit 0 "
+        "healthy, 1 unhealthy, 3 unavailable; about 3-5 seconds). It runs the health judge's verify burst through "
+        "SDO's isolated prober, the same synthetic traffic the controller requires before it closes this incident. "
+        "It also reports unhealthy while the controller's other health detectors still fire (a fault traffic "
+        "cannot see yet), and it lists configuration that changed after this request was taken, which the "
+        "request's state diff lacks. "
+        "Do not submit mitigation through any channel, and do not return a completed result, until it reports "
+        "healthy. When it reports unhealthy, its failing scenarios, status codes, and request paths are live "
+        "evidence: a change that leaves them failing did not fix the incident, however plausible the artifact it "
+        "addressed, so keep investigating along those request paths. Only when it reports unavailable, rely on "
+        "your own verification of the health objective. Record its final output as a verification_evidence entry "
+        "named `sdo-incident-status`.\n\n"
+        "Every confirmed root cause needs live evidence: a detector finding (source: its detector ID), a failing "
+        "synthetic scenario (source: its scenario ID), a change listed since the last healthy state (source: its "
+        "`Kind/name`), or a live observation (source: the command; observation: what its output showed). Scripts, "
+        "manifests, ConfigMap bodies, source files, and architecture notes show what could go wrong, not what did: "
+        "list them only in static_context. Name in explained_detectors the detectors whose findings the cause "
+        "explains; they must clear after your fix, and SDO checks that they do.\n\n"
+        "Label every pod or Job you create only to investigate or check (debug, curl, DNS, or database-client "
+        "pods) with `sdo.dev/responder-helper=true`, for example `kubectl run ... --labels "
+        "sdo.dev/responder-helper=true`; the controller deletes them when you finish. Never put that label on "
+        "application workloads.\n\n"
     )
 
 
@@ -396,6 +496,7 @@ def _responder_prompt(request: IncidentRequest) -> str:
         f"You are the SDO incident responder for incident {request.incident_id}.\n\n"
         "Work autonomously in the supplied repository and Kubernetes namespace to resolve every triggering finding. "
         f"{strategy}"
+        f"{_verification_instructions()}"
         "During this response, "
         "`.sdo/` is read-only. Do not create, edit, or delete any path under `.sdo/`. The controller independently "
         "verifies recovery after this response and records the authoritative outcome; only then may the broker open "
@@ -407,7 +508,8 @@ def _responder_prompt(request: IncidentRequest) -> str:
         f"{additional_context}\n"
         f"{_inlined_health_objective(request)}"
         f"{_detector_evidence(request)}\n"
-        f"Incident request:\n{request.model_dump_json(indent=2, exclude={'detector_history'})}\n"
+        f"{_state_changes_section(request)}"
+        f"Incident request:\n{request.model_dump_json(indent=2, exclude={'detector_history', 'state_changes'})}\n"
     )
 
 

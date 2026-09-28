@@ -1250,3 +1250,181 @@ Coordinator-directed, 2026-09-27. Four harness items from 3.4, each test-first, 
   - **Implication:** the host fits about 8 concurrent lanes, against about 4 at 1 + 3. Budget about 20 GB of disk per lane.
   - **Keep at least 100 GB free on `/mnt/data`.** When the disk filled to 100% during this work, idle clusters' MongoDB pods crashed with "no space left on device".
   - **Next action:** in the first 1 + 1 run, compare TTD and TTM against the 1 + 3 runs. That checks that the responder and detector builds sharing one worker don't slow incident handling.
+
+## Feedback-loop e2e check on a first encounter (2026-09-28)
+
+Goal: show whether the end-to-end traffic detectors, the incident-status gate and the healthy-state diff (`vic/feat/robust-feedback-loop`, record in `docs/feedback-loop-DECISIONS.md`) stop the coding agent (Codex gpt-6-luna) from declaring success early or following the decoy ConfigMaps, on a first encounter. Arms: SDO (persistent controller, no incident memory) x3, stock Codex x3, Codex + verify x3.
+
+### Landing the feedback loop
+
+- **Checks on the merge result, not only the branch head.** The branch was one commit behind main (`8cadce1`) when I started; the other agent then rebased it (head `1730b0f`). I merged it `--no-ff` onto main in a separate worktree (`151bda5`) and ran every check there, which covers the branch head plus main: `format_code.sh` (no diff), `check_errors.sh`, `type_check.sh` (pyright, 0 errors), `check_arch.sh` (tach), the full unit suite (1801 passed, 2 skipped, serially; xdist collects different parametrizations per worker in this repo, so `-n` errors at collection), and `go test ./...` in `controller/sdk`, `core`, `runtime` (all ok). The 9 `test_worker_image_preflight.py` failures the feedback agent saw were its missing submodule: 9/9 pass with `third_party/sregym` initialized.
+  - The first check run, on the pre-rebase head `44a40aa`, failed tach (the adapter and `sdo.__main__` importing `sdo.agent_runtime.responder`) and pyright (`TrafficSLO` constructed by field name instead of alias). The feedback agent had those fixes in flight (`1730b0f` and its parent), so I waited for them instead of duplicating them.
+- **The push to `origin main` was refused by the local permission system** (auto-mode classifier, "out-of-place publication"), although the task authorised it. I did not work around the refusal. The merge and everything below live on branch `vic/exp/feedback-loop-e2e` (merge `151bda5` + experiment commits), and all runs use that worktree (`/mnt/data/shli/sdo-worktrees/luna-reuse-merge`) instead of the main checkout. The main checkout was left on main `8cadce1` with its untracked `bench/` and `sdo_paper/` untouched. **Landing on main (and main's CI) needs the user's approval.**
+
+### Problem: `network_policy_block` (user-directed)
+
+- **Decision (user-directed): evaluate on `network_policy_block`, not `wrong_service_selector_hotel_reservation`.** Last round Codex failed it once and passed it once in `codex_sequence` (pass 1 blamed the decoy "revoked DB roles", pass 2 passed), so it is genuinely flaky. `wrong_service_selector` failed on both passes: consistent, so less informative about the loop. The fault is a deny-all ingress+egress NetworkPolicy `deny-all-recommendation` on `io.kompose.service=recommendation`; the healthy-state diff should name the new NetworkPolicy and the traffic generator's `/recommendations` route should fail. The decoy ConfigMaps `failure-admin-geo`/`failure-admin-rate` are present as always.
+- **Configs** (`a398f2e`): `sdo_codex_luna_network_policy_block.toml` (single-stage persistent-controller pipeline; defaults identical to `sdo_codex_luna_persistent.toml`), `codex_luna_network_policy_block_baseline.toml` (stock, `repeat = 3`) and `codex_luna_verify_network_policy_block_baseline.toml` (`verify_protocol = true`, `repeat = 3`). Judge `codex-gpt-6-luna` (xhigh), effort `medium` explicit, `kind_worker_nodes = 1`, `worker_cpu_limit = "3"`. `test_luna_experiment_configs.py` pins each to its reference (SDO defaults == persistent defaults; the baseline differs from `codex_luna_baseline.toml` only in problems and repeat; the verify arm differs from the baseline only in the flag).
+
+### Runs, bugs and fixes
+
+Wrapper scripts, lane events (`queue.events`, with a quota, disk and load reading at every start) and 30 s load samples live in `<scratch>/np/`. All runs use the merged worktree, and every lane is a 1+1 kind cluster (`luna-w0`, `-w1` and `-w2` were recreated from 1+3 by the harness).
+
+- **Infra bug 1: the stock Codex CLI install broke (fixed in `a3c02c4`, SREGym `cbb9715f`).** The first Codex (`20260928_050435_codex`) and Codex + verify (`20260928_050500_codex`) launches never started an agent. SREGym installs `@openai/codex@latest` at container start, and npm `latest` had just become 0.158.0, whose linux-x64 platform tarball returns 404. `install.rc = 1`, and the attempt ended at once with no rollout.
+  - **Decision:** pin the stock arm to 0.157.1, the version `controller/Dockerfile.runtime` bakes into the SDO images, so both arms run one CLI. It is set in SREGym's `agents.yaml` (`agent_version`) on fork branch `vic/fix/pin-codex-cli`.
+  - Test-first: `tests/unit/benchmarks/sregym/harness/test_codex_cli_version.py` fails on the unpinned registry.
+  - No rebuild is needed, because the CLI installs at container start.
+  - Both aborted launches are infrastructure failures, not counted. The lanes were killed by process group, the clusters checked clean, and the arms relaunched at 05:20Z.
+  - **Rejected:** pinning only via env for these runs. It would leave the next run on a moving `latest`.
+- **SDO bug 1: the health-judge lifecycle failed on a false repository-escape (fixed in `0d42e22`).** The unseeded lifecycle run (`20260928_050410_pipeline_…`) failed all three round-1 correction attempts with "Codex lifecycle session read outside the application repository".
+  - Every flagged command was in-repo. The audit's absolute-path regex matched route alternatives inside quoted search patterns, such as `rg -n 'HandleFunc|/hotels|/recommendations' services`. The new traffic-authoring prompt makes the judge look for routes, so this now hits on every lifecycle.
+  - **Fix, test-first** (`test_repository_audit_allows_route_alternatives_in_quoted_search_patterns` and `..._still_rejects_external_paths_near_search_patterns`):
+    - unwrap Codex's `bash -lc` wrapper;
+    - inside quoted arguments, mask a `/` that follows `|` or `(`, since that starts a regex alternative or group.
+  - Unquoted paths, quoted absolute paths (`cat '/etc/passwd'`) and pipes into absolute commands are still rejected.
+  - The run cost 3.63M tokens (0.26M uncached, 3.34M cache read, 27k output; 79 requests) and produced nothing. It is not counted, and its tokens are reported as waste, not as the lifecycle cost.
+  - **Rejected:** loosening the audit to allow any path under `/` in quotes. That would admit `cat '/etc/passwd'`.
+- **Quota reading bug (scratch only):** `quota.sh` first scanned the main checkout's logs, not the worktree's, so it saw no new rollouts. It now scans both. Readings: 90% at 05:04Z, 90% at 05:39Z, 90% at 07:45Z; no error events and no `rate_limit_reached`.
+- **Session-limit pause:** the orchestrating session hit its own limit from about 05:45Z to 07:43Z. Nothing ran in that window apart from the finished Codex arms.
+
+### Codex arms (post-fix, both launched 05:20Z; all 3+3 attempts completed)
+
+`20260928_052020_codex` (stock, luna-w1) and `20260928_052039_codex` (+ verify, luna-w2). Behaviour comes from the rollouts (`<scratch>/np/codex_rollouts.py`). `turn_context` shows effort `medium` in all 6. The verify appendix is present in all 3 verify rollouts and absent from all 3 stock ones.
+
+| Arm | # | Diag | Mit | TTD s | Decoy cmds | NetworkPolicy cmds | Probed `/recommendations` | Final "fix" | Helpers left |
+|---|---|---|---|---|---|---|---|---|---|
+| stock | 1 | fail (0) | fail | 52.5 | 6 | 0 | no | patched `mongodb-rate` (Mongo roles) | none |
+| stock | 2 | **pass (100)** | **pass** | 59.1 | 0 | 4 | no | deleted `deny-all-recommendation` | none |
+| stock | 3 | fail (0) | fail | 45.6 | 6 | 0 | no | re-granted Mongo roles via `kubectl run grant-geo` | **`grant-geo`, `verify-geo` left** |
+| verify | 1 | fail (0) | fail | 145.1 | 3 | 0 | no | "Mongo startup race"; patched `recommendation` initContainer | none |
+| verify | 2 | fail (0) | fail | 118.8 | 0 | 0 | no | "user Mongo startup race"; toggled frontend Service NodePort | none |
+| verify | 3 | fail (7.33) | fail | 96.0 | 0 | 0 | no | "Consul startup race"; patched frontend | none (`--rm` + delete) |
+
+### Lifecycle seed (`30e023d`, run `20260928_074550_pipeline_…`, luna-w0, after `0d42e22`)
+
+- **The lifecycle succeeded in about 13 min** (deploy 07:45:55, lifecycle commit 07:58:26). The health judge authored:
+  - one generator file `.sdo/diagnostics/traffic/generators/hotel_reservation.go` with three scenarios: `hotel-search`, `hotel-recommendations` (depends on frontend, recommendation, profile and their Mongo) and `user-login-check`;
+  - `workloads/health.yaml` (health-probe, 3 req/s) and `workloads/verify.yaml` (verify-burst, 12 req/s for 3 s);
+  - health detectors `objective`, `service-endpoints` and `traffic-health`.
+- **Checks:**
+  - **Generators compile.** The lifecycle's isolated validator accepted them, and the controller built and started the prober from them.
+  - **The healthy probe is quiet and warm.** `synthetic_traffic_warm: true` came in 2.27 s, with all three scenarios `qualified`. There were no findings before injection, and no findings in the 25 evaluations (about 80 s) after the repair.
+  - **The diff tracker was running, but the check exposed SDO bug 2 (below).** `state_baseline_startup_ms: 2273`, no unobserved kinds.
+- **Decision: the seed is `30e023d` exactly** (lifecycle commit only: empty `outcomes.jsonl`, only the lifecycle `health-objective` playbook, no incident detectors). It was cloned into `<scratch>/np/seed/lifecycle_workspace` and set through `SREGYM_APP_WORKSPACE_SEED_DIR` for every counted SDO run, as with `64b3ac2` before. The workspace's later reflection commits (`7eef8e9`, `992fe9d`) were excluded.
+- **One-time lifecycle cost** (from `sdo_turn_usage.jsonl`, reported separately in the analysis). The failed first attempt's 3.63M tokens are waste from bug 1, not lifecycle cost.
+- **This run then answered the incident, unseeded. Decision: report it as supplementary run "SDO-0", not as one of the 3.** Two reasons: its lifecycle was part of the same stage, and its healthy-state diff was broken by bug 2. Result: diagnosis pass and mitigation pass. The diagnosis was POSTed 23.4 s after injection, and the mitigation was submitted 56.8 s after.
+
+### SDO bug 2: the healthy-state diff was frozen at startup (fixed in `13d5613`, images rebuilt)
+
+- **Symptom (SDO-0's responder prompt):** "No Service, workload, NetworkPolicy, ConfigMap, Secret, or RBAC object changed since the last healthy state (baseline 07:58:48.995Z, observed 07:58:51.723Z). The fault is likely not a configuration change … (for example a process, data, permission-inside-a-database …)". `deny-all-recommendation` had been created at 07:58:50.22Z, inside that window.
+  - This is the worst failure mode for a red-herring defence: it points the agent at the decoy's story ("revoked DB roles").
+  - The responder was not misled, because the static `network-policy-total-isolation` finding named the policy.
+- **Root cause.** `run.go` starts the tracker as `Start(startCtx)` with a 30 s startup context and `defer cancelStart()`. `StateTracker.Start` derived the informers' lifetime from that context, so the informers stopped the moment `Start` returned, and every later diff read the initial list.
+  - The feedback agent's combined smoke passed because its driver called `Start` with a long-lived context.
+  - The Go unit tests never cancelled the start context.
+- **Fix, test-first.** `ctx` now bounds only the RBAC probes and the initial sync, and `Stop` ends observation (`context.WithoutCancel`).
+  - `TestStateTrackerKeepsObservingAfterItsStartContextEnds` reproduces the run.go pattern and failed before the fix.
+  - `TestStateTrackerStopEndsObservation` keeps `Stop` authoritative.
+  - `startTraffic` already uses `runCtx` and is unaffected.
+  - **Rejected:** changing only run.go to pass `runCtx`. It would leave a trap in the API for the next caller.
+- **The SDO images were rebuilt after the fix** (`sdo-controller` `47af54578ec6`, `sdo-sregym-responder` `70b4113ee18d`, `sdo-detector-validator` `aba7b255eb0c`). The kind image preflight reloads changed digests on each lane.
+- **Runs before the fix:** SDO-0 only (supplementary). **Runs after:** SDO-1..3.
+
+### SDO runs (user-directed speed-up: three lanes at once)
+
+- **Decision (user-directed): run the 3 SDO runs concurrently, one per lane, staggered 1 min.** sdo1 is on luna-w0 (08:19Z), sdo2 on luna-w1 (08:20Z) and sdo3 on luna-w2 (08:21Z), each seeded from `30e023d`, with load averages of 7.9, 5.3 and 9.0 at start.
+  - The arms rotate across clusters: w1 ran stock Codex and w2 ran Codex + verify, before each hosted one SDO run.
+  - No new lanes were needed, since w0 to w2 were idle.
+
+## Feedback-loop e2e results: `network_policy_block`, first encounter
+
+Code: branch `vic/exp/feedback-loop-e2e` at `13d5613` (merge `151bda5` + fixes `a3c02c4`, `0d42e22`, `13d5613`), SREGym `cbb9715f`. Judge `codex-gpt-6-luna` (xhigh); agents gpt-6-luna at `medium`; 1+1 kind lanes; `worker_cpu_limit = 3`.
+
+Tokens come from `incident_cost` (cache-aware). Cost weights are in base-input units: cache read 0.1, output 5. USD uses agentshim's 2026-09-27 gpt-6-luna table.
+
+Column definitions:
+- **TTD:** diagnosis POST minus injection; no judge time precedes it.
+- **TTM:** `incident_cost`'s judge-free headline, the last state-changing mutation after injection.
+- **Raw:** mitigation POST minus injection, including the diagnosis-grading wait.
+- A failed run's TTM is only when it stopped changing things, not a recovery.
+
+### Per-run results
+
+| Arm | Run | Lane | Diag | Mit | TTD s | TTM s | Raw s | Uncached in | Cached in | Output | Weighted tok | USD | Requests |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| SDO | sdo1 `20260928_081908` | w0 | pass | pass | 21.0 | 43.4 | 60.1 | 29,983 | 139,520 | 2,170 | 54,785 | 0.0055 | 8 |
+| SDO | sdo2 `20260928_082009` | w1 | pass | pass | 15.1 | 26.7 | 45.4 | 24,305 | 139,264 | 1,902 | 47,741 | 0.0048 | 9 |
+| SDO | sdo3 `20260928_082110` | w2 | pass | pass | 18.9 | 30.4 | 46.8 | 25,167 | 128,256 | 1,979 | 47,888 | 0.0048 | 8 |
+| **SDO mean** | | | **3/3** | **3/3** | **18.3** | **33.5** | **50.8** | 26,485 | 135,680 | 2,017 | 50,138 | 0.0050 | 8.3 |
+| Codex | #1 `20260928_052020` | w1 | fail | fail | 52.5 | 109.4 | 125.5 | 56,344 | 645,120 | 3,256 | 137,136 | 0.0137 | 16 |
+| Codex | #2 | w1 | pass | pass | 59.1 | 63.7 | 77.9 | 41,235 | 396,288 | 1,784 | 89,784 | 0.0090 | 12 |
+| Codex | #3 | w1 | fail | fail | 45.6 | 71.3 | 85.3 | 37,555 | 405,248 | 2,290 | 89,530 | 0.0090 | 13 |
+| **Codex mean** | | | **1/3** | **1/3** | **52.4** | **81.5** | **96.2** | 45,045 | 482,219 | 2,443 | 105,483 | 0.0105 | 13.7 |
+| Codex + verify | #1 `20260928_052039` | w2 | fail | fail | 145.1 | 261.1 | 276.1 | 58,493 | 866,560 | 6,913 | 179,714 | 0.0180 | 23 |
+| Codex + verify | #2 | w2 | fail | fail | 118.8 | 178.6 | 181.2 | 58,472 | 1,048,576 | 5,343 | 190,045 | 0.0190 | 28 |
+| Codex + verify | #3 | w2 | fail (7.33) | fail | 96.0 | 205.6 | 208.3 | 41,255 | 646,656 | 3,710 | 124,471 | 0.0124 | 22 |
+| **Codex + verify mean** | | | **0/3** | **0/3** | **120.0** | **215.1** | **221.9** | 52,740 | 853,931 | 5,322 | 164,743 | 0.0165 | 24.3 |
+
+- **SDO's incident rows count the responder only.**
+- **Reflection** runs after verified recovery and is not incident time. It cost 349,780, 623,987 and 549,990 raw tokens: 106k, 150k and 131k weighted, or $0.011 to $0.015.
+- **Supplementary SDO-0** (`20260928_074550`: unseeded lifecycle in the same stage; state diff broken by bug 2) passed both. TTD 23.4 s, TTM 29.1 s, raw 56.8 s; responder 233,193 tokens (59,797 weighted, $0.0060, 11 requests).
+- **One-time lifecycle** (seed `30e023d`): 2,086,905 raw tokens. That is 233,502 uncached input, 1,838,336 cached input and 15,067 output: 492,671 weighted, $0.049, 43 requests, about 13 min. The failed pre-fix lifecycle wasted another 3,629,184 tokens (729,049 weighted, 79 requests).
+
+### Loop evidence, SDO runs (from the controller logs, responder rollouts and strict receipts)
+
+| Evidence | sdo1 | sdo2 | sdo3 | SDO-0 (pre-fix diff) |
+|---|---|---|---|---|
+| First finding after injection | +0.0 s, `health-objective/network-policy-total-isolation` naming `deny-all-recommendation` | same | same | same |
+| Traffic detector fired | no | no | **yes, +20.4 s**: `scenario-slo.hotel-search` and `user-login-check` (timeout 3/5), then `hotel-recommendations` | no |
+| Probe warm and qualified | yes (3/3 scenarios) | yes | yes | yes |
+| Healthy-state diff in the prompt | `NetworkPolicy/deny-all-recommendation added: podSelector io.kompose.service=recommendation; policyTypes Ingress,Egress` (only change) | same | same | **"No … NetworkPolicy … changed"** (bug 2) |
+| Diff cited as evidence | not cited as `state-change` | `state-change`, verified | `state-change`, verified | n/a |
+| `sdo incident status` runs | 1 (+43.1 s): HEALTHY | 1 (+27.2 s): HEALTHY | 1 (+34.5 s): HEALTHY | 1 (+30.8 s): HEALTHY |
+| Submit helper refused (exit 4) | never | never | never | never |
+| Diagnosis verification | `confirmed` (detector finding verified) | `confirmed` (finding + state change verified) | `confirmed` (finding + state change verified) | `confirmed` |
+| Helpers created / cleaned | none created; `cleaned_helpers` empty | none | none | none |
+| Decoys touched or cited | no (0 commands; not in prompt or result) | no | no | no |
+| Repair | `kubectl delete networkpolicy deny-all-recommendation` | same | same | same |
+| Learned | incident detector + `network-policy-total-isolation` playbook from a `confirmed` cause | same | same | same |
+
+- **Why the traffic detector mostly stayed quiet.** The fault was repaired 25 to 35 s after injection. In sdo1, sdo2 and SDO-0 the probe saw no SLO violation in that window. In sdo3 every scenario timed out from +16 s, including ones that do not use `recommendation`.
+  - **Hypothesis (not verified):** frontend-to-recommendation gRPC connections opened before the policy kept working for a while, until something re-dialled.
+  - Either way, on this fault the end-to-end probe was a slow, intermittent backstop. The static rule and the fixed diff named the cause at dispatch.
+- **Fairness note on the static rule.** `network-policy-total-isolation` is generic. It fires for any NetworkPolicy that selects a required workload and denies all ingress and egress, and it names no fault or decoy. The health judge wrote it from the goal's all-Deployments objective and the judge prompt's generic NetworkPolicy coverage requirement. It still matches this fault exactly, so this problem is easy for SDO's static layer on a first encounter.
+
+### Codex arms: loop-relevant behaviour (from the rollouts)
+
+| | Stock #1 | Stock #2 | Stock #3 | Verify #1 | Verify #2 | Verify #3 |
+|---|---|---|---|---|---|---|
+| Fell for the decoys | **yes**: "revoked readWrite on rate/geo DB", patched `mongodb-rate` | no | **yes**: re-granted Mongo roles | partly: inspected them, then rejected the "privilege scripts" | no | no |
+| Found the NetworkPolicy | no | yes (4 NP commands) | no | no | no | no |
+| Reproduced a user-facing symptom | no (pods/logs only) | no end-to-end request | no | curl-style checks, never `/recommendations` | curled `/hotels` → 200 | curled `/hotels` → 200 |
+| Re-verified after its fix | logs and pods only | `get networkpolicy,pods` | Mongo client pod | yes, same checks | yes | yes |
+| Blamed | DB roles (decoy) | NetworkPolicy (correct) | DB roles (decoy) | Mongo startup race | user-Mongo startup race | Consul startup race |
+| Helpers left behind | none | none | **`grant-geo`, `verify-geo` pods (`--restart=Never`, never deleted)** | none | none | none (`--rm` + explicit delete) |
+
+### Takeaways
+
+- **What it shows.**
+  - On a first encounter with a decoy-bearing, historically flaky fault, SDO resolved 3/3 runs. It had a correct diagnosis at 15 to 21 s and the repair applied at 27 to 43 s, and it never touched the decoys.
+  - Stock Codex went 1/3, following the decoys twice. Codex + verify went 0/3.
+  - SDO's responder needed about a third of stock Codex's incident tokens: 164k against 530k raw, and 50k against 105k weighted. That was about half the dollar cost, without reflection.
+  - The mechanism that mattered was the deterministic evidence at dispatch: the health judge's static isolation rule fired at +0 s, and (after bug 2's fix) the diff listed exactly one change, the NetworkPolicy. It was not the traffic probe, which fired in only 1 of 4 runs and 20 s late.
+  - The incident-status gate was exercised but never had to refuse. Every responder fixed the right object first, and a single status check came back HEALTHY.
+- **Confidence.**
+  - High that the static layer plus the diff are what separate SDO from Codex here: 3/3 against 1/3 and 0/3, with qualitatively consistent traces.
+  - Low for rates: n=3 per arm, one problem.
+  - Low for anything about the gate's refusal path and the traffic detector's value, because neither was stressed.
+  - The verify-protocol regression (0/3) is n=3 but mechanistically clear. "Reproduce a user-facing symptom" without a map of the request paths made Codex probe `/hotels`, which still returned 200. It then grabbed the only abnormal evidence available, container restarts from app startup, and built a startup-race story. Verification without coverage anchored it on the wrong symptom rather than rescuing it.
+- **Implications for SDO.**
+  1. The healthy-state diff is powerful and was silently broken in the shipped branch. A frozen diff actively argues for the decoy story, so it needs a live liveness check. A no-LLM smoke that creates an object after `Start` returns, through the production `run.go` path, belongs in CI.
+  2. The traffic probe cannot be the primary detector for connection-level faults like NetworkPolicy isolation. Either it needs to open fresh connections per probe or scenario (so a deny policy shows at once), or the lifecycle should keep generating static config-level health rules like this one.
+  3. The gate's value on this problem is insurance, not effect. It needs a problem where the plausible first fix is wrong (for example `wrong_service_selector` with the decoys) to show a refusal-and-recover sequence.
+  4. The lifecycle audit false positive (bug 1) would have blocked every cold deployment that authors traffic generators. The new prompt makes route-pattern searches routine, so the audit's tests must include realistic judge commands.
+- **Next actions.**
+  - Get the branch landed on main (needs the user's approval; see "Landing the feedback loop").
+  - Add the run.go-path liveness smoke for the diff.
+  - Make the prober dial fresh connections for health probes and re-measure time-to-fire on `network_policy_block`.
+  - Run the same three arms on `wrong_service_selector_hotel_reservation`, where the gate should refuse the decoy fix, before claiming the gate works.
+- **Quota:** the Codex weekly window read 90% before every start and 90% at the end (08:28Z). There were no rate-limit or error events in any rollout.
+  - This round used about 12.9M agent tokens: 1.6M stock Codex, 2.7M Codex + verify, 2.0M SDO counted runs incl. reflection, 0.65M SDO-0, 2.1M lifecycle and 3.6M on the failed lifecycle. Judge tokens are not counted.

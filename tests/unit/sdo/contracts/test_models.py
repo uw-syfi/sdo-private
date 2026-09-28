@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from sdo.contracts import IncidentRequest, IncidentResult, UsageMetrics
+from sdo.contracts import ConfirmedRootCause, IncidentRequest, IncidentResult, UsageMetrics
 
 FIXTURE_DIR = Path(__file__).resolve().parents[3] / "fixtures" / "sdo" / "contracts"
 
@@ -15,6 +15,7 @@ FIXTURE_DIR = Path(__file__).resolve().parents[3] / "fixtures" / "sdo" / "contra
     ("fixture_name", "model_type"),
     [
         ("incident_request.json", IncidentRequest),
+        ("incident_request_state_changes.json", IncidentRequest),
         ("incident_result.json", IncidentResult),
     ],
 )
@@ -34,6 +35,31 @@ def test_contract_models_reject_unknown_fields() -> None:
 
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         IncidentRequest.model_validate(payload)
+
+
+def test_root_cause_evidence_must_be_live_and_static_artifacts_are_only_context() -> None:
+    payload = json.loads((FIXTURE_DIR / "incident_result.json").read_text(encoding="utf-8"))
+    cause = payload["confirmed_root_causes"][0]
+
+    static = dict(cause, evidence=[{"kind": "static-artifact", "source": "arch.md", "observation": "looks odd"}])
+    with pytest.raises(ValueError, match="kind"):
+        ConfirmedRootCause.model_validate(static)
+    with pytest.raises(ValueError, match="observation"):
+        ConfirmedRootCause.model_validate(dict(cause, evidence=[{"kind": "state-change", "source": "Service/x"}]))
+
+    parsed = ConfirmedRootCause.model_validate(cause)
+    assert [item.kind for item in parsed.evidence] == ["detector-finding", "live-observation"]
+    assert parsed.explained_detectors == ["missing-configmap"]
+
+
+def test_root_causes_recorded_before_evidence_existed_still_load() -> None:
+    legacy = ConfirmedRootCause.model_validate(
+        {"summary": "geo lost its ConfigMap", "resources": [{"kind": "Deployment", "name": "geo"}]}
+    )
+
+    assert legacy.evidence == []
+    assert legacy.explained_detectors == []
+    assert "evidence" not in legacy.model_dump(exclude_defaults=True)
 
 
 def test_incident_result_rejects_duplicate_or_non_chronological_repair_actions() -> None:

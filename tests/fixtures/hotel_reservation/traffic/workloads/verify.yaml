@@ -1,0 +1,12 @@
+apiVersion: sdo.dev/v1alpha1
+kind: TrafficWorkload
+name: verify
+description: A few seconds of the incident's scenarios at a higher rate, to verify a repair.
+purpose: verify-burst
+ratePerSecond: 12
+duration: 3s
+timeout: 2s
+scenarios:
+  - id: search-hotels
+  - id: recommend
+  - id: login

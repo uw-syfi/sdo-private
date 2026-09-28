@@ -1,0 +1,26 @@
+# Memoryless stock Codex baseline for sdo_codex_luna_network_policy_block.toml:
+# three independent first encounters of network_policy_block (repeat = 3).
+# Everything that affects grading or timing matches the SDO arm: model, effort,
+# source-backed hotel deployment, judge, worker CPU limit, and kind topology.
+
+[runner]
+agent = "codex"
+model = "gpt-6-luna"
+reasoning_effort = "medium"  # explicit on both arms; SDO pins its incident agents to medium
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+enable_summary = false
+no_inject_summary = true
+problems = ["network_policy_block"]
+repeat = 3
+
+[runner.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+kind_worker_nodes = 1  # 1 control plane + 1 worker per lane (topology measurement, 2026-09-28)
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+docker_builder = "sdo-example"
