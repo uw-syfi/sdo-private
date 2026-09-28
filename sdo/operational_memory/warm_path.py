@@ -16,6 +16,10 @@ incident when any of these holds:
 - its owning incident detector was learned from an exact-fingerprint prior
   outcome (``originatingIncident``).
 
+A prior outcome is exact when a finding shares its fingerprint, or when a
+detector learned from it fired on the same resource
+(``learned-detector-origin``).
+
 The responder uses the rule to skip re-diagnosis, and the broker uses it to
 skip redundant reflection.
 """
@@ -33,6 +37,10 @@ if TYPE_CHECKING:
     from sdo.operational_memory.models import DetectorRegistration, DiagnosticsManifest
 
 EXACT_FINGERPRINT_MATCH = "exact-fingerprint"
+#: A detector learned from the prior outcome fired on the same resource. The
+#: learned detector fires first, so its repeat often shares no fingerprint.
+LEARNED_DETECTOR_ORIGIN_MATCH = "learned-detector-origin"
+EXACT_MATCHES = frozenset({EXACT_FINGERPRINT_MATCH, LEARNED_DETECTOR_ORIGIN_MATCH})
 
 #: Why a warm playbook is surfaced for the incident.
 SOURCE_ACTIVE_FINDING = "active-finding"
@@ -66,7 +74,7 @@ class WarmPlaybookMatch:
 
 
 def exact_prior_outcomes(request: IncidentRequest) -> list[PriorOutcomeEvidence]:
-    return [outcome for outcome in request.relevant_outcomes if outcome.match_reason == EXACT_FINGERPRINT_MATCH]
+    return [outcome for outcome in request.relevant_outcomes if outcome.match_reason in EXACT_MATCHES]
 
 
 def has_exact_fingerprint_match(request: IncidentRequest) -> bool:

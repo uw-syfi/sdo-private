@@ -108,6 +108,12 @@ func (c *Controller) closureRetryDueLocked() bool {
 
 // closureRetryWake returns the next closure retry time when it is earlier than
 // next, so the runtime loop wakes to resubmit the closure.
+// PausedWake is when a paused controller must wake: the next closure retry,
+// or zero. A pause stops observing the application, not committing memory.
+func (c *Controller) PausedWake() time.Time {
+	return c.closureRetryWake(time.Time{})
+}
+
 func (c *Controller) closureRetryWake(next time.Time) time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()

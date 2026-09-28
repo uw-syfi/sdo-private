@@ -243,11 +243,14 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	trafficWorkloads := TrafficWorkloadNames(detectors)
 	var proberAPI ProberAPI
 	var proberAddress func(context.Context, bool) (string, error)
+	// Responders outlive prober pod IPs, so they get a stable address.
+	var responderProberAddress func(context.Context, bool) (string, error)
 	switch {
 	case !*syntheticTraffic || len(trafficWorkloads) == 0:
 	case *proberURL != "":
 		proberAddress = StaticProberURL(*proberURL)
 		proberAPI = HTTPProberClient{BaseURL: proberAddress}
+		responderProberAddress = proberAddress
 	case *proberBinary != "":
 		image := *proberImage
 		if image == "" {
@@ -259,6 +262,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			RepositoryPVCSubPath: *repositoryPVCSubPath, Binary: *proberBinary,
 		}
 		proberAddress = pod.Address
+		responderProberAddress = pod.ServiceAddress
 		proberAPI = HTTPProberClient{BaseURL: proberAddress}
 	}
 	trafficObserver := NewTrafficObserver(proberAPI, trafficWorkloads, func() { kubernetesCache.Notify(traffic.Watch) }, 0)
@@ -288,7 +292,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			Command: argv, ServiceAccount: "sdo-responder", RepositoryPVC: *repositoryPVC,
 			RepositoryMountPath: *repositoryMountPath, RepositoryPVCSubPath: *repositoryPVCSubPath,
 			CredentialsSecret: *credentialsSecret, PollInterval: time.Second,
-			Environment: jobEnvironment, DispatchEnvironment: ProberEnvironment(proberAddress),
+			Environment: jobEnvironment, DispatchEnvironment: ProberEnvironment(responderProberAddress),
 		}
 	default:
 		return fmt.Errorf("unsupported dispatcher mode %q", *dispatcherMode)
@@ -348,6 +352,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		return err
 	}
 	iteration := 0
+	reviewGate := &detectorReviewGate{exit: *exitAfterClosure || *duration > 0, log: stderr}
 	encoder := json.NewEncoder(stdout)
 	controller.OnError = func(err error) { fmt.Fprintln(stderr, err) }
 	controller.OnClosureFailed = func(failure ClosureFailure) {
@@ -477,7 +482,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err := controller.PersistState(ctx); err != nil {
 		return fmt.Errorf("persist controller state: %w", err)
 	}
-	if err := detectorReviewError(controller); err != nil {
+	if err := reviewGate.check(controller); err != nil {
 		return err
 	}
 	if err := executePendingEffects(runCtx, controller); err != nil {
@@ -525,7 +530,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		if err := controller.PersistState(ctx); err != nil {
 			return fmt.Errorf("persist controller state: %w", err)
 		}
-		if err := detectorReviewError(controller); err != nil {
+		if err := reviewGate.check(controller); err != nil {
 			return err
 		}
 		if err := executePendingEffects(runCtx, controller); err != nil {
@@ -547,6 +552,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			delay = 2 * time.Second
 		case applied.Paused:
 			delay = time.Hour
+			if wake := controller.PausedWake(); !wake.IsZero() {
+				delay = time.Until(wake)
+			}
 		default:
 			delay = time.Until(controller.NextWake())
 		}
@@ -596,7 +604,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			if err := controller.PersistState(ctx); err != nil {
 				return fmt.Errorf("persist controller state: %w", err)
 			}
-			if err := detectorReviewError(controller); err != nil {
+			if err := reviewGate.check(controller); err != nil {
 				return err
 			}
 			if err := executePendingEffects(runCtx, controller); err != nil {
@@ -613,7 +621,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			if err := controller.PersistState(ctx); err != nil {
 				return fmt.Errorf("persist controller state: %w", err)
 			}
-			if err := detectorReviewError(controller); err != nil {
+			if err := reviewGate.check(controller); err != nil {
 				return err
 			}
 			if err := executePendingEffects(runCtx, controller); err != nil {
@@ -630,7 +638,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			if err := controller.PersistState(ctx); err != nil {
 				return fmt.Errorf("persist controller state: %w", err)
 			}
-			if err := detectorReviewError(controller); err != nil {
+			if err := reviewGate.check(controller); err != nil {
 				return err
 			}
 			if err := executePendingEffects(runCtx, controller); err != nil {
@@ -697,6 +705,12 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 				continue
 			}
 			if applied.Paused {
+				if err := executePausedEffects(runCtx, controller); err != nil {
+					if runCtx.Err() != nil {
+						return nil
+					}
+					return err
+				}
 				continue
 			}
 			if err := controller.Step(runCtx, time.Now().UTC(), nil); err != nil {
@@ -708,7 +722,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			if err := controller.PersistState(ctx); err != nil {
 				return fmt.Errorf("persist controller state: %w", err)
 			}
-			if err := detectorReviewError(controller); err != nil {
+			if err := reviewGate.check(controller); err != nil {
 				return err
 			}
 			if err := executePendingEffects(runCtx, controller); err != nil {
@@ -721,12 +735,31 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	}
 }
 
-func detectorReviewError(controller *Controller) error {
+// detectorReviewGate ends a one-shot run when health did not clear after the
+// responder. A persistent controller keeps observing instead and reports the
+// review once: its Job restarts it on exit, so exiting crash-looped it past
+// the backoff limit and stopped detection for every later incident. The
+// incident still closes, marked late-verified, if health clears.
+type detectorReviewGate struct {
+	exit     bool
+	log      io.Writer
+	reported string
+}
+
+func (gate *detectorReviewGate) check(controller *Controller) error {
 	required, reason := controller.DetectorReviewStatus()
 	if !required {
+		gate.reported = ""
 		return nil
 	}
-	return fmt.Errorf("detector review required: %s", reason)
+	if gate.exit {
+		return fmt.Errorf("detector review required: %s", reason)
+	}
+	if gate.reported != reason {
+		gate.reported = reason
+		fmt.Fprintf(gate.log, "detector review required (controller keeps observing): %s\n", reason)
+	}
+	return nil
 }
 
 func stopTimerForRuntimeEvent(ctx context.Context, timer *time.Timer) bool {
@@ -894,6 +927,23 @@ func defaultIdentity() string {
 		hostname = "sdo-controller"
 	}
 	return hostname + "-" + strconv.Itoa(os.Getpid())
+}
+
+// executePausedEffects runs only operational-memory effects: a paused
+// controller neither prepares nor dispatches a responder.
+func executePausedEffects(ctx context.Context, controller *Controller) error {
+	if closure, ok := controller.PendingClosureEffect(); ok {
+		if err := controller.ExecuteClosureEffect(ctx, closure); err != nil {
+			return fmt.Errorf("execute persisted closure effect: %w", err)
+		}
+		return nil
+	}
+	if acknowledgment, ok := controller.PendingClosureAcknowledgmentEffect(); ok {
+		if err := controller.ExecuteClosureAcknowledgmentEffect(ctx, acknowledgment); err != nil {
+			return fmt.Errorf("execute persisted closure acknowledgment effect: %w", err)
+		}
+	}
+	return nil
 }
 
 func executePendingEffects(ctx context.Context, controller *Controller) error {

@@ -752,6 +752,31 @@ def test_failed_or_unverified_outcome_never_reflects_as_success(tmp_path: Path) 
     assert backend.calls == []
 
 
+def test_health_that_cleared_only_after_detector_review_is_not_a_responder_success(tmp_path: Path) -> None:
+    """A responder that claimed a wrong fix must not be credited when health recovers after its window."""
+
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = RecordingSessionBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+    payload = _closure(workspace.path, workspace.base_commit).model_dump(mode="json")
+    payload["detector_review_required_at"] = "2026-07-09T18:05:30Z"
+    payload["detector_review_reason"] = "health detectors did not clear within 2m0s after responder completion"
+    closure = BrokerClosure.model_validate(payload)
+
+    receipt = service.process_closure(closure)
+
+    outcome = MemoryRepository(target).outcomes()[-1]
+    assert outcome.classification == OutcomeClassification.PARTIAL
+    assert outcome.timestamps.verified_at is None
+    assert receipt.reflection_commit is None
+    assert backend.calls == []
+
+
 def test_reflection_retries_after_backend_failure_before_any_edit(tmp_path: Path) -> None:
     target = tmp_path / "target"
     worktrees = tmp_path / "worktrees"
@@ -776,6 +801,41 @@ def test_reflection_retries_after_backend_failure_before_any_edit(tmp_path: Path
     assert state.closure == closure
     assert state.responder_session_id == "019c-session-0001"
     assert state.reflection_backend_completed is True
+
+
+class AlwaysFailingBackend(RecordingSessionBackend):
+    def resume(self, *, session_id: str, worktree: Path, prompt: str, idempotency_key: str) -> ReflectionTurn:
+        del worktree, prompt
+        self.calls.append((session_id, idempotency_key))
+        raise RuntimeError("codex exited with status 1")
+
+
+def test_a_reflection_backend_that_always_fails_is_bounded_and_the_closure_completes(tmp_path: Path) -> None:
+    """Unbounded backend failures spent the controller's closure retries and wedged a persistent controller."""
+
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    validator = AcceptRepairValidator()
+    backend = AlwaysFailingBackend()
+    service = _service(target, worktrees, validator, reflector=SessionReflector(backend), max_reflection_attempts=2)
+    workspace = service.prepare_incident("inc-20260709-0001")
+    closure = _closure(workspace.path, workspace.base_commit)
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="status 1"):
+            service.process_closure(closure)
+    receipt = service.process_closure(closure)
+
+    assert len(backend.calls) == 2
+    assert receipt.reflection_commit is not None
+    state = service.completion_state("inc-20260709-0001")
+    assert state.reflection_attempts == 2
+    assert state.reflection_learning_decision == "no_change"
+    assert "codex exited with status 1" in str(state.reflection_no_change_reason)
+    assert "failed independent validation" not in str(state.reflection_no_change_reason)
 
 
 def test_recovery_rolls_back_partial_reflection_edits_before_resuming_same_session(tmp_path: Path) -> None:

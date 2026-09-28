@@ -210,3 +210,30 @@ func TestRuntimeStateRejectsFailedClosureWithoutFailureRecord(t *testing.T) {
 		t.Fatal("closure failure for another incident was accepted")
 	}
 }
+
+// Maintenance pauses observation of the application, not operational
+// memory. A closure rejected while paused (a reflection the validator
+// refused) must still be retried, or the drain that waits for its
+// acknowledgment deadlocks.
+func TestAPausedControllerStillRetriesARejectedClosure(t *testing.T) {
+	now := time.Unix(1000, 0).UTC()
+	broker := &rejectingIncidentBroker{rejections: 1}
+	controller := newClosureRetryController(t, ClosureRetryPolicy{
+		MaxAttempts: 3, InitialBackoff: time.Second, MaxBackoff: time.Second,
+	}, broker, &now)
+	attemptClosure(t, controller)
+
+	if wake := controller.PausedWake(); !wake.Equal(now.Add(time.Second)) {
+		t.Fatalf("a paused controller must wake for the closure retry: got %s", wake)
+	}
+	now = now.Add(time.Second)
+	if err := executePausedEffects(context.Background(), controller); err != nil {
+		t.Fatalf("paused effects: %v", err)
+	}
+	awaitBrokerResult(t, controller.closureResults)
+	controller.processBrokerCompletions()
+	if broker.processCalls() != 2 || controller.ExportState().ClosureState == "pending" {
+		t.Fatalf("the paused controller did not retry the closure: calls=%d state=%q",
+			broker.processCalls(), controller.ExportState().ClosureState)
+	}
+}

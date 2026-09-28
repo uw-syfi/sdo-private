@@ -485,6 +485,7 @@ def _production_receipt(
         "responder_session_id": ledger.get("responder_session_id"),
         "same_session_reflection": _same_session_reflection(ledger),
         "detector_clear": detector_clear,
+        "detector_review_required_at": closure.get("detector_review_required_at"),
         "incident_detector_states": closure.get("incident_detector_states", []),
         "independent_verification": result.get("verification_evidence", []),
         "usage": result.get("usage", {}),

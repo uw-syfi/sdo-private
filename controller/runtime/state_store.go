@@ -296,6 +296,10 @@ func cloneIncidentClosure(closure *IncidentClosure) *IncidentClosure {
 	copy.Result = cloneIncidentResult(closure.Result)
 	copy.FinalDetectorStates = append([]DetectorEvaluation(nil), closure.FinalDetectorStates...)
 	copy.IncidentDetectorStates = append([]DetectorEvaluation(nil), closure.IncidentDetectorStates...)
+	if closure.DetectorReviewRequiredAt != nil {
+		reviewAt := *closure.DetectorReviewRequiredAt
+		copy.DetectorReviewRequiredAt = &reviewAt
+	}
 	return &copy
 }
 

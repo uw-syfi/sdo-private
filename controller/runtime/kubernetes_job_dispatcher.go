@@ -88,7 +88,7 @@ func (d KubernetesJobDispatcher) Dispatch(ctx context.Context, request IncidentR
 			return IncidentResult{}, fmt.Errorf("get responder Job: %w", jobErr)
 		}
 		if jobErr == nil && jobFailed(job) {
-			return IncidentResult{}, fmt.Errorf("responder Job %q failed", jobName)
+			return IncidentResult{}, &ResponderJobFailedError{JobName: jobName}
 		}
 		resultConfigMap, err := d.Client.CoreV1().ConfigMaps(d.Namespace).Get(ctx, resultName, metav1.GetOptions{})
 		if err == nil {
@@ -258,6 +258,17 @@ func responderEnvironment(values map[string]string) []corev1.EnvVar {
 		result = append(result, corev1.EnvVar{Name: name, Value: values[name]})
 	}
 	return result
+}
+
+// ResponderJobFailedError reports a responder Job that Kubernetes marked
+// failed. It is terminal: the Job name is derived from the incident, so a
+// retry rejoins the same failed Job.
+type ResponderJobFailedError struct {
+	JobName string
+}
+
+func (err *ResponderJobFailedError) Error() string {
+	return fmt.Sprintf("responder Job %q failed", err.JobName)
 }
 
 func jobFailed(job *batchv1.Job) bool {

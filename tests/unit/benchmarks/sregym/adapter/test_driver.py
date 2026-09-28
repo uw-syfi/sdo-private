@@ -799,6 +799,9 @@ def test_strict_production_receipt_requires_job_route_reflection_clear_ack_and_c
             validate_production_receipt(invalid)
     with pytest.raises(ControllerInstallError, match="detector_clear"):
         validate_production_receipt({**receipt, "detector_clear": [{"status": "clear", "fingerprints": ["stale"]}]})
+    with pytest.raises(ControllerInstallError, match="detector review"):
+        validate_production_receipt({**receipt, "detector_review_required_at": "2026-07-09T18:05:30Z"})
+    validate_production_receipt({**receipt, "detector_review_required_at": None})
     with pytest.raises(ControllerInstallError, match="validator_evidence_commit=reflection_commit"):
         validate_production_receipt({**receipt, "validator_evidence_commit": "outcome"})
 
