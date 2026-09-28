@@ -130,9 +130,34 @@ class IncidentRequest(ContractModel):
     state_changes: StateChanges | None = None
 
 
+#: Live evidence kinds a root cause may cite. Static artifacts (manifests,
+#: scripts, ConfigMap bodies, source files, architecture notes) show what
+#: could go wrong, not what did, so they are only ``static_context``.
+ROOT_CAUSE_EVIDENCE_KINDS = ("detector-finding", "synthetic-traffic", "state-change", "live-observation")
+
+
+class RootCauseEvidence(ContractModel):
+    """One live observation that supports a root cause.
+
+    ``source`` names what was observed: a detector ID, a synthetic scenario,
+    a changed ``Kind/name`` from the request's state changes, or the command
+    that produced ``observation``.
+    """
+
+    kind: Literal["detector-finding", "synthetic-traffic", "state-change", "live-observation"]
+    source: str = Field(min_length=1)
+    observation: str = Field(min_length=1)
+
+
 class ConfirmedRootCause(ContractModel):
     summary: str = Field(min_length=1)
     resources: list[ObjectRef] = Field(min_length=1)
+    # Empty only in records written before evidence was required; the
+    # responder's output schema requires at least one live item.
+    evidence: list[RootCauseEvidence] = Field(default_factory=list)
+    #: Detectors whose findings this cause explains; they must clear after the fix.
+    explained_detectors: list[str] = Field(default_factory=list)
+    static_context: list[str] = Field(default_factory=list)
 
 
 class AppliedPlaybook(SurfacedPlaybook):

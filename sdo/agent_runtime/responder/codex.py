@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_structured_turn, turn_usage
 from sdo.agent_runtime.responder.reflection import INCIDENT_REASONING_EFFORT
 from sdo.contracts import (
+    ROOT_CAUSE_EVIDENCE_KINDS,
     DetectorEvaluation,
     DetectorEvaluationStatus,
     Finding,
@@ -92,6 +93,17 @@ def _incident_result_schema() -> dict[str, object]:
         "required": ["api_version", "kind", "namespace", "name"],
         "additionalProperties": False,
     }
+    # Only live evidence qualifies; static artifacts go to static_context.
+    evidence_item = {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string", "enum": list(ROOT_CAUSE_EVIDENCE_KINDS)},
+            "source": {"type": "string", "minLength": 1},
+            "observation": {"type": "string", "minLength": 1},
+        },
+        "required": ["kind", "source", "observation"],
+        "additionalProperties": False,
+    }
     properties: dict[str, object] = {
         "incident_id": {"type": "string", "minLength": 1},
         "status": {"type": "string", "enum": ["completed", "failed", "cancelled"]},
@@ -102,8 +114,15 @@ def _incident_result_schema() -> dict[str, object]:
                 "properties": {
                     "summary": {"type": "string", "minLength": 1},
                     "resources": {"type": "array", "items": object_ref, "minItems": 1},
+                    "evidence": {"type": "array", "items": evidence_item, "minItems": 1},
+                    "explained_detectors": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                        "minItems": 1,
+                    },
+                    "static_context": {"type": "array", "items": {"type": "string", "minLength": 1}},
                 },
-                "required": ["summary", "resources"],
+                "required": ["summary", "resources", "evidence", "explained_detectors", "static_context"],
                 "additionalProperties": False,
             },
         },
@@ -450,6 +469,12 @@ def _verification_instructions() -> str:
         "addressed, so keep investigating along those request paths. Only when it reports unavailable, rely on "
         "your own verification of the health objective. Record its final output as a verification_evidence entry "
         "named `sdo-incident-status`.\n\n"
+        "Every confirmed root cause needs live evidence: a detector finding (source: its detector ID), a failing "
+        "synthetic scenario (source: its scenario ID), a change listed since the last healthy state (source: its "
+        "`Kind/name`), or a live observation (source: the command; observation: what its output showed). Scripts, "
+        "manifests, ConfigMap bodies, source files, and architecture notes show what could go wrong, not what did: "
+        "list them only in static_context. Name in explained_detectors the detectors whose findings the cause "
+        "explains; they must clear after your fix, and SDO checks that they do.\n\n"
     )
 
 

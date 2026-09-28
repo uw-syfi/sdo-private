@@ -144,6 +144,20 @@ def test_codex_output_schema_is_strict_and_requires_defaulted_fields() -> None:
     assert "usage" not in schema["properties"]
     action = schema["properties"]["repair_actions"]["items"]
     assert action["required"] == list(action["properties"])
+    cause = schema["properties"]["confirmed_root_causes"]["items"]
+    assert cause["required"] == list(cause["properties"])
+    assert cause["additionalProperties"] is False
+    assert cause["properties"]["evidence"]["minItems"] == 1
+    assert cause["properties"]["explained_detectors"]["minItems"] == 1
+    evidence = cause["properties"]["evidence"]["items"]
+    assert evidence["required"] == list(evidence["properties"])
+    assert "static-artifact" not in evidence["properties"]["kind"]["enum"]
+    assert set(evidence["properties"]["kind"]["enum"]) == {
+        "detector-finding",
+        "synthetic-traffic",
+        "state-change",
+        "live-observation",
+    }
 
 
 def test_recorded_actions_policy_is_explicit_in_responder_prompt() -> None:
@@ -295,6 +309,15 @@ def test_every_path_verifies_with_incident_status_before_submitting(tmp_path: Pa
         assert "`sdo-incident-status`" in prompt
     warm = _responder_prompt(_warm_request(tmp_path))
     assert "Run the playbook's verification and `python3 -m sdo incident status`" in warm
+
+
+def test_prompt_requires_live_evidence_for_every_root_cause() -> None:
+    prompt = _responder_prompt(IncidentRequest.model_validate_json(_fixture("incident_request.json")))
+
+    assert "Every confirmed root cause needs live evidence" in prompt
+    assert "static_context" in prompt
+    assert "explained_detectors" in prompt
+    assert "must clear after your fix" in prompt
 
 
 def test_prompt_lists_changes_since_the_healthy_baseline_once() -> None:
