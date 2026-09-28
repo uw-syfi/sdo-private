@@ -1,0 +1,38 @@
+# "Codex + verify" over the luna sequence: codex_luna_sequence_baseline.toml
+# plus the generic verification protocol (see codex_luna_verify_baseline.toml).
+# Codex keeps no memory between problems, so each run is an independent sample.
+#
+# Needs an sregym-agent-base image with the prompt-appendix hook; the runner
+# refuses a stale image (rebuild with third_party/sregym/docker/agents/build.sh).
+
+[runner]
+agent = "codex"
+model = "gpt-6-luna"
+reasoning_effort = "medium"  # explicit on both arms; SDO pins its incident agents to medium
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+enable_summary = false
+no_inject_summary = true
+problems = [
+    "readiness_probe_misconfiguration_hotel_reservation",
+    "missing_configmap_hotel_reservation",
+    "wrong_service_selector_hotel_reservation",
+    "network_policy_block",
+    "readiness_probe_misconfiguration_hotel_reservation",
+    "missing_configmap_hotel_reservation",
+    "wrong_service_selector_hotel_reservation",
+    "network_policy_block",
+]
+
+[runner.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+docker_builder = "sdo-example"
+
+[agent.codex]
+verify_protocol = true

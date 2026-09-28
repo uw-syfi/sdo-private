@@ -122,3 +122,29 @@ def test_fresh_reflection_arm_differs_from_its_reference_only_in_reflection_sess
     assert all(
         bool(stage.agent_config["sdo_codex"].get("persistent_controller", False)) is persistent for stage in resolved
     )
+
+
+VERIFY_BASELINES = {
+    "codex_luna_verify_baseline.toml": "codex_luna_baseline_x5.toml",
+    "codex_luna_verify_sequence_baseline.toml": "codex_luna_sequence_baseline.toml",
+}
+
+
+@pytest.mark.parametrize(("name", "base_name"), sorted(VERIFY_BASELINES.items()))
+def test_codex_verify_arm_differs_from_its_base_only_in_the_protocol_flag(name: str, base_name: str) -> None:
+    """The "Codex + verify" arms isolate the verify protocol; name and problems may differ."""
+    verify = _toml(name)
+    base = _toml(base_name)
+
+    assert verify.pop("agent") == {"codex": {"verify_protocol": True}}
+    assert "agent" not in base
+    for raw in (verify, base):
+        raw["runner"].pop("problems")
+        raw["runner"].pop("name", None)
+    assert verify == base
+
+    config = load_experiment_config(EXPERIMENTS / name)
+    assert config.agent == "codex"
+    assert config.reasoning_effort == "medium"
+    assert config.env.judge_model_id == "codex-gpt-6-luna"
+    assert config.agent_config["codex"]["verify_protocol"] is True
