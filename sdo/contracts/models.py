@@ -114,13 +114,18 @@ class IncidentView(ContractModel):
 
     Published in the controller's state ConfigMap (Go ``runtime.IncidentView``)
     while an incident is open. The request is a snapshot from dispatch; the
-    view shows what still blocks closure and the configuration diff now.
+    view shows what still blocks submission and the configuration diff now.
+    ``blocking_findings`` are the active findings closure waits on that the
+    controller's submit gate has not confirmed clear; ``clearing_findings``
+    were confirmed clear on consecutive fresh evaluations and hold only
+    closure's slower clear persistence.
     """
 
     incident_id: str = Field(min_length=1)
     observed_at: datetime
     blocking_detectors: list[str] = Field(default_factory=list)
     blocking_findings: list[Finding] = Field(default_factory=list)
+    clearing_findings: list[Finding] = Field(default_factory=list)
     state_changes: StateChanges | None = None
 
 

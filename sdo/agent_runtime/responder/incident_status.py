@@ -103,8 +103,10 @@ class IncidentStatusReport:
     view: IncidentView | None = None
     #: Why no view was used, or where it came from.
     controller_detail: str = ""
-    #: Active non-traffic findings of the detectors closure waits on.
+    #: Active non-traffic findings of the detectors closure waits on, not yet confirmed clear.
     blocking_findings: tuple[Finding, ...] = field(default=())
+    #: Non-traffic findings the controller confirmed clear; they hold only closure's own clear persistence.
+    clearing_findings: tuple[Finding, ...] = field(default=())
     #: Configuration changes the controller sees now that the request's diff lacks.
     new_state_changes: tuple[StateChange, ...] = field(default=())
 
@@ -113,8 +115,8 @@ class IncidentStatusReport:
             raise TypeError("state must be a IncidentStatusState")
         if self.state != IncidentStatusState.UNAVAILABLE and self.burst is None:
             raise ValueError("a healthy or unhealthy status needs the verify burst that produced it")
-        if self.blocking_findings and self.view is None:
-            raise ValueError("blocking findings come from the controller's view")
+        if (self.blocking_findings or self.clearing_findings) and self.view is None:
+            raise ValueError("blocking and clearing findings come from the controller's view")
 
     @property
     def exit_code(self) -> int:
@@ -135,6 +137,8 @@ class IncidentStatusReport:
                 "observed_at": None if self.view is None else self.view.observed_at.isoformat(),
                 "blocking_detectors": sorted({finding.detector_id for finding in self.blocking_findings}),
                 "blocking_findings": [finding.model_dump(mode="json") for finding in self.blocking_findings],
+                "clearing_detectors": sorted({finding.detector_id for finding in self.clearing_findings}),
+                "clearing_findings": [finding.model_dump(mode="json") for finding in self.clearing_findings],
                 "new_state_changes": [change.model_dump(mode="json") for change in self.new_state_changes],
             },
         }
@@ -177,6 +181,12 @@ class IncidentStatusReport:
                 f"  FAIL  controller detector {finding.detector_id}: {finding.summary} "
                 f"({resource.kind}/{resource.name}): {finding.evidence}"
             )
+        for finding in self.clearing_findings:
+            resource = finding.primary_resource
+            lines.append(
+                f"  ok    controller detector {finding.detector_id}: confirmed clear on fresh evaluations "
+                f"({resource.kind}/{resource.name}); closure confirms it on its own schedule"
+            )
         if self.new_state_changes:
             lines.append("Changed since the incident request was taken (not in its state diff):")
             lines.extend(f"  {change.kind}/{change.name} {change.change}" for change in self.new_state_changes)
@@ -189,9 +199,10 @@ class IncidentStatusReport:
             if self.blocking_findings and self.view is not None:
                 lines.append(
                     "The controller will not close this incident while its health detectors still fire, even when "
-                    f"traffic is healthy. This is its evaluation at {self.view.observed_at.isoformat()}; if you have "
-                    "already repaired the cause, wait for its next evaluation and run "
-                    "`python3 -m sdo incident status` again before submitting mitigation or returning the result."
+                    f"traffic is healthy. This is its evaluation at {self.view.observed_at.isoformat()}. Once the "
+                    "cause is repaired it re-checks these detectors every second and confirms them clear within a "
+                    "few seconds; run `python3 -m sdo incident status` again before submitting mitigation or "
+                    "returning the result."
                 )
         return "\n".join(lines)
 
@@ -260,13 +271,8 @@ def incident_status(
         controller_state, controller_reader or read_controller_state, request_path
     )
     # Traffic findings are the controller's view of the same scenarios the burst just measured afresh.
-    blocking_findings = (
-        ()
-        if view is None
-        else tuple(
-            finding for finding in view.blocking_findings if not finding.rule_id.startswith(SCENARIO_RULE_PREFIX)
-        )
-    )
+    blocking_findings = () if view is None else _non_traffic(view.blocking_findings)
+    clearing_findings = () if view is None else _non_traffic(view.clearing_findings)
     new_changes = () if view is None else _new_state_changes(_load_request(request_path), view)
     scenarios_fail = any(verdict.blocking for verdict in burst.verdicts) or not burst.verdicts
     state = IncidentStatusState.UNHEALTHY if scenarios_fail or blocking_findings else IncidentStatusState.HEALTHY
@@ -284,8 +290,13 @@ def incident_status(
         view=view,
         controller_detail=controller_detail,
         blocking_findings=blocking_findings,
+        clearing_findings=clearing_findings,
         new_state_changes=new_changes,
     )
+
+
+def _non_traffic(findings: Sequence[Finding]) -> tuple[Finding, ...]:
+    return tuple(finding for finding in findings if not finding.rule_id.startswith(SCENARIO_RULE_PREFIX))
 
 
 def read_controller_state(location: str) -> str:
