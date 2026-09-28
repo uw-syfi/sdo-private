@@ -347,6 +347,10 @@ class ScriptedAgent:
             outcomes = [item for item in _jsonl_text(outcomes_text or "") if item.get("incident_id") == incident_id]
             classes = [item.get("classification") for item in outcomes]
             record.metrics["outcome_classifications"] = classes
+            if spec.expect.classification is not None:
+                record.checks.append(
+                    Check("classification", classes == [spec.expect.classification], f"classifications {classes}")
+                )
             # An abandoned incident must still reach memory exactly once; a lost one is silent.
             record.checks.append(Check("outcome-recorded", len(outcomes) == 1, f"{len(outcomes)} outcome record(s)"))
             if spec.expect.resolution == "not-mitigated":
@@ -477,6 +481,8 @@ class ScriptedAgent:
         record.metrics["classification"] = classification
         if expect.resolution == "mitigated":
             checks.append(Check("classified-success", classification == "success", str(classification)))
+        if expect.classification is not None:
+            checks.append(Check("classification", classification == expect.classification, str(classification)))
 
         memory = receipt.get("memory_reuse") or {}
         record.metrics["warm_path"] = memory.get("warm_path")

@@ -32,6 +32,8 @@ class Expectation:
     reflection_skipped: bool | None = None
     #: Minimum reflection attempts recorded by the broker.
     min_reflection_attempts: int | None = None
+    #: The outcome classification SDO must record, when it matters (for example ``cancelled``).
+    classification: str | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,19 @@ SCENARIOS: dict[str, tuple[IncidentSpec, ...]] = {
             mitigation="wrong_only_claimed",
             expect=Expectation(resolution="not-mitigated", not_learned=(CLAIMED_DETECTOR, NP_DETECTOR)),
         ),
+    ),
+    # F16: the fault heals by itself while the responder waits; the responder claims ``completed``
+    # with no repair action. SDO must record it as cancelled, learn nothing, and dispatch the next one.
+    "healed-stray": (
+        incident(
+            NP,
+            "healed-stray/noop",
+            31,
+            mitigation="healed_noop",
+            chaos="heal-fault",
+            expect=Expectation(resolution="not-mitigated", classification="cancelled", not_learned=(NP_DETECTOR,)),
+        ),
+        incident(MCM_GEO, "healed-stray/next", 32, expect=_learned(MCM_DETECTOR)),
     ),
     "sequence": (
         incident(NP, "sequence/np", 11, expect=_learned(NP_DETECTOR)),

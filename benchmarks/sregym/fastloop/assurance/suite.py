@@ -183,7 +183,12 @@ def scripted_result(
     }
 
 
-def stray_result(request: dict[str, Any]) -> dict[str, Any]:
+#: How the suite answers a stray incident: ``cancelled`` (the honest default) or ``completed``
+#: with no repair action, the shape a real responder gives a self-healed stray (F16).
+STRAY_STATUSES = ("cancelled", "completed")
+
+
+def stray_result(request: dict[str, Any], status: str = "cancelled") -> dict[str, Any]:
     """The answer for an incident no injected fault explains: nothing repaired, so ``cancelled``.
 
     ``cancelled`` is the honest answer for a finding that healed on its own. Since F16 the broker
@@ -194,8 +199,12 @@ def stray_result(request: dict[str, Any]) -> dict[str, Any]:
     result = scripted_result(
         request, objects=(), summary="no fault injected", actions=[], started_at=utcnow(), verification=[]
     )
-    result["status"] = "cancelled"
+    if status not in STRAY_STATUSES:
+        raise ValueError(f"unknown stray status {status!r}; expected one of {STRAY_STATUSES}")
+    result["status"] = status
     result["confirmed_root_causes"] = []
+    if status == "completed":
+        result["repair_changes"] = ["health recovered before any repair; nothing was changed"]
     return result
 
 
@@ -238,7 +247,11 @@ class AssuranceSuite:
         prober_url: str,
         helper_image: str,
         bounds: Bounds | None = None,
+        stray_status: str = "cancelled",
     ) -> None:
+        if stray_status not in STRAY_STATUSES:
+            raise ValueError(f"unknown stray status {stray_status!r}; expected one of {STRAY_STATUSES}")
+        self.stray_status = stray_status
         self.kubectl = kubectl
         self.driver = driver
         self.controller = controller
@@ -393,7 +406,8 @@ class AssuranceSuite:
             state_changes=diff_reading(request, ()).named,
         )
         logger.warning("stray incident %s after %s: %s", incident_id, self._last_case, stray.findings)
-        result = stray_result(request)
+        result = stray_result(request, self.stray_status)
+        stray.answered = self.stray_status
         result_path(self.spool, incident_id).write_text(json.dumps(result), encoding="utf-8")
         try:
             ledger = self.wait_closure(incident_id, timeout=self.bounds.verify_seconds + 120)
@@ -402,6 +416,7 @@ class AssuranceSuite:
             if verified:
                 verified_at = datetime.fromisoformat(str(verified).replace("Z", "+00:00"))
                 stray.closed_seconds = round((verified_at - dispatched).total_seconds(), 3)
+            stray.classification = self._classification(incident_id)
         except HarnessError as exc:
             stray.error = str(exc)
         return stray
@@ -955,6 +970,14 @@ class AssuranceSuite:
                 raise HarnessError(f"responder for {incident_id} did not exit")
             time.sleep(0.05)
         return datetime.fromisoformat(path.read_text(encoding="utf-8").strip())
+
+    def _classification(self, incident_id: str) -> str | None:
+        outcomes = self.app_root / ".sdo" / "outcomes.jsonl"
+        for line in reversed(outcomes.read_text(encoding="utf-8").splitlines()):
+            record = json.loads(line)
+            if record.get("incident_id") == incident_id:
+                return str(record.get("classification"))
+        return None
 
     def _verdicts(self, incident_id: str) -> list[str]:
         outcomes = self.app_root / ".sdo" / "outcomes.jsonl"

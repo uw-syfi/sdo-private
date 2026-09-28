@@ -102,7 +102,7 @@ def pause_apiserver(ctx: ChaosContext, seconds: float = 25.0) -> None:
     ctx.wait_for(lambda: bool(responder_running(ctx)), "a running responder pod")
     time.sleep(10)
     container = f"{ctx.cluster}-control-plane"
-    if not ctx.cluster.startswith("assure-c"):
+    if not ctx.cluster.startswith("assure-"):
         raise ChaosError(f"refusing to pause {container}: not an assurance cluster")
     subprocess.run(["docker", "pause", container], check=True, capture_output=True)
     ctx.note(f"paused {container}")
@@ -111,6 +111,26 @@ def pause_apiserver(ctx: ChaosContext, seconds: float = 25.0) -> None:
     finally:
         subprocess.run(["docker", "unpause", container], check=True, capture_output=True)
         ctx.note(f"unpaused {container} after {seconds:.0f}s")
+
+
+def heal_fault(ctx: ChaosContext) -> None:
+    """Remove the deny-all NetworkPolicy while the responder waits, as a self-healing transient would (F16)."""
+
+    ctx.wait_for(lambda: bool(responder_running(ctx)), "a running responder pod")
+    time.sleep(5)
+    completed = kubectl(["get", "networkpolicy", "-o", "json"], namespace=ctx.namespace, check=False)
+    if completed.returncode != 0:
+        raise ChaosError(f"cannot list NetworkPolicies: {completed.stderr.strip()[:300]}")
+    names = [
+        str(item["metadata"]["name"])
+        for item in json.loads(completed.stdout).get("items", [])
+        if not item.get("spec", {}).get("ingress") and not item.get("spec", {}).get("egress")
+    ]
+    if not names:
+        raise ChaosError("no deny-all NetworkPolicy to heal")
+    for name in names:
+        kubectl(["delete", "networkpolicy", name, "--wait=true"], namespace=ctx.namespace)
+    ctx.note(f"healed the fault without the responder: deleted NetworkPolicy {names}")
 
 
 def concurrent_memory_commit(ctx: ChaosContext) -> None:
@@ -138,6 +158,7 @@ CHAOS: dict[str, Callable[[ChaosContext], None]] = {
     "kill-prober": kill_prober,
     "pause-apiserver": pause_apiserver,
     "concurrent-commit": concurrent_memory_commit,
+    "heal-fault": heal_fault,
 }
 
 

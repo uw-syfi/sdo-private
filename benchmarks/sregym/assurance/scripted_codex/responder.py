@@ -87,7 +87,9 @@ def respond(turn: Turn, directive: Directive, request: dict[str, Any], prompt: s
     }
     warm = [path for path in warm_playbooks(prompt) if path == f"{plan.playbook_dir}/README.md"]
     try:
-        if warm and directive.mitigation == "correct":
+        if directive.mitigation == "healed_noop":
+            _healed_noop(turn, directive, result)
+        elif warm and directive.mitigation == "correct":
             _warm(turn, directive, plan, request, namespace, worktree, result, warm[0])
         else:
             _cold(turn, directive, plan, request, namespace, worktree, result)
@@ -98,6 +100,20 @@ def respond(turn: Turn, directive: Directive, request: dict[str, Any], prompt: s
         time.sleep(directive.pause_before_result_seconds)
     result["timing"] = {"started_at": started, "completed_at": utc_now()}
     return result
+
+
+def _healed_noop(turn: Turn, directive: Directive, result: dict[str, Any]) -> None:
+    """Wait for the finding to heal without touching anything, then claim ``completed`` with no action (F16).
+
+    This is the shape a real responder gives a stray that self-healed: nothing
+    was repaired and nothing is blamed. SDO must close it as cancelled.
+    """
+
+    healthy, status_output = _poll_status(turn, directive.status_attempts)
+    result["verification_evidence"].append(_verification(healthy, status_output))
+    if healthy:
+        result["status"] = "completed"
+        result["repair_changes"] = ["health recovered before any repair; nothing was changed"]
 
 
 def _warm(

@@ -174,6 +174,9 @@ class StrayIncident(BaseModel):
     evidence: str = ""
     state_changes: list[str] = Field(default_factory=list)
     closed_seconds: float | None = None
+    #: How the suite answered it (``cancelled``, or ``completed`` with no action) and the outcome SDO recorded.
+    answered: str = "cancelled"
+    classification: str | None = None
     error: str = ""
 
 

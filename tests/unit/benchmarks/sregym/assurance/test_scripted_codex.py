@@ -333,3 +333,26 @@ def test_a_failed_plan_records_why_it_stopped(scripted: dict[str, Path], monkeyp
     (turn,) = _turn_records(scripted["store"])
     assert turn["outcome"] == "failed"
     assert "scripted plan stopped" in str(turn["plan_error"])
+
+
+def test_healed_noop_claims_completed_with_no_action_once_health_is_back(
+    scripted: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F16's production shape: the finding healed without the responder, which truthfully reports doing nothing."""
+
+    worktree = _memory_worktree(scripted["tmp"])
+    request = _request(worktree, scripted["tmp"], monkeypatch)
+    _directive(scripted["store"], mitigation="healed_noop", status_attempts=2)
+    unhealed = execute_incident(request, model="gpt-6-luna", provider="codex")
+    assert unhealed.status.value == "failed"
+    assert unhealed.repair_actions == []
+
+    shutil.rmtree(scripted["store"] / "bindings")
+    (scripted["state"] / "deleted").write_text("", encoding="utf-8")  # someone else healed it
+    _directive(scripted["store"], mitigation="healed_noop", status_attempts=2)
+    healed = execute_incident(request, model="gpt-6-luna", provider="codex")
+
+    assert healed.status.value == "completed"
+    assert healed.repair_actions == []
+    assert healed.confirmed_root_causes == []
+    assert healed.verification_evidence[0].passed is True

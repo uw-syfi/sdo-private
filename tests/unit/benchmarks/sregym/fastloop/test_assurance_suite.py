@@ -426,3 +426,16 @@ def test_a_stray_incidents_answer_passes_the_brokers_recorded_actions_rule() -> 
     BrokerService._validate_recorded_actions(closure(completed))
     with pytest.raises(Exception, match="successful recorded repair action"):
         BrokerService._validate_recorded_actions(closure(completed, firing))
+
+
+def test_a_stray_can_be_answered_as_a_healed_no_action_completion() -> None:
+    """``--stray-status completed``: F16's shape, a completion with nothing repaired and nothing blamed."""
+
+    from benchmarks.sregym.fastloop.assurance.suite import stray_result
+
+    completed = stray_result(_request(), "completed")
+
+    assert completed["status"] == "completed"
+    assert (completed["repair_actions"], completed["confirmed_root_causes"]) == ([], [])
+    with pytest.raises(ValueError, match="stray status"):
+        stray_result(_request(), "resolved")

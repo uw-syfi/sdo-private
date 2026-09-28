@@ -154,6 +154,7 @@ def _run(args: argparse.Namespace) -> int:
                 prober_url=port_forward.url,
                 helper_image=environment.images.controller,
                 bounds=Bounds(),
+                stray_status=args.stray_status,
             )
             for iteration in range(1, args.iterations + 1):
                 for case in faults:
@@ -312,6 +313,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="hold each fault past the baseline settle period, then re-inject it (default: first iteration)",
     )
     run.add_argument("--soak-minutes", type=float, default=0.0)
+    run.add_argument(
+        "--stray-status",
+        choices=("cancelled", "completed"),
+        default="cancelled",
+        help="answer stray incidents cancelled, or completed with no repair action (F16's healed-stray shape)",
+    )
     run.add_argument("--results", type=Path, default=None)
     run.add_argument("--run-id", default=None)
     run.set_defaults(handler=_run)
