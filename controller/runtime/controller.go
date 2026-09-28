@@ -430,7 +430,7 @@ func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 	}
 	request := c.incidentRequest(now, batch)
 	if c.Baseline != nil {
-		request.StateChanges = c.Baseline.Changes(now)
+		request.StateChanges = cloneStateChanges(c.Baseline.Changes(now))
 	}
 	c.mu.Lock()
 	c.incidentOpen = true
@@ -886,7 +886,7 @@ func (c *Controller) finalStateChangesLocked(now time.Time) *StateChanges {
 	if c.Baseline == nil {
 		return nil
 	}
-	return c.Baseline.Changes(now)
+	return cloneStateChanges(c.Baseline.Changes(now))
 }
 
 func (c *Controller) latestEvaluations(

@@ -80,7 +80,7 @@ func (c *Controller) refreshIncidentView(now time.Time, evaluated bool) {
 	sort.Strings(blocking)
 	var changes *StateChanges
 	if c.Baseline != nil {
-		changes = c.Baseline.Changes(now)
+		changes = cloneStateChanges(c.Baseline.Changes(now))
 	}
 	view := &IncidentView{
 		IncidentID: incidentID, ObservedAt: now.UTC(),

@@ -249,10 +249,25 @@ func cloneIncidentRequest(request *IncidentRequest) *IncidentRequest {
 		return nil
 	}
 	copy := *request
-	copy.Findings = append([]sdk.Finding(nil), request.Findings...)
-	copy.DetectorHistory = append([]DetectorEvaluation(nil), request.DetectorHistory...)
-	copy.SurfacedPlaybooks = append([]SurfacedPlaybook(nil), request.SurfacedPlaybooks...)
+	// Lists stay lists when empty: the responder's and the broker's schemas
+	// reject null (a cold incident surfaces no playbook and no outcome).
+	copy.Findings = append(make([]sdk.Finding, 0, len(request.Findings)), request.Findings...)
+	copy.DetectorHistory = cloneEvaluations(request.DetectorHistory)
+	copy.SurfacedPlaybooks = append(make([]SurfacedPlaybook, 0, len(request.SurfacedPlaybooks)), request.SurfacedPlaybooks...)
+	copy.RelevantOutcomes = append(make([]PriorOutcomeEvidence, 0, len(request.RelevantOutcomes)), request.RelevantOutcomes...)
+	copy.StateChanges = cloneStateChanges(request.StateChanges)
 	return &copy
+}
+
+// cloneEvaluations copies detector evaluations; the list and each
+// evaluation's fingerprints stay lists when empty, never null.
+func cloneEvaluations(evaluations []DetectorEvaluation) []DetectorEvaluation {
+	copied := make([]DetectorEvaluation, 0, len(evaluations))
+	for _, evaluation := range evaluations {
+		evaluation.Fingerprints = append(make([]string, 0, len(evaluation.Fingerprints)), evaluation.Fingerprints...)
+		copied = append(copied, evaluation)
+	}
+	return copied
 }
 
 func cloneIncidentResult(result *IncidentResult) *IncidentResult {
@@ -281,9 +296,7 @@ func cloneIncidentResult(result *IncidentResult) *IncidentResult {
 	copy.RepairActions = append(
 		make([]RepairActionReceipt, 0, len(result.RepairActions)), result.RepairActions...,
 	)
-	copy.FinalDetectorStates = append(
-		make([]DetectorEvaluation, 0, len(result.FinalDetectorStates)), result.FinalDetectorStates...,
-	)
+	copy.FinalDetectorStates = cloneEvaluations(result.FinalDetectorStates)
 	copy.ProposedMemoryChanges = append(
 		make([]string, 0, len(result.ProposedMemoryChanges)), result.ProposedMemoryChanges...,
 	)
@@ -300,8 +313,8 @@ func cloneIncidentClosure(closure *IncidentClosure) *IncidentClosure {
 	copy := *closure
 	copy.Request = *cloneIncidentRequest(&closure.Request)
 	copy.Result = cloneIncidentResult(closure.Result)
-	copy.FinalDetectorStates = append([]DetectorEvaluation(nil), closure.FinalDetectorStates...)
-	copy.IncidentDetectorStates = append([]DetectorEvaluation(nil), closure.IncidentDetectorStates...)
+	copy.FinalDetectorStates = cloneEvaluations(closure.FinalDetectorStates)
+	copy.IncidentDetectorStates = cloneEvaluations(closure.IncidentDetectorStates)
 	copy.FinalStateChanges = cloneStateChanges(closure.FinalStateChanges)
 	if closure.ObservedStateChanges != nil {
 		copy.ObservedStateChanges = append(
