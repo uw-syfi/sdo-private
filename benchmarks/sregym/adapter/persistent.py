@@ -719,6 +719,7 @@ def _wait_for_verified_incident(
     """Return the first new incident the controller verified healthy, before reflection finishes."""
 
     deadline = clock.monotonic() + timeout
+    state: dict[str, Any] = {}
     while clock.monotonic() < deadline:
         state = ops.runtime_state(control)
         closure = state.get("pending_closure")
@@ -733,7 +734,31 @@ def _wait_for_verified_incident(
             # Reflection finished between polls; the ledger holds the closure.
             return VerifiedIncident(incident_id=acknowledged, closure=None)
         clock.sleep(POLL_SECONDS)
-    raise PersistentControllerError(f"controller in {control!r} verified no new incident within {timeout:.0f}s")
+    raise PersistentControllerError(
+        f"controller in {control!r} verified no new incident within {timeout:.0f}s{_open_incident_summary(state)}"
+    )
+
+
+def _open_incident_summary(state: dict[str, Any]) -> str:
+    """Why the controller's open incident has not closed, from its last runtime state."""
+
+    if not state.get("incident_open"):
+        return f"; no incident open (dispatch state {state.get('dispatch_state') or 'unknown'!r})"
+    request = state.get("incident_request") if isinstance(state.get("incident_request"), dict) else {}
+    parts = [f"; incident {request.get('incident_id') or 'unknown'!r} is open"]
+    result = state.get("incident_result")
+    if isinstance(result, dict):
+        parts.append(f"responder status {result.get('status')!r}")
+        notes = [str(note) for note in result.get("repair_changes") or []]
+        if notes:
+            parts.append(f"responder notes: {'; '.join(notes)[:500]}")
+    elif state.get("dispatch_error"):
+        parts.append(f"dispatch error: {state['dispatch_error']}")
+    else:
+        parts.append(f"responder not done (dispatch state {state.get('dispatch_state')!r})")
+    if state.get("detector_review_required"):
+        parts.append(f"detector review required: {state.get('detector_review_reason') or 'no reason recorded'}")
+    return ", ".join(parts)
 
 
 def _log_records(logs: str) -> list[dict[str, Any]]:

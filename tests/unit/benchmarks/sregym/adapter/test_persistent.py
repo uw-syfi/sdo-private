@@ -574,3 +574,40 @@ def test_a_drained_receipt_is_published_as_soon_as_the_next_stage_drains_it(tmp_
     state_path = tmp_path / "sdo_persistent_controller.json"
     assert teardown(state_path, ops=ops, clock=_clock(ops)) == []
     assert run_dir / STRICT_RECEIPT_FILENAME not in publish_deferred_receipts(state_path, tmp_path / "pipeline")
+
+
+@dataclass
+class _StuckOps(FakeOps):
+    """The responder reported failure, so the controller keeps the incident open for detector review."""
+
+    def inject_after_resume(
+        self, control_namespace: str, generation: str, inject: Callable[[], None]
+    ) -> dict[str, float]:
+        inject()
+        self.states[control_namespace].update(
+            {
+                "incident_open": True,
+                "responder_done": True,
+                "incident_request": {"incident_id": "incident-stuck"},
+                "incident_result": {
+                    "incident_id": "incident-stuck",
+                    "status": "failed",
+                    "repair_changes": ["scripted plan stopped: no manifest defines ConfigMap x"],
+                },
+                "detector_review_required": True,
+                "detector_review_reason": "health detectors did not clear within 5m0s after responder completion",
+            }
+        )
+        return {}
+
+
+def test_an_unverified_incident_timeout_names_the_open_incident_and_why_it_is_stuck(tmp_path: Path) -> None:
+    with pytest.raises(PersistentControllerError) as raised:
+        _run(tmp_path, _StuckOps(), "s0", [])
+
+    message = str(raised.value)
+    assert "verified no new incident within 30s" in message
+    assert "incident-stuck" in message
+    assert "responder status 'failed'" in message
+    assert "no manifest defines ConfigMap x" in message
+    assert "health detectors did not clear" in message
