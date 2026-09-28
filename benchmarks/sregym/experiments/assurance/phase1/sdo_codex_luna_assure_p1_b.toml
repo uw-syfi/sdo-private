@@ -1,0 +1,137 @@
+# Assurance phase 1, SDO arm, rotation B (PLAN.md section (d)); lane assure-w1.
+#
+# One pipeline = one lane with ONE long-running SDO controller. Round 1 runs the
+# five phase-1 problems in rotation B (S2 S3 K1 K2 S1); round 2 repeats round 1 in the
+# same order (exact repeats, the warm samples for C1/C2/C5).
+#
+# Stage 0 is seeded from the lifecycle-only seed of the feedback-loop e2e
+# (lifecycle commit 30e023d, no incident memory) through
+# SREGYM_APP_WORKSPACE_SEED_DIR at launch; every later stage chains the previous
+# stage's workspace. No lifecycle quota is spent unless the seed fails.
+#
+# Models (user rule, 2026-09-28): every SDO agent role runs Codex gpt-6-luna at
+# medium effort; the SREGym judge is codex-gpt-6-luna at the Codex CLI backend's
+# default xhigh, never overridden. Enforced by
+# tests/unit/benchmarks/sregym/runner/test_assurance_configs.py.
+#
+# DO NOT LAUNCH before the 2026-10-03 18:19 UTC quota reset and the PLAN.md
+# preconditions. Env and agent settings are copied from
+# ../../sdo_codex_luna_network_policy_block.toml.
+
+[pipeline]
+name = "assure-p1-sdo-b"
+
+[defaults]
+agent = "sdo_codex"
+model = "gpt-6-luna"
+reasoning_effort = "medium"  # explicit on every arm; SDO pins its incident agents to medium
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+application_workspace = "persistent"
+require_strict_receipt = true
+
+[defaults.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+kind_worker_nodes = 1  # 1 control plane + 1 worker per lane
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+cleanup_defer_timeout_seconds = 4200
+docker_builder = "sdo-example"
+
+[defaults.variants]
+enabled = false
+
+[defaults.agent_config.sdo_codex]
+backend = "agent-cli"
+provider = "codex"
+model = "gpt-6-luna"
+timeout_sec = 3600
+controller_image = "sdo-controller:v0.1.0"
+responder_image = "sdo-sregym-responder:v0.1.0"
+validator_image = "sdo-detector-validator:v0.1.0"
+credentials_secret = "sdo-agent-credentials"
+persistent_controller = true
+
+[[stages]]
+name = "r1-s2-wrong-service-selector"
+chain_kb = false
+chain_application_workspace = false
+
+[stages.runner]
+problems = ["wrong_service_selector_hotel_reservation"]
+
+[[stages]]
+name = "r1-s3-network-policy-block"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["network_policy_block"]
+
+[[stages]]
+name = "r1-k1-k1-policy-and-rate-configmap"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["composite_policy_and_rate_configmap_hotel_reservation"]
+
+[[stages]]
+name = "r1-k2-k2-frontend-selector-and-readiness"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["composite_frontend_selector_and_readiness_hotel_reservation"]
+
+[[stages]]
+name = "r1-s1-missing-configmap"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["missing_configmap_hotel_reservation"]
+
+[[stages]]
+name = "r2-s2-wrong-service-selector"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["wrong_service_selector_hotel_reservation"]
+
+[[stages]]
+name = "r2-s3-network-policy-block"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["network_policy_block"]
+
+[[stages]]
+name = "r2-k1-k1-policy-and-rate-configmap"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["composite_policy_and_rate_configmap_hotel_reservation"]
+
+[[stages]]
+name = "r2-k2-k2-frontend-selector-and-readiness"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["composite_frontend_selector_and_readiness_hotel_reservation"]
+
+[[stages]]
+name = "r2-s1-missing-configmap"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["missing_configmap_hotel_reservation"]
