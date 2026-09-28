@@ -317,6 +317,14 @@ class ScriptedAgent:
             key: state.get(key)
             for key in ("incident_open", "closure_state", "last_acknowledged_incident_id", "detector_review_required")
         }
+        settled = not state.get("incident_open") and not state.get("pending_closure")
+        record.checks.append(
+            Check(
+                "controller-settled",
+                settled,
+                "idle" if settled else f"still open after {SETTLE_TIMEOUT_SECONDS}s: {_open_summary(state)}",
+            )
+        )
         record.checks.extend(self._memory_checks(spec, incident_id))
         if incident_id:
             turns = self._turns_for(incident_id)
@@ -328,6 +336,8 @@ class ScriptedAgent:
             ]
             classes = [item.get("classification") for item in outcomes]
             record.metrics["outcome_classifications"] = classes
+            # An abandoned incident must still reach memory exactly once; a lost one is silent.
+            record.checks.append(Check("outcome-recorded", len(outcomes) == 1, f"{len(outcomes)} outcome record(s)"))
             if spec.expect.resolution == "not-mitigated":
                 record.checks.append(
                     Check("not-recorded-as-mitigated", "success" not in classes, f"classifications {classes}")
@@ -337,7 +347,7 @@ class ScriptedAgent:
                 record.checks.append(
                     Check("no-reflection-learning", not learned, f"{len(learned)} reflection turn(s) proposed memory")
                 )
-        elif spec.expect.resolution == "not-mitigated":
+        else:
             record.checks.append(Check("abandoned-incident-identified", False, "no incident id for the failed resolve"))
         record.checks.append(
             Check(
@@ -618,3 +628,12 @@ def prepare_offline_environment(scratch: Path) -> dict[str, str]:
     os.environ["OPENAI_API_KEY"] = "scripted-no-model"
     os.environ.pop("ANTHROPIC_API_KEY", None)
     return original
+
+
+def _open_summary(state: dict[str, Any]) -> str:
+    request = state.get("incident_request") or {}
+    result = state.get("incident_result") or {}
+    return (
+        f"incident {request.get('incident_id')!r}, responder {result.get('status')!r}, "
+        f"review {state.get('detector_review_reason')!r}, closure {state.get('closure_state')!r}"
+    )
