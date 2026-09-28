@@ -388,6 +388,92 @@ separate commits, and the clone was deleted.
   benchmark or entry-point code into production code, so no production module
   gains a benchmark dependency.
 
+### D25. Prober dial hygiene and dial-failure classification
+
+- **Problem.** In the `network_policy_block` live eval (see "Feedback-loop
+  e2e results" below), the traffic detector fired late (+20.4 s) in 1 of 4
+  runs and never fired in the other 3, even though the fault denies all
+  ingress and egress to `recommendation`.
+- **Investigation.** `controller/runtime/prober.NewHTTPClient` already
+  builds its transport with `DisableKeepAlives: true` and a 2 s
+  `net.Dialer` timeout (D5), so the prober's own requests to `frontend`
+  already dial a fresh connection every time and already fail within
+  seconds if `frontend` itself were blocked. The fixture's `recommend`
+  scenario (`tests/fixtures/hotel_reservation/traffic/generators/generators.go`)
+  targets `frontend`, not `recommendation` directly, because `frontend`
+  proxies the call internally (matching the real hotel-reservation
+  service). The fault only denies `recommendation`, which `frontend` is not
+  probed against directly.
+- **Confirmed.** The prober-to-frontend hop was never the masked
+  connection. The mechanism is `frontend`'s own internal call to
+  `recommendation`: a NetworkPolicy denies *new* connections but does not
+  tear down ones already established (most CNIs allow already-tracked
+  flows through), so `frontend`'s pre-existing connection or channel to
+  `recommendation` keeps working, and `frontend` keeps returning 200 to the
+  prober, until something makes `frontend` redial (idle timeout, an error,
+  a restart). That explains sdo3's pattern: every scenario, including ones
+  that never call `recommendation`, started timing out from +16 s,
+  consistent with `frontend` itself degrading (for example thread or
+  connection-pool exhaustion) once its call to `recommendation` started
+  blocking, rather than a prober-side defect.
+- **Decision (prober-side, in scope).**
+  1. Keep `DisableKeepAlives: true` as the primary mechanism (already the
+     strongest option: a per-request fresh dial, not merely a periodic
+     one); no change needed here.
+  2. Shorten and name the dial timeout explicitly:
+     `prober.DialTimeout = 1 * time.Second`, clearly shorter than
+     `traffic.DefaultTimeout` (2 s), so a blocked dial is always resolved,
+     and classified, by its own timer well before the general per-request
+     deadline would otherwise cancel it with a generic "context deadline
+     exceeded".
+  3. Add `traffic.Sample.DialFailed`, set from a new `isDialError` check
+     (`errors.As` to `*net.OpError` with `Op == "dial"`) in
+     `controller/sdk/traffic/engine.go`. It is orthogonal to `Outcome`: a
+     blocked dial that times out is still `OutcomeTimeout` with
+     `DialFailed = true`; an outright refusal is `OutcomeError` with
+     `DialFailed = true`. `window.go`'s `StatusCounts` gets a `"dial"`
+     bucket for the non-timeout case, and `detector.go`'s evidence text
+     prefixes a failure's label with "dial" when `DialFailed`, so a health
+     judge or responder reading a finding's evidence can tell a
+     connection-level fault from an HTTP-level one without parsing the
+     free-text error string.
+  4. No workload YAML or generator changes; `.sdo/diagnostics/traffic/`
+     ownership and the fixture's scenarios are unchanged.
+- **Alternatives.**
+  - A per-probe `http.Transport` instance instead of a shared one with
+    `DisableKeepAlives`: no behavioral difference once keep-alives are
+    off, since the shared transport already never pools a connection to
+    reuse; would only add allocation overhead per iteration.
+  - A periodic `CloseIdleConnections()` ticker: weaker than disabling
+    keep-alives outright (a connection could still be reused between
+    ticks), and redundant given D5 already disables them.
+  - Subdividing "timeout" into "dial-timeout" vs "read-timeout" buckets in
+    `StatusCounts`: more granular than the task's ask ("classify dial and
+    timeout failures clearly"), and `Sample.DialFailed` already lets a
+    consumer recover that distinction per-sample without adding another
+    bucket key.
+- **Residual gap (out of scope, not fixed here).** The frontend-to-
+  recommendation path is application-internal: the prober never talks to
+  `recommendation`, and cannot force `frontend`'s own client to redial.
+  Closing this gap needs one of: a generator that calls `recommendation`
+  directly (bypassing `frontend`, changing what the workload asserts about
+  the real request path), or an app-level fix (the frontend's own HTTP or
+  gRPC client would need short keep-alive/idle timeouts or health-aware
+  connection management), or continuing to rely on the static
+  `network-policy-total-isolation` health-judge rule and the state-change
+  diff, which is what actually caught this fault at +0 s in all 3 SDO
+  runs. This is a different fix than the prober's own hygiene and is
+  recorded here, not implemented.
+- **Expected effect.** Once a probe's dial to `frontend` is itself blocked
+  (for example a NetworkPolicy that includes `frontend`, or a selector
+  fault), the shorter, explicit `DialTimeout` and the `DialFailed`
+  classification make that failure fire, and be legible as a
+  connection-level fault, within about 1 s instead of racing the 2 s
+  per-request timeout non-deterministically. For `network_policy_block` on
+  `recommendation` specifically, no change in probe-side timing is
+  expected, because the residual gap above is what masks it; the static
+  rule and the state diff remain the primary detectors for this fault.
+
 ### Combined final smoke (no LLM, throwaway kind `sdo-smoke`, 3 runs)
 
 The same setup as above, with the decoys mounted. One driver runs the
