@@ -56,12 +56,13 @@ class GoRunner:
             return cls(executable=str(local_install))
         return cls()
 
-    def run(self, args: list[str], *, cwd: Path) -> int:
+    def run(self, args: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> int:
         try:
             completed = subprocess.run(
                 [self.executable, *args],
                 cwd=cwd,
                 check=False,
+                env={**os.environ, **env} if env else None,
             )
         except FileNotFoundError:
             print(f"could not find Go executable: {self.executable}")

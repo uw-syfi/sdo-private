@@ -19,13 +19,23 @@ from sdo.operational_memory.commit_broker import (
     CommitBroker,
 )
 from sdo.operational_memory.detector_sdk import DETECTOR_SDK_REFERENCE
+from sdo.operational_memory.diagnosis import (
+    DetectorFlip,
+    DiagnosisVerdict,
+    EvidenceCheck,
+    RootCauseVerification,
+    verify_diagnosis,
+)
 from sdo.operational_memory.models import (
     DETECTOR_ID_PATTERN,
     FAULT_CLASS_PATTERN,
     INCIDENT_DETECTOR_MAX_FIRING,
+    TRAFFIC_DIRECTORY,
+    TRAFFIC_INCIDENT_WORKLOAD_PREFIX,
     ArtifactOwner,
     OutcomeClassification,
     OutcomeRecord,
+    TrafficWorkload,
 )
 from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
 from sdo.operational_memory.sandbox import (
@@ -58,6 +68,8 @@ __all__ = [
     "RESPONDER_FORBIDDEN_KUBECTL_VERBS",
     "REFLECTION_SESSION_MODES",
     "SOURCE_REPAIR_CHECK_COMMAND",
+    "TRAFFIC_DIRECTORY",
+    "TRAFFIC_INCIDENT_WORKLOAD_PREFIX",
     "VALIDATION_PASSED_TRAILER",
     "ArtifactOwner",
     "BrokerClosure",
@@ -81,7 +93,13 @@ __all__ = [
     "SandboxResult",
     "SandboxRunner",
     "TopologyReview",
+    "TrafficWorkload",
     "WarmPlaybookMatch",
     "incident_worktree_dirname",
     "warm_playbook_matches",
+    "DetectorFlip",
+    "DiagnosisVerdict",
+    "EvidenceCheck",
+    "RootCauseVerification",
+    "verify_diagnosis",
 ]

@@ -1,0 +1,13 @@
+apiVersion: sdo.dev/v1alpha1
+kind: TrafficWorkload
+name: health
+description: Continuous low-rate probe of the frontend's user-facing read paths.
+purpose: health-probe
+arrival: uniform
+ratePerSecond: 4
+timeout: 2s
+scenarios:
+  - id: search-hotels
+    weight: 2
+  - id: recommend
+  - id: login

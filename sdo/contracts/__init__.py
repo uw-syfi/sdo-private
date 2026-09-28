@@ -1,4 +1,5 @@
 from sdo.contracts.models import (
+    ROOT_CAUSE_EVIDENCE_KINDS,
     ConfirmedRootCause,
     DetectorEvaluation,
     DetectorEvaluationStatus,
@@ -10,6 +11,10 @@ from sdo.contracts.models import (
     ObjectRef,
     PriorOutcomeEvidence,
     RepairActionReceipt,
+    RootCauseEvidence,
+    StateChange,
+    StateChanges,
+    StateFieldChange,
     UsageMetrics,
 )
 
@@ -24,6 +29,11 @@ __all__ = [
     "IncidentStatus",
     "ObjectRef",
     "PriorOutcomeEvidence",
+    "ROOT_CAUSE_EVIDENCE_KINDS",
     "RepairActionReceipt",
+    "RootCauseEvidence",
+    "StateChange",
+    "StateChanges",
+    "StateFieldChange",
     "UsageMetrics",
 ]

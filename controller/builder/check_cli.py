@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -128,6 +129,11 @@ def _build_parser() -> argparse.ArgumentParser:
     controller.add_argument("--source-commit")
     controller.add_argument("--deployed-commit")
     controller.add_argument("--responder-image", required=True)
+    controller.add_argument(
+        "--prober-image",
+        default="",
+        help="image that runs the isolated traffic prober binary; defaults to the responder image",
+    )
     controller.add_argument("--repository-pvc", required=True)
     controller.add_argument("--repository-mount-path", default="/workspace")
     controller.add_argument("--repository-pvc-subpath", default="")
@@ -191,7 +197,10 @@ def _test(args: argparse.Namespace) -> int:
             keep=args.keep_workdir,
         )
     ) as workspace:
-        for command in [["mod", "tidy"], ["test", "./..."], ["build", "-buildvcs=false", "./cmd/controller"]]:
+        commands = [["mod", "tidy"], ["test", "./..."], ["build", "-buildvcs=false", "./cmd/controller"]]
+        if workspace.has_prober:
+            commands.append(["build", "-buildvcs=false", "./cmd/prober"])
+        for command in commands:
             exit_code = runner.run(command, cwd=workspace.path)
             if exit_code != 0:
                 return exit_code
@@ -403,6 +412,11 @@ def _controller_once(args: argparse.Namespace) -> int:
             exit_code = runner.run(command, cwd=workspace.path)
             if exit_code != 0:
                 return exit_code
+        prober_binary: Path | None = None
+        if workspace.has_prober:
+            prober_binary = _build_prober(runner, workspace.path, Path(args.repository_mount_path))
+            if prober_binary is None:
+                return 1
 
         responder_args = args.responder_arg or ["-m", "sdo.agent_runtime.responder.job"]
         broker_args = args.broker_arg or [
@@ -468,6 +482,9 @@ def _controller_once(args: argparse.Namespace) -> int:
             command.append("--exit-after-closure")
         if getattr(args, "supervise", False) and not getattr(args, "controller_update_rollout", False):
             command.append("--restart-after-closure")
+        if prober_binary is not None:
+            optional_values["--prober-binary"] = str(prober_binary)
+            optional_values["--prober-image"] = args.prober_image
         for flag, value in optional_values.items():
             if value:
                 command.extend([flag, value])
@@ -485,6 +502,34 @@ def _controller_once(args: argparse.Namespace) -> int:
             raise ValueError("accepted diagnostics changed without a correlated durable rollout expectation")
         return returncode
     return _execute_controller_update_rollout(args, app_root, worktree_root, pending)
+
+
+PROBER_BINARY_DIR = ".sdo-prober"
+
+
+def _build_prober(runner: GoRunner, workspace: Path, repository_mount: Path) -> Path | None:
+    """Build the traffic prober and publish it on the shared repository volume.
+
+    The prober pod mounts only the binary's content-addressed directory, read-only.
+    """
+
+    built = workspace / "sdo-prober"
+    exit_code = runner.run(
+        ["build", "-buildvcs=false", "-o", str(built), "./cmd/prober"],
+        cwd=workspace,
+        env={"CGO_ENABLED": "0"},
+    )
+    if exit_code != 0:
+        return None
+    digest = hashlib.sha256(built.read_bytes()).hexdigest()[:16]
+    target = repository_mount / PROBER_BINARY_DIR / digest / "sdo-prober"
+    if not target.is_file():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        staging = target.with_name(f".sdo-prober-{os.getpid()}")
+        shutil.copyfile(built, staging)
+        staging.chmod(0o555)
+        staging.replace(target)
+    return target
 
 
 def _execute_controller_update_rollout(

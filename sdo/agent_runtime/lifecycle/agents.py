@@ -77,6 +77,19 @@ class DeployerAssessment(DeployerHandoff):
     resources: list[TopologyResourceDTO]
 
 
+class AuthoredTrafficFile(BaseModel):
+    """One judge-authored synthetic-traffic file under ``.sdo/diagnostics/traffic/``.
+
+    ``path`` is relative to that directory: ``generators/<file>.go`` for the
+    Go generator package or ``workloads/<name>.yaml`` for a workload profile.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+
+
 class HealthJudgeDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -87,10 +100,15 @@ class HealthJudgeDraft(BaseModel):
     failure_patterns: list[str] = Field(min_length=1)
     detector_source: str = Field(min_length=40)
     detector_test_source: str = Field(min_length=40)
+    # Required in the structured-output schema (strict turns require every
+    # property); an application with no HTTP entrypoint returns an empty list.
+    traffic_files: list[AuthoredTrafficFile]
 
 
 class HealthJudgeArtifact(HealthJudgeDraft):
     session_id: str = Field(min_length=1)
+    # Provenance recorded before synthetic traffic existed has none.
+    traffic_files: list[AuthoredTrafficFile] = Field(default_factory=list)
 
 
 class HealthJudgeWorkspaceDraft(BaseModel):
@@ -107,6 +125,39 @@ class HealthJudgeWorkspaceDraft(BaseModel):
 
 class HealthJudgeWorkspaceArtifact(HealthJudgeWorkspaceDraft):
     session_id: str = Field(min_length=1)
+
+
+#: Health-judge instructions for synthetic traffic, shared by both judge sessions.
+TRAFFIC_AUTHORING = """Synthetic traffic (health-judge owned). For an application that serves HTTP, also author
+end-to-end synthetic traffic under .sdo/diagnostics/traffic/. Ground it in the application source and the deployer's
+architecture summary (which becomes .sdo/arch.md): open the user-facing entrypoint's route handlers (its HTTP mux or
+router) and derive paths it really serves, their methods, and parameter values its handlers accept, including the
+records the application seeds at startup. Cover the main user journeys, read and write paths both when the
+application has write paths. An isolated prober runs these journeys continuously at a few requests per second; the
+traffic health detector opens an incident when a scenario violates its SLO, and a responder's repair is accepted only
+when the same scenarios recover. Every scenario must therefore succeed against the healthy application.
+
+1. Generators: Go package `generators` in .sdo/diagnostics/traffic/generators/ exporting
+   `func Scenarios() traffic.Catalog` (import "sdo.dev/controller/sdk/traffic"). Each traffic.Scenario has ID,
+   Description, Target {Service, Port} (a source-backed Service and a port it exposes), DependsOn (the Services on
+   the request path per the architecture summary, for localization), SideEffect (traffic.SideEffectRead,
+   SideEffectIdempotentWrite, or SideEffectWriteWithCleanup with Cleanup steps), Marker (writes only: a string such
+   as "sdo-synthetic" that appears in every write request and names dedicated synthetic data), Steps, and Detects
+   (extra fault classes: traffic.FaultWrongBody when a step checks the body, traffic.FaultSlow). A simple step is one
+   line: `{Name: "search", Endpoint: traffic.GET("/hotels", traffic.Params{"inDate": traffic.DateRange("2015-04-09",
+   "2015-04-23"), "outDate": traffic.DaysAfter("inDate", 1, 3)}).Contains("expected text")}`. Other parameter
+   generators: Const, OneOf, IntBetween, FloatBetween, FromSeed(count, render), FromSeedPair(key, count, first,
+   second) for matching credentials, FromPrevious(key); chain steps with .SaveJSON(field, key) and "{key}" path
+   segments. Use .Contains(...) whenever the application reports failures inside a successful status. Generators only
+   build requests and check responses: never import net, os, or the clock, and draw randomness only from the rng the
+   engine passes. Never read or modify real users' data beyond the fixtures the application's own source seeds.
+2. Workloads: .sdo/diagnostics/traffic/workloads/<name>.yaml with apiVersion sdo.dev/v1alpha1, kind
+   TrafficWorkload, name equal to the file name, purpose, ratePerSecond, and scenarios [{id, weight}]. Write
+   `health` (purpose health-probe, ratePerSecond at most 4, read scenarios only unless a write is idempotent) and
+   `verify` (purpose verify-burst, ratePerSecond about 12, duration 3s, the same scenarios). Optional: timeout (2s),
+   slo {window, minSamples, maxErrorRate, maxTimeoutRate, latencyPercentile, maxLatency}, and journey workloads
+   (purpose journey, bounded duration) for writes that should not run continuously.
+Omit synthetic traffic only for an application that serves no HTTP."""
 
 
 class LifecycleAgentBackend(Protocol):
@@ -353,6 +404,12 @@ The controller evaluates one configured runtime namespace. A source manifest nam
 resource will be applied into that configured namespace; it is not a literal runtime namespace. Never embed the
 literal string "default" in detector source. Use DetectionContext.Namespace() whenever synthesizing an ObjectRef or
 checking for a required resource that is absent, and use each observed object's Namespace for resources that exist.
+
+{TRAFFIC_AUTHORING}
+Return each file in traffic_files as {{path, content}} with path relative to .sdo/diagnostics/traffic/ (for example
+generators/generators.go or workloads/health.yaml); the controller writes the files, compiles and checks them in the
+isolated validator, and installs the detector that judges each health-probe workload. Repeat every file in full on
+later rounds.
 """
         draft, session_id = self._execute(repository, prompt, HealthJudgeDraft)
         return HealthJudgeArtifact(**draft.model_dump(), session_id=session_id)
@@ -400,6 +457,8 @@ Validation feedback:
 Edit these files directly:
 - .sdo/diagnostics/detectors/health/objective/detector.go
 - .sdo/diagnostics/detectors/health/objective/detector_test.go
+- .sdo/diagnostics/traffic/generators/*.go and .sdo/diagnostics/traffic/workloads/<name>.yaml (synthetic traffic;
+  see below)
 
 Inspect the application source and existing detector, implement deterministic objective-specific checks, and add
 matching plus near-miss tests. Use `sdo detector check` to compile and run the detector tests in the isolated
@@ -423,6 +482,11 @@ object's namespace for objects that exist; never embed "default" as a runtime na
 provided, cover the matching Deployment, Service, ConfigMap, and NetworkPolicy resources required by the objective,
 including low-level dependencies rather than only user-facing workloads. Do not invent resource objects absent from
 the deployer handoff.
+
+{TRAFFIC_AUTHORING}
+`sdo detector check` also compiles the generators, proves every scenario fails against unreachable and erroring
+targets and its declared fault classes, and checks the workloads. The controller installs the detector that judges
+each health-probe workload; do not write that detector or edit the manifest.
 
 Return only metadata in the final structured response. Set round to {round_index}, source_commit to
 {deployer.source_commit!r}, copy the objective digest exactly, list objective-relevant failure patterns, and use only

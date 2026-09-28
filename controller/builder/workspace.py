@@ -12,6 +12,7 @@ import yaml
 
 from controller.builder.manifest import DetectorManifest, duration_nanoseconds, load_manifest
 from controller.builder.paths import find_diagnostics_dir
+from controller.builder.traffic import write_generated_traffic
 
 MODULE_RE = re.compile(r"^\s*module\s+(\S+)\s*$", re.MULTILINE)
 DEFAULT_MODULE_PATH = "app-diagnostics"
@@ -37,6 +38,7 @@ class BuildWorkspace:
     app_root: Path
     manifest: DetectorManifest
     module_path: str
+    has_prober: bool = False
     _temp_dir: tempfile.TemporaryDirectory[str] | None = None
 
     @classmethod
@@ -79,12 +81,19 @@ class BuildWorkspace:
         _write_generated_registration(workspace_path, module_path=module_path, manifest=manifest)
         _write_generated_externalname_invariant(workspace_path / "generated", _source_service_names(app_root))
         _write_generated_main(workspace_path, module_path=module_path)
+        try:
+            has_prober = write_generated_traffic(workspace_path, module_path=module_path)
+        except ValueError:
+            if temp_dir is not None:
+                temp_dir.cleanup()
+            raise
 
         return cls(
             path=workspace_path,
             app_root=app_root,
             manifest=manifest,
             module_path=module_path,
+            has_prober=has_prober,
             _temp_dir=temp_dir,
         )
 

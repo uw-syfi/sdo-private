@@ -11,6 +11,7 @@ from sdo.contracts import (
     IncidentStatus,
     UsageMetrics,
 )
+from sdo.operational_memory.diagnosis import verify_diagnosis
 from sdo.operational_memory.models import OutcomeClassification, OutcomeRecord, OutcomeTimestamps
 
 
@@ -23,6 +24,8 @@ class OutcomeFacts(BaseModel):
     result: IncidentResult | None = None
     dispatch_error: str | None = None
     final_health_detector_state: list[DetectorEvaluation] = Field(default_factory=list)
+    # Post-response evaluations of the incident's non-health detectors.
+    incident_detector_states: list[DetectorEvaluation] = Field(default_factory=list)
     health_verified: bool
     fault_confirmed: bool
     missed_fault_detected: bool = False
@@ -80,6 +83,12 @@ def derive_outcome(facts: OutcomeFacts) -> OutcomeRecord:
             mitigated_at=facts.responder_completed_at if result is not None else None,
             verified_at=facts.verified_at if facts.health_verified else None,
             completed_at=completed_at,
+        ),
+        diagnosis_verification=verify_diagnosis(
+            facts.request,
+            result,
+            final_detector_states=facts.final_health_detector_state,
+            incident_detector_states=facts.incident_detector_states,
         ),
     )
 

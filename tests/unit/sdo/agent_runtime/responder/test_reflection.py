@@ -14,7 +14,16 @@ from sdo.agent_runtime.responder.reflection import (
     SessionReflector,
 )
 from sdo.contracts import IncidentRequest, IncidentResult
-from sdo.operational_memory import BrokerClosure, OutcomeClassification, OutcomeRecord, TopologyReview
+from sdo.operational_memory import (
+    BrokerClosure,
+    DetectorFlip,
+    DiagnosisVerdict,
+    EvidenceCheck,
+    OutcomeClassification,
+    OutcomeRecord,
+    RootCauseVerification,
+    TopologyReview,
+)
 from sdo.operational_memory.models import (
     DETECTOR_ID_PATTERN,
     FAULT_CLASS_PATTERN,
@@ -280,6 +289,56 @@ def _first_reflection_prompt(tmp_path: Path) -> str:
         topology_review=_REVIEW,
     )
     return str(backend.calls[0]["prompt"])
+
+
+def _reflection_prompt_for(tmp_path: Path, outcome: OutcomeRecord) -> str:
+    backend = _CapturingBackend()
+    SessionReflector(backend).resume(
+        session_id="session-1",
+        incident_id="inc-1",
+        worktree=tmp_path,
+        outcome=outcome,
+        history=[outcome],
+        outcome_commit="outcome-sha",
+        topology_review=_REVIEW,
+    )
+    return str(backend.calls[0]["prompt"])
+
+
+def test_reflection_records_the_diagnosis_verification_and_learns_only_confirmed_causes(tmp_path: Path) -> None:
+    verified = _outcome().model_copy(
+        update={
+            "diagnosis_verification": [
+                RootCauseVerification(
+                    summary="frontend selector matches no pods",
+                    verdict=DiagnosisVerdict.CONFIRMED,
+                    evidence=[EvidenceCheck(kind="state-change", source="Service/frontend", verified=True)],
+                    detectors=[
+                        DetectorFlip(
+                            detector_id="traffic-health", fired_at_dispatch=True, cleared_after_fix=True, flipped=True
+                        )
+                    ],
+                ),
+                RootCauseVerification(
+                    summary="mongo admin roles revoked",
+                    verdict=DiagnosisVerdict.CONTRADICTED,
+                    evidence=[EvidenceCheck(kind="state-change", source="ConfigMap/failure-admin-geo", verified=False)],
+                ),
+            ]
+        }
+    )
+
+    prompt = _reflection_prompt_for(tmp_path, verified)
+
+    assert "Diagnosis verification (deterministic, by SDO):" in prompt
+    assert (
+        "- confirmed: frontend selector matches no pods; detectors flipped: traffic-health; verified evidence: "
+        in prompt
+    )
+    assert "state-change Service/frontend" in prompt
+    assert "- contradicted: mongo admin roles revoked" in prompt
+    assert "Learn only from confirmed causes" in prompt
+    assert "## Verification" in prompt
 
 
 def test_reflection_requires_executable_playbooks_that_trust_the_incident_detector(tmp_path: Path) -> None:

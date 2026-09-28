@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from sdo.contracts import IncidentRequest, IncidentResult, IncidentStatus
+from sdo.operational_memory import DiagnosisVerdict
 from sdo.operational_memory.models import OutcomeClassification
 from sdo.operational_memory.outcomes import OutcomeFacts, derive_outcome
 
@@ -75,3 +76,29 @@ def test_controller_facts_authoritatively_derive_all_outcome_classes(
     )
     assert outcome.applied_playbooks == expected_applied
     assert outcome.final_health_detector_state == result.final_detector_states
+
+
+def test_outcome_records_the_diagnosis_verification() -> None:
+    request = IncidentRequest.model_validate_json(_contract_fixture("incident_request.json"))
+    result = IncidentResult.model_validate_json(_contract_fixture("incident_result.json"))
+    detected = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    facts = OutcomeFacts(
+        request=request,
+        result=result,
+        final_health_detector_state=result.final_detector_states,
+        health_verified=True,
+        fault_confirmed=True,
+        responder_backend="codex",
+        responder_model="gpt-5",
+        detected_at=detected,
+        dispatched_at=detected + timedelta(seconds=1),
+        responder_completed_at=detected + timedelta(seconds=2),
+        verified_at=detected + timedelta(seconds=3),
+    )
+
+    outcome = derive_outcome(facts)
+
+    [verification] = outcome.diagnosis_verification
+    assert verification.verdict == DiagnosisVerdict.CONFIRMED
+    assert verification.detectors[0].detector_id == "missing-configmap"
+    assert verification.detectors[0].flipped

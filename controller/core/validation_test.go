@@ -6,7 +6,17 @@ import (
 	"time"
 
 	"sdo.dev/controller/sdk"
+	"sdo.dev/controller/sdk/traffic"
 )
+
+func TestValidateDetectorsAcceptsTheSyntheticTrafficWatch(t *testing.T) {
+	detector := validationDetector{spec: sdk.DetectorSpec{
+		ID: "traffic", Interval: time.Second, Watches: []sdk.WatchKind{traffic.Watch},
+	}}
+	if err := ValidateDetectors([]sdk.Detector{detector}); err != nil {
+		t.Fatalf("synthetic traffic watch must be supported: %v", err)
+	}
+}
 
 type validationDetector struct {
 	spec sdk.DetectorSpec
