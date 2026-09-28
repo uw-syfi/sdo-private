@@ -49,7 +49,7 @@ The first-party SREGym tree is divided by responsibility:
 
 | Package | Responsibility |
 |---|---|
-| `benchmarks/sregym/adapter/` | Translate SREGym execution into production SDO lifecycle/controller/responder APIs; derive and persist submission relays and strict receipts |
+| `benchmarks/sregym/adapter/` | Translate SREGym execution into production SDO lifecycle/controller/responder APIs; derive and persist submission relays (refusing a mitigation submission with exit 4 while `sdo incident status` is unhealthy) and strict receipts (including `diagnosis_verification`) |
 | `benchmarks/sregym/protocol/` | Benchmark-only conductor, HTTP, MCP submission, and strict-receipt evidence contracts |
 | `benchmarks/sregym/runner/` | Experiment and pipeline configuration, lifecycle chaining, and harness process orchestration |
 | `benchmarks/sregym/experiments/` | Checked-in benchmark and end-to-end experiment definitions |
@@ -65,11 +65,22 @@ The controller is split by stability and privilege:
 | Package | Responsibility |
 |---|---|
 | `controller/sdk/` | Public Go interfaces for detector specifications, snapshots, findings, persistence, batching, and test snapshots |
+| `controller/sdk/servicehealth/` | Zero-knowledge ready-endpoints detector that names the selector labels a Service's backing Deployment lacks |
+| `controller/sdk/traffic/` | Synthetic-traffic scenarios, parameter generators, workload profiles, the deterministic engine, sliding-window SLO evaluation, and the scenario SLO detector |
 | `controller/core/` | Detector execution, snapshot validation, finding emission, and playbook-path validation |
-| `controller/runtime/` | Kubernetes cache, scheduler, finding state, batching, responder jobs, broker effects, leader election, and durable state |
-| `controller/builder/` | Validate `.sdo/diagnostics`, compile detector tests in isolation, and generate the application-specific controller workspace |
+| `controller/runtime/` | Kubernetes cache, scheduler, finding state, batching, responder jobs, broker effects, leader election, durable state, and the prober pod and its observer |
+| `controller/runtime/prober/` | The isolated synthetic-traffic prober process (no Kubernetes dependency): continuous health probes, verify bursts, HTTP API |
+| `controller/builder/` | Validate `.sdo/diagnostics`, compile detector and traffic-generator tests in isolation, and generate the application-specific controller and prober workspaces |
 
 Generated detectors are deterministic Go. They consume controller snapshots and must not call models, read hidden benchmark labels, or use external verdicts.
+
+### Synthetic traffic
+
+The health judge writes Go generators (`.sdo/diagnostics/traffic/generators/`, a package exporting `Scenarios() traffic.Catalog`) and workload profiles (`traffic/workloads/<name>.yaml`). A scenario is a user journey: steps whose endpoints build requests from a seeded rng and per-iteration state and check responses, the Services on its request path (from `.sdo/arch.md`, for localization), a side-effect class (read, idempotent write, or write with cleanup steps), a synthetic-data marker for writes, and the fault classes it must detect. A workload is data: purpose (`health-probe` runs continuously and feeds a traffic health detector; `verify-burst` and `journey` run on demand for a bounded time), scenarios and weights, arrival pattern and rate, timeouts, and per-scenario SLOs.
+
+The `traffic.Engine` owns scheduling, arrival, rate, in-flight and time caps, latency measurement, and seeding: iteration *n* of a workload always builds the same requests, so any failing probe replays exactly. It refuses unsafe requests (writes from read scenarios, writes without the marker) without sending them. The builder compiles generators only into a separate prober binary (`cmd/prober`, with workloads embedded), never into the controller; generated tests prove that every scenario fails against simulated unreachable and 5xx targets plus its declared classes, that workloads name provided scenarios, and that traffic detectors consume health-probe workloads, and a static guard rejects generator imports that reach the network, filesystem, or cluster and package-level clock or rng calls.
+
+The controller runs the prober as a pod in the control namespace: no service-account token, a read-only mount of only its content-addressed binary on the repository volume, CPU and memory limits, restart on crash, and a NetworkPolicy allowing egress only to the application namespace and cluster DNS. An unchanged binary keeps its pod across controller relaunches. The controller polls the prober's windows every 500 ms and wakes the traffic detectors only while a failure is inside a scenario's window; a scenario judges health only after it has succeeded once, and an unreachable prober surfaces as a detector error that blocks closure but never opens an incident. The always-on `service-endpoints` detector needs no authoring.
 
 ## Operational memory
 
@@ -80,7 +91,7 @@ The application repository is the shared durable memory. Five artifact classes l
 | `goal.md` | Human | Application identity and exact health objective |
 | `arch.md` | Deployer/upkeep | Source commit, topology fingerprint, and complete architecture summary |
 | `playbooks/` | Responder | Fault-specific diagnosis, repair, and verification procedures |
-| `diagnostics/` | Health judge and responder | Health and incident detector source, tests, module, and manifest |
+| `diagnostics/` | Health judge and responder | Health and incident detector source, tests, module, and manifest; synthetic-traffic generators and workloads (judge-owned, except responder-owned `traffic/generators/incident/` and `traffic/workloads/incident-*.yaml`) |
 | `outcomes.jsonl` | Controller | Append-only authoritative incident outcomes and evidence |
 
 `schema-version` and `lifecycle-provenance.yaml` are validation metadata. They do not change the five ownership classes. Lifecycle provenance may attest an exact diagnostics-tree digest against an immutable validator image identity; only that exact pair can reuse a prior successful compilation, while any detector or validator change forces isolated validation again.
@@ -90,6 +101,10 @@ Incident responders never merge directly into the operational branch. The broker
 ## Controller/responder interaction
 
 The controller batches persistent findings into an incident request. The request includes the health objective path, architecture path, findings, surfaced playbooks, detector history, an isolated repository worktree, and the selected repair-evidence policy. A responder returns a structured result with diagnosis, applied playbooks, repository changes, and per-action receipts recording the target, timing, success, and reversibility of live mutations. Independent health detectors must clear after the response before closure. If they do not clear within the configured verification timeout, the controller durably records a detector-review-required state and exits with an actionable error instead of leaving the incident open indefinitely.
+
+The controller keeps a baseline of the application namespace's configuration, taken from namespace-scoped informers over Services, workloads, NetworkPolicies, ConfigMaps, Secrets, Roles and RoleBindings. The first healthy evaluation sets it. A later healthy snapshot replaces it only after a two-minute settle period with no unhealthy evaluation, and a maintenance pause resets it. When an incident opens, the request carries `state_changes`: the objects added, removed or modified since that baseline, with field-level before and after values. ConfigMap and Secret data appear only as digests. Kinds the controller cannot list are reported as unobserved. Objects that existed unchanged while the application was healthy, such as a benchmark's decoy ConfigMaps, never appear. The diff is computed in memory from the informer cache, so it adds no API calls on the dispatch path.
+
+Responder Jobs receive the prober's address as `SDO_PROBER_URL` when they are dispatched. `python3 -m sdo incident status` runs one verify burst of the incident's scenarios through the prober. It exits 0 when healthy, 1 when unhealthy and 3 when the prober is unavailable, and only scenarios the steady probe has seen succeed can make it unhealthy. Responders must run it before declaring a repair. Each confirmed root cause cites structured live `evidence` (a detector finding, synthetic traffic, a state change or a live observation) and the `explained_detectors` it accounts for. Scripts and manifests go in `static_context`, which is never evidence. After closure, `verify_diagnosis` checks the citations against the request and the post-response detector states. It records a verdict per cause (`confirmed`, `contradicted`, `unverified` or `no-evidence`) in the outcome record. The verdict does not gate closure. Reflection learns playbooks and incident detectors only from confirmed causes. Responders label any helper pods or Jobs they create `sdo.dev/responder-helper=true`. When the responder completes, the controller deletes them before evaluating the closure gate and records them in the closure as `cleaned_helpers`. A split-namespace install grants this through a narrow pods/jobs delete Role.
 
 Before dispatch, the controller deterministically selects up to three successful prior outcomes using exact finding fingerprints and, secondarily, detector/rule/resource-kind compatibility. Only compact root-cause, repair, playbook, and source-compatibility evidence enters the incident request. The responder treats that evidence as a hypothesis and must confirm, adapt, or reject it against live state; historical actions are never replayed automatically.
 

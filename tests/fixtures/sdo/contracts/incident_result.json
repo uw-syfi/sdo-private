@@ -18,6 +18,24 @@
           "namespace": "hotel-reservation",
           "name": "geo-config"
         }
+      ],
+      "evidence": [
+        {
+          "kind": "detector-finding",
+          "source": "missing-configmap",
+          "observation": "Deployment hotel-reservation/geo requires ConfigMap geo-config, which does not exist"
+        },
+        {
+          "kind": "live-observation",
+          "source": "kubectl -n hotel-reservation get configmap geo-config",
+          "observation": "Error from server (NotFound): configmaps \"geo-config\" not found"
+        }
+      ],
+      "explained_detectors": [
+        "missing-configmap"
+      ],
+      "static_context": [
+        "kubernetes/geo/geo-deployment.yaml mounts geo-config"
       ]
     }
   ],
@@ -38,10 +56,14 @@
           "name": "geo"
         }
       },
-      "scripts": [".sdo/playbooks/missing-configmap/scripts/verify.sh"]
+      "scripts": [
+        ".sdo/playbooks/missing-configmap/scripts/verify.sh"
+      ]
     }
   ],
-  "repair_changes": ["deploy/kubernetes/geo-config.yaml"],
+  "repair_changes": [
+    "deploy/kubernetes/geo-config.yaml"
+  ],
   "repair_actions": [
     {
       "action_id": "action-1",

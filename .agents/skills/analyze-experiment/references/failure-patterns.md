@@ -36,6 +36,12 @@ Inspect firing/clearing thresholds, debounce state, snapshot versions, durable c
 
 Compare trajectory actions with findings, surfaced playbooks, architecture, and validator feedback. Count proposals and rejected commits rather than only model turns.
 
+## Red-herring diagnosis
+
+**Signature:** health verifies, but the outcome's or receipt's `diagnosis_verification` shows `contradicted` or `unverified`; or the diagnosis names a decoy such as a `failure-admin-*` ConfigMap that never appears in `request.state_changes`.
+
+Compare the cited evidence with the request's `state_changes` and `incident_detector_states`. A cause built on `static_context` alone, or one whose `explained_detectors` never cleared, is a lucky fix, not a learned one. Reflection should not have saved a playbook from it; check the reflection commit. Repeated exit-4 refusals from the submission helper before a successful mitigation show the verify-before-submit rule catching wrong fixes.
+
 ## Ownership or broker rejection
 
 **Signature:** a repair appears plausible but the broker rejects it.

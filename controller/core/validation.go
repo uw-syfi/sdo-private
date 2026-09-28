@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"sdo.dev/controller/sdk"
+	"sdo.dev/controller/sdk/traffic"
 )
 
 func ValidateDetectors(detectors []sdk.Detector) error {
@@ -40,6 +41,9 @@ var supportedWatches = map[string]struct{}{
 	"v1/Event":                           {},
 	"v1/Pod":                             {},
 	"v1/Service":                         {},
+	// Emitted by the controller runtime's synthetic-traffic prober rather
+	// than by a Kubernetes informer.
+	traffic.Watch.APIVersion + "/" + traffic.Watch.Kind: {},
 }
 
 func validateDetectorSpec(spec sdk.DetectorSpec) error {

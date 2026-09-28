@@ -70,6 +70,7 @@ type Controller struct {
 	currentIncidentRequest     *IncidentRequest
 	dispatchState              string
 	incidentFindingKeys        []string
+	cleanedHelpers             []string
 	healthDetectorIDs          []string
 	detectorSpecs              map[string]sdk.DetectorSpec
 	currentIncidentResult      *IncidentResult
@@ -89,6 +90,13 @@ type Controller struct {
 	workspaceResults           chan workspaceCompletion
 	closureResults             chan closureCompletion
 	acknowledgmentResults      chan acknowledgmentCompletion
+
+	// Baseline, when set, records healthy configuration and attaches the
+	// diff against it to each new incident request.
+	Baseline StateBaseline
+	// Helpers, when set, deletes responder helper objects once the
+	// responder completes, before recovery is verified.
+	Helpers HelperCleaner
 
 	OnError          func(error)
 	OnResult         func(IncidentResult)
@@ -191,11 +199,13 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 	}
 
 	sampleFindings := make([]sdk.Finding, 0)
+	errored := false
 	for _, detector := range detectors {
 		spec := detector.Spec()
 		findings, detectErr := detector.Detect(ctx, snapshot)
 		if detectErr != nil {
 			c.recordDetectorError(spec.ID, now, detectErr)
+			errored = true
 			continue
 		}
 		validFindings := make([]sdk.Finding, 0, len(findings))
@@ -211,6 +221,7 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 			if validationErr := core.ValidateFinding(spec, finding); validationErr != nil {
 				c.recordDetectorError(spec.ID, now, validationErr)
 				valid = false
+				errored = true
 				break
 			}
 			validFindings = append(validFindings, finding)
@@ -249,9 +260,23 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 	if c.OnEvaluation != nil {
 		c.OnEvaluation(sampleFindings)
 	}
+	if c.Baseline != nil {
+		c.Baseline.Observe(now, !errored && c.quiet())
+	}
 
 	c.maybeCloseIncident(now)
 	return c.dispatchReady(ctx, now)
+}
+
+// quiet reports that nothing is wrong or pending: no incident or closure,
+// no active or pending finding, and nothing waiting in the batcher. Only a
+// quiet state may become the configuration baseline.
+func (c *Controller) quiet() bool {
+	c.mu.Lock()
+	busy := c.incidentOpen || c.pendingClosure != nil
+	c.mu.Unlock()
+	_, batched := c.batcher.Deadline()
+	return !busy && !batched && c.tracker.Quiet()
 }
 
 // EvaluateAll evaluates every detector against one fresh snapshot, for example
@@ -351,6 +376,9 @@ func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 		return nil
 	}
 	request := c.incidentRequest(now, batch)
+	if c.Baseline != nil {
+		request.StateChanges = c.Baseline.Changes(now)
+	}
 	c.mu.Lock()
 	c.incidentOpen = true
 	c.responderDone = false
@@ -532,11 +560,28 @@ func (c *Controller) handleDispatchCompletion(completion dispatchCompletion, obs
 		c.currentIncidentResult = cloneIncidentResult(&completion.result)
 	}
 	c.mu.Unlock()
+	if completion.err == nil && c.Helpers != nil {
+		c.cleanupHelpers()
+	}
 	if completion.err != nil && c.OnError != nil {
 		c.OnError(fmt.Errorf("dispatch incident: %w", completion.err))
 	}
 	if completion.err == nil && c.OnResult != nil {
 		c.OnResult(completion.result)
+	}
+}
+
+// cleanupHelpers deletes the responder's labelled helpers. A failure is
+// reported but never blocks verification: helpers are hygiene, not health.
+func (c *Controller) cleanupHelpers() {
+	ctx, cancel := context.WithTimeout(context.Background(), helperCleanupTimeout)
+	defer cancel()
+	deleted, err := c.Helpers.CleanupHelpers(ctx)
+	c.mu.Lock()
+	c.cleanedHelpers = append([]string(nil), deleted...)
+	c.mu.Unlock()
+	if err != nil && c.OnError != nil {
+		c.OnError(err)
 	}
 }
 
@@ -574,6 +619,7 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 		IncidentDetectorStates: c.incidentDetectorStates(),
 		DetectedAt:             c.incidentDetectedAt, DispatchedAt: c.incidentDispatchedAt,
 		ResponderCompletedAt: c.responderCompletedAt, VerifiedAt: verifiedAt,
+		CleanedHelpers: append([]string(nil), c.cleanedHelpers...),
 	}
 	c.pendingClosure = cloneIncidentClosure(&closure)
 	c.closureState = "pending"
@@ -591,6 +637,7 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 	c.detectorReviewReason = ""
 	c.dispatchState = "idle"
 	c.incidentFindingKeys = nil
+	c.cleanedHelpers = nil
 	c.mu.Unlock()
 	if c.OnIncidentClosed != nil {
 		c.OnIncidentClosed(closure)

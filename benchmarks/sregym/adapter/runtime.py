@@ -35,7 +35,7 @@ from sdo.controller_install import (
 from sdo.controller_install import (
     controller_resources as production_controller_resources,
 )
-from sdo.operational_memory import ControllerRolloutRecord
+from sdo.operational_memory import BrokerClosure, ControllerRolloutRecord, verify_diagnosis
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,10 @@ def _responder_instructions() -> str:
         "benchmark transport or grading, never as health evidence: the controller alone determines closure from "
         "live detectors. Do not begin repair until diagnosis is acknowledged. Before mitigation, wait for every "
         "affected rollout to finish, require desired, updated, ready, and available replicas to agree, require each "
-        "affected Service to expose a ready endpoint for the current rollout, and exercise a representative request. "
+        "affected Service to expose a ready endpoint for the current rollout, and run "
+        "`python3 -m sdo incident status` until it reports healthy. The mitigation command re-runs that check and "
+        "refuses to submit while it reports unhealthy (exit 4, printing the failing scenarios); keep repairing "
+        "instead. When it reports unavailable, exercise a representative request yourself. "
         "Do not return the incident result until mitigation reports done. Submit mitigation once: any `done.status` "
         "(done, completed, finished, or awaiting_cleanup) means the benchmark accepted it and the problem ended; "
         "a repeated call only reports `already_submitted`."
@@ -489,6 +492,7 @@ def _production_receipt(
         **_reflection_telemetry(ledger),
         "phase_timings_seconds": _phase_timings(closure, recorded_at),
         "memory_reuse": _memory_reuse_summary(closure, result),
+        "diagnosis_verification": _diagnosis_verification(closure),
         "validator_network_policy_canaries": ledger.get("validator_network_policy_canaries", []),
         "acknowledged": ledger.get("acknowledged") is True,
         "cleaned": ledger.get("cleaned") is True,
@@ -526,6 +530,24 @@ def _phase_timings(closure: dict[str, Any], recorded_at: datetime) -> dict[str, 
         "post_recovery_learning_and_receipt": (recorded_at - verified).total_seconds(),
         "total": (recorded_at - detected).total_seconds(),
     }
+
+
+def _diagnosis_verification(closure: dict[str, Any]) -> list[dict[str, Any]]:
+    """Check the responder's diagnosis against the broker closure's controller facts."""
+
+    try:
+        parsed = BrokerClosure.model_validate(closure)
+    except ValidationError:
+        return []
+    return [
+        verification.model_dump(mode="json")
+        for verification in verify_diagnosis(
+            parsed.request,
+            parsed.result,
+            final_detector_states=parsed.final_detector_states,
+            incident_detector_states=parsed.incident_detector_states,
+        )
+    ]
 
 
 def _memory_reuse_summary(closure: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:

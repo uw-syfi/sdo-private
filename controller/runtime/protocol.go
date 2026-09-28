@@ -67,11 +67,28 @@ type IncidentRequest struct {
 	ResponseDeadline        time.Time              `json:"response_deadline"`
 	CancellationToken       string                 `json:"cancellation_token"`
 	RepairPolicy            string                 `json:"repair_policy"`
+	// StateChanges is the application's configuration diff against its last
+	// healthy baseline when the incident opened; nil without a baseline.
+	StateChanges *StateChanges `json:"state_changes,omitempty"`
+}
+
+// RootCauseEvidence is one live observation supporting a root cause: a
+// detector finding, a synthetic scenario, a state change, or a command and
+// its output. Static artifacts are only context.
+type RootCauseEvidence struct {
+	Kind        string `json:"kind"`
+	Source      string `json:"source"`
+	Observation string `json:"observation"`
 }
 
 type ConfirmedRootCause struct {
 	Summary   string          `json:"summary"`
 	Resources []sdk.ObjectRef `json:"resources"`
+	// Evidence is empty only in results predating evidence-bearing diagnoses.
+	Evidence []RootCauseEvidence `json:"evidence,omitempty"`
+	// ExplainedDetectors must clear after the fix.
+	ExplainedDetectors []string `json:"explained_detectors,omitempty"`
+	StaticContext      []string `json:"static_context,omitempty"`
 }
 
 type AppliedPlaybook struct {
@@ -144,6 +161,9 @@ type IncidentClosure struct {
 	DispatchedAt           time.Time            `json:"dispatched_at"`
 	ResponderCompletedAt   time.Time            `json:"responder_completed_at"`
 	VerifiedAt             time.Time            `json:"verified_at"`
+	// CleanedHelpers are the responder helper objects the controller
+	// deleted after the responder completed, as Kind/namespace/name.
+	CleanedHelpers []string `json:"cleaned_helpers,omitempty"`
 }
 
 func (request IncidentRequest) Validate() error {

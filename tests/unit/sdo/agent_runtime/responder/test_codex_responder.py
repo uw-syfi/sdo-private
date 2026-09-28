@@ -144,6 +144,20 @@ def test_codex_output_schema_is_strict_and_requires_defaulted_fields() -> None:
     assert "usage" not in schema["properties"]
     action = schema["properties"]["repair_actions"]["items"]
     assert action["required"] == list(action["properties"])
+    cause = schema["properties"]["confirmed_root_causes"]["items"]
+    assert cause["required"] == list(cause["properties"])
+    assert cause["additionalProperties"] is False
+    assert cause["properties"]["evidence"]["minItems"] == 1
+    assert cause["properties"]["explained_detectors"]["minItems"] == 1
+    evidence = cause["properties"]["evidence"]["items"]
+    assert evidence["required"] == list(evidence["properties"])
+    assert "static-artifact" not in evidence["properties"]["kind"]["enum"]
+    assert set(evidence["properties"]["kind"]["enum"]) == {
+        "detector-finding",
+        "synthetic-traffic",
+        "state-change",
+        "live-observation",
+    }
 
 
 def test_recorded_actions_policy_is_explicit_in_responder_prompt() -> None:
@@ -280,6 +294,74 @@ def test_cold_prompt_is_unchanged_without_exact_incident_detector_match(tmp_path
         assert "Warm path" not in prompt
         assert "Treat them as hypotheses" in prompt
         assert "Confirm a surfaced playbook against live state before applying it" in prompt
+
+
+def test_every_path_verifies_with_incident_status_before_submitting(tmp_path: Path) -> None:
+    _write_memory(tmp_path)
+    _own_playbook(tmp_path)
+    cold = IncidentRequest.model_validate_json(_fixture("incident_request.json"))
+
+    for prompt in (_responder_prompt(cold), _responder_prompt(_warm_request(tmp_path))):
+        assert "`python3 -m sdo incident status`" in prompt
+        assert "same synthetic traffic the controller requires before it closes this incident" in prompt
+        assert "Do not submit mitigation through any channel, and do not return a completed result" in prompt
+        assert "reports unavailable" in prompt
+        assert "`sdo-incident-status`" in prompt
+    warm = _responder_prompt(_warm_request(tmp_path))
+    assert "Run the playbook's verification and `python3 -m sdo incident status`" in warm
+
+
+def test_prompt_requires_helper_objects_to_carry_the_cleanup_label() -> None:
+    prompt = _responder_prompt(IncidentRequest.model_validate_json(_fixture("incident_request.json")))
+
+    assert "sdo.dev/responder-helper=true" in prompt
+    assert "deletes them when you finish" in prompt
+
+
+def test_prompt_requires_live_evidence_for_every_root_cause() -> None:
+    prompt = _responder_prompt(IncidentRequest.model_validate_json(_fixture("incident_request.json")))
+
+    assert "Every confirmed root cause needs live evidence" in prompt
+    assert "static_context" in prompt
+    assert "explained_detectors" in prompt
+    assert "must clear after your fix" in prompt
+
+
+def test_prompt_lists_changes_since_the_healthy_baseline_once() -> None:
+    request = IncidentRequest.model_validate_json(_fixture("incident_request_state_changes.json"))
+
+    prompt = _responder_prompt(request)
+
+    assert "Changes since the last healthy state (baseline 2026-09-27T10:00:00Z" in prompt
+    assert (
+        "- Service/frontend modified: selector: io.kompose.service=frontend -> "
+        "current_service_name=frontend,io.kompose.service=frontend" in prompt
+    )
+    assert "- NetworkPolicy/deny-all added: policyTypes: Ingress" in prompt
+    assert "- ConfigMap/geo-config removed" in prompt
+    assert "2 more changes omitted" in prompt
+    assert "not observed: Secret" in prompt
+    assert "existed unchanged while the application was healthy" in prompt
+    assert prompt.count("current_service_name=frontend,io.kompose.service=frontend") == 1
+
+
+def test_prompt_says_when_nothing_changed_since_the_healthy_baseline() -> None:
+    request = IncidentRequest.model_validate_json(_fixture("incident_request_state_changes.json"))
+    assert request.state_changes is not None
+    unchanged = request.model_copy(
+        update={
+            "state_changes": request.state_changes.model_copy(
+                update={"changes": [], "omitted": None, "unobserved_kinds": None}
+            )
+        }
+    )
+
+    prompt = _responder_prompt(unchanged)
+
+    assert "No Service, workload, NetworkPolicy, ConfigMap, Secret, or RBAC object changed" in prompt
+    assert "Changes since the last healthy state" not in _responder_prompt(
+        IncidentRequest.model_validate_json(_fixture("incident_request.json"))
+    )
 
 
 def test_warm_path_requires_the_incident_playbook_to_exist(tmp_path: Path) -> None:

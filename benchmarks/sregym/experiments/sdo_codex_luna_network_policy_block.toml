@@ -1,0 +1,59 @@
+# Feedback-loop check on a first encounter: ONE long-running SDO controller
+# (Codex gpt-6-luna) answers network_policy_block (a deny-all NetworkPolicy on
+# hotel-reservation's recommendation service), with SREGym's decoy ConfigMaps
+# failure-admin-geo / failure-admin-rate present as always. Last round raw Codex
+# failed this problem once and passed it once, blaming "revoked DB roles" from
+# the decoys on the failed pass.
+#
+# Every run seeds stage 0 from one fixed post-lifecycle workspace (the lifecycle
+# commit that authored the traffic generators and workloads, no incident memory)
+# through SREGYM_APP_WORKSPACE_SEED_DIR; see luna_reuse_DECISIONS.md. Env and
+# agent settings are copied from sdo_codex_luna_persistent.toml.
+# Baselines: codex_luna_network_policy_block_baseline.toml and
+# codex_luna_verify_network_policy_block_baseline.toml.
+
+[pipeline]
+name = "sdo-codex-luna-network-policy-block"
+
+[defaults]
+agent = "sdo_codex"
+model = "gpt-6-luna"
+reasoning_effort = "medium"  # explicit on both arms; SDO pins its incident agents to medium
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+application_workspace = "persistent"
+require_strict_receipt = true
+
+[defaults.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+kind_worker_nodes = 1  # 1 control plane + 1 worker per lane (topology measurement, 2026-09-28)
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+cleanup_defer_timeout_seconds = 4200
+docker_builder = "sdo-example"
+
+[defaults.variants]
+enabled = false
+
+[defaults.agent_config.sdo_codex]
+backend = "agent-cli"
+provider = "codex"
+model = "gpt-6-luna"
+timeout_sec = 3600
+controller_image = "sdo-controller:v0.1.0"
+responder_image = "sdo-sregym-responder:v0.1.0"
+validator_image = "sdo-detector-validator:v0.1.0"
+credentials_secret = "sdo-agent-credentials"
+persistent_controller = true
+
+[[stages]]
+name = "network-policy-block"
+chain_kb = false
+chain_application_workspace = false
+
+[stages.runner]
+problems = ["network_policy_block"]

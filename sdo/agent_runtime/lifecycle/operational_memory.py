@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ import yaml
 
 from sdo.agent_runtime.lifecycle.agents import (
     ActiveTopologyResourceDTO,
+    AuthoredTrafficFile,
     CodexLifecycleBackend,
     DeployerAssessment,
     DeployerHandoff,
@@ -28,10 +30,13 @@ from sdo.agent_runtime.lifecycle.agents import (
 )
 from sdo.operational_memory import (
     BROKER_AUTHOR_EMAIL,
+    TRAFFIC_DIRECTORY,
+    TRAFFIC_INCIDENT_WORKLOAD_PREFIX,
     VALIDATION_PASSED_TRAILER,
     ContainerSandboxRunner,
     SandboxResult,
     SandboxRunner,
+    TrafficWorkload,
 )
 
 if TYPE_CHECKING:
@@ -97,6 +102,7 @@ def _health_judge_authoring_errors(root: Path) -> list[str]:
             failure_patterns=["authoring draft"],
             detector_source=(detector / "detector.go").read_text(encoding="utf-8"),
             detector_test_source=(detector / "detector_test.go").read_text(encoding="utf-8"),
+            traffic_files=_authored_traffic_files(root),
         )
         artifact = _canonicalize_active_coverage(
             artifact,
@@ -762,6 +768,7 @@ def _validate_health_judge_artifact(
         _canonicalize_health_registration(source)
     except LifecycleError as exc:
         errors.append(str(exc))
+    errors.extend(_traffic_errors(artifact.traffic_files, deployer))
     return errors
 
 
@@ -884,7 +891,9 @@ def _run_workspace_authored_candidate(
         }
         changed = set(_git(candidate, "diff", "--name-only", baseline_commit).splitlines())
         changed.update(_git(candidate, "ls-files", "--others", "--exclude-standard").splitlines())
-        unexpected = sorted(path for path in changed if path and path not in allowed)
+        unexpected = sorted(
+            path for path in changed if path and path not in allowed and not _is_judge_traffic_path(path)
+        )
         if unexpected:
             raise LifecycleError("health judge edited files outside its ownership: " + ", ".join(unexpected))
         detector = candidate / ".sdo/diagnostics/detectors/health/objective/detector.go"
@@ -896,7 +905,10 @@ def _run_workspace_authored_candidate(
             session_id=metadata.session_id,
             detector_source=source,
             detector_test_source=detector_test.read_text(encoding="utf-8"),
+            traffic_files=_authored_traffic_files(candidate),
         )
+        # The judge authors traffic; the lifecycle installs the detectors that judge it.
+        _ensure_generic_health_detectors(candidate)
         return artifact, validator.run(candidate), _diagnostics_digest(candidate)
 
 
@@ -958,6 +970,10 @@ def ensure_operational_memory(
             return _git(root, "rev-parse", "HEAD")
         _refresh_architecture_if_needed(root, application, fingerprint, source_commit)
         _upgrade_health_detector_if_needed(root, plan)
+        _ensure_health_configmap_watch(root)
+        _ensure_generic_health_detectors(root)
+        if _git(root, "status", "--porcelain", "--", ".sdo"):
+            _commit(root, "sdo: install generic symptom health detectors")
         return _git(root, "rev-parse", "HEAD")
 
     detector = memory / "diagnostics" / "detectors" / "health" / "objective"
@@ -1056,6 +1072,8 @@ detectors:
         _write_health_detector(detector, plan)
     else:
         _write_authored_health_detector(detector, health_judge_artifact)
+        _write_traffic_files(root, health_judge_artifact.traffic_files)
+    _ensure_generic_health_detectors(root)
     _commit(root, "sdo: capture goal, architecture, and independent health judge")
     return _git(root, "rev-parse", "HEAD")
 
@@ -1085,7 +1103,9 @@ def _refresh_model_backed_operational_memory(
     if health_judge_artifact is not None:
         detector = memory / "diagnostics" / "detectors" / "health" / "objective"
         _write_authored_health_detector(detector, health_judge_artifact)
+        _write_traffic_files(root, health_judge_artifact.traffic_files)
     _ensure_health_configmap_watch(root)
+    _ensure_generic_health_detectors(root)
     if lifecycle_provenance is not None:
         (memory / "lifecycle-provenance.yaml").write_text(
             yaml.safe_dump(lifecycle_provenance, sort_keys=True),
@@ -1105,6 +1125,303 @@ def _refresh_architecture_if_needed(root: Path, application: str, fingerprint: s
         encoding="utf-8",
     )
     _commit(root, "sdo: refresh commit-aware architecture summary")
+
+
+#: Lifecycle-installed, app-agnostic health detectors built on controller/sdk.
+ENDPOINT_DETECTOR_ID = "service-endpoints"
+TRAFFIC_DETECTOR_PREFIX = "traffic-"
+_HEALTH_PLAYBOOK = ".sdo/playbooks/health-objective/README.md"
+_GENERIC_BLOCK_RE = re.compile(
+    r"^  # BEGIN lifecycle-installed health detector (?P<id>\S+)\n.*?"
+    r"^  # END lifecycle-installed health detector (?P=id)\n",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+#: Judge-authored traffic files, relative to ``.sdo/diagnostics/traffic/``;
+#: the responder-owned ``generators/incident/`` and ``incident-*`` workloads are excluded.
+_JUDGE_TRAFFIC_FILE = re.compile(
+    rf"generators/[a-z0-9_]+\.go|workloads/(?!{TRAFFIC_INCIDENT_WORKLOAD_PREFIX})[a-z0-9]([-a-z0-9]{{0,61}}[a-z0-9])?\.yaml"
+)
+
+
+def _is_judge_traffic_path(path: str) -> bool:
+    prefix = f"{TRAFFIC_DIRECTORY}/"
+    return path.startswith(prefix) and bool(_JUDGE_TRAFFIC_FILE.fullmatch(path.removeprefix(prefix)))
+
+
+def traffic_detector_id(workload: str) -> str:
+    return f"{TRAFFIC_DETECTOR_PREFIX}{workload}"
+
+
+def _judge_traffic_files(root: Path) -> list[Path]:
+    directory = root / TRAFFIC_DIRECTORY
+    if not directory.is_dir():
+        return []
+    return sorted(
+        path
+        for path in directory.rglob("*")
+        if path.is_file() and _JUDGE_TRAFFIC_FILE.fullmatch(path.relative_to(directory).as_posix())
+    )
+
+
+def _write_traffic_files(root: Path, files: list[AuthoredTrafficFile]) -> None:
+    """Make the judge's files the complete judge-owned set under ``.sdo/diagnostics/traffic/``."""
+
+    for stale in _judge_traffic_files(root):
+        stale.unlink()
+    directory = root / TRAFFIC_DIRECTORY
+    for authored in files:
+        path = directory / authored.path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(authored.content.rstrip() + "\n", encoding="utf-8")
+
+
+def _authored_traffic_files(root: Path) -> list[AuthoredTrafficFile]:
+    directory = root / TRAFFIC_DIRECTORY
+    return [
+        AuthoredTrafficFile(path=path.relative_to(directory).as_posix(), content=path.read_text(encoding="utf-8"))
+        for path in _judge_traffic_files(root)
+    ]
+
+
+def _health_probe_workloads(root: Path) -> list[str]:
+    """Judge-owned health-probe workloads; invalid ones are reported by validation, not here."""
+
+    names = []
+    for path in _judge_traffic_files(root):
+        if path.suffix != ".yaml":
+            continue
+        try:
+            workload = TrafficWorkload.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+        except (yaml.YAMLError, ValueError):
+            continue
+        if workload.purpose == "health-probe" and workload.name == path.stem:
+            names.append(workload.name)
+    return sorted(names)
+
+
+def _generic_registration(detector_id: str, package: str, watches: list[tuple[str, str]], interval: str) -> str:
+    rendered_watches = "".join(
+        f"      - apiVersion: {api_version}\n        kind: {kind}\n" for api_version, kind in watches
+    )
+    return (
+        f"  # BEGIN lifecycle-installed health detector {detector_id}\n"
+        f"  - id: {detector_id}\n"
+        f"    package: ./detectors/health/{package}\n"
+        "    constructor: New\n"
+        "    class: health\n"
+        "    owner: health_judge\n"
+        "    watches:\n"
+        f"{rendered_watches}"
+        f"    interval: {interval}\n"
+        "    persistence:\n"
+        "      firing: 2\n"
+        "      clearing: 2\n"
+        "    batching:\n"
+        "      severity: critical\n"
+        "      debounce: 500ms\n"
+        "    possiblePlaybooks:\n"
+        f"      - {_HEALTH_PLAYBOOK}\n"
+        "    originatingCommit: lifecycle-bootstrap\n"
+        f"  # END lifecycle-installed health detector {detector_id}\n"
+    )
+
+
+_GENERIC_SPEC_FIELDS = """		Class:       sdk.DetectorClassHealth,
+		Owner:       sdk.DetectorOwnerHealthJudge,
+		Persistence: sdk.PersistencePolicy{Firing: 2, Clearing: 2},
+		Batching:    sdk.BatchingPolicy{Severity: sdk.SeverityCritical, Debounce: 500 * time.Millisecond},
+		Playbooks:   []string{".sdo/playbooks/health-objective/README.md"},
+		OriginatingCommit: "lifecycle-bootstrap","""
+
+
+def _endpoint_detector_source() -> str:
+    return f"""// Code generated by the SDO lifecycle. DO NOT EDIT.
+
+// Package serviceendpoints installs SDO's generic ready-endpoint health check
+// (controller/sdk/servicehealth) for this application.
+package serviceendpoints
+
+import (
+	"time"
+
+	"sdo.dev/controller/sdk"
+	"sdo.dev/controller/sdk/servicehealth"
+)
+
+func New() sdk.Detector {{
+	return servicehealth.NewReadyEndpointsDetector(sdk.DetectorSpec{{
+		ID:          "{ENDPOINT_DETECTOR_ID}",
+{_GENERIC_SPEC_FIELDS}
+		Watches:     servicehealth.EndpointWatches(),
+		Interval:    15 * time.Second,
+	}})
+}}
+"""
+
+
+def _endpoint_detector_test_source() -> str:
+    return f"""// Code generated by the SDO lifecycle. DO NOT EDIT.
+
+package serviceendpoints
+
+import "testing"
+
+func TestRegistration(t *testing.T) {{
+	if New().Spec().ID != "{ENDPOINT_DETECTOR_ID}" {{
+		t.Fatalf("unexpected detector id %q", New().Spec().ID)
+	}}
+}}
+"""
+
+
+def _traffic_detector_source(workload: str) -> str:
+    return f"""// Code generated by the SDO lifecycle. DO NOT EDIT.
+
+// Package synthetic judges the health judge's health-probe workload
+// .sdo/diagnostics/traffic/workloads/{workload}.yaml with controller/sdk/traffic.
+package synthetic
+
+import (
+	"time"
+
+	"sdo.dev/controller/sdk"
+	"sdo.dev/controller/sdk/traffic"
+)
+
+func New() sdk.Detector {{
+	return traffic.NewDetector(sdk.DetectorSpec{{
+		ID:          "{traffic_detector_id(workload)}",
+{_GENERIC_SPEC_FIELDS}
+		Watches:     []sdk.WatchKind{{traffic.Watch}},
+		Interval:    10 * time.Second,
+	}}, "{workload}")
+}}
+"""
+
+
+def _traffic_detector_test_source(workload: str) -> str:
+    return f"""// Code generated by the SDO lifecycle. DO NOT EDIT.
+
+package synthetic
+
+import (
+	"testing"
+
+	"sdo.dev/controller/sdk/traffic"
+)
+
+func TestRegistration(t *testing.T) {{
+	consumer, ok := New().(traffic.Consumer)
+	if !ok || len(consumer.TrafficWorkloads()) != 1 || consumer.TrafficWorkloads()[0] != "{workload}" {{
+		t.Fatalf("detector must judge traffic workload {workload}")
+	}}
+}}
+"""
+
+
+def _ensure_generic_health_detectors(root: Path) -> None:
+    """Install the endpoint check and one traffic detector per health-probe workload, idempotently.
+
+    Their registrations sit in marked blocks at the end of the detector list so a
+    refresh replaces exactly them and never touches responder-owned entries.
+    """
+
+    diagnostics = root / ".sdo" / "diagnostics"
+    health = diagnostics / "detectors" / "health"
+    workloads = _health_probe_workloads(root)
+    packages = {
+        ENDPOINT_DETECTOR_ID: (_endpoint_detector_source(), _endpoint_detector_test_source()),
+        **{
+            traffic_detector_id(name): (_traffic_detector_source(name), _traffic_detector_test_source(name))
+            for name in workloads
+        },
+    }
+    for stale in health.glob(f"{TRAFFIC_DETECTOR_PREFIX}*"):
+        if stale.is_dir() and stale.name not in packages:
+            shutil.rmtree(stale)
+    for package, (source, test_source) in packages.items():
+        directory = health / package
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "detector.go").write_text(source, encoding="utf-8")
+        (directory / "detector_test.go").write_text(test_source, encoding="utf-8")
+
+    manifest = diagnostics / "manifest.yaml"
+    text = _GENERIC_BLOCK_RE.sub("", manifest.read_text(encoding="utf-8"))
+    unmarked = {
+        str(detector.get("id"))
+        for detector in (yaml.safe_load(text) or {}).get("detectors", [])
+        if isinstance(detector, dict)
+    }
+    blocks = []
+    if ENDPOINT_DETECTOR_ID not in unmarked:
+        endpoint_watches = [("v1", "Service"), ("v1", "Endpoints"), ("v1", "Pod"), ("apps/v1", "Deployment")]
+        blocks.append(_generic_registration(ENDPOINT_DETECTOR_ID, ENDPOINT_DETECTOR_ID, endpoint_watches, "15s"))
+    for name in workloads:
+        detector_id = traffic_detector_id(name)
+        if detector_id not in unmarked:
+            blocks.append(
+                _generic_registration(detector_id, detector_id, [("sdo.dev/v1alpha1", "SyntheticTraffic")], "10s")
+            )
+    head, separator, tail = text.partition("detectors:\n")
+    if not separator:
+        raise LifecycleError("diagnostics manifest has no detectors list")
+    lines = tail.splitlines(keepends=True)
+    end = next(
+        (index for index, line in enumerate(lines) if line.strip() and not line[0].isspace() and line[0] != "-"),
+        len(lines),
+    )
+    list_body, rest = "".join(lines[:end]), "".join(lines[end:])
+    if list_body and not list_body.endswith("\n"):
+        list_body += "\n"
+    manifest.write_text(head + separator + list_body + "".join(blocks) + rest, encoding="utf-8")
+
+
+_GENERATOR_TARGET_RE = re.compile(r'Service:\s*"([^"]+)"')
+
+
+def _traffic_errors(files: list[AuthoredTrafficFile], deployer: DeployerAssessment) -> list[str]:
+    """Check judge-authored traffic before the validator compiles and tests it."""
+
+    services = {resource.name for resource in deployer.resources if resource.kind == "Service"}
+    paths = [authored.path for authored in files]
+    errors = [
+        f"traffic file {duplicate!r} is authored more than once"
+        for duplicate in sorted({path for path in paths if paths.count(path) > 1})
+    ]
+    generators = [authored for authored in files if authored.path.startswith("generators/")]
+    workloads = [authored for authored in files if authored.path.startswith("workloads/")]
+    errors.extend(
+        f"traffic file {authored.path!r} must be generators/<file>.go or workloads/<name>.yaml "
+        f"(not an {TRAFFIC_INCIDENT_WORKLOAD_PREFIX}* workload)"
+        for authored in files
+        if not _JUDGE_TRAFFIC_FILE.fullmatch(authored.path)
+    )
+    if workloads and not generators:
+        errors.append("traffic workloads need a generators/ Go package providing their scenarios")
+    for authored in generators:
+        if not re.search(r"^package generators\s*$", authored.content, re.MULTILINE):
+            errors.append(f"traffic file {authored.path!r} must be in package generators")
+        errors.extend(
+            f"traffic file {authored.path!r} targets Service/{service}, which is not a source-backed Service "
+            "in the deployer handoff"
+            for service in sorted(set(_GENERATOR_TARGET_RE.findall(authored.content)) - services)
+        )
+    health_probes = 0
+    for authored in workloads:
+        name = Path(authored.path).stem
+        try:
+            workload = TrafficWorkload.model_validate(yaml.safe_load(authored.content))
+        except (yaml.YAMLError, ValueError) as exc:
+            errors.append(f"traffic workload {authored.path!r} is invalid: {exc}")
+            continue
+        if workload.name != name:
+            errors.append(f"traffic workload {authored.path!r} declares name {workload.name!r}; it must match its file")
+        health_probes += workload.purpose == "health-probe"
+    if generators and not health_probes:
+        errors.append("traffic generators need a health-probe workload that runs them continuously")
+    return errors
 
 
 def _ensure_health_configmap_watch(root: Path) -> None:

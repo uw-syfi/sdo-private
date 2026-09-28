@@ -169,6 +169,27 @@ def test_split_namespace_keeps_every_sdo_workload_and_state_out_of_the_applicati
     assert any("patch" in rule["verbs"] for rule in responder["rules"])
 
 
+def test_split_namespace_controller_may_only_list_and_delete_pods_and_jobs_to_clean_responder_helpers() -> None:
+    resources = controller_resources(_split_config())
+    cleanup = next(
+        resource
+        for resource in resources
+        if resource["kind"] == "Role" and resource["metadata"]["name"] == "sdo-controller-helper-cleanup"
+    )
+    binding = next(
+        resource
+        for resource in resources
+        if resource["kind"] == "RoleBinding" and resource["metadata"]["name"] == "sdo-controller-helper-cleanup"
+    )
+
+    assert cleanup["metadata"]["namespace"] == "demo"
+    assert cleanup["rules"] == [
+        {"apiGroups": [""], "resources": ["pods"], "verbs": ["list", "delete"]},
+        {"apiGroups": ["batch"], "resources": ["jobs"], "verbs": ["list", "delete"]},
+    ]
+    assert binding["subjects"] == [{"kind": "ServiceAccount", "name": "sdo-controller", "namespace": "demo-sdo"}]
+
+
 def test_split_namespace_controller_observes_app_and_runs_jobs_in_its_own_namespace() -> None:
     args = _job(controller_resources(_split_config()))["spec"]["template"]["spec"]["containers"][0]["args"]
 

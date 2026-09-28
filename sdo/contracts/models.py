@@ -81,6 +81,34 @@ class PriorOutcomeEvidence(ContractModel):
     exact_source_match: bool
 
 
+class StateFieldChange(ContractModel):
+    """One changed aspect of an object; data values appear only as digests.
+
+    Optional fields mirror the Go runtime's ``omitempty`` encoding.
+    """
+
+    field: str = Field(min_length=1)
+    before: str | None = None
+    after: str | None = None
+
+
+class StateChange(ContractModel):
+    kind: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    change: Literal["added", "removed", "modified"]
+    fields: list[StateFieldChange] | None = None
+
+
+class StateChanges(ContractModel):
+    """The application's configuration diff against its last healthy baseline."""
+
+    baseline_at: datetime
+    observed_at: datetime
+    changes: list[StateChange] = Field(default_factory=list)
+    omitted: int | None = Field(default=None, ge=0)
+    unobserved_kinds: list[str] | None = None
+
+
 class IncidentRequest(ContractModel):
     schema_version: Literal["sdo.dev/v1alpha1"] = SCHEMA_VERSION
     application: str = Field(min_length=1)
@@ -99,11 +127,37 @@ class IncidentRequest(ContractModel):
     response_deadline: datetime
     cancellation_token: str = Field(min_length=1)
     repair_policy: Literal["commit", "recorded-actions"] = "commit"
+    state_changes: StateChanges | None = None
+
+
+#: Live evidence kinds a root cause may cite. Static artifacts (manifests,
+#: scripts, ConfigMap bodies, source files, architecture notes) show what
+#: could go wrong, not what did, so they are only ``static_context``.
+ROOT_CAUSE_EVIDENCE_KINDS = ("detector-finding", "synthetic-traffic", "state-change", "live-observation")
+
+
+class RootCauseEvidence(ContractModel):
+    """One live observation that supports a root cause.
+
+    ``source`` names what was observed: a detector ID, a synthetic scenario,
+    a changed ``Kind/name`` from the request's state changes, or the command
+    that produced ``observation``.
+    """
+
+    kind: Literal["detector-finding", "synthetic-traffic", "state-change", "live-observation"]
+    source: str = Field(min_length=1)
+    observation: str = Field(min_length=1)
 
 
 class ConfirmedRootCause(ContractModel):
     summary: str = Field(min_length=1)
     resources: list[ObjectRef] = Field(min_length=1)
+    # Empty only in records written before evidence was required; the
+    # responder's output schema requires at least one live item.
+    evidence: list[RootCauseEvidence] = Field(default_factory=list)
+    #: Detectors whose findings this cause explains; they must clear after the fix.
+    explained_detectors: list[str] = Field(default_factory=list)
+    static_context: list[str] = Field(default_factory=list)
 
 
 class AppliedPlaybook(SurfacedPlaybook):
