@@ -526,6 +526,25 @@ def interleaved_launch_order(lanes: Mapping[str, LaneState]) -> list[str]:
 # --------------------------------------------------------------------------- orchestration
 
 
+def lane_env(lane: str, gate: QuotaGate) -> dict[str, str]:
+    """The environment one lane's ``benchmarks.sregym.run`` subprocess starts with.
+
+    Besides the lane's cluster binding, it carries the stop line as the
+    lane's own launch-preflight quota ceiling (``SDO_PREFLIGHT_MAX_QUOTA_USED_PERCENT``).
+    Without it the lane's enforcing preflight falls back to its 85% default
+    and refuses to start whenever the matrix runs above that; the launcher's
+    live stop (:meth:`QuotaGate.must_stop_matrix`) is the lane's actual guard.
+    """
+
+    from benchmarks.sregym.runner.preflight import MAX_QUOTA_USED_ENV
+
+    env = dict(os.environ)
+    env["SREGYM_KIND_CLUSTER_PREFIX"] = LANE_PREFIX
+    env["SREGYM_WORKER_ID_OFFSET"] = str(lane_offset(lane))
+    env[MAX_QUOTA_USED_ENV] = str(gate.stop_percent)
+    return env
+
+
 def run_matrix(
     *,
     phase1_dir: Path,
@@ -629,9 +648,7 @@ def run_matrix(
     for lane, lane_state in sorted(state.lanes.items()):
         if lane_state.status == "running":
             resume_dir = Path(lane_state.run_dir) if lane_state.run_dir else None
-            env = dict(os.environ)
-            env["SREGYM_KIND_CLUSTER_PREFIX"] = LANE_PREFIX
-            env["SREGYM_WORKER_ID_OFFSET"] = str(lane_offset(lane))
+            env = lane_env(lane, gate)
             now = clock()
             handles[lane] = process_runner.start(lane_state.binding, resume_dir=resume_dir, env=env)
             lane_started_at[lane] = now
@@ -659,9 +676,7 @@ def run_matrix(
         for lane, lane_state in sorted(state.lanes.items()):
             if lane_state.status == "pending" and now >= scheduled_start[lane]:
                 resume_dir = Path(lane_state.run_dir) if lane_state.run_dir else None
-                env = dict(os.environ)
-                env["SREGYM_KIND_CLUSTER_PREFIX"] = LANE_PREFIX
-                env["SREGYM_WORKER_ID_OFFSET"] = str(lane_offset(lane))
+                env = lane_env(lane, gate)
                 handles[lane] = process_runner.start(lane_state.binding, resume_dir=resume_dir, env=env)
                 lane_state.status = "running"
                 lane_started_at[lane] = now

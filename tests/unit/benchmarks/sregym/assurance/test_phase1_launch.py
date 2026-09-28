@@ -17,7 +17,7 @@ from benchmarks.sregym.assurance.phase1_launch import (
     parse_lane_from_header,
     run_matrix,
 )
-from benchmarks.sregym.runner.preflight import PreflightCheck, PreflightReport
+from benchmarks.sregym.runner.preflight import MAX_QUOTA_USED_ENV, PreflightCheck, PreflightReport
 
 PHASE1_HEADERS = {
     "sdo_codex_luna_assure_p1_a.toml": "assure-w0",
@@ -229,9 +229,11 @@ class FakeProcessRunner:
         self._discovered_dir = discovered_dir
         self.started: list[tuple[str, Path | None]] = []
         self.handles: dict[str, FakeHandle] = {}
+        self.envs: dict[str, dict[str, str]] = {}
 
     def start(self, binding, *, resume_dir, env) -> FakeHandle:
         self.started.append((binding.lane, resume_dir))
+        self.envs[binding.lane] = dict(env)
         ticks = (
             self._ticks_to_finish
             if isinstance(self._ticks_to_finish, int)
@@ -284,6 +286,19 @@ def test_run_matrix_completes_every_lane(tmp_path: Path) -> None:
     state, _, _ = _run(tmp_path)
     assert state.matrix_status == "completed"
     assert all(lane_state.status == "done" for lane_state in state.lanes.values())
+
+
+def test_run_matrix_gives_every_lane_the_stop_line_as_its_own_preflight_quota_ceiling(tmp_path: Path) -> None:
+    """Each lane's ``benchmarks.sregym.run`` re-runs an enforcing preflight; without the
+    launcher's ceiling it falls back to preflight's 85% default and refuses to start at
+    the ~90% this run launches from. The launcher's live stop line is the lane's guard."""
+
+    process_runner = FakeProcessRunner(ticks_to_finish=1)
+    state, _, _ = _run(tmp_path, process_runner=process_runner, gate=QuotaGate(stop_percent=96.0))
+    assert state.matrix_status == "completed"
+    assert set(process_runner.envs) == {f"assure-w{n}" for n in range(8)}
+    for env in process_runner.envs.values():
+        assert env[MAX_QUOTA_USED_ENV] == "96.0"
 
 
 def test_run_matrix_aborts_the_whole_matrix_on_any_failing_lane_preflight(tmp_path: Path) -> None:

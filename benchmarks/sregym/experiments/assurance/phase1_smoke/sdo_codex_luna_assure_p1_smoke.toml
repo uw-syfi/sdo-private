@@ -1,0 +1,58 @@
+# Phase-1 smoke, SDO arm: the first two stages of rotation A (S1 then S2,
+# chained), same [defaults] as sdo_codex_luna_assure_p1_a.toml; lane assure-w0.
+# Kept outside phase1/ because the launcher binds every *.toml there.
+
+[pipeline]
+name = "assure-p1-smoke-sdo"
+workspace_seed = "PENDING-FRESH-LIFECYCLE-SEED"
+
+[defaults]
+agent = "sdo_codex"
+model = "gpt-6-luna"
+reasoning_effort = "medium"  # explicit on every arm; SDO pins its incident agents to medium
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+application_workspace = "persistent"
+require_strict_receipt = true
+
+[defaults.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+kind_worker_nodes = 1  # 1 control plane + 1 worker per lane
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+cleanup_defer_timeout_seconds = 4200
+docker_builder = "sdo-example"
+
+[defaults.variants]
+enabled = false
+
+[defaults.agent_config.sdo_codex]
+backend = "agent-cli"
+provider = "codex"
+model = "gpt-6-luna"
+timeout_sec = 3600
+controller_image = "sdo-controller:p1"
+responder_image = "sdo-sregym-responder:p1"
+validator_image = "sdo-detector-validator:p1"
+credentials_secret = "sdo-agent-credentials"
+persistent_controller = true
+
+[[stages]]
+name = "r1-s1-missing-configmap"
+chain_kb = false
+chain_application_workspace = false
+
+[stages.runner]
+problems = ["missing_configmap_hotel_reservation"]
+
+[[stages]]
+name = "r1-s2-wrong-service-selector"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["wrong_service_selector_hotel_reservation"]
