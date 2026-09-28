@@ -13,16 +13,19 @@ config's own header names (``PLAN.md`` D11). Before anything starts:
 - the Codex quota gate is read offline (:func:`benchmarks.sregym.runner.preflight.read_quota_snapshot`):
   2026-10 correction (see ``RUNBOOK.md``/``HARNESS_DECISIONS.md``): the start
   gate is budget-aware, not a fixed percent. ``phase1_budget.py`` estimates
-  the selected ``--matrix`` preset's (default: PLAN.md's full matrix) worst
-  case in tokens, calibrated from measured runs, converted to quota points at
-  a conservative fallback rate; the matrix only starts if
-  ``current used_percent + that worst case <= --stop-percent`` (default 96%,
-  one point under PLAN.md (d)'s own 97% hard stop), auto-shrinking the
-  matrix's attempt/pipeline counts first if it does not fit. A small,
-  non-shrinking smoke budget (1 SDO pipeline + 1 attempt/Codex arm, 1
-  problem) is reserved ahead of the matrix in this same check. The matrix
-  stops hard, mid-run, at ``--stop-percent`` regardless (the "Hard stop" rule
-  the plan attributes to ``run.sh`` ``QUOTA-STOP``).
+  the selected ``--matrix`` preset's (default: PLAN.md's full matrix, no
+  stock arm) EXPECTED (nominal) cost in tokens, calibrated from measured
+  runs, converted to quota points at a conservative fallback rate; the
+  matrix only starts if ``current used_percent + that expected cost <=
+  --stop-percent`` (default 96%, one point under PLAN.md (d)'s own 97% hard
+  stop), auto-shrinking the matrix's attempt/pipeline counts first if it
+  does not fit. A small, non-shrinking smoke budget (1 SDO pipeline + 1
+  Codex attempt, 1 problem) is reserved ahead of the matrix in this same
+  check. The 2x worst case is still computed and printed for information,
+  but no longer gates the start decision (2026-10 gate change): the matrix's
+  actual safety nets are the hard stop below and the per-lane 1.5x abort.
+  The matrix stops hard, mid-run, at ``--stop-percent`` regardless (the
+  "Hard stop" rule the plan attributes to ``run.sh`` ``QUOTA-STOP``).
 
 Once running, lane starts are staggered, host load and disk are sampled every
 30 s, quota is logged per completed run, and a lane whose own attributed
@@ -49,6 +52,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import os
 import re
@@ -184,17 +188,25 @@ class QuotaGate:
         if self.lane_abort_multiplier <= 1.0:
             raise ValueError(f"lane_abort_multiplier must be > 1.0, got {self.lane_abort_multiplier}")
 
-    def can_start_matrix(self, used_percent: float | None, planned_worst_case_percent: float) -> bool:
-        """Budget-aware start gate: current + planned worst case must clear the stop line.
+    def can_start_matrix(self, used_percent: float | None, planned_percent: float) -> bool:
+        """Budget-aware start gate: current + planned cost must clear the stop line.
+
+        2026-10 gate change (``HARNESS_DECISIONS.md``): *planned_percent* is
+        the plan's EXPECTED (nominal) cost, not its 2x worst case -- gating
+        on the worst case auto-shrunk the full matrix to a single SDO
+        pipeline for no measured reason. The live global stop
+        (:meth:`must_stop_matrix`) and the per-lane 1.5x abort
+        (:meth:`lane_over_budget`) are the run's actual safety nets; the
+        worst case is still computed and printed for information.
 
         Unknown quota does not block (a missing/expired snapshot cannot
         veto a start; preflight's own quota check independently guards
         this).
         """
 
-        if planned_worst_case_percent < 0:
-            raise ValueError(f"planned_worst_case_percent must be non-negative, got {planned_worst_case_percent}")
-        return used_percent is None or used_percent + planned_worst_case_percent <= self.stop_percent
+        if planned_percent < 0:
+            raise ValueError(f"planned_percent must be non-negative, got {planned_percent}")
+        return used_percent is None or used_percent + planned_percent <= self.stop_percent
 
     def must_stop_matrix(self, used_percent: float | None) -> bool:
         """ "Hard stop": the runner does not start a run at or above the stop line."""
@@ -491,6 +503,26 @@ def append_jsonl(path: Path, record: Mapping[str, Any]) -> None:
         stream.write(json.dumps(record) + "\n")
 
 
+def interleaved_launch_order(lanes: Mapping[str, LaneState]) -> list[str]:
+    """Lane start order, round-robin across arms (user decision, 2026-09-28).
+
+    Lane names sort by arm (SDO w0-w3, Codex w4-w7), so staggering lanes in
+    plain sorted order would give one arm a multi-stagger head start over the
+    other. If the matrix is stopped partway (quota hard stop), that would
+    leave lopsided partial data: one arm well progressed, the other barely
+    started. Interleaving keeps every arm's lanes starting close together in
+    time, so a partial run's data stays roughly balanced across arms.
+    """
+
+    by_arm: dict[str, list[str]] = {}
+    for lane in sorted(lanes):
+        by_arm.setdefault(lanes[lane].binding.arm, []).append(lane)
+    order: list[str] = []
+    for round_lanes in itertools.zip_longest(*by_arm.values()):
+        order.extend(lane for lane in round_lanes if lane is not None)
+    return order
+
+
 # --------------------------------------------------------------------------- orchestration
 
 
@@ -521,10 +553,11 @@ def run_matrix(
     ``planned_budget`` is the token-calibrated cost of the matrix (plus any
     smoke run) the caller is about to launch (see ``phase1_budget.py``);
     it defaults to the full phase-1 matrix. The start gate checks
-    ``used_percent + planned_budget.worst_case_percent`` against
-    ``gate.stop_percent``, and the decision (with every number that went
-    into it) is logged to ``<launch_dir>/gate_decision.json`` before
-    anything is launched.
+    ``used_percent + planned_budget.nominal_percent`` (EXPECTED cost; 2026-10
+    gate change, ``HARNESS_DECISIONS.md``) against ``gate.stop_percent``, and
+    the decision (with every number that went into it, including the worst
+    case, kept for information) is logged to
+    ``<launch_dir>/gate_decision.json`` before anything is launched.
     """
 
     gate = gate or QuotaGate()
@@ -550,7 +583,7 @@ def run_matrix(
 
     if not state.preflight_done:
         used_at_start = quota_reader.used_percent()
-        started = gate.can_start_matrix(used_at_start, planned_budget.worst_case_percent)
+        started = gate.can_start_matrix(used_at_start, planned_budget.nominal_percent)
         gate_decision = {
             "used_percent_at_start": used_at_start,
             "planned_label": planned_budget.label,
@@ -558,6 +591,7 @@ def run_matrix(
             "planned_worst_case_tokens": planned_budget.worst_case_tokens,
             "planned_nominal_percent": planned_budget.nominal_percent,
             "planned_worst_case_percent": planned_budget.worst_case_percent,
+            "gated_on": "nominal_percent",  # 2026-10 gate change: expected cost, not the 2x worst case
             "stop_percent": gate.stop_percent,
             "decision": "start" if started else "abort_quota_start",
         }
@@ -583,7 +617,8 @@ def run_matrix(
     lane_started_at: dict[str, float] = {}
     lane_used_before: dict[str, float | None] = {}
     scheduled_start = {
-        lane: (state.started_at or clock()) + index * stagger_seconds for index, lane in enumerate(sorted(state.lanes))
+        lane: (state.started_at or clock()) + index * stagger_seconds
+        for index, lane in enumerate(interleaved_launch_order(state.lanes))
     }
 
     # Resume: a lane this process left "running" was mid-flight when the
@@ -777,11 +812,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     # 2026-10 pivot: plan the smoke run and the selected matrix in tokens,
     # calibrated from measured runs (phase1_budget.py), auto-shrinking the
     # matrix (never the smoke run, which is fixed and small) until the
-    # combined worst case clears the stop line; print the plan either way.
+    # combined EXPECTED (nominal) cost clears the stop line (2026-10 gate
+    # change: gating on the 2x worst case was too conservative and shrank the
+    # full matrix down for no measured reason; the worst case is still
+    # computed and printed here for information). Print the plan either way.
     current_used_percent = quota_reader.used_percent()
     smoke = smoke_budget()
     start_plan = FULL_MATRIX if args.matrix == "full" else REDUCED_MATRIX
-    effective_stop_for_matrix = args.stop_percent - smoke.worst_case_percent
+    effective_stop_for_matrix = args.stop_percent - smoke.nominal_percent
     shrink_result = autoshrink_to_fit(
         current_used_percent=current_used_percent or 0.0,
         stop_percent=effective_stop_for_matrix,
@@ -797,7 +835,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"smoke: {smoke.render()}")
     print(shrink_result.explain())
     print(
-        f"combined worst case: {planned_budget.worst_case_percent:.3f} pt "
+        f"combined expected (nominal) cost: {planned_budget.nominal_percent:.3f} pt (gates the start decision) "
+        f"[worst case {planned_budget.worst_case_percent:.3f} pt, informational only] "
         f"(stop line {args.stop_percent:.1f}%, current {current_used_percent})"
     )
     if not shrink_result.fits:
@@ -806,7 +845,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if dry_run:
         preflight_runner: PreflightRunner = _dry_run_preflight_runner
     else:
-        effective_quota_threshold = max(0.0, min(100.0, args.stop_percent - planned_budget.worst_case_percent))
+        effective_quota_threshold = max(0.0, min(100.0, args.stop_percent - planned_budget.nominal_percent))
         preflight_runner = default_preflight_runner(
             project_root=project_root, sregym_dir=sregym_dir, max_quota_used_percent=effective_quota_threshold
         )

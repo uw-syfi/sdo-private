@@ -8,8 +8,10 @@ import pytest
 from benchmarks.sregym.assurance.phase1_launch import (
     ClusterCheck,
     HostSample,
+    LaneState,
     QuotaGate,
     bind_lanes,
+    interleaved_launch_order,
     lane_offset,
     load_state,
     parse_lane_from_header,
@@ -93,6 +95,25 @@ def test_the_real_phase1_directory_binds_cleanly() -> None:
     assert len(bind_lanes(real)) == 8
 
 
+def test_interleaved_launch_order_round_robins_across_arms(tmp_path: Path) -> None:
+    phase1 = _write_phase1_dir(tmp_path)
+    bindings = bind_lanes(phase1)
+    lanes = {lane: LaneState(binding=binding) for lane, binding in bindings.items()}
+
+    order = interleaved_launch_order(lanes)
+
+    assert order == [
+        "assure-w0",
+        "assure-w4",
+        "assure-w1",
+        "assure-w5",
+        "assure-w2",
+        "assure-w6",
+        "assure-w3",
+        "assure-w7",
+    ]
+
+
 def test_lane_offset_parses_the_trailing_worker_number() -> None:
     assert lane_offset("assure-w0") == 0
     assert lane_offset("assure-w7") == 7
@@ -104,15 +125,18 @@ def test_lane_offset_parses_the_trailing_worker_number() -> None:
 
 
 class TestQuotaGate:
-    def test_starts_only_if_current_plus_planned_worst_case_clears_the_stop_line(self) -> None:
+    def test_starts_only_if_current_plus_planned_percent_clears_the_stop_line(self) -> None:
+        # 2026-10 gate change: the caller passes the plan's EXPECTED (nominal)
+        # cost here, not its 2x worst case; QuotaGate itself is agnostic to
+        # which figure it is handed.
         gate = QuotaGate(stop_percent=96.0)
         assert gate.can_start_matrix(90.0, 6.0)  # 90 + 6 == 96
         assert not gate.can_start_matrix(90.1, 6.0)  # 90.1 + 6 > 96
         assert gate.can_start_matrix(None, 6.0)  # unknown quota does not block a launch
 
-    def test_can_start_matrix_rejects_a_negative_planned_worst_case(self) -> None:
+    def test_can_start_matrix_rejects_a_negative_planned_percent(self) -> None:
         gate = QuotaGate()
-        with pytest.raises(ValueError, match="planned_worst_case_percent"):
+        with pytest.raises(ValueError, match="planned_percent"):
             gate.can_start_matrix(50.0, -1.0)
 
     def test_stops_at_or_above_the_threshold(self) -> None:
@@ -273,22 +297,26 @@ def test_run_matrix_aborts_the_whole_matrix_on_any_failing_lane_preflight(tmp_pa
     assert process_runner.started == []  # nothing launched once one lane fails
 
 
-def test_run_matrix_does_not_start_when_current_plus_planned_worst_case_exceeds_the_stop_line(tmp_path: Path) -> None:
-    # Default gate (stop_percent=97.0) + default planned budget (the full
-    # matrix, worst case ~15.4 pt): 90% used leaves no room (90 + 15.4 > 97).
+def test_run_matrix_does_not_start_when_current_plus_planned_nominal_cost_exceeds_the_stop_line(
+    tmp_path: Path,
+) -> None:
+    # 2026-10 gate change: gated on EXPECTED (nominal) cost, not the 2x worst
+    # case. Default gate (stop_percent=97.0) + default planned budget (the
+    # no-stock full matrix, nominal ~6.1 pt): 92% used leaves no room
+    # (92 + 6.1 > 97).
     clock = FakeClock()
     process_runner = FakeProcessRunner()
     state, _, _ = _run(
         tmp_path,
         clock_obj=clock,
-        quota_reader=FakeQuotaReader(clock, start=90.0),
+        quota_reader=FakeQuotaReader(clock, start=92.0),
         process_runner=process_runner,
     )
     assert state.matrix_status == "aborted_quota_start"
     assert process_runner.started == []
 
 
-def test_run_matrix_starts_when_current_plus_planned_worst_case_clears_the_stop_line(tmp_path: Path) -> None:
+def test_run_matrix_starts_when_current_plus_planned_nominal_cost_clears_the_stop_line(tmp_path: Path) -> None:
     clock = FakeClock()
     state, _, _ = _run(tmp_path, clock_obj=clock, quota_reader=FakeQuotaReader(clock, start=10.0))
     assert state.matrix_status == "completed"
@@ -296,12 +324,13 @@ def test_run_matrix_starts_when_current_plus_planned_worst_case_clears_the_stop_
 
 def test_run_matrix_logs_the_gate_decision(tmp_path: Path) -> None:
     clock = FakeClock()
-    state, phase1, _ = _run(tmp_path, clock_obj=clock, quota_reader=FakeQuotaReader(clock, start=90.0))
+    state, phase1, _ = _run(tmp_path, clock_obj=clock, quota_reader=FakeQuotaReader(clock, start=92.0))
     assert state.matrix_status == "aborted_quota_start"
     decision = json.loads((tmp_path / "launch" / "gate_decision.json").read_text(encoding="utf-8"))
-    assert decision["used_percent_at_start"] == 90.0
+    assert decision["used_percent_at_start"] == 92.0
     assert decision["decision"] == "abort_quota_start"
     assert decision["stop_percent"] == 97.0
+    assert decision["gated_on"] == "nominal_percent"
     assert decision["planned_worst_case_percent"] > 0
 
 
@@ -337,6 +366,29 @@ def test_run_matrix_staggers_lane_starts(tmp_path: Path) -> None:
     # Only the first lane (scheduled at t=0) has started after one tick.
     assert len(process_runner.started) == 1
     assert process_runner.started[0][0] == "assure-w0"
+
+
+def test_run_matrix_interleaves_lane_starts_across_arms_so_a_stop_leaves_balanced_data(tmp_path: Path) -> None:
+    # Lane names sort by arm (SDO w0-w3, then Codex w4-w7); a stagger built
+    # from plain sorted order would launch every SDO lane well before any
+    # Codex lane. The first two lanes to start must be one from each arm, so
+    # a matrix stopped this early still has both arms in progress.
+    clock = FakeClock()
+    process_runner = FakeProcessRunner(ticks_to_finish=100_000)
+    state, _, _ = _run(
+        tmp_path,
+        clock_obj=clock,
+        stagger_seconds=100.0,
+        tick_seconds=100.0,
+        process_runner=process_runner,
+        max_ticks=2,
+    )
+    started_lanes = [lane for lane, _ in process_runner.started[:2]]
+    assert started_lanes == ["assure-w0", "assure-w4"]
+    assert {state.lanes["assure-w0"].binding.arm, state.lanes["assure-w4"].binding.arm} == {
+        "sdo_codex",
+        "codex_verify",
+    }
 
 
 def test_run_matrix_aborts_only_the_lane_that_exceeds_its_own_budget(tmp_path: Path) -> None:
