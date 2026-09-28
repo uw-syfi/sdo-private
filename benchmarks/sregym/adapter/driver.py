@@ -326,7 +326,7 @@ def _deployed_lifecycle_context(
         )
     health_objective = (
         f"The deployed Deployments named {', '.join(deployments)} remain available; {service_clause}; "
-        "required non-optional ConfigMap volume references remain present; and representative requests succeed."
+        "and representative requests succeed."
     )
     active_keys = {
         (kind, name) for kind in ("ConfigMap", "Deployment", "NetworkPolicy", "Service") for name in names(kind)

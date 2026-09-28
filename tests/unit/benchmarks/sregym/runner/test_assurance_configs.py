@@ -133,6 +133,21 @@ def test_each_sdo_pipeline_runs_its_rotation_twice_on_one_persistent_controller(
         assert sdo["persistent_controller"] is True
 
 
+@pytest.mark.parametrize("name", sorted(SDO))
+def test_each_sdo_pipeline_waits_for_a_fresh_lifecycle_seed(name: str) -> None:
+    """Seed ``30e023d`` was built with benchmark-tailored hints (docs/fairness-DECISIONS.md).
+
+    Phase 1 must seed from a fresh lifecycle on the de-tailored code; until the launch
+    agent fills it in, the placeholder makes the runner refuse to launch stage 0.
+    """
+    from benchmarks.sregym.runner.pipeline import WORKSPACE_SEED_PLACEHOLDER
+
+    config = load_pipeline_config(PHASE1 / name)
+
+    assert config.workspace_seed == WORKSPACE_SEED_PLACEHOLDER
+    assert "30e023d" not in (PHASE1 / name).read_text(encoding="utf-8")
+
+
 def test_the_rotations_put_every_problem_once_at_every_stream_position() -> None:
     """Four cyclic rotations: at each position the four pipelines run four different problems."""
     for position in range(len(PHASE_ONE)):

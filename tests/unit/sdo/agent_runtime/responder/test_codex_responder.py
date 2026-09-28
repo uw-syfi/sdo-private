@@ -253,6 +253,9 @@ def test_exact_match_on_incident_detector_inlines_playbook_and_fast_procedure(tm
     assert "has not fired" not in prompt
     assert "full investigation only if" in prompt
     assert "Confirm a surfaced playbook against live state before applying it" not in prompt
+    # The learned playbook owns the repair; SDO adds no fault-specific repair tip of its own.
+    assert "mount backoff" not in prompt
+    assert "stuck pods" not in prompt
 
 
 def test_registered_but_not_fired_incident_detector_gets_precondition_sanity_check(tmp_path: Path) -> None:
@@ -374,6 +377,9 @@ def test_prompt_lists_changes_since_the_healthy_baseline_once() -> None:
     assert "2 more changes omitted" in prompt
     assert "not observed: Secret" in prompt
     assert "existed unchanged while the application was healthy" in prompt
+    # The inference is neutral: no steer about names or contents that look suspicious.
+    assert "suspicious" not in prompt
+    assert "did not cause a new incident on their own" in prompt
     assert prompt.count("current_service_name=frontend,io.kompose.service=frontend") == 1
 
 

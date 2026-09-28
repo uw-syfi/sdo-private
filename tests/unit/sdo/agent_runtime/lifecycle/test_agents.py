@@ -1009,6 +1009,9 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
     assert "last structured response is the only response the controller accepts" in prompts[1]
     assert "Every Go func declaration must be package-level" in prompts[1]
     assert "Mentally parse both complete files before returning them" in prompts[1].replace("\n", " ")
+    # No fault-class hint: the judge derives its checks from the objective and the topology.
+    assert "missing-configmap" not in prompts[1].lower()
+    assert "imperatively" not in prompts[1]
 
 
 @pytest.mark.parametrize(
@@ -1377,7 +1380,12 @@ def test_global_health_objective_requires_every_source_backed_deployment_and_ser
     assert any("must cover exactly" in error and "PersistentVolumeClaim/example-data" in error for error in errors)
 
 
-def test_global_health_objective_requires_dynamic_missing_configmap_dependency_detection(tmp_path: Path) -> None:
+def test_global_health_objective_does_not_mandate_a_fault_specific_check(tmp_path: Path) -> None:
+    """The validator checks the judge's contract, not whether it wrote a check for a particular fault class.
+
+    It once rejected every global-objective detector that did not derive missing ConfigMap
+    references from pod templates: a check chosen because it matches a benchmark fault.
+    """
     repository = _repository(tmp_path)
     manifest = repository / "deploy.yaml"
     manifest.write_text(
@@ -1398,40 +1406,74 @@ def test_global_health_objective_requires_dynamic_missing_configmap_dependency_d
         resources=[TopologyResourceDTO.model_validate(item) for item in raw["resources"]],
         architecture_summary_markdown="# Architecture\n\nExample Deployment and Service use runtime-script.",
     )
+    objective = (
+        "All source-backed Deployments remain available, all selected Services have ready endpoints, "
+        "and representative requests succeed."
+    )
     artifact = _artifact(repository, session_id="judge", round_index=1, deployer=deployer)
+    artifact = artifact.model_copy(
+        update={
+            "objective_digest": hashlib.sha256(objective.encode()).hexdigest(),
+            "detector_source": artifact.detector_source.replace(
+                artifact.objective_digest, hashlib.sha256(objective.encode()).hexdigest()
+            ),
+        }
+    )
+    assert "ConfigMaps()" not in artifact.detector_source
 
     errors = _validate_health_judge_artifact(
         artifact,
         deployer=deployer,
-        health_objective=(
-            "All source-backed Deployments remain available, all selected Services have ready endpoints, "
-            "and representative requests succeed."
-        ),
+        health_objective=objective,
         expected_round=1,
     )
 
-    assert any("derive missing ConfigMap dependencies from Deployment pod specs" in error for error in errors)
-    assert any("ConfigMap/runtime-script" in error for error in errors)
+    assert errors == []
 
-    helper_artifact = artifact.model_copy(
-        update={
-            "detector_source": artifact.detector_source
-            + "\n// uses sdk.ConfigMapReferencesForDeployment(deployment) with snapshot.ConfigMaps()\n"
-        }
-    )
-    helper_errors = _validate_health_judge_artifact(
-        helper_artifact,
-        deployer=deployer,
-        health_objective=(
-            "All source-backed Deployments remain available, all selected Services have ready endpoints, "
-            "and representative requests succeed."
-        ),
-        expected_round=1,
+
+def test_lifecycle_agents_never_run_in_a_directory_named_after_the_benchmark_stage(tmp_path: Path) -> None:
+    """A stage directory such as ``r1-s1-missing-configmap`` names the injected fault; agents must not see it."""
+    stage = tmp_path / "r1-s1-missing-configmap"
+    stage.mkdir()
+    repository = _repository(stage)
+
+    class CwdRecordingBackend(RecordingBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.repositories: list[Path] = []
+
+        def run_deployer(
+            self,
+            *,
+            repository: Path,
+            application: str,
+            correction_feedback: str | None,
+        ) -> DeployerAssessment:
+            self.repositories.append(repository)
+            return super().run_deployer(
+                repository=repository, application=application, correction_feedback=correction_feedback
+            )
+
+        def run_health_judge(self, **kwargs: object) -> HealthJudgeArtifact:
+            self.repositories.append(cast("Path", kwargs["repository"]))
+            return super().run_health_judge(**kwargs)  # pyright: ignore[reportArgumentType]
+
+    backend = CwdRecordingBackend()
+
+    run_initial_lifecycle(
+        repository,
+        application="example",
+        health_objective="Deployment example and Service example must remain available.",
+        backend=backend,
+        validator=PassingValidator(),
+        judge_rounds=3,
     )
 
-    assert not any(
-        "derive missing ConfigMap dependencies from Deployment pod specs" in error for error in helper_errors
-    )
+    assert len(backend.repositories) == 4
+    for seen in backend.repositories:
+        assert "missing-configmap" not in str(seen)
+        assert seen.name == "application"
+    assert (repository / ".sdo/lifecycle-provenance.yaml").is_file()
 
 
 @pytest.mark.live_agents

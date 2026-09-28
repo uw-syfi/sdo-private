@@ -130,11 +130,19 @@ def test_sregym_adapter_routes_only_through_production_job_controller(tmp_path: 
         for resource in resources
         if resource["kind"] == "Role" and resource["metadata"]["name"] == "sdo-responder"
     )
-    assert {
-        "apiGroups": ["networking.k8s.io"],
-        "resources": ["networkpolicies"],
-        "verbs": ["get", "list", "watch", "delete"],
-    } in responder_role["rules"]
+    # The responder's repair Role is generic namespace-scoped edit on application resources, not a list
+    # of the benchmark's repairs: it can edit a Service's selector as well as a NetworkPolicy.
+    edit_verbs = ["get", "list", "watch", "create", "update", "patch", "delete"]
+    for group, kind in (
+        ("", "services"),
+        ("", "configmaps"),
+        ("apps", "deployments"),
+        ("networking.k8s.io", "networkpolicies"),
+    ):
+        assert any(
+            group in rule["apiGroups"] and kind in rule["resources"] and rule["verbs"] == edit_verbs
+            for rule in responder_role["rules"]
+        ), (group, kind)
     relay = next(
         resource
         for resource in resources
@@ -257,8 +265,7 @@ def test_health_objective_names_only_resources_deployed_in_the_runtime_namespace
     ]
     assert objective == (
         "The deployed Deployments named frontend, mongodb-geo remain available; "
-        "the deployed Services named frontend expose ready endpoints; required non-optional ConfigMap volume "
-        "references remain present; and representative requests succeed."
+        "the deployed Services named frontend expose ready endpoints; and representative requests succeed."
     )
     assert "source-backed" not in objective
     assert "ignored-openshift-variant" not in objective
