@@ -88,3 +88,17 @@ jobs:
             --image validator_image=sdo-detector-validator:v0.1.0
           uv run python -m benchmarks.sregym.runner.preflight \
             --image responder_image=sdo-responder:v0.1.0
+      - name: Confirm the responder image carries no SREGym answer key
+        # Belt-and-braces over tests/unit/controller/test_dockerfile_benchmark_scope.py,
+        # which checks the Dockerfile COPY lines statically: this lists the files an
+        # actually built image carries, so a leak would fail here even if some other
+        # build step (a base image, a stray COPY --from) reintroduced one.
+        run: |
+          files="$(docker run --rm --entrypoint find sdo-sregym-responder:v0.1.0 /opt/sdo/benchmarks -type f)"
+          echo "${files}"
+          leaked="$(echo "${files}" | grep -E '/(experiments|assurance|fastloop|analysis|runner|agents)/|/docs/|/tests/|/sdo_paper/' || true)"
+          if [ -n "${leaked}" ]; then
+            echo "answer-key paths present in sdo-sregym-responder:v0.1.0:" >&2
+            echo "${leaked}" >&2
+            exit 1
+          fi
