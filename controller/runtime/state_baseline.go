@@ -153,6 +153,13 @@ func (t *StateTracker) Start(ctx context.Context) error {
 	return nil
 }
 
+// UnobservedKinds are the kinds the last Start could not read.
+func (t *StateTracker) UnobservedKinds() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]string(nil), t.unobserved...)
+}
+
 // Stop ends observation; the baseline is kept until Reset.
 func (t *StateTracker) Stop() {
 	t.mu.Lock()

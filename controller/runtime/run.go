@@ -124,6 +124,10 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	)
 	proberImage := flags.String("prober-image", "", "image that runs the prober binary; defaults to --responder-image")
 	proberURL := flags.String("prober-url", "", "use an already running prober at this URL instead of starting one")
+	stateBaseline := flags.Bool(
+		"state-baseline", true,
+		"attach the application's configuration changes since its last healthy baseline to each incident",
+	)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -295,6 +299,12 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			return err
 		}
 	}
+	var stateTracker *StateTracker
+	if *stateBaseline {
+		stateTracker = NewStateTracker(StateTrackerConfig{Client: bootstrapProvider.Client, Namespace: *namespace})
+		controller.Baseline = stateTracker
+		defer stateTracker.Stop()
+	}
 	controller.CanAct = elector.IsLeader
 	controller.GuardAction = elector.GuardContext
 	stateStore := NewConfigMapStateStore(bootstrapProvider.Client, *controlNamespace, "sdo-controller-state")
@@ -381,13 +391,52 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			trafficObserver.Stop()
 		}
 	}
+	// startState begins observing the application's configuration, in
+	// parallel with the traffic warm-up, so the first quiet evaluation
+	// becomes its healthy baseline. The returned wait joins it and logs the
+	// outcome. It never fails operation: without it incidents simply carry
+	// no state changes.
+	startState := func() (wait func()) {
+		if stateTracker == nil {
+			return func() {}
+		}
+		started := time.Now()
+		done := make(chan error, 1)
+		go func() {
+			startCtx, cancelStart := context.WithTimeout(runCtx, 30*time.Second)
+			defer cancelStart()
+			done <- stateTracker.Start(startCtx)
+		}()
+		return func() {
+			err := <-done
+			record := map[string]any{"state_baseline_startup_ms": time.Since(started).Milliseconds()}
+			if err != nil {
+				record["state_baseline_error"] = err.Error()
+			} else if unobserved := stateTracker.UnobservedKinds(); len(unobserved) > 0 {
+				record["state_baseline_unobserved_kinds"] = unobserved
+			}
+			if err := encoder.Encode(record); err != nil {
+				fmt.Fprintln(stderr, err)
+			}
+		}
+	}
+	stopState := func() {
+		if stateTracker != nil {
+			// A maintenance window may redeploy the application, so the old
+			// baseline no longer describes it.
+			stateTracker.Stop()
+			stateTracker.Reset()
+		}
+	}
 	if !desired.Paused {
 		kubernetesCache.Start(runCtx)
 		cacheStarted = true
 		if err := kubernetesCache.WaitForSync(runCtx); err != nil {
 			return fmt.Errorf("sync Kubernetes informer cache: %w", err)
 		}
+		waitState := startState()
 		startTraffic()
+		waitState()
 		if err := controller.Step(runCtx, time.Now().UTC(), nil); err != nil {
 			if runCtx.Err() != nil {
 				return nil
@@ -429,7 +478,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			fmt.Fprintf(stderr, "resume observation of namespace %s: %v\n", *namespace, syncErr)
 			return nil
 		}
+		waitState := startState()
 		startTraffic()
+		waitState()
 		kubernetesCache.TakeEvents()
 		applied = desired
 		if err := encoder.Encode(applied.Record()); err != nil {
@@ -486,6 +537,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 				// A redeploying application would fail synthetic requests;
 				// resume starts again from empty windows.
 				stopTraffic()
+				stopState()
 				kubernetesCache.Stop()
 				kubernetesCache.TakeEvents()
 				applied = desired
