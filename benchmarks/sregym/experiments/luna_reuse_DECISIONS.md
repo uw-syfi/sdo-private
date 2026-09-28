@@ -1265,3 +1265,37 @@ Goal: show whether the end-to-end traffic detectors, the incident-status gate an
 
 - **Decision (user-directed): evaluate on `network_policy_block`, not `wrong_service_selector_hotel_reservation`.** Last round Codex failed it once and passed it once in `codex_sequence` (pass 1 blamed the decoy "revoked DB roles", pass 2 passed), so it is genuinely flaky. `wrong_service_selector` failed on both passes: consistent, so less informative about the loop. The fault is a deny-all ingress+egress NetworkPolicy `deny-all-recommendation` on `io.kompose.service=recommendation`; the healthy-state diff should name the new NetworkPolicy and the traffic generator's `/recommendations` route should fail. The decoy ConfigMaps `failure-admin-geo`/`failure-admin-rate` are present as always.
 - **Configs** (`a398f2e`): `sdo_codex_luna_network_policy_block.toml` (single-stage persistent-controller pipeline; defaults identical to `sdo_codex_luna_persistent.toml`), `codex_luna_network_policy_block_baseline.toml` (stock, `repeat = 3`) and `codex_luna_verify_network_policy_block_baseline.toml` (`verify_protocol = true`, `repeat = 3`). Judge `codex-gpt-6-luna` (xhigh), effort `medium` explicit, `kind_worker_nodes = 1`, `worker_cpu_limit = "3"`. `test_luna_experiment_configs.py` pins each to its reference (SDO defaults == persistent defaults; the baseline differs from `codex_luna_baseline.toml` only in problems and repeat; the verify arm differs from the baseline only in the flag).
+
+### Runs, bugs and fixes
+
+Wrapper scripts, lane events (`queue.events`, with a quota, disk and load reading at every start) and 30 s load samples live in `<scratch>/np/`. All runs use the merged worktree, and every lane is a 1+1 kind cluster (`luna-w0`, `-w1` and `-w2` were recreated from 1+3 by the harness).
+
+- **Infra bug 1: the stock Codex CLI install broke (fixed in `a3c02c4`, SREGym `cbb9715f`).** The first Codex (`20260928_050435_codex`) and Codex + verify (`20260928_050500_codex`) launches never started an agent. SREGym installs `@openai/codex@latest` at container start, and npm `latest` had just become 0.158.0, whose linux-x64 platform tarball returns 404. `install.rc = 1`, and the attempt ended at once with no rollout.
+  - **Decision:** pin the stock arm to 0.157.1, the version `controller/Dockerfile.runtime` bakes into the SDO images, so both arms run one CLI. It is set in SREGym's `agents.yaml` (`agent_version`) on fork branch `vic/fix/pin-codex-cli`.
+  - Test-first: `tests/unit/benchmarks/sregym/harness/test_codex_cli_version.py` fails on the unpinned registry.
+  - No rebuild is needed, because the CLI installs at container start.
+  - Both aborted launches are infrastructure failures, not counted. The lanes were killed by process group, the clusters checked clean, and the arms relaunched at 05:20Z.
+  - **Rejected:** pinning only via env for these runs. It would leave the next run on a moving `latest`.
+- **SDO bug 1: the health-judge lifecycle failed on a false repository-escape (fixed in `0d42e22`).** The unseeded lifecycle run (`20260928_050410_pipeline_…`) failed all three round-1 correction attempts with "Codex lifecycle session read outside the application repository".
+  - Every flagged command was in-repo. The audit's absolute-path regex matched route alternatives inside quoted search patterns, such as `rg -n 'HandleFunc|/hotels|/recommendations' services`. The new traffic-authoring prompt makes the judge look for routes, so this now hits on every lifecycle.
+  - **Fix, test-first** (`test_repository_audit_allows_route_alternatives_in_quoted_search_patterns` and `..._still_rejects_external_paths_near_search_patterns`):
+    - unwrap Codex's `bash -lc` wrapper;
+    - inside quoted arguments, mask a `/` that follows `|` or `(`, since that starts a regex alternative or group.
+  - Unquoted paths, quoted absolute paths (`cat '/etc/passwd'`) and pipes into absolute commands are still rejected.
+  - The run cost 3.63M tokens (0.26M uncached, 3.34M cache read, 27k output; 79 requests) and produced nothing. It is not counted, and its tokens are reported as waste, not as the lifecycle cost.
+  - **Rejected:** loosening the audit to allow any path under `/` in quotes. That would admit `cat '/etc/passwd'`.
+- **Quota reading bug (scratch only):** `quota.sh` first scanned the main checkout's logs, not the worktree's, so it saw no new rollouts. It now scans both. Readings: 90% at 05:04Z, 90% at 05:39Z, 90% at 07:45Z; no error events and no `rate_limit_reached`.
+- **Session-limit pause:** the orchestrating session hit its own limit from about 05:45Z to 07:43Z. Nothing ran in that window apart from the finished Codex arms.
+
+### Codex arms (post-fix, both launched 05:20Z; all 3+3 attempts completed)
+
+`20260928_052020_codex` (stock, luna-w1) and `20260928_052039_codex` (+ verify, luna-w2). Behaviour comes from the rollouts (`<scratch>/np/codex_rollouts.py`). `turn_context` shows effort `medium` in all 6. The verify appendix is present in all 3 verify rollouts and absent from all 3 stock ones.
+
+| Arm | # | Diag | Mit | TTD s | Decoy cmds | NetworkPolicy cmds | Probed `/recommendations` | Final "fix" | Helpers left |
+|---|---|---|---|---|---|---|---|---|---|
+| stock | 1 | fail (0) | fail | 52.5 | 6 | 0 | no | patched `mongodb-rate` (Mongo roles) | none |
+| stock | 2 | **pass (100)** | **pass** | 59.1 | 0 | 4 | no | deleted `deny-all-recommendation` | none |
+| stock | 3 | fail (0) | fail | 45.6 | 6 | 0 | no | re-granted Mongo roles via `kubectl run grant-geo` | **`grant-geo`, `verify-geo` left** |
+| verify | 1 | fail (0) | fail | 145.1 | 3 | 0 | no | "Mongo startup race"; patched `recommendation` initContainer | none |
+| verify | 2 | fail (0) | fail | 118.8 | 0 | 0 | no | "user Mongo startup race"; toggled frontend Service NodePort | none |
+| verify | 3 | fail (7.33) | fail | 96.0 | 0 | 0 | no | "Consul startup race"; patched frontend | none (`--rm` + delete) |
