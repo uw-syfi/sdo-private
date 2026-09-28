@@ -19,6 +19,13 @@ from sdo.operational_memory.commit_broker import (
     CommitBroker,
 )
 from sdo.operational_memory.detector_sdk import DETECTOR_SDK_REFERENCE
+from sdo.operational_memory.diagnosis import (
+    DetectorFlip,
+    DiagnosisVerdict,
+    EvidenceCheck,
+    RootCauseVerification,
+    verify_diagnosis,
+)
 from sdo.operational_memory.models import (
     DETECTOR_ID_PATTERN,
     FAULT_CLASS_PATTERN,
@@ -90,4 +97,9 @@ __all__ = [
     "WarmPlaybookMatch",
     "incident_worktree_dirname",
     "warm_playbook_matches",
+    "DetectorFlip",
+    "DiagnosisVerdict",
+    "EvidenceCheck",
+    "RootCauseVerification",
+    "verify_diagnosis",
 ]
