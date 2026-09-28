@@ -2,11 +2,15 @@
 
 This runbook covers the phase-1 live matrix in `PLAN.md` (d): 8 lanes
 (`assure-w0`..`assure-w7`), about 2 h wall clock, comparing SDO against a
-memoryless Codex baseline (stock and + verify). It assumes the launcher
-(`launch.sh` / `benchmarks.sregym.assurance.phase1_launch`), the image
-rebuild step (`benchmarks.sregym.assurance.rebuild_v010_images`) and the
-analysis step (`benchmarks.sregym.assurance.phase1_analyze`) built alongside
-this file, on branch `vic/exp/phase1-launch`.
+memoryless Codex baseline. **Phase 1 has no stock (no-verify) Codex arm**
+(user decision, 2026-09-28, logged in `PLAN.md`'s decisions log): the sole
+Codex arm is the default, concise-verify baseline, run on 4 lanes. The
+full-verify protocol stays available as a config option (`PLAN.md` C11); it
+is just not scheduled in phase 1. It assumes the launcher (`launch.sh` /
+`benchmarks.sregym.assurance.phase1_launch`), the image rebuild step
+(`benchmarks.sregym.assurance.rebuild_v010_images`) and the analysis step
+(`benchmarks.sregym.assurance.phase1_analyze`) built alongside this file, on
+branch `vic/exp/phase1-launch`.
 
 **2026-10 update: this run does not wait for the 2026-10-03 18:19 UTC quota
 reset.** The user asked to run as soon as RC2 lands, with the shared Codex
@@ -15,6 +19,13 @@ fixed "`used_percent <= 50%`" rule PLAN.md (d) states; see "Quota budget
 correction (2026-10)" below for the budget-aware gate this launcher actually
 enforces, and its own hard stop at `used_percent >= 97%` is kept, with this
 run's own stop line set one point under it, at 96%.
+
+**2026-10 gate change, same day (`HARNESS_DECISIONS.md`):** the start gate
+checks the plan's EXPECTED (nominal) cost against the stop line, not its 2x
+worst case. The worst case is still computed and printed, for information;
+gating on it auto-shrank the full matrix down to a single SDO pipeline for
+no measured reason. The run's actual safety nets are the live global hard
+stop and the per-lane 1.5x budget abort, both below.
 
 ## Preconditions
 
@@ -56,9 +67,9 @@ below, because they are branch/merge decisions outside its scope.
      figure; that is expected and, run by hand like this, uses preflight's
      own default 85% ceiling and will show `fail`. The launcher itself does
      **not** use that default: it computes an effective ceiling from its own
-     quota gate (`stop_percent` minus the selected matrix's worst-case
-     percent) and passes that to preflight instead, recording which ceiling
-     was used (`preflight_max_quota_used_percent`,
+     quota gate (`stop_percent` minus the selected matrix's EXPECTED,
+     nominal percent) and passes that to preflight instead, recording which
+     ceiling was used (`preflight_max_quota_used_percent`,
      `preflight_max_quota_used_percent_source`) in the report's facts. See
      "Quota budget correction (2026-10)" below.
    - The launcher (step 2 below) re-runs this per lane in enforcing mode and
@@ -96,8 +107,8 @@ bash benchmarks/sregym/experiments/assurance/phase1/launch.sh --dry-run --stop-p
 uv run python -m benchmarks.sregym.assurance.phase1_analyze \
     --sdo third_party/sregym/logs/<pipeline-w0> third_party/sregym/logs/<pipeline-w1> \
           third_party/sregym/logs/<pipeline-w2> third_party/sregym/logs/<pipeline-w3> \
-    --codex-stock third_party/sregym/logs/<w4> third_party/sregym/logs/<w5> \
-    --codex-verify third_party/sregym/logs/<w6> third_party/sregym/logs/<w7> \
+    --codex third_party/sregym/logs/<w4> third_party/sregym/logs/<w5> \
+            third_party/sregym/logs/<w6> third_party/sregym/logs/<w7> \
     --out benchmarks/sregym/experiments/assurance/phase1/report.md
 ```
 
@@ -107,18 +118,24 @@ comment (`; lane assure-wN`), already fixed in `PLAN.md` D11:
 | Lane | Config | Arm |
 |---|---|---|
 | `assure-w0`..`w3` | `sdo_codex_luna_assure_p1_{a,b,c,d}.toml` | SDO (4 pipelines, rotations A-D) |
-| `assure-w4`, `w5` | `codex_luna_assure_p1_stock_{1,2}.toml` | Codex stock |
-| `assure-w6`, `w7` | `codex_luna_verify_assure_p1_{1,2}.toml` | Codex + verify |
+| `assure-w4`..`w7` | `codex_luna_verify_assure_p1_{1,2,3,4}.toml` | Codex (concise verify, the default; no stock arm) |
 
 ## Expected duration
 
 **About 2 h wall clock** (`PLAN.md` (d)), staggered lane starts (default
 120 s apart, `--stagger-seconds`), so the last lane (`assure-w7`) begins
-about 14 minutes after the first.
+about 14 minutes after the first. Lane starts are interleaved across arms,
+not grouped (`interleaved_launch_order`, user decision, 2026-09-28): the
+stagger order is `w0, w4, w1, w5, w2, w6, w3, w7`, one SDO lane then one
+Codex lane, repeating — not all four SDO lanes first. If the matrix is
+stopped partway (the hard stop below, or a person killing the launcher),
+both arms are left with roughly the same amount of progress, not one arm
+well ahead of the other.
 
 - SDO lanes: 10 stages each (5 cold + 5 warm repeats); each stage runs a
   deploy-once, then inject/diagnose/mitigate/verify cycle.
-- Codex lanes: 12-13 sequential attempts each.
+- Codex lanes: 6-7 sequential attempts each (25 total across 4 lanes, 5 per
+  problem).
 
 ## Monitoring while it runs
 
@@ -159,26 +176,38 @@ so it will not under-budget. PLAN.md (d)'s relative multipliers (composite
 x1.5, verify x1.3, worst case x2) are unchanged; only the absolute
 weekly-percent conversion was wrong.
 
-The launcher now (a) **defaults to the full phase-1 matrix** from PLAN.md
-(the `reduced` 2026-10 preset is available via `--matrix reduced` but is no
-longer the default), (b) reserves a small, non-shrinking smoke budget (1 SDO
-pipeline + 1 attempt/Codex arm, 1 problem) ahead of the matrix, (c)
-auto-shrinks the matrix's pipeline/attempt counts — most expensive component
-first, down to a floor, never below 1 SDO pipeline, verify droppable to 0 —
-until `current used_percent + combined worst case <= --stop-percent`, and
-(d) prints the plan (and, if it shrank, exactly what changed and why)
-before anything launches. `--stop-percent` defaults to 96%, one point under
-PLAN.md's own 97% hard stop, for this run specifically (quota was already
-around 90% used when this correction was made).
+The launcher now (a) **defaults to the full phase-1 matrix** from PLAN.md,
+amended by the same-day no-stock-arm decision: 4 SDO pipelines, 5
+concise-verify Codex attempts per problem, 0 stock (the `reduced` 2026-10
+preset is available via `--matrix reduced` — 2 pipelines, 3 attempts per
+problem — but is no longer the default), (b) reserves a small, non-shrinking
+smoke budget (1 SDO pipeline + 1 Codex attempt, 1 problem) ahead of the
+matrix, (c) auto-shrinks the matrix's pipeline/attempt counts — most
+expensive component first, down to a floor of 1 SDO pipeline and 1 Codex
+attempt per problem (never to zero: phase 1 never launches with no baseline
+comparison at all) — until `current used_percent + combined EXPECTED
+(nominal) cost <= --stop-percent`, and (d) prints the plan (and, if it
+shrank, exactly what changed and why), including the worst case for
+information, before anything launches. `--stop-percent` defaults to 96%, one
+point under PLAN.md's own 97% hard stop, for this run specifically (quota
+was already around 90% used when this correction was made).
+
+**2026-10 gate change, same day:** the start decision in (c) and (d) is
+gated on the plan's EXPECTED (nominal) cost, not its 2x worst case
+(`HARNESS_DECISIONS.md`'s "Phase-1 gate: expected cost, not the 2x worst
+case"). The worst case is still computed and printed everywhere it was
+before; it just no longer decides whether the matrix starts. The run's
+actual safety nets are the live global hard stop and the per-lane 1.5x
+budget abort, both in "Abort criteria" below.
 
 **Not yet wired**: the smoke run's own `run_validity`-gated execution (the
 launcher reserves its token budget and will not start the matrix if the
 combined plan does not fit, but does not yet actually run 1 SDO pipeline + 1
-Codex attempt/arm and check their runs are `valid` before proceeding — that
+Codex attempt and check their runs are `valid` before proceeding — that
 remains a manual step for this launch). The `reduced` preset's own lane
-configs (a 4-lane subset) also do not exist yet; `--matrix reduced` sizes
-the budget correctly but the launcher still binds and runs all 8 phase-1
-lanes.
+configs (a smaller lane subset) also do not exist yet; `--matrix reduced`
+sizes the budget correctly but the launcher still binds and runs all 8
+phase-1 lanes.
 
 ## Abort criteria (enforced by the launcher; also watch for them by hand)
 
@@ -188,22 +217,23 @@ lanes.
   `matrix_status = "stopped_quota"`. If you see this, the run is over; do not
   restart until the next quota window.
 - **Matrix does not start** if `current used_percent + the planned matrix's
-  worst-case percent > --stop-percent` at launch time
+  EXPECTED (nominal) percent > --stop-percent` at launch time
   (`matrix_status = "aborted_quota_start"`; see "Quota budget correction
-  (2026-10)" below for how the worst case is computed and auto-shrunk), or if
-  **any** lane's own preflight fails (`matrix_status = "aborted_preflight"`)
-  — the whole matrix aborts before any lane starts, by design (one bad lane
-  must not silently run a partial comparison). Every start-gate decision
-  (current quota, planned nominal/worst-case tokens and percent, the stop
-  line, and the outcome) is written to `.launch/gate_decision.json` and
+  (2026-10)" below for how the nominal cost is computed and auto-shrunk, and
+  the "gate change" note there for why nominal, not worst case, gates this),
+  or if **any** lane's own preflight fails
+  (`matrix_status = "aborted_preflight"`) — the whole matrix aborts before
+  any lane starts, by design (one bad lane must not silently run a partial
+  comparison). Every start-gate decision (current quota, planned
+  nominal/worst-case tokens and percent, which one gated the decision, the
+  stop line, and the outcome) is written to `.launch/gate_decision.json` and
   appended to `.launch/quota_log.jsonl` before anything launches.
 - **Per-lane abort** when a lane's own attributed quota spend exceeds 1.5x
   its budgeted share of its arm's `PLAN.md` (d) row (SDO ~1.55%/lane,
-  threshold ~2.33%; Codex stock ~1.05%/lane, threshold ~1.58%; Codex +
-  verify ~1.35%/lane, threshold ~2.03%) — that lane is terminated
-  (`aborted_budget`) and the rest of the matrix continues. This usually
-  means a retry storm or a stuck loop in that one lane; check its log before
-  re-launching it alone.
+  threshold ~2.33%; Codex (concise verify) ~0.675%/lane, threshold ~1.01%) —
+  that lane is terminated (`aborted_budget`) and the rest of the matrix
+  continues. This usually means a retry storm or a stuck loop in that one
+  lane; check its log before re-launching it alone.
 - **Host disk below 100 GB free** is not auto-enforced mid-run today (only
   at preflight); if `host_samples.jsonl` shows it dropping toward that
   floor, stop the matrix by hand (`Ctrl-C` the launcher, or `kill` the PIDs
@@ -216,11 +246,16 @@ lanes.
 
 1. classifies every run with `run_validity` (valid / `agent_failure` /
    `invalid_infra`, with reasons);
-2. runs `incident_cost` per SDO pipeline against both Codex arms, over the
-   valid runs only, and includes each pipeline's rendered report;
+2. runs `incident_cost` per SDO pipeline against the sole Codex arm (the
+   default concise-verify baseline), over the valid runs only, and includes
+   each pipeline's rendered report;
 3. computes C1-C11 against `PLAN.md` (a)'s pre-registered pass criteria,
    using a stratified bootstrap for ratios, Wilson for a proportion, and
-   Newcombe for a difference of proportions, exactly as the plan specifies;
+   Newcombe for a difference of proportions, exactly as the plan specifies.
+   Every claim compares SDO against the concise-verify arm; where the paper's
+   own comparisons were against a stock baseline (C1-C4, C8), the claim's
+   summary notes that phase 1 has no stock arm to compare against
+   (`NO_STOCK_ARM_NOTE`);
 4. writes a report with a mandatory **Takeaways** section per claim.
 
 **Known gaps in this analysis step** (flagged in the report itself, not
@@ -236,7 +271,8 @@ silently dropped):
   against `run_validity`'s helper-leftover and receipt checks before
   reporting either claim as a clean pass.
 - **Decoy-citation counting (C11)** needs a diagnosis-text scan against the
-  known decoy markers; this tool only computes C11's ratio-vs-verify half.
+  known decoy markers; this tool only computes C11's ratio-vs-concise-verify
+  half.
 
 ## After the matrix
 
