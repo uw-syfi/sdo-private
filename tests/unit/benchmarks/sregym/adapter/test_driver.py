@@ -26,6 +26,7 @@ from benchmarks.sregym.adapter.driver import (
 from benchmarks.sregym.adapter.runtime import (
     RuntimeConfig,
     _controller_update_rollout_succeeded,
+    _diagnosis_verification,
     _load_incident_ledger,
     _memory_reuse_summary,
     _phase_timings,
@@ -1518,3 +1519,29 @@ def test_persistent_mode_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> N
     assert driver._parse_args([]).persistent_controller is False
     monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"persistent_controller": True}))
     assert driver._parse_args([]).persistent_controller is True
+
+
+def test_receipt_diagnosis_verification_comes_from_the_broker_closure() -> None:
+    fixtures = Path(__file__).resolve().parents[4] / "fixtures" / "sdo" / "contracts"
+    request = json.loads((fixtures / "incident_request.json").read_text(encoding="utf-8"))
+    result = json.loads((fixtures / "incident_result.json").read_text(encoding="utf-8"))
+    closure = {
+        "request": request,
+        "result": result,
+        "final_detector_states": result["final_detector_states"],
+        "detected_at": "2026-07-09T18:00:31Z",
+        "dispatched_at": "2026-07-09T18:01:00Z",
+        "responder_completed_at": "2026-07-09T18:13:05Z",
+        "verified_at": "2026-07-09T18:13:10Z",
+    }
+
+    [verification] = _diagnosis_verification(closure)
+
+    assert verification["verdict"] == "confirmed"
+    assert verification["detectors"][0] == {
+        "detector_id": "missing-configmap",
+        "fired_at_dispatch": True,
+        "cleared_after_fix": True,
+        "flipped": True,
+    }
+    assert _diagnosis_verification({}) == []

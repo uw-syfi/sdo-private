@@ -35,7 +35,7 @@ from sdo.controller_install import (
 from sdo.controller_install import (
     controller_resources as production_controller_resources,
 )
-from sdo.operational_memory import ControllerRolloutRecord
+from sdo.operational_memory import BrokerClosure, ControllerRolloutRecord, verify_diagnosis
 
 logger = logging.getLogger(__name__)
 
@@ -492,6 +492,7 @@ def _production_receipt(
         **_reflection_telemetry(ledger),
         "phase_timings_seconds": _phase_timings(closure, recorded_at),
         "memory_reuse": _memory_reuse_summary(closure, result),
+        "diagnosis_verification": _diagnosis_verification(closure),
         "validator_network_policy_canaries": ledger.get("validator_network_policy_canaries", []),
         "acknowledged": ledger.get("acknowledged") is True,
         "cleaned": ledger.get("cleaned") is True,
@@ -529,6 +530,24 @@ def _phase_timings(closure: dict[str, Any], recorded_at: datetime) -> dict[str, 
         "post_recovery_learning_and_receipt": (recorded_at - verified).total_seconds(),
         "total": (recorded_at - detected).total_seconds(),
     }
+
+
+def _diagnosis_verification(closure: dict[str, Any]) -> list[dict[str, Any]]:
+    """Check the responder's diagnosis against the broker closure's controller facts."""
+
+    try:
+        parsed = BrokerClosure.model_validate(closure)
+    except ValidationError:
+        return []
+    return [
+        verification.model_dump(mode="json")
+        for verification in verify_diagnosis(
+            parsed.request,
+            parsed.result,
+            final_detector_states=parsed.final_detector_states,
+            incident_detector_states=parsed.incident_detector_states,
+        )
+    ]
 
 
 def _memory_reuse_summary(closure: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
