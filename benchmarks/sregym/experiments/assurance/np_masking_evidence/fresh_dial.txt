@@ -1,0 +1,22 @@
+### fresh dial from helper (new pod netns) 1790633912.139093540
+-- nc -z -w3 192.168.59.138 8085 (pod-ip)
+Command exited with non-zero status 1
+real	0m 3.00s
+user	0m 0.00s
+sys	0m 0.00s
+rc=1
+-- nc -z -w3 10.96.100.9 8085 (svc-clusterip)
+Command exited with non-zero status 1
+real	0m 3.00s
+user	0m 0.00s
+sys	0m 0.00s
+rc=1
+-- nc -z -w3 192.168.59.138 27017 (wrong-port-control)
+Command exited with non-zero status 1
+real	0m 3.00s
+user	0m 0.00s
+sys	0m 0.00s
+rc=1
+-- control: fresh dial to another service (user:8086) and frontend:5000
+frontend rc=0
+user rc=0

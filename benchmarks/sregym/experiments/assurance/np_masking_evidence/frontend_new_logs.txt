@@ -1,0 +1,15 @@
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:140[0m[36m >[0m srv-search.
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:138[0m[36m >[0m get Grpc conn is :
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:139[0m[36m >[0m 
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:140[0m[36m >[0m srv-profile.
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:138[0m[36m >[0m get Grpc conn is :
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:139[0m[36m >[0m 
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:140[0m[36m >[0m srv-recommendation.
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:138[0m[36m >[0m get Grpc conn is :
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:139[0m[36m >[0m 
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:140[0m[36m >[0m srv-user.
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:138[0m[36m >[0m get Grpc conn is :
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:139[0m[36m >[0m 
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:140[0m[36m >[0m srv-reservation.
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:65[0m[36m >[0m Successfull
+[90m2026-09-28T22:28:37Z[0m [32mINF[0m [1mservices/frontend/server.go:87[0m[36m >[0m Serving http
