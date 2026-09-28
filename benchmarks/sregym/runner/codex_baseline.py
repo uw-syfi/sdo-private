@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -80,11 +80,11 @@ class CodexBaselineConfig:
     verify_protocol: VerifyProtocolMode = "concise"
 
     def __post_init__(self) -> None:
-        value = self.verify_protocol
+        value = cast("object", self.verify_protocol)  # TOML input: a legacy bool or any other type may arrive
         if isinstance(value, bool):
             object.__setattr__(self, "verify_protocol", _LEGACY_BOOL_MODE[value])
             return
-        if not isinstance(value, str):  # pyright: ignore[reportUnnecessaryIsInstance] - TOML input
+        if not isinstance(value, str):
             raise TypeError(f"agent.codex.verify_protocol must be a string mode or a legacy boolean, got {value!r}")
         if value not in VERIFY_PROTOCOL_MODES:
             raise ValueError(
