@@ -156,8 +156,10 @@ func TestDispatchErrorRetriesTheSameIncidentInsteadOfOpeningADuplicate(t *testin
 	interval := time.Second
 	detector := controllerDetector("health", interval, stateFinding("fault"), stateFinding("fault"), stateFinding("fault"))
 	dispatcher := &retryingDispatcher{requests: make(chan IncidentRequest, 2)}
+	config := testControllerConfig()
+	config.DispatchRetry = DispatchRetryPolicy{InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}
 	controller, err := NewController(
-		testControllerConfig(),
+		config,
 		[]sdk.Detector{detector},
 		staticProvider{snapshot: sdktest.Snapshot{}},
 		dispatcher,
@@ -166,6 +168,8 @@ func TestDispatchErrorRetriesTheSameIncidentInsteadOfOpeningADuplicate(t *testin
 	if err != nil {
 		t.Fatalf("new controller: %v", err)
 	}
+	now := time.Unix(1000, 0).UTC()
+	controller.now = func() time.Time { return now }
 	for sample := 0; sample < 2; sample++ {
 		if err := controller.Step(context.Background(), time.Unix(int64(sample), 0), nil); err != nil {
 			t.Fatalf("firing step: %v", err)
@@ -181,6 +185,11 @@ func TestDispatchErrorRetriesTheSameIncidentInsteadOfOpeningADuplicate(t *testin
 		incidentID: "stale-incident",
 		result:     completedResult("stale-incident"),
 	}, time.Unix(3, 0))
+	if _, ok := controller.PendingDispatchEffect(); ok {
+		t.Fatal("a transient dispatch failure retried without backoff")
+	}
+	// The bounded backoff (capped at 1ms here) is over; the retry stays pending.
+	now = now.Add(2 * time.Millisecond)
 	retry, ok := controller.PendingDispatchEffect()
 	if !ok {
 		t.Fatal("transient dispatch failure did not remain pending for retry")

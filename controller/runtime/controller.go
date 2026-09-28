@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"sort"
 	"strings"
 	"sync"
@@ -41,6 +42,9 @@ type ControllerConfig struct {
 	RepairPolicy         string
 	// ClosureRetry bounds resubmission of a closure the broker rejects.
 	ClosureRetry ClosureRetryPolicy
+	// DispatchRetry bounds how quickly a transient dispatch failure
+	// re-executes the dispatch effect.
+	DispatchRetry DispatchRetryPolicy
 }
 
 type dispatchCompletion struct {
@@ -86,6 +90,8 @@ type Controller struct {
 	closureState               string
 	closureReceipt             *ClosureReceipt
 	closureFailure             *ClosureFailure
+	dispatchFailureAttempts    int
+	dispatchNextRetryAt        time.Time
 	lastAcknowledgedIncidentID string
 	broker                     IncidentBroker
 	workspaceResults           chan workspaceCompletion
@@ -106,8 +112,12 @@ type Controller struct {
 	OnClosureFailed  func(ClosureFailure)
 	CanAct           func() bool
 	GuardAction      func(context.Context) (context.Context, context.CancelFunc, error)
-	// now overrides the wall clock for closure retry backoff in tests.
+	// now overrides the wall clock for closure and dispatch retry backoff in
+	// tests.
 	now func() time.Time
+	// dispatchJitter overrides the dispatch retry jitter source in tests; it
+	// must return a value in [0, 1). Nil defaults to a real random source.
+	dispatchJitter func() float64
 }
 
 func NewController(
@@ -149,6 +159,11 @@ func NewController(
 		return nil, err
 	}
 	config.ClosureRetry = closureRetry
+	dispatchRetry, err := config.DispatchRetry.withDefaults()
+	if err != nil {
+		return nil, err
+	}
+	config.DispatchRetry = dispatchRetry
 	if err := core.ValidateDetectors(detectors); err != nil {
 		return nil, err
 	}
@@ -174,6 +189,7 @@ func NewController(
 		detectorSpecs:    detectorSpecs,
 		workspaceResults: make(chan workspaceCompletion, 1), closureResults: make(chan closureCompletion, 1),
 		acknowledgmentResults: make(chan acknowledgmentCompletion, 1),
+		dispatchJitter:        rand.Float64,
 	}, nil
 }
 
@@ -392,6 +408,7 @@ func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 	c.detectorReviewRequired = false
 	c.detectorReviewRequiredAt = time.Time{}
 	c.detectorReviewReason = ""
+	c.resetDispatchRetryLocked()
 	c.dispatchState = "pending"
 	if c.broker != nil {
 		c.dispatchState = "workspace_pending"
@@ -427,7 +444,7 @@ func (c *Controller) NextWake() time.Time {
 	if verificationPending && (next.IsZero() || verificationDeadline.Before(next)) {
 		return verificationDeadline
 	}
-	return c.closureRetryWake(next)
+	return c.closureRetryWake(c.dispatchRetryWake(next))
 }
 
 func (c *Controller) IncidentOpen() bool {
@@ -567,16 +584,20 @@ func (c *Controller) handleDispatchCompletion(completion dispatchCompletion, obs
 		c.dispatchState = "completed"
 		c.dispatchError = completion.err.Error()
 		c.currentIncidentResult = nil
+		c.resetDispatchRetryLocked()
 	} else if completion.err != nil {
 		// A watcher, transport, or leadership-guard failure does not prove that
 		// the durable responder Job stopped. Retry the same incident effect so
 		// the idempotent dispatcher rejoins its existing Job/result instead of
-		// clearing the incident lock and opening a duplicate responder.
+		// clearing the incident lock and opening a duplicate responder. Bounded,
+		// jittered backoff keeps a persistent outage (an API-server pause) from
+		// spinning the dispatch effect in a hot loop.
 		c.responderDone = false
 		c.responderCompletedAt = time.Time{}
 		c.dispatchState = "pending"
 		c.dispatchError = completion.err.Error()
 		c.currentIncidentResult = nil
+		c.recordDispatchFailureLocked()
 	} else {
 		c.responderDone = true
 		c.responderCompletedAt = observedAt.UTC()
@@ -586,6 +607,7 @@ func (c *Controller) handleDispatchCompletion(completion dispatchCompletion, obs
 		c.dispatchState = "completed"
 		c.dispatchError = ""
 		c.currentIncidentResult = cloneIncidentResult(&completion.result)
+		c.resetDispatchRetryLocked()
 	}
 	c.mu.Unlock()
 	if completion.err == nil && c.Helpers != nil {
