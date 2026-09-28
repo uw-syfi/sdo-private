@@ -236,7 +236,7 @@ def test_the_plans_composites_are_sregym_registry_problems() -> None:
             fault.problem_id for fault in case.faults
         ]
         assert bool(case.decoy_objects) == any(item["role"] == "decoy" for item in components)
-    k3 = composite("K3-geo-configmap+log-drift")
+    k3 = composite("K3")
     assert k3.decoy_objects == ("Deployment/geo",)
     assert k3.wrong_fixes[0].label == "revert the recent LOG_LEVEL change on deployment/geo"
     with pytest.raises(ValueError, match="only a registry composite"):

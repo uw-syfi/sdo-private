@@ -538,10 +538,18 @@ class AssuranceSuite:
             decoy_objects=case.decoy_objects,
         )
 
-    def _inject(self, problems: list[str], registry_id: str = "") -> tuple[datetime, datetime]:
-        if registry_id or len(problems) == 1:
-            # A registry composite is one SREGym problem; its fault components are faults 0..n-1.
-            window = self.driver.inject(registry_id or problems[0])
+    def inject_case(self, case: CompositeCase) -> tuple[datetime, datetime]:
+        """Make a composite case's faults live: one registry problem, or a worker composition."""
+
+        return self._inject([fault.problem_id for fault in case.faults], registry_id=case.registry_id)
+
+    def _inject(self, problems: list[str], *, registry_id: str = "") -> tuple[datetime, datetime]:
+        # A registry composite is one SREGym problem; the worker addresses its fault components
+        # as faults 0..n-1, exactly as it does a composition, so partial fixes work unchanged.
+        if registry_id:
+            window = self.driver.inject(registry_id)
+        elif len(problems) == 1:
+            window = self.driver.inject(problems[0])
         else:
             window = self.driver.inject_composite(problems).window
         return window.started_at, window.finished_at
@@ -582,7 +590,7 @@ class AssuranceSuite:
                 )
             )
             known = self.known_requests()
-            run.injection_started_at, run.injection_finished_at = self._inject(problems, registry_id)
+            run.injection_started_at, run.injection_finished_at = self._inject(problems, registry_id=registry_id)
             injected = True
             request_file, request = self.wait_request(known=known, timeout=bounds.detect_seconds + 120)
             received = utcnow()

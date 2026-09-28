@@ -1,0 +1,48 @@
+# Assurance phase 1, Codex stock arm, attempt plan 1 of 2 (PLAN.md section (d)); lane assure-w4.
+#
+# Memoryless: each listed problem is an independent attempt (the runner keeps
+# repeated inline problems as separate runs, in order). The two lanes of this arm
+# together give 5 attempts per phase-1 problem (13 + 12), in interleaved order so
+# problem and lane are not confounded.
+#
+# Models (user rule, 2026-09-28): Codex gpt-6-luna at medium effort; the SREGym
+# judge is codex-gpt-6-luna at the Codex CLI backend's default xhigh, never
+# overridden. Enforced by tests/unit/benchmarks/sregym/runner/test_assurance_configs.py.
+#
+# DO NOT LAUNCH before the 2026-10-03 18:19 UTC quota reset and the PLAN.md
+# preconditions. Settings copied from ../../codex_luna_baseline.toml.
+
+[runner]
+agent = "codex"
+model = "gpt-6-luna"
+reasoning_effort = "medium"  # explicit on every arm; SDO pins its incident agents to medium
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+enable_summary = false
+no_inject_summary = true
+problems = [
+    "missing_configmap_hotel_reservation",
+    "wrong_service_selector_hotel_reservation",
+    "network_policy_block",
+    "composite_policy_and_rate_configmap_hotel_reservation",
+    "composite_frontend_selector_and_readiness_hotel_reservation",
+    "missing_configmap_hotel_reservation",
+    "wrong_service_selector_hotel_reservation",
+    "network_policy_block",
+    "composite_policy_and_rate_configmap_hotel_reservation",
+    "composite_frontend_selector_and_readiness_hotel_reservation",
+    "missing_configmap_hotel_reservation",
+    "wrong_service_selector_hotel_reservation",
+    "network_policy_block",
+]
+
+[runner.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+kind_worker_nodes = 1  # 1 control plane + 1 worker per lane
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+docker_builder = "sdo-example"

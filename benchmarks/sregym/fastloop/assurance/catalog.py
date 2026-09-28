@@ -87,6 +87,8 @@ class CompositeCase:
     faults: tuple[FaultCase, ...]
     source: str = "suite"
     wrong_fixes: tuple[WrongFix, ...] = field(default=())
+    #: A SREGym registry composite (``composite_specs.json``), injected as one problem; its fault
+    #: components are ``faults``, in order. Empty: the worker composes ``faults`` itself.
     registry_id: str = ""
     decoy_objects: tuple[str, ...] = field(default=())
 
@@ -95,6 +97,8 @@ class CompositeCase:
             raise ValueError(f"{self.name}: a composite fault has at least two faults, or a fault and a decoy")
         if self.decoy_objects and not self.registry_id:
             raise ValueError(f"{self.name}: only a registry composite injects decoys")
+        if self.registry_id and not self.registry_id.startswith("composite_"):
+            raise ValueError(f"{self.name}: a registry composite id starts with composite_, got {self.registry_id}")
         problems = [fault.problem_id for fault in self.faults]
         if len(set(problems)) != len(problems):
             raise ValueError(f"{self.name}: a problem appears twice: {problems}")
@@ -170,21 +174,21 @@ COMPOSITES: tuple[CompositeCase, ...] = (
     CompositeCase(name="configmap-geo+selector", faults=(MISSING_CONFIGMAP, WRONG_SELECTOR)),
     CompositeCase(name="configmap-geo+configmap-rate", faults=(MISSING_CONFIGMAP, MISSING_CONFIGMAP_RATE)),
     CompositeCase(
-        name="K1-policy+rate-configmap",
+        name="K1",
         faults=(NETWORK_POLICY_BLOCK, MISSING_CONFIGMAP_RATE),
         source="PLAN.md K1",
         registry_id="composite_policy_and_rate_configmap_hotel_reservation",
         wrong_fixes=(WrongFix("decoy-regrant"),),
     ),
     CompositeCase(
-        name="K2-selector+readiness",
+        name="K2",
         faults=(WRONG_SELECTOR, READINESS_PROBE),
         source="PLAN.md K2",
         registry_id="composite_frontend_selector_and_readiness_hotel_reservation",
         wrong_fixes=(WrongFix("restart", "frontend"),),
     ),
     CompositeCase(
-        name="K3-geo-configmap+log-drift",
+        name="K3",
         faults=(MISSING_CONFIGMAP,),
         source="PLAN.md K3",
         registry_id="composite_geo_configmap_with_log_drift_hotel_reservation",

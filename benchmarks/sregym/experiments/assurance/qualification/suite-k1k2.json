@@ -1,0 +1,1440 @@
+{
+  "schema_version": "sdo.no-llm-assurance/v1",
+  "run_id": "k1k2",
+  "cluster": "assure-q0",
+  "seed_commit": "93f35a93a07d107f84bf90e0cf17f43fb11bc3f8",
+  "controller_binary_sha256": "46fb7450ea2b9a5be404ee19f8184ecc02c392017716f1b2b01001a23246021a",
+  "prober_digest": "26ab1dae5ff28114",
+  "started_at": "2026-09-28T11:34:28.738616Z",
+  "finished_at": "2026-09-28T11:56:32.792845Z",
+  "runs": [
+    {
+      "case": "K1",
+      "kind": "composite",
+      "iteration": 1,
+      "problems": [
+        "network_policy_block",
+        "missing_configmap_mongodb_rate_hotel_reservation"
+      ],
+      "started_at": "2026-09-28T11:36:52.435629Z",
+      "injection_started_at": "2026-09-28T11:36:56.387037Z",
+      "injection_finished_at": "2026-09-28T11:37:13.395347Z",
+      "incident_id": "hotel-reservation-1790595417898303406",
+      "first_finding_seconds": {
+        "health-objective": 0.011,
+        "service-endpoints": 6.643
+      },
+      "incident_opened_seconds": 1.511,
+      "request_received_seconds": 17.009,
+      "diff": {
+        "expected": [
+          "ConfigMap/mongo-rate-script",
+          "NetworkPolicy/deny-all-recommendation"
+        ],
+        "named": [
+          "NetworkPolicy/deny-all-recommendation"
+        ],
+        "missing": [
+          "ConfigMap/mongo-rate-script"
+        ],
+        "unexpected": [],
+        "decoys_named": [],
+        "baseline_at": "2026-09-28T11:34:33.580812Z",
+        "observed_at": "2026-09-28T11:36:57.898303Z"
+      },
+      "live_named": [
+        "ConfigMap/mongo-rate-script"
+      ],
+      "on_fault": {
+        "label": "on the fault",
+        "at": "2026-09-28T11:37:17.620702Z",
+        "status_exit": 1,
+        "status_seconds": 4.533,
+        "gate_exit": 4,
+        "unhealthy_scenarios": [],
+        "blocking_detectors": [
+          "health-objective",
+          "service-endpoints"
+        ],
+        "new_state_changes": [
+          "ConfigMap/mongo-rate-script"
+        ],
+        "controller_detail": "controller view of hotel-reservation-1790595417898303406 at 2026-09-28T11:37:13.577381+00:00"
+      },
+      "wrong_fixes": [],
+      "partial_fixes": [
+        {
+          "fixed_problem": "network_policy_block",
+          "remaining_problems": [
+            "missing_configmap_mongodb_rate_hotel_reservation"
+          ],
+          "probe": {
+            "label": "after fixing network_policy_block",
+            "at": "2026-09-28T11:37:27.399158Z",
+            "status_exit": 1,
+            "status_seconds": 5.428,
+            "gate_exit": 4,
+            "unhealthy_scenarios": [],
+            "blocking_detectors": [
+              "health-objective",
+              "service-endpoints"
+            ],
+            "new_state_changes": [
+              "ConfigMap/mongo-rate-script"
+            ],
+            "controller_detail": "controller view of hotel-reservation-1790595417898303406 at 2026-09-28T11:37:27.398507+00:00"
+          }
+        }
+      ],
+      "correct_fix_seconds": 4.517,
+      "clear_seconds": 30.758,
+      "after_fix": {
+        "label": "after the correct fix",
+        "at": "2026-09-28T11:38:15.783090Z",
+        "status_exit": 0,
+        "status_seconds": 3.86,
+        "gate_exit": 0,
+        "unhealthy_scenarios": [],
+        "blocking_detectors": [],
+        "new_state_changes": [
+          "Deployment/mongodb-rate"
+        ],
+        "controller_detail": "controller view of hotel-reservation-1790595417898303406 at 2026-09-28T11:38:14.948727+00:00"
+      },
+      "verified_seconds": 48.557,
+      "closure_acknowledged": true,
+      "final_detector_states": {
+        "health-objective": "clear",
+        "service-endpoints": "clear",
+        "traffic-health": "clear"
+      },
+      "diagnosis_verdicts": [
+        "confirmed"
+      ],
+      "helpers": {
+        "created": [
+          "Pod/hotel-reservation/sdo-assure-helper-1-1790595273",
+          "Pod/hotel-reservation-sdo/sdo-assure-helper-1-1790595273",
+          "Job/hotel-reservation/sdo-assure-helper-job-1-1790595273"
+        ],
+        "cleaned_by_controller": [
+          "Job/hotel-reservation/sdo-assure-helper-job-1-1790595273",
+          "Pod/hotel-reservation-sdo/sdo-assure-helper-1-1790595273",
+          "Pod/hotel-reservation/sdo-assure-helper-1-1790595273",
+          "Pod/hotel-reservation/sdo-assure-helper-job-1-1790595273-5qlqn"
+        ],
+        "remaining": [],
+        "bystander_kept": true,
+        "cleanup_seconds": 0.212
+      },
+      "absorption": null,
+      "checks": [
+        {
+          "name": "healthy before the fault",
+          "passed": true,
+          "detail": "status exit 0",
+          "known_gap": false
+        },
+        {
+          "name": "diff names every faulted object",
+          "passed": true,
+          "detail": "request diff named ['NetworkPolicy/deny-all-recommendation'], live view added ['ConfigMap/mongo-rate-script'], missing []",
+          "known_gap": false
+        },
+        {
+          "name": "diff names no decoy",
+          "passed": true,
+          "detail": "decoys []",
+          "known_gap": false
+        },
+        {
+          "name": "diff names nothing else",
+          "passed": true,
+          "detail": "unexpected []",
+          "known_gap": false
+        },
+        {
+          "name": "traffic prober detects within the bound",
+          "passed": false,
+          "detail": "traffic-health never produced a finding (the prober detected network_policy_block late (+20.4 s) in 1 of 4 live runs (feedback-loop e2e))",
+          "known_gap": true
+        },
+        {
+          "name": "status unhealthy on the fault",
+          "passed": true,
+          "detail": "exit 1",
+          "known_gap": false
+        },
+        {
+          "name": "gate refuses on the fault",
+          "passed": true,
+          "detail": "exit 4",
+          "known_gap": false
+        },
+        {
+          "name": "still unhealthy with missing_configmap_mongodb_rate_hotel_reservation left",
+          "passed": true,
+          "detail": "exit 1",
+          "known_gap": false
+        },
+        {
+          "name": "gate refuses with missing_configmap_mongodb_rate_hotel_reservation left",
+          "passed": true,
+          "detail": "exit 4",
+          "known_gap": false
+        },
+        {
+          "name": "status healthy within the clear bound",
+          "passed": true,
+          "detail": "cleared after 30.758s (bound 60.0s)",
+          "known_gap": false
+        },
+        {
+          "name": "gate accepts after the correct fix",
+          "passed": true,
+          "detail": "exit 0",
+          "known_gap": false
+        },
+        {
+          "name": "incident opened within the detect bound",
+          "passed": true,
+          "detail": "opened 1.511s after injection started",
+          "known_gap": false
+        },
+        {
+          "name": "controller verified recovery within the bound",
+          "passed": true,
+          "detail": "verified 48.557s after the fix",
+          "known_gap": false
+        },
+        {
+          "name": "closure never preceded the correct fix",
+          "passed": true,
+          "detail": "verified_at 2026-09-28T11:38:33.582173+00:00",
+          "known_gap": false
+        },
+        {
+          "name": "every health detector clear at closure",
+          "passed": true,
+          "detail": "{'health-objective': 'clear', 'service-endpoints': 'clear', 'traffic-health': 'clear'}",
+          "known_gap": false
+        },
+        {
+          "name": "labelled helpers cleaned",
+          "passed": true,
+          "detail": "cleaned ['Job/hotel-reservation/sdo-assure-helper-job-1-1790595273', 'Pod/hotel-reservation-sdo/sdo-assure-helper-1-1790595273', 'Pod/hotel-reservation/sdo-assure-helper-1-1790595273', 'Pod/hotel-reservation/sdo-assure-helper-job-1-1790595273-5qlqn'], remaining []",
+          "known_gap": false
+        },
+        {
+          "name": "helper cleanup within the bound",
+          "passed": true,
+          "detail": "0.212s after the responder exited",
+          "known_gap": false
+        },
+        {
+          "name": "unlabelled bystander kept",
+          "passed": true,
+          "detail": "",
+          "known_gap": false
+        },
+        {
+          "name": "diagnosis verified as confirmed",
+          "passed": true,
+          "detail": "['confirmed']",
+          "known_gap": false
+        },
+        {
+          "name": "first fault came after the state tracker's start deadline",
+          "passed": true,
+          "detail": "controller up 144s at the first injection",
+          "known_gap": false
+        }
+      ],
+      "error": null
+    },
+    {
+      "case": "K2",
+      "kind": "composite",
+      "iteration": 1,
+      "problems": [
+        "wrong_service_selector_hotel_reservation",
+        "readiness_probe_misconfiguration_hotel_reservation"
+      ],
+      "started_at": "2026-09-28T11:40:55.182107Z",
+      "injection_started_at": "2026-09-28T11:40:59.023837Z",
+      "injection_finished_at": "2026-09-28T11:41:11.383909Z",
+      "incident_id": "hotel-reservation-1790595660621522310",
+      "first_finding_seconds": {
+        "health-objective": 0.099,
+        "service-endpoints": 0.099,
+        "traffic-health": 4.547
+      },
+      "incident_opened_seconds": 1.598,
+      "request_received_seconds": 12.361,
+      "diff": {
+        "expected": [
+          "Deployment/frontend",
+          "Service/frontend"
+        ],
+        "named": [
+          "Service/frontend"
+        ],
+        "missing": [
+          "Deployment/frontend"
+        ],
+        "unexpected": [],
+        "decoys_named": [],
+        "baseline_at": "2026-09-28T11:38:35.308119Z",
+        "observed_at": "2026-09-28T11:41:00.621522Z"
+      },
+      "live_named": [
+        "Deployment/frontend"
+      ],
+      "on_fault": {
+        "label": "on the fault",
+        "at": "2026-09-28T11:41:16.818949Z",
+        "status_exit": 1,
+        "status_seconds": 5.522,
+        "gate_exit": 4,
+        "unhealthy_scenarios": [
+          "hotel-search",
+          "hotel-recommendations",
+          "user-login-check"
+        ],
+        "blocking_detectors": [
+          "health-objective",
+          "service-endpoints"
+        ],
+        "new_state_changes": [
+          "Deployment/frontend"
+        ],
+        "controller_detail": "controller view of hotel-reservation-1790595660621522310 at 2026-09-28T11:41:22.070472+00:00"
+      },
+      "wrong_fixes": [],
+      "partial_fixes": [
+        {
+          "fixed_problem": "wrong_service_selector_hotel_reservation",
+          "remaining_problems": [
+            "readiness_probe_misconfiguration_hotel_reservation"
+          ],
+          "probe": {
+            "label": "after fixing wrong_service_selector_hotel_reservation",
+            "at": "2026-09-28T11:41:29.126645Z",
+            "status_exit": 1,
+            "status_seconds": 5.438,
+            "gate_exit": 4,
+            "unhealthy_scenarios": [
+              "hotel-search",
+              "hotel-recommendations",
+              "user-login-check"
+            ],
+            "blocking_detectors": [
+              "health-objective",
+              "service-endpoints"
+            ],
+            "new_state_changes": [
+              "Deployment/frontend"
+            ],
+            "controller_detail": "controller view of hotel-reservation-1790595660621522310 at 2026-09-28T11:41:34.071634+00:00"
+          }
+        }
+      ],
+      "correct_fix_seconds": 2.33,
+      "clear_seconds": 3.896,
+      "after_fix": {
+        "label": "after the correct fix",
+        "at": "2026-09-28T11:41:46.907996Z",
+        "status_exit": 0,
+        "status_seconds": 3.962,
+        "gate_exit": 0,
+        "unhealthy_scenarios": [],
+        "blocking_detectors": [],
+        "new_state_changes": [],
+        "controller_detail": "controller state invalid: 1 validation error for IncidentView\nstate_changes.changes\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.12/v/list_type"
+      },
+      "verified_seconds": 23.06,
+      "closure_acknowledged": true,
+      "final_detector_states": {
+        "health-objective": "clear",
+        "service-endpoints": "clear",
+        "traffic-health": "clear"
+      },
+      "diagnosis_verdicts": [
+        "confirmed"
+      ],
+      "helpers": {
+        "created": [
+          "Pod/hotel-reservation/sdo-assure-helper-2-1790595515",
+          "Pod/hotel-reservation-sdo/sdo-assure-helper-2-1790595515",
+          "Job/hotel-reservation/sdo-assure-helper-job-2-1790595515"
+        ],
+        "cleaned_by_controller": [
+          "Job/hotel-reservation/sdo-assure-helper-job-2-1790595515",
+          "Pod/hotel-reservation-sdo/sdo-assure-helper-2-1790595515",
+          "Pod/hotel-reservation/sdo-assure-helper-2-1790595515",
+          "Pod/hotel-reservation/sdo-assure-helper-job-2-1790595515-tc6fm"
+        ],
+        "remaining": [],
+        "bystander_kept": true,
+        "cleanup_seconds": 0.212
+      },
+      "absorption": null,
+      "checks": [
+        {
+          "name": "healthy before the fault",
+          "passed": true,
+          "detail": "status exit 0",
+          "known_gap": false
+        },
+        {
+          "name": "diff names every faulted object",
+          "passed": true,
+          "detail": "request diff named ['Service/frontend'], live view added ['Deployment/frontend'], missing []",
+          "known_gap": false
+        },
+        {
+          "name": "diff names no decoy",
+          "passed": true,
+          "detail": "decoys []",
+          "known_gap": false
+        },
+        {
+          "name": "diff names nothing else",
+          "passed": true,
+          "detail": "unexpected []",
+          "known_gap": false
+        },
+        {
+          "name": "status unhealthy on the fault",
+          "passed": true,
+          "detail": "exit 1",
+          "known_gap": false
+        },
+        {
+          "name": "gate refuses on the fault",
+          "passed": true,
+          "detail": "exit 4",
+          "known_gap": false
+        },
+        {
+          "name": "still unhealthy with readiness_probe_misconfiguration_hotel_reservation left",
+          "passed": true,
+          "detail": "exit 1",
+          "known_gap": false
+        },
+        {
+          "name": "gate refuses with readiness_probe_misconfiguration_hotel_reservation left",
+          "passed": true,
+          "detail": "exit 4",
+          "known_gap": false
+        },
+        {
+          "name": "status healthy within the clear bound",
+          "passed": true,
+          "detail": "cleared after 3.896s (bound 60.0s)",
+          "known_gap": false
+        },
+        {
+          "name": "gate accepts after the correct fix",
+          "passed": true,
+          "detail": "exit 0",
+          "known_gap": false
+        },
+        {
+          "name": "incident opened within the detect bound",
+          "passed": true,
+          "detail": "opened 1.598s after injection started",
+          "known_gap": false
+        },
+        {
+          "name": "controller verified recovery within the bound",
+          "passed": true,
+          "detail": "verified 23.06s after the fix",
+          "known_gap": false
+        },
+        {
+          "name": "closure never preceded the correct fix",
+          "passed": true,
+          "detail": "verified_at 2026-09-28T11:42:06.071955+00:00",
+          "known_gap": false
+        },
+        {
+          "name": "every health detector clear at closure",
+          "passed": true,
+          "detail": "{'health-objective': 'clear', 'service-endpoints': 'clear', 'traffic-health': 'clear'}",
+          "known_gap": false
+        },
+        {
+          "name": "labelled helpers cleaned",
+          "passed": true,
+          "detail": "cleaned ['Job/hotel-reservation/sdo-assure-helper-job-2-1790595515', 'Pod/hotel-reservation-sdo/sdo-assure-helper-2-1790595515', 'Pod/hotel-reservation/sdo-assure-helper-2-1790595515', 'Pod/hotel-reservation/sdo-assure-helper-job-2-1790595515-tc6fm'], remaining []",
+          "known_gap": false
+        },
+        {
+          "name": "helper cleanup within the bound",
+          "passed": true,
+          "detail": "0.212s after the responder exited",
+          "known_gap": false
+        },
+        {
+          "name": "unlabelled bystander kept",
+          "passed": true,
+          "detail": "",
+          "known_gap": false
+        },
+        {
+          "name": "diagnosis verified as confirmed",
+          "passed": true,
+          "detail": "['confirmed']",
+          "known_gap": false
+        }
+      ],
+      "error": null
+    },
+    {
+      "case": "K1",
+      "kind": "composite",
+      "iteration": 2,
+      "problems": [
+        "network_policy_block",
+        "missing_configmap_mongodb_rate_hotel_reservation"
+      ],
+      "started_at": "2026-09-28T11:44:27.965215Z",
+      "injection_started_at": "2026-09-28T11:44:31.827453Z",
+      "injection_finished_at": "2026-09-28T11:44:38.138956Z",
+      "incident_id": "hotel-reservation-1790595872448480161",
+      "first_finding_seconds": {
+        "health-objective": 0.01,
+        "service-endpoints": 0.197
+      },
+      "incident_opened_seconds": 0.621,
+      "request_received_seconds": 6.312,
+      "diff": {
+        "expected": [
+          "ConfigMap/mongo-rate-script",
+          "NetworkPolicy/deny-all-recommendation"
+        ],
+        "named": [
+          "ConfigMap/mongo-rate-script",
+          "NetworkPolicy/deny-all-recommendation"
+        ],
+        "missing": [],
+        "unexpected": [],
+        "decoys_named": [],
+        "baseline_at": "2026-09-28T11:42:08.091267Z",
+        "observed_at": "2026-09-28T11:44:32.448480Z"
+      },
+      "live_named": [],
+      "on_fault": {
+        "label": "on the fault",
+        "at": "2026-09-28T11:44:38.139694Z",
+        "status_exit": 1,
+        "status_seconds": 3.757,
+        "gate_exit": 4,
+        "unhealthy_scenarios": [],
+        "blocking_detectors": [
+          "health-objective",
+          "service-endpoints"
+        ],
+        "new_state_changes": [],
+        "controller_detail": "controller view of hotel-reservation-1790595872448480161 at 2026-09-28T11:44:36.079213+00:00"
+      },
+      "wrong_fixes": [],
+      "partial_fixes": [
+        {
+          "fixed_problem": "network_policy_block",
+          "remaining_problems": [
+            "missing_configmap_mongodb_rate_hotel_reservation"
+          ],
+          "probe": {
+            "label": "after fixing network_policy_block",
+            "at": "2026-09-28T11:44:46.523971Z",
+            "status_exit": 1,
+            "status_seconds": 3.774,
+            "gate_exit": 4,
+            "unhealthy_scenarios": [],
+            "blocking_detectors": [
+              "health-objective",
+              "service-endpoints"
+            ],
+            "new_state_changes": [],
+            "controller_detail": "controller view of hotel-reservation-1790595872448480161 at 2026-09-28T11:44:47.804717+00:00"
+          }
+        }
+      ],
+      "correct_fix_seconds": 2.987,
+      "clear_seconds": 33.77,
+      "after_fix": {
+        "label": "after the correct fix",
+        "at": "2026-09-28T11:45:31.676182Z",
+        "status_exit": 0,
+        "status_seconds": 3.728,
+        "gate_exit": 0,
+        "unhealthy_scenarios": [],
+        "blocking_detectors": [],
+        "new_state_changes": [
+          "Deployment/mongodb-rate"
+        ],
+        "controller_detail": "controller view of hotel-reservation-1790595872448480161 at 2026-09-28T11:45:27.859625+00:00"
+      },
+      "verified_seconds": 48.176,
+      "closure_acknowledged": true,
+      "final_detector_states": {
+        "health-objective": "clear",
+        "service-endpoints": "clear",
+        "traffic-health": "clear"
+      },
+      "diagnosis_verdicts": [
+        "confirmed"
+      ],
+      "helpers": {
+        "created": [
+          "Pod/hotel-reservation/sdo-assure-helper-3-1790595728",
+          "Pod/hotel-reservation-sdo/sdo-assure-helper-3-1790595728",
+          "Job/hotel-reservation/sdo-assure-helper-job-3-1790595728"
+        ],
+        "cleaned_by_controller": [
+          "Job/hotel-reservation/sdo-assure-helper-job-3-1790595728",
+          "Pod/hotel-reservation-sdo/sdo-assure-helper-3-1790595728",
+          "Pod/hotel-reservation/sdo-assure-helper-3-1790595728",
+          "Pod/hotel-reservation/sdo-assure-helper-job-3-1790595728-qbfpb"
+        ],
+        "remaining": [],
+        "bystander_kept": true,
+        "cleanup_seconds": 0.217
+      },
+      "absorption": null,
+      "checks": [
+        {
+          "name": "healthy before the fault",
+          "passed": true,
+          "detail": "status exit 0",
+          "known_gap": false
+        },
+        {
+          "name": "diff names every faulted object",
+          "passed": true,
+          "detail": "request diff named ['ConfigMap/mongo-rate-script', 'NetworkPolicy/deny-all-recommendation'], live view added [], missing []",
+          "known_gap": false
+        },
+        {
+          "name": "diff names no decoy",
+          "passed": true,
+          "detail": "decoys []",
+          "known_gap": false
+        },
+        {
+          "name": "diff names nothing else",
+          "passed": true,
+          "detail": "unexpected []",
+          "known_gap": false
+        },
+        {
+          "name": "traffic prober detects within the bound",
+          "passed": false,
+          "detail": "traffic-health never produced a finding (the prober detected network_policy_block late (+20.4 s) in 1 of 4 live runs (feedback-loop e2e))",
+          "known_gap": true
+        },
+        {
+          "name": "status unhealthy on the fault",
+          "passed": true,
+          "detail": "exit 1",
+          "known_gap": false
+        },
+        {
+          "name": "gate refuses on the fault",
+          "passed": true,
+          "detail": "exit 4",
+          "known_gap": false
+        },
+        {
+          "name": "still unhealthy with missing_configmap_mongodb_rate_hotel_reservation left",
+          "passed": true,
+          "detail": "exit 1",
+          "known_gap": false
+        },
+        {
+          "name": "gate refuses with missing_configmap_mongodb_rate_hotel_reservation left",
+          "passed": true,
+          "detail": "exit 4",
+          "known_gap": false
+        },
+        {
+          "name": "status healthy within the clear bound",
+          "passed": true,
+          "detail": "cleared after 33.77s (bound 60.0s)",
+          "known_gap": false
+        },
+        {
+          "name": "gate accepts after the correct fix",
+          "passed": true,
+          "detail": "exit 0",
+          "known_gap": false
+        },
+        {
+          "name": "incident opened within the detect bound",
+          "passed": true,
+          "detail": "opened 0.621s after injection started",
+          "known_gap": false
+        },
+        {
+          "name": "controller verified recovery within the bound",
+          "passed": true,
+          "detail": "verified 48.176s after the fix",
+          "known_gap": false
+        },
+        {
+          "name": "closure never preceded the correct fix",
+          "passed": true,
+          "detail": "verified_at 2026-09-28T11:45:46.081861+00:00",
+          "known_gap": false
+        },
+        {
+          "name": "every health detector clear at closure",
+          "passed": true,
+          "detail": "{'health-objective': 'clear', 'service-endpoints': 'clear', 'traffic-health': 'clear'}",
+          "known_gap": false
+        },
+        {
+          "name": "labelled helpers cleaned",
+          "passed": true,
+          "detail": "cleaned ['Job/hotel-reservation/sdo-assure-helper-job-3-1790595728', 'Pod/hotel-reservation-sdo/sdo-assure-helper-3-1790595728', 'Pod/hotel-reservation/sdo-assure-helper-3-1790595728', 'Pod/hotel-reservation/sdo-assure-helper-job-3-1790595728-qbfpb'], remaining []",
+          "known_gap": false
+        },
+        {
+          "name": "helper cleanup within the bound",
+          "passed": true,
+          "detail": "0.217s after the responder exited",
+          "known_gap": false
+        },
+        {
+          "name": "unlabelled bystander kept",
+          "passed": true,
+          "detail": "",
+          "known_gap": false
+        },
+        {
+          "name": "diagnosis verified as confirmed",
+          "passed": true,
+          "detail": "['confirmed']",
+          "known_gap": false
+        }
+      ],
+      "error": null
+    },
+    {
+      "case": "K2",
+      "kind": "composite",
+      "iteration": 2,
+      "problems": [
+        "wrong_service_selector_hotel_reservation",
+        "readiness_probe_misconfiguration_hotel_reservation"
+      ],
+      "started_at": "2026-09-28T11:48:07.656236Z",
+      "injection_started_at": "2026-09-28T11:48:11.531147Z",
+      "injection_finished_at": "2026-09-28T11:48:23.867836Z",
+      "incident_id": "hotel-reservation-1790596093107464639",
+      "first_finding_seconds": {
+        "health-objective": 0.076,
+        "service-endpoints": 0.076,
+        "traffic-health": 4.54
+      },
+      "incident_opened_seconds": 1.576,
+      "request_received_seconds": 12.337,
+      "diff": {
+        "expected": [
+          "Deployment/frontend",
+          "Service/frontend"
+        ],
+        "named": [
+          "Service/frontend"
+        ],
+        "missing": [
+          "Deployment/frontend"
+        ],
+        "unexpected": [],
+        "decoys_named": [],
+        "baseline_at": "2026-09-28T11:45:47.766261Z",
+        "observed_at": "2026-09-28T11:48:13.107464Z"
+      },
+      "live_named": [
+        "Deployment/frontend"
+      ],
+      "on_fault": {
+        "label": "on the fault",
+        "at": "2026-09-28T11:48:29.313059Z",
+        "status_exit": 1,
+        "status_seconds": 5.497,
+        "gate_exit": 4,
+        "unhealthy_scenarios": [
+          "hotel-search",
+          "hotel-recommendations",
+          "user-login-check"
+        ],
+        "blocking_detectors": [
+          "health-objective",
+          "service-endpoints"
+        ],
+        "new_state_changes": [
+          "Deployment/frontend"
+        ],
+        "controller_detail": "controller view of hotel-reservation-1790596093107464639 at 2026-09-28T11:48:34.571859+00:00"
+      },
+      "wrong_fixes": [],
+      "partial_fixes": [
+        {
+          "fixed_problem": "wrong_service_selector_hotel_reservation",
+          "remaining_problems": [
+            "readiness_probe_misconfiguration_hotel_reservation"
+          ],
+          "probe": {
+            "label": "after fixing wrong_service_selector_hotel_reservation",
+            "at": "2026-09-28T11:48:41.683305Z",
+            "status_exit": 1,
+            "status_seconds": 5.402,
+            "gate_exit": 4,
+            "unhealthy_scenarios": [
+              "hotel-search",
+              "hotel-recommendations",
+              "user-login-check"
+            ],
+            "blocking_detectors": [
+              "health-objective",
+              "service-endpoints"
+            ],
+            "new_state_changes": [
+              "Deployment/frontend"
+            ],
+            "controller_detail": "controller view of hotel-reservation-1790596093107464639 at 2026-09-28T11:48:46.570724+00:00"
+          }
+        }
+      ],
+      "correct_fix_seconds": 2.477,
+      "clear_seconds": 3.815,
+      "after_fix": {
+        "label": "after the correct fix",
+        "at": "2026-09-28T11:48:59.510166Z",
+        "status_exit": 0,
+        "status_seconds": 3.771,
+        "gate_exit": 0,
+        "unhealthy_scenarios": [],
+        "blocking_detectors": [],
+        "new_state_changes": [],
+        "controller_detail": "controller state invalid: 1 validation error for IncidentView\nstate_changes.changes\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.12/v/list_type"
+      },
+      "verified_seconds": 22.377,
+      "closure_acknowledged": true,
+      "final_detector_states": {
+        "health-objective": "clear",
+        "service-endpoints": "clear",
+        "traffic-health": "clear"
+      },
+      "diagnosis_verdicts": [
+        "confirmed"
+      ],
+      "helpers": {
+        "created": [
+          "Pod/hotel-reservation/sdo-assure-helper-4-1790595947",
+          "Pod/hotel-reservation-sdo/sdo-assure-helper-4-1790595947",
+          "Job/hotel-reservation/sdo-assure-helper-job-4-1790595947"
+        ],
+        "cleaned_by_controller": [
+          "Job/hotel-reservation/sdo-assure-helper-job-4-1790595947",
+          "Pod/hotel-reservation-sdo/sdo-assure-helper-4-1790595947",
+          "Pod/hotel-reservation/sdo-assure-helper-4-1790595947",
+          "Pod/hotel-reservation/sdo-assure-helper-job-4-1790595947-cz6wg"
+        ],
+        "remaining": [],
+        "bystander_kept": true,
+        "cleanup_seconds": 0.213
+      },
+      "absorption": null,
+      "checks": [
+        {
+          "name": "healthy before the fault",
+          "passed": true,
+          "detail": "status exit 0",
+          "known_gap": false
+        },
+        {
+          "name": "diff names every faulted object",
+          "passed": true,
+          "detail": "request diff named ['Service/frontend'], live view added ['Deployment/frontend'], missing []",
+          "known_gap": false
+        },
+        {
+          "name": "diff names no decoy",
+          "passed": true,
+          "detail": "decoys []",
+          "known_gap": false
+        },
+        {
+          "name": "diff names nothing else",
+          "passed": true,
+          "detail": "unexpected []",
+          "known_gap": false
+        },
+        {
+          "name": "status unhealthy on the fault",
+          "passed": true,
+          "detail": "exit 1",
+          "known_gap": false
+        },
+        {
+          "name": "gate refuses on the fault",
+          "passed": true,
+          "detail": "exit 4",
+          "known_gap": false
+        },
+        {
+          "name": "still unhealthy with readiness_probe_misconfiguration_hotel_reservation left",
+          "passed": true,
+          "detail": "exit 1",
+          "known_gap": false
+        },
+        {
+          "name": "gate refuses with readiness_probe_misconfiguration_hotel_reservation left",
+          "passed": true,
+          "detail": "exit 4",
+          "known_gap": false
+        },
+        {
+          "name": "status healthy within the clear bound",
+          "passed": true,
+          "detail": "cleared after 3.815s (bound 60.0s)",
+          "known_gap": false
+        },
+        {
+          "name": "gate accepts after the correct fix",
+          "passed": true,
+          "detail": "exit 0",
+          "known_gap": false
+        },
+        {
+          "name": "incident opened within the detect bound",
+          "passed": true,
+          "detail": "opened 1.576s after injection started",
+          "known_gap": false
+        },
+        {
+          "name": "controller verified recovery within the bound",
+          "passed": true,
+          "detail": "verified 22.377s after the fix",
+          "known_gap": false
+        },
+        {
+          "name": "closure never preceded the correct fix",
+          "passed": true,
+          "detail": "verified_at 2026-09-28T11:49:18.072048+00:00",
+          "known_gap": false
+        },
+        {
+          "name": "every health detector clear at closure",
+          "passed": true,
+          "detail": "{'health-objective': 'clear', 'service-endpoints': 'clear', 'traffic-health': 'clear'}",
+          "known_gap": false
+        },
+        {
+          "name": "labelled helpers cleaned",
+          "passed": true,
+          "detail": "cleaned ['Job/hotel-reservation/sdo-assure-helper-job-4-1790595947', 'Pod/hotel-reservation-sdo/sdo-assure-helper-4-1790595947', 'Pod/hotel-reservation/sdo-assure-helper-4-1790595947', 'Pod/hotel-reservation/sdo-assure-helper-job-4-1790595947-cz6wg'], remaining []",
+          "known_gap": false
+        },
+        {
+          "name": "helper cleanup within the bound",
+          "passed": true,
+          "detail": "0.213s after the responder exited",
+          "known_gap": false
+        },
+        {
+          "name": "unlabelled bystander kept",
+          "passed": true,
+          "detail": "",
+          "known_gap": false
+        },
+        {
+          "name": "diagnosis verified as confirmed",
+          "passed": true,
+          "detail": "['confirmed']",
+          "known_gap": false
+        }
+      ],
+      "error": null
+    },
+    {
+      "case": "K1",
+      "kind": "composite",
+      "iteration": 3,
+      "problems": [
+        "network_policy_block",
+        "missing_configmap_mongodb_rate_hotel_reservation"
+      ],
+      "started_at": "2026-09-28T11:51:39.647450Z",
+      "injection_started_at": "2026-09-28T11:51:43.579962Z",
+      "injection_finished_at": "2026-09-28T11:51:49.941066Z",
+      "incident_id": "hotel-reservation-1790596304237139514",
+      "first_finding_seconds": {
+        "health-objective": 0.012,
+        "service-endpoints": 0.237
+      },
+      "incident_opened_seconds": 0.657,
+      "request_received_seconds": 6.362,
+      "diff": {
+        "expected": [
+          "ConfigMap/mongo-rate-script",
+          "NetworkPolicy/deny-all-recommendation"
+        ],
+        "named": [
+          "ConfigMap/mongo-rate-script",
+          "NetworkPolicy/deny-all-recommendation"
+        ],
+        "missing": [],
+        "unexpected": [],
+        "decoys_named": [],
+        "baseline_at": "2026-09-28T11:49:19.755531Z",
+        "observed_at": "2026-09-28T11:51:44.237139Z"
+      },
+      "live_named": [],
+      "on_fault": {
+        "label": "on the fault",
+        "at": "2026-09-28T11:51:49.941923Z",
+        "status_exit": 1,
+        "status_seconds": 3.879,
+        "gate_exit": 4,
+        "unhealthy_scenarios": [],
+        "blocking_detectors": [
+          "health-objective",
+          "service-endpoints"
+        ],
+        "new_state_changes": [],
+        "controller_detail": "controller view of hotel-reservation-1790596304237139514 at 2026-09-28T11:51:48.080049+00:00"
+      },
+      "wrong_fixes": [],
+      "partial_fixes": [
+        {
+          "fixed_problem": "network_policy_block",
+          "remaining_problems": [
+            "missing_configmap_mongodb_rate_hotel_reservation"
+          ],
+          "probe": {
+            "label": "after fixing network_policy_block",
+            "at": "2026-09-28T11:51:58.480137Z",
+            "status_exit": 1,
+            "status_seconds": 3.805,
+            "gate_exit": 4,
+            "unhealthy_scenarios": [],
+            "blocking_detectors": [
+              "health-objective",
+              "service-endpoints"
+            ],
+            "new_state_changes": [],
+            "controller_detail": "controller view of hotel-reservation-1790596304237139514 at 2026-09-28T11:51:59.718626+00:00"
+          }
+        }
+      ],
+      "correct_fix_seconds": 2.874,
+      "clear_seconds": 30.057,
+      "after_fix": {
+        "label": "after the correct fix",
+        "at": "2026-09-28T11:52:39.878298Z",
+        "status_exit": 0,
+        "status_seconds": 3.866,
+        "gate_exit": 0,
+        "unhealthy_scenarios": [],
+        "blocking_detectors": [],
+        "new_state_changes": [
+          "Deployment/mongodb-rate"
+        ],
+        "controller_detail": "controller view of hotel-reservation-1790596304237139514 at 2026-09-28T11:52:39.774524+00:00"
+      },
+      "verified_seconds": 48.263,
+      "closure_acknowledged": true,
+      "final_detector_states": {
+        "health-objective": "clear",
+        "service-endpoints": "clear",
+        "traffic-health": "clear"
+      },
+      "diagnosis_verdicts": [
+        "confirmed"
+      ],
+      "helpers": {
+        "created": [
+          "Pod/hotel-reservation/sdo-assure-helper-5-1790596159",
+          "Pod/hotel-reservation-sdo/sdo-assure-helper-5-1790596159",
+          "Job/hotel-reservation/sdo-assure-helper-job-5-1790596159"
+        ],
+        "cleaned_by_controller": [
+          "Job/hotel-reservation/sdo-assure-helper-job-5-1790596159",
+          "Pod/hotel-reservation-sdo/sdo-assure-helper-5-1790596159",
+          "Pod/hotel-reservation/sdo-assure-helper-5-1790596159",
+          "Pod/hotel-reservation/sdo-assure-helper-job-5-1790596159-ck2ms"
+        ],
+        "remaining": [],
+        "bystander_kept": true,
+        "cleanup_seconds": 0.215
+      },
+      "absorption": null,
+      "checks": [
+        {
+          "name": "healthy before the fault",
+          "passed": true,
+          "detail": "status exit 0",
+          "known_gap": false
+        },
+        {
+          "name": "diff names every faulted object",
+          "passed": true,
+          "detail": "request diff named ['ConfigMap/mongo-rate-script', 'NetworkPolicy/deny-all-recommendation'], live view added [], missing []",
+          "known_gap": false
+        },
+        {
+          "name": "diff names no decoy",
+          "passed": true,
+          "detail": "decoys []",
+          "known_gap": false
+        },
+        {
+          "name": "diff names nothing else",
+          "passed": true,
+          "detail": "unexpected []",
+          "known_gap": false
+        },
+        {
+          "name": "traffic prober detects within the bound",
+          "passed": false,
+          "detail": "traffic-health never produced a finding (the prober detected network_policy_block late (+20.4 s) in 1 of 4 live runs (feedback-loop e2e))",
+          "known_gap": true
+        },
+        {
+          "name": "status unhealthy on the fault",
+          "passed": true,
+          "detail": "exit 1",
+          "known_gap": false
+        },
+        {
+          "name": "gate refuses on the fault",
+          "passed": true,
+          "detail": "exit 4",
+          "known_gap": false
+        },
+        {
+          "name": "still unhealthy with missing_configmap_mongodb_rate_hotel_reservation left",
+          "passed": true,
+          "detail": "exit 1",
+          "known_gap": false
+        },
+        {
+          "name": "gate refuses with missing_configmap_mongodb_rate_hotel_reservation left",
+          "passed": true,
+          "detail": "exit 4",
+          "known_gap": false
+        },
+        {
+          "name": "status healthy within the clear bound",
+          "passed": true,
+          "detail": "cleared after 30.057s (bound 60.0s)",
+          "known_gap": false
+        },
+        {
+          "name": "gate accepts after the correct fix",
+          "passed": true,
+          "detail": "exit 0",
+          "known_gap": false
+        },
+        {
+          "name": "incident opened within the detect bound",
+          "passed": true,
+          "detail": "opened 0.657s after injection started",
+          "known_gap": false
+        },
+        {
+          "name": "controller verified recovery within the bound",
+          "passed": true,
+          "detail": "verified 48.263s after the fix",
+          "known_gap": false
+        },
+        {
+          "name": "closure never preceded the correct fix",
+          "passed": true,
+          "detail": "verified_at 2026-09-28T11:52:58.084362+00:00",
+          "known_gap": false
+        },
+        {
+          "name": "every health detector clear at closure",
+          "passed": true,
+          "detail": "{'health-objective': 'clear', 'service-endpoints': 'clear', 'traffic-health': 'clear'}",
+          "known_gap": false
+        },
+        {
+          "name": "labelled helpers cleaned",
+          "passed": true,
+          "detail": "cleaned ['Job/hotel-reservation/sdo-assure-helper-job-5-1790596159', 'Pod/hotel-reservation-sdo/sdo-assure-helper-5-1790596159', 'Pod/hotel-reservation/sdo-assure-helper-5-1790596159', 'Pod/hotel-reservation/sdo-assure-helper-job-5-1790596159-ck2ms'], remaining []",
+          "known_gap": false
+        },
+        {
+          "name": "helper cleanup within the bound",
+          "passed": true,
+          "detail": "0.215s after the responder exited",
+          "known_gap": false
+        },
+        {
+          "name": "unlabelled bystander kept",
+          "passed": true,
+          "detail": "",
+          "known_gap": false
+        },
+        {
+          "name": "diagnosis verified as confirmed",
+          "passed": true,
+          "detail": "['confirmed']",
+          "known_gap": false
+        }
+      ],
+      "error": null
+    },
+    {
+      "case": "K2",
+      "kind": "composite",
+      "iteration": 3,
+      "problems": [
+        "wrong_service_selector_hotel_reservation",
+        "readiness_probe_misconfiguration_hotel_reservation"
+      ],
+      "started_at": "2026-09-28T11:55:19.742845Z",
+      "injection_started_at": "2026-09-28T11:55:23.638961Z",
+      "injection_finished_at": "2026-09-28T11:55:36.023250Z",
+      "incident_id": "hotel-reservation-1790596525215370234",
+      "first_finding_seconds": {
+        "health-objective": 0.078,
+        "service-endpoints": 0.078,
+        "traffic-health": 4.433
+      },
+      "incident_opened_seconds": 1.576,
+      "request_received_seconds": 12.385,
+      "diff": {
+        "expected": [
+          "Deployment/frontend",
+          "Service/frontend"
+        ],
+        "named": [
+          "Service/frontend"
+        ],
+        "missing": [
+          "Deployment/frontend"
+        ],
+        "unexpected": [],
+        "decoys_named": [],
+        "baseline_at": "2026-09-28T11:52:59.865774Z",
+        "observed_at": "2026-09-28T11:55:25.215370Z"
+      },
+      "live_named": [
+        "Deployment/frontend"
+      ],
+      "on_fault": {
+        "label": "on the fault",
+        "at": "2026-09-28T11:55:41.416150Z",
+        "status_exit": 1,
+        "status_seconds": 5.368,
+        "gate_exit": 4,
+        "unhealthy_scenarios": [
+          "hotel-search",
+          "hotel-recommendations",
+          "user-login-check"
+        ],
+        "blocking_detectors": [
+          "health-objective",
+          "service-endpoints"
+        ],
+        "new_state_changes": [
+          "Deployment/frontend"
+        ],
+        "controller_detail": "controller view of hotel-reservation-1790596525215370234 at 2026-09-28T11:55:46.570491+00:00"
+      },
+      "wrong_fixes": [],
+      "partial_fixes": [
+        {
+          "fixed_problem": "wrong_service_selector_hotel_reservation",
+          "remaining_problems": [
+            "readiness_probe_misconfiguration_hotel_reservation"
+          ],
+          "probe": {
+            "label": "after fixing wrong_service_selector_hotel_reservation",
+            "at": "2026-09-28T11:55:53.561300Z",
+            "status_exit": 1,
+            "status_seconds": 5.503,
+            "gate_exit": 4,
+            "unhealthy_scenarios": [
+              "hotel-search",
+              "hotel-recommendations",
+              "user-login-check"
+            ],
+            "blocking_detectors": [
+              "health-objective",
+              "service-endpoints"
+            ],
+            "new_state_changes": [
+              "Deployment/frontend"
+            ],
+            "controller_detail": "controller view of hotel-reservation-1790596525215370234 at 2026-09-28T11:55:58.570398+00:00"
+          }
+        }
+      ],
+      "correct_fix_seconds": 2.416,
+      "clear_seconds": 3.868,
+      "after_fix": {
+        "label": "after the correct fix",
+        "at": "2026-09-28T11:56:11.575182Z",
+        "status_exit": 0,
+        "status_seconds": 3.792,
+        "gate_exit": 0,
+        "unhealthy_scenarios": [],
+        "blocking_detectors": [],
+        "new_state_changes": [],
+        "controller_detail": "controller state invalid: 1 validation error for IncidentView\nstate_changes.changes\n  Input should be a valid list [type=list_type, input_value=None, input_type=NoneType]\n    For further information visit https://errors.pydantic.dev/2.12/v/list_type"
+      },
+      "verified_seconds": 22.871,
+      "closure_acknowledged": true,
+      "final_detector_states": {
+        "health-objective": "clear",
+        "service-endpoints": "clear",
+        "traffic-health": "clear"
+      },
+      "diagnosis_verdicts": [
+        "confirmed"
+      ],
+      "helpers": {
+        "created": [
+          "Pod/hotel-reservation/sdo-assure-helper-6-1790596379",
+          "Pod/hotel-reservation-sdo/sdo-assure-helper-6-1790596379",
+          "Job/hotel-reservation/sdo-assure-helper-job-6-1790596379"
+        ],
+        "cleaned_by_controller": [
+          "Job/hotel-reservation/sdo-assure-helper-job-6-1790596379",
+          "Pod/hotel-reservation-sdo/sdo-assure-helper-6-1790596379",
+          "Pod/hotel-reservation/sdo-assure-helper-6-1790596379",
+          "Pod/hotel-reservation/sdo-assure-helper-job-6-1790596379-6dnhv"
+        ],
+        "remaining": [],
+        "bystander_kept": true,
+        "cleanup_seconds": 0.312
+      },
+      "absorption": null,
+      "checks": [
+        {
+          "name": "healthy before the fault",
+          "passed": true,
+          "detail": "status exit 0",
+          "known_gap": false
+        },
+        {
+          "name": "diff names every faulted object",
+          "passed": true,
+          "detail": "request diff named ['Service/frontend'], live view added ['Deployment/frontend'], missing []",
+          "known_gap": false
+        },
+        {
+          "name": "diff names no decoy",
+          "passed": true,
+          "detail": "decoys []",
+          "known_gap": false
+        },
+        {
+          "name": "diff names nothing else",
+          "passed": true,
+          "detail": "unexpected []",
+          "known_gap": false
+        },
+        {
+          "name": "status unhealthy on the fault",
+          "passed": true,
+          "detail": "exit 1",
+          "known_gap": false
+        },
+        {
+          "name": "gate refuses on the fault",
+          "passed": true,
+          "detail": "exit 4",
+          "known_gap": false
+        },
+        {
+          "name": "still unhealthy with readiness_probe_misconfiguration_hotel_reservation left",
+          "passed": true,
+          "detail": "exit 1",
+          "known_gap": false
+        },
+        {
+          "name": "gate refuses with readiness_probe_misconfiguration_hotel_reservation left",
+          "passed": true,
+          "detail": "exit 4",
+          "known_gap": false
+        },
+        {
+          "name": "status healthy within the clear bound",
+          "passed": true,
+          "detail": "cleared after 3.868s (bound 60.0s)",
+          "known_gap": false
+        },
+        {
+          "name": "gate accepts after the correct fix",
+          "passed": true,
+          "detail": "exit 0",
+          "known_gap": false
+        },
+        {
+          "name": "incident opened within the detect bound",
+          "passed": true,
+          "detail": "opened 1.576s after injection started",
+          "known_gap": false
+        },
+        {
+          "name": "controller verified recovery within the bound",
+          "passed": true,
+          "detail": "verified 22.871s after the fix",
+          "known_gap": false
+        },
+        {
+          "name": "closure never preceded the correct fix",
+          "passed": true,
+          "detail": "verified_at 2026-09-28T11:56:30.578693+00:00",
+          "known_gap": false
+        },
+        {
+          "name": "every health detector clear at closure",
+          "passed": true,
+          "detail": "{'health-objective': 'clear', 'service-endpoints': 'clear', 'traffic-health': 'clear'}",
+          "known_gap": false
+        },
+        {
+          "name": "labelled helpers cleaned",
+          "passed": true,
+          "detail": "cleaned ['Job/hotel-reservation/sdo-assure-helper-job-6-1790596379', 'Pod/hotel-reservation-sdo/sdo-assure-helper-6-1790596379', 'Pod/hotel-reservation/sdo-assure-helper-6-1790596379', 'Pod/hotel-reservation/sdo-assure-helper-job-6-1790596379-6dnhv'], remaining []",
+          "known_gap": false
+        },
+        {
+          "name": "helper cleanup within the bound",
+          "passed": true,
+          "detail": "0.312s after the responder exited",
+          "known_gap": false
+        },
+        {
+          "name": "unlabelled bystander kept",
+          "passed": true,
+          "detail": "",
+          "known_gap": false
+        },
+        {
+          "name": "diagnosis verified as confirmed",
+          "passed": true,
+          "detail": "['confirmed']",
+          "known_gap": false
+        }
+      ],
+      "error": null
+    }
+  ],
+  "soak": null,
+  "port_forward_restarts": 0,
+  "notes": [
+    "controller warm=True startup_ms=1003; state baseline startup_ms=1003 unobserved=[]"
+  ]
+}
