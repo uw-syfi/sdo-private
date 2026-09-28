@@ -374,3 +374,35 @@ scratchpad clone. Committing from the clone was refused as out-of-place
 publication, so I stopped and reported it. After space was freed, the
 changes were applied to the worktree as a patch, tested, committed as
 separate commits, and the clone was deleted.
+
+### Combined final smoke (no LLM, throwaway kind `sdo-smoke`, 3 runs)
+
+The same setup as above, with the decoys mounted. One driver runs the
+production `StateTracker`, the traffic and `service-endpoints` detectors, the
+`python3 -m sdo incident status` CLI (run through `uv`, so its wall time
+includes about 1 s of `uv` startup), and `KubernetesHelperCleaner`. The
+prober image predates the `qualified` verdict field, which does not matter
+here because every scenario qualifies on the healthy application.
+
+| Phase | Result (runs 1, 2 and 3) |
+|---|---|
+| State tracker startup | 134, 135 and 134 ms; no unobserved kinds |
+| Healthy with decoys | No findings in 66 evaluations over 20 s. The baseline diff has 0 changes. Verify burst healthy in 3.0 s. `incident status` exits 0 |
+| Selector fault | First unhealthy verdict at 1.27, 1.90 and 1.50 s. `scenario-slo.search-hotels` fired at 1.57, 2.21 and 1.79 s, with `service-selector-matches-no-pods` on `Service/frontend` 0.3 s later. The state diff (about 1.1 ms) has exactly one change: `Service/frontend` selector `io.kompose.service=frontend` to `current_service_name=frontend,io.kompose.service=frontend`. No `failure-admin-*` object appears. Verify burst unhealthy in 4.6 s. `incident status` exits 1 |
+| Decoy fix (SREGym's Mongo privilege-restore scripts, which reported "Privilege restored successfully") | Still firing for 20 s. The diff still points only at the selector. Verify burst unhealthy in 4.7 s. `incident status` exits 1, so the submission gate would refuse it with exit 4 |
+| Correct fix | First healthy verdict at 1.90, 2.47 and 1.90 s. Cleared at 2.20, 2.78 and 2.21 s. Verify burst healthy in 3.0 s. `incident status` exits 0. 0 state changes remain |
+| Helper cleanup | The labelled helper pod was deleted in 10–13 ms. An unlabelled bystander pod was kept |
+
+**Wall-clock impact.**
+
+- **Incident path.** The state diff is read from the informer cache, taking
+  about 1 ms at incident open. Its informers start in about 135 ms, in
+  parallel with prober startup, at controller launch.
+- **Dispatch.** `SDO_PROBER_URL` adds at most a 2 s prober check, which
+  normally returns in milliseconds.
+- **Responder.** Each self-check costs 3.0 s when healthy and about 4.6 s
+  when unhealthy. That replaces the ad-hoc `curl` checks responders already
+  ran.
+- **Closure.** Helper cleanup adds about 10 ms before the closure gate.
+- **Verification.** Diagnosis verification is pure Python over data the
+  broker already holds.
