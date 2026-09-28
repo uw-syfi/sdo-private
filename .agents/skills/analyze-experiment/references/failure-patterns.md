@@ -24,6 +24,12 @@ Look for unchanged Git HEAD, missing role trailer, Kubernetes rollout errors, ag
 
 Check ownership/class, objective digest, watches, namespace handling, source-backed resource coverage, nondeterministic dependencies, and whether tests merely restate implementation details.
 
+## Benchmark-tailored seed memory
+
+**Signature:** the run's lifecycle seed predates `docs/fairness-DECISIONS.md`. Its `.sdo/goal.md` says "required non-optional ConfigMap volume references remain present", its health detector has a `network-policy-total-isolation` rule, or its health-objective manifest watches lack `apps/v1 ReplicaSet`.
+
+Such a seed (for example `30e023d`) carries checks written knowing the SREGym faults. Its detection and diagnosis results are not a fair SDO measurement; report them as pre-fairness, and use a seed from a fresh lifecycle on the de-tailored code.
+
 ## Finding-state instability
 
 **Signature:** incidents fire or clear unexpectedly, duplicate dispatches occur, or restarts change behavior.
