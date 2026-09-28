@@ -124,15 +124,17 @@ func NewStateTracker(config StateTrackerConfig) *StateTracker {
 }
 
 // Start probes which kinds may be read, starts their informers and waits for
-// the initial sync. A kind that may not be read is reported, not fatal.
+// the initial sync. A kind that may not be read is reported, not fatal. ctx
+// bounds only the probes and the initial sync: the informers keep observing
+// after it ends, until Stop, so a caller may pass a startup deadline.
 func (t *StateTracker) Start(ctx context.Context) error {
 	t.Stop()
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	factory := informers.NewSharedInformerFactoryWithOptions(t.config.Client, 0, informers.WithNamespace(t.config.Namespace))
 	started := map[string]cache.SharedIndexInformer{}
 	unobserved := []string{}
 	for _, kind := range trackedKinds {
-		if err := kind.probe(runCtx, t.config.Client, t.config.Namespace); err != nil {
+		if err := kind.probe(ctx, t.config.Client, t.config.Namespace); err != nil {
 			unobserved = append(unobserved, kind.kind)
 			continue
 		}
@@ -143,7 +145,7 @@ func (t *StateTracker) Start(ctx context.Context) error {
 	for _, informer := range started {
 		syncs = append(syncs, informer.HasSynced)
 	}
-	if !cache.WaitForCacheSync(runCtx.Done(), syncs...) {
+	if !cache.WaitForCacheSync(ctx.Done(), syncs...) {
 		cancel()
 		return fmt.Errorf("sync state tracker informers: %w", ctx.Err())
 	}

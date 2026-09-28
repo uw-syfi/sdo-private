@@ -293,3 +293,47 @@ func TestStateChangesStayFastAndBounded(t *testing.T) {
 		t.Fatalf("removals are reported: %+v", changes.Changes[0])
 	}
 }
+
+// The controller starts the tracker with a context that only bounds the
+// initial sync (run.go cancels it when Start returns). Observation must
+// continue until Stop: a live run reported "no change" for a deny-all
+// NetworkPolicy created 1.5 s before dispatch because the informers had
+// stopped with the start context.
+func TestStateTrackerKeepsObservingAfterItsStartContextEnds(t *testing.T) {
+	client := fake.NewSimpleClientset(hotelObjects()...)
+	tracker := NewStateTracker(StateTrackerConfig{Client: client, Namespace: hotel})
+	startCtx, cancelStart := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := tracker.Start(startCtx); err != nil {
+		t.Fatal(err)
+	}
+	cancelStart()
+	t.Cleanup(tracker.Stop)
+	start := time.Date(2026, 9, 28, 7, 58, 49, 0, time.UTC)
+	tracker.Observe(start, true)
+
+	_, _ = client.NetworkingV1().NetworkPolicies(hotel).Create(context.Background(), &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "deny-all-recommendation", Namespace: hotel},
+		Spec: networkingv1.NetworkPolicySpec{
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+		},
+	}, metav1.CreateOptions{})
+
+	eventually(t, "the NetworkPolicy created after the start context ended", func() bool {
+		policy := findChange(tracker.Changes(start.Add(3*time.Second)), "NetworkPolicy", "deny-all-recommendation")
+		return policy != nil && policy.Change == StateChangeAdded
+	})
+}
+
+// Stop still ends observation when the start context lives on.
+func TestStateTrackerStopEndsObservation(t *testing.T) {
+	client := fake.NewSimpleClientset(hotelObjects()...)
+	tracker := NewStateTracker(StateTrackerConfig{Client: client, Namespace: hotel})
+	if err := tracker.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	tracker.Observe(time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC), true)
+	tracker.Stop()
+	if changes := tracker.Changes(time.Date(2026, 9, 28, 8, 0, 1, 0, time.UTC)); changes != nil {
+		t.Fatalf("a stopped tracker reports no diff: %+v", changes)
+	}
+}
