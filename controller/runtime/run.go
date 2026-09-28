@@ -303,6 +303,10 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		RepairPolicy:        *repairPolicy,
 		FiringThreshold:     2, ClearThreshold: 2, BatchDebounce: 500 * time.Millisecond,
 		ConfirmationInterval: time.Second,
+		// The submit gate confirms a clearing finding on 3 fresh evaluations
+		// over at least 2 s instead of waiting for the detector's interval;
+		// closure keeps the health judge's clear persistence.
+		GateConfirmation: GateConfirmationPolicy{Evaluations: 3, Window: 2 * time.Second, Interval: time.Second},
 	}, detectors, snapshotProvider, dispatcher, start)
 	if err != nil {
 		return err
