@@ -98,7 +98,10 @@ type Controller struct {
 	// detectorClearSince maps each detector to the start of its current
 	// streak of clear evaluations (F8); a firing or erroring evaluation ends
 	// the streak. Guarded by mu.
-	detectorClearSince         map[string]time.Time
+	detectorClearSince map[string]time.Time
+	// incidentObservedChanges maps Kind/name to the first time the open
+	// incident's diff showed that object changed. Guarded by mu.
+	incidentObservedChanges    map[string]ObservedStateChange
 	pendingClosure             *IncidentClosure
 	closureState               string
 	closureReceipt             *ClosureReceipt
@@ -442,6 +445,8 @@ func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 	c.detectorReviewRequiredAt = time.Time{}
 	c.detectorReviewReason = ""
 	c.resetDispatchRetryLocked()
+	c.incidentObservedChanges = make(map[string]ObservedStateChange)
+	c.observeStateChangesLocked(request.StateChanges, now)
 	c.dispatchState = "pending"
 	if c.broker != nil {
 		c.dispatchState = "workspace_pending"
@@ -739,11 +744,14 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 	if verifiedAt.Before(c.responderCompletedAt) {
 		verifiedAt = c.responderCompletedAt
 	}
+	finalChanges := c.finalStateChangesLocked(now)
+	c.observeStateChangesLocked(finalChanges, now)
 	closure := IncidentClosure{
 		Request: *cloneIncidentRequest(c.currentIncidentRequest), Result: cloneIncidentResult(c.currentIncidentResult),
 		DispatchError: c.dispatchError, FinalDetectorStates: finalStates,
 		IncidentDetectorStates: c.incidentDetectorStates(),
-		FinalStateChanges:      c.finalStateChangesLocked(now),
+		FinalStateChanges:      finalChanges,
+		ObservedStateChanges:   c.observedStateChangesLocked(),
 		HealthClearedAt:        c.healthClearedAtLocked(finalStates),
 		DetectedAt:             c.incidentDetectedAt, DispatchedAt: c.incidentDispatchedAt,
 		ResponderCompletedAt: c.responderCompletedAt, VerifiedAt: verifiedAt,
@@ -771,6 +779,7 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 	c.dispatchState = "idle"
 	c.incidentFindingKeys = nil
 	c.cleanedHelpers = nil
+	c.incidentObservedChanges = nil
 	c.mu.Unlock()
 	if c.OnIncidentClosed != nil {
 		c.OnIncidentClosed(closure)
@@ -823,6 +832,49 @@ func (c *Controller) incidentDetectorStates() []DetectorEvaluation {
 	sort.Strings(ids)
 	states, _ := c.latestEvaluations(ids, c.responderCompletedAt, false)
 	return states
+}
+
+// observeStateChangesLocked records the first time the open incident's diff
+// showed each object changed. Called with c.mu held.
+func (c *Controller) observeStateChangesLocked(changes *StateChanges, now time.Time) {
+	if changes == nil || !c.incidentOpen {
+		return
+	}
+	if c.incidentObservedChanges == nil {
+		c.incidentObservedChanges = make(map[string]ObservedStateChange)
+	}
+	for _, change := range changes.Changes {
+		key := change.Kind + "/" + change.Name
+		if _, seen := c.incidentObservedChanges[key]; seen {
+			continue
+		}
+		c.incidentObservedChanges[key] = ObservedStateChange{
+			Kind: change.Kind, Name: change.Name, FirstObservedAt: now.UTC(),
+		}
+	}
+}
+
+// observedStateChangesLocked lists the open incident's observed changes by
+// first observation; nil without a baseline, when nothing can be checked.
+// Called with c.mu held.
+func (c *Controller) observedStateChangesLocked() []ObservedStateChange {
+	if c.Baseline == nil || c.incidentObservedChanges == nil {
+		return nil
+	}
+	observed := make([]ObservedStateChange, 0, len(c.incidentObservedChanges))
+	for _, entry := range c.incidentObservedChanges {
+		observed = append(observed, entry)
+	}
+	sort.Slice(observed, func(left int, right int) bool {
+		if !observed[left].FirstObservedAt.Equal(observed[right].FirstObservedAt) {
+			return observed[left].FirstObservedAt.Before(observed[right].FirstObservedAt)
+		}
+		if observed[left].Kind != observed[right].Kind {
+			return observed[left].Kind < observed[right].Kind
+		}
+		return observed[left].Name < observed[right].Name
+	})
+	return observed
 }
 
 // finalStateChangesLocked is the configuration diff against the healthy
@@ -895,6 +947,7 @@ func (c *Controller) ExportState() RuntimeState {
 		DetectorReviewRequiredAt:   c.detectorReviewRequiredAt,
 		DetectorReviewReason:       c.detectorReviewReason,
 		DetectorClearSince:         cloneClearSince(c.detectorClearSince),
+		IncidentObservedChanges:    c.observedStateChangesLocked(),
 		IncidentFindingKeys:        append([]string(nil), c.incidentFindingKeys...),
 		PendingClosure:             cloneIncidentClosure(c.pendingClosure),
 		ClosureState:               closureState,
@@ -931,6 +984,13 @@ func (c *Controller) RestoreState(state RuntimeState) error {
 	c.detectorReviewRequiredAt = state.DetectorReviewRequiredAt
 	c.detectorReviewReason = state.DetectorReviewReason
 	c.detectorClearSince = cloneClearSince(state.DetectorClearSince)
+	c.incidentObservedChanges = nil
+	if state.IncidentOpen {
+		c.incidentObservedChanges = make(map[string]ObservedStateChange, len(state.IncidentObservedChanges))
+		for _, entry := range state.IncidentObservedChanges {
+			c.incidentObservedChanges[entry.Kind+"/"+entry.Name] = entry
+		}
+	}
 	c.dispatchState = state.DispatchState
 	c.incidentFindingKeys = append([]string(nil), state.IncidentFindingKeys...)
 	c.pendingClosure = cloneIncidentClosure(state.PendingClosure)

@@ -151,6 +151,14 @@ type IncidentResult struct {
 	Error                 string                 `json:"error,omitempty"`
 }
 
+// ObservedStateChange is one object the controller saw changed from the
+// healthy baseline while an incident was open, and when it first saw it.
+type ObservedStateChange struct {
+	Kind            string    `json:"kind"`
+	Name            string    `json:"name"`
+	FirstObservedAt time.Time `json:"first_observed_at"`
+}
+
 type IncidentClosure struct {
 	Request             IncidentRequest      `json:"request"`
 	Result              *IncidentResult      `json:"result,omitempty"`
@@ -175,6 +183,14 @@ type IncidentClosure struct {
 	// streak of clear evaluations. Only a repair action that started by then
 	// can back a root cause (F8). nil when no streak is on record.
 	HealthClearedAt *time.Time `json:"health_cleared_at,omitempty"`
+	// ObservedStateChanges is every object the controller saw differ from
+	// the healthy baseline while the incident was open, with its first
+	// observation: the dispatch diff, later evaluations' diffs, and the
+	// closing view. A state-change citation is evidence of the cause only if
+	// it was observed before the responder's own repair of that object
+	// started; otherwise it is that repair's edit. Omitted without a
+	// baseline, when state changes cannot be checked at all.
+	ObservedStateChanges []ObservedStateChange `json:"observed_state_changes,omitempty"`
 	// DetectorReviewRequiredAt is set when health did not clear within the
 	// verification window after the responder completed. Health that
 	// clears later was not verifiably restored by the responder.

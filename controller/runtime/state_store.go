@@ -45,14 +45,17 @@ type RuntimeState struct {
 	DetectorReviewReason     string                  `json:"detector_review_reason,omitempty"`
 	// DetectorClearSince is the start of each detector's current clear
 	// streak, so a restarted controller keeps HealthClearedAt exact (F8).
-	DetectorClearSince         map[string]time.Time `json:"detector_clear_since,omitempty"`
-	DispatchState              string               `json:"dispatch_state"`
-	IncidentFindingKeys        []string             `json:"incident_finding_keys"`
-	PendingClosure             *IncidentClosure     `json:"pending_closure,omitempty"`
-	ClosureState               string               `json:"closure_state,omitempty"`
-	ClosureReceipt             *ClosureReceipt      `json:"closure_receipt,omitempty"`
-	ClosureFailure             *ClosureFailure      `json:"closure_failure,omitempty"`
-	LastAcknowledgedIncidentID string               `json:"last_acknowledged_incident_id,omitempty"`
+	DetectorClearSince map[string]time.Time `json:"detector_clear_since,omitempty"`
+	// IncidentObservedChanges is every object seen changed while the open
+	// incident lasted, so a restart keeps first observations exact.
+	IncidentObservedChanges    []ObservedStateChange `json:"incident_observed_changes,omitempty"`
+	DispatchState              string                `json:"dispatch_state"`
+	IncidentFindingKeys        []string              `json:"incident_finding_keys"`
+	PendingClosure             *IncidentClosure      `json:"pending_closure,omitempty"`
+	ClosureState               string                `json:"closure_state,omitempty"`
+	ClosureReceipt             *ClosureReceipt       `json:"closure_receipt,omitempty"`
+	ClosureFailure             *ClosureFailure       `json:"closure_failure,omitempty"`
+	LastAcknowledgedIncidentID string                `json:"last_acknowledged_incident_id,omitempty"`
 	// IncidentView is published for responders and never restored.
 	IncidentView *IncidentView `json:"incident_view,omitempty"`
 }
@@ -300,6 +303,11 @@ func cloneIncidentClosure(closure *IncidentClosure) *IncidentClosure {
 	copy.FinalDetectorStates = append([]DetectorEvaluation(nil), closure.FinalDetectorStates...)
 	copy.IncidentDetectorStates = append([]DetectorEvaluation(nil), closure.IncidentDetectorStates...)
 	copy.FinalStateChanges = cloneStateChanges(closure.FinalStateChanges)
+	if closure.ObservedStateChanges != nil {
+		copy.ObservedStateChanges = append(
+			make([]ObservedStateChange, 0, len(closure.ObservedStateChanges)), closure.ObservedStateChanges...,
+		)
+	}
 	if closure.HealthClearedAt != nil {
 		clearedAt := *closure.HealthClearedAt
 		copy.HealthClearedAt = &clearedAt
