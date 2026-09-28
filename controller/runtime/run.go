@@ -224,11 +224,14 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	trafficWorkloads := TrafficWorkloadNames(detectors)
 	var proberAPI ProberAPI
 	var proberAddress func(context.Context, bool) (string, error)
+	// Responders outlive prober pod IPs, so they get a stable address.
+	var responderProberAddress func(context.Context, bool) (string, error)
 	switch {
 	case !*syntheticTraffic || len(trafficWorkloads) == 0:
 	case *proberURL != "":
 		proberAddress = StaticProberURL(*proberURL)
 		proberAPI = HTTPProberClient{BaseURL: proberAddress}
+		responderProberAddress = proberAddress
 	case *proberBinary != "":
 		image := *proberImage
 		if image == "" {
@@ -240,6 +243,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			RepositoryPVCSubPath: *repositoryPVCSubPath, Binary: *proberBinary,
 		}
 		proberAddress = pod.Address
+		responderProberAddress = pod.ServiceAddress
 		proberAPI = HTTPProberClient{BaseURL: proberAddress}
 	}
 	trafficObserver := NewTrafficObserver(proberAPI, trafficWorkloads, func() { kubernetesCache.Notify(traffic.Watch) }, 0)
@@ -267,7 +271,7 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			Command: argv, ServiceAccount: "sdo-responder", RepositoryPVC: *repositoryPVC,
 			RepositoryMountPath: *repositoryMountPath, RepositoryPVCSubPath: *repositoryPVCSubPath,
 			CredentialsSecret: *credentialsSecret, PollInterval: time.Second,
-			Environment: jobEnvironment, DispatchEnvironment: ProberEnvironment(proberAddress),
+			Environment: jobEnvironment, DispatchEnvironment: ProberEnvironment(responderProberAddress),
 		}
 	default:
 		return fmt.Errorf("unsupported dispatcher mode %q", *dispatcherMode)
