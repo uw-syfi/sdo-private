@@ -3,8 +3,9 @@
 For each problem and trial: the app is healthy, inject, the mitigation oracle fails,
 recover, the app is healthy and the oracle passes. For a composite, after the
 injection one fault component is recovered alone (a different one each trial);
-the composite's oracle must still fail, that component's own oracle must pass,
-and every other fault component's oracle must still fail.
+the composite's oracle must still fail and every other fault component's oracle
+must still fail. Whether the recovered component's own oracle passes is recorded
+but not gated (a coupled component oracle can need the other fix too).
 
 No LLM, no Codex, no controller: only the SREGym fast-loop worker on a warm lane
 created by ``fastloop up``. Run from the repository root::
@@ -87,7 +88,9 @@ def qualify(
                 "fault_oracles": parts,
             }
             checks["composite oracle fails after one component is recovered"] = whole["success"] is False
-            checks["the recovered component's oracle passes"] = parts[first] is True
+            # Recorded, not gated: K2's selector oracle probes the Service's endpoints, which stay
+            # empty while the readiness probe is still broken, so its components are coupled.
+            record["partial"]["recovered_component_passes"] = parts[first] is True
             checks["every other component's oracle still fails"] = all(
                 success is False for fault, success in parts.items() if fault != first
             )
