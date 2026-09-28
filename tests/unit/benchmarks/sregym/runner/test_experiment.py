@@ -176,6 +176,20 @@ def test_sdo_codex_exports_required_kind_images_for_prefault_preflight(tmp_path:
     assert env["SREGYM_KIND_NETWORK_POLICY_CANARY_IMAGE"] == "validator:run-123"
 
 
+def test_every_arm_gets_an_enforcing_cni_on_the_same_kind_topology(tmp_path: Path, monkeypatch) -> None:
+    """SREGym's base kind config disables the default CNI and installs Calico only on request.
+
+    A baseline arm that did not ask for it got a cluster with no CNI (nodes
+    NotReady, every deploy timing out), and a network-policy fault would not
+    be enforced for the baseline while it is for SDO. Every arm must ask.
+    """
+
+    monkeypatch.delenv("SREGYM_KIND_REQUIRE_NETWORK_POLICY", raising=False)
+    for agent in ("codex", "crucible", "sdo_codex"):
+        env = config_to_env(ExperimentConfig(agent=agent), tmp_path)
+        assert env["SREGYM_KIND_REQUIRE_NETWORK_POLICY"] == "1", agent
+
+
 def test_legacy_crucible_runner_fields_are_promoted_to_agent_config(tmp_path: Path) -> None:
     toml = _write_toml(
         tmp_path,

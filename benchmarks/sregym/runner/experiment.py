@@ -561,6 +561,10 @@ def config_to_env(config: ExperimentConfig, project_root: Path, exp_dir: Path | 
     if config.env.kind_worker_nodes > 0:
         env["SREGYM_KIND_WORKER_NODES"] = str(config.env.kind_worker_nodes)
 
+    # SREGym's base kind config disables the default CNI; Calico is installed
+    # only on this request. Every arm asks for it, so a baseline lane is not
+    # left without a CNI and network-policy faults are enforced on every arm.
+    env["SREGYM_KIND_REQUIRE_NETWORK_POLICY"] = "1"
     env["SREGYM_PROGRESS_MODE"] = "rich"
     if exp_dir is not None:
         env["SREGYM_EXPERIMENT_DIR"] = str(exp_dir)
