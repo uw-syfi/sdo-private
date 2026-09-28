@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from sdo.operational_memory.broker_service import (
     BrokerClosure,
     BrokerService,
     BrokerServiceError,
+    ClosureReceipt,
     ControllerRolloutRecord,
 )
 from sdo.operational_memory.commit_broker import CommitBroker
@@ -1545,3 +1547,43 @@ def test_a_correct_cause_backed_by_its_own_repair_is_confirmed_and_learned(tmp_p
     assert [verification.verdict.value for verification in outcome.diagnosis_verification] == ["confirmed"]
     assert receipt.reflection_commit is not None
     assert len(backend.calls) == 1
+
+
+# Cross-language: the broker processes closures the Go controller wrote.
+
+_GO_FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "sdo" / "contracts" / "go"
+
+
+@pytest.mark.parametrize(
+    ("fixture", "classification", "verdict"),
+    [
+        ("closure_repaired.json", OutcomeClassification.SUCCESS, "confirmed"),
+        ("closure_own_edit.json", OutcomeClassification.SUCCESS, "contradicted"),
+    ],
+)
+def test_the_broker_processes_a_go_encoded_closure_into_a_ledger_and_outcome(
+    tmp_path: Path, fixture: str, classification: OutcomeClassification, verdict: str
+) -> None:
+    """The Go closure, as the broker CLI receives it, commits an outcome with the F17 facts applied."""
+
+    target = tmp_path / "target"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    service = _service(target, tmp_path / "worktrees", AcceptRepairValidator(), repair_policy="recorded-actions")
+    payload = json.loads((_GO_FIXTURES / fixture).read_text(encoding="utf-8"))
+    workspace = service.prepare_incident(payload["request"]["incident_id"])
+    payload["request"]["repository_worktree"] = str(workspace.path)
+    payload["request"]["repository_base_commit"] = workspace.base_commit
+
+    receipt = service.process_closure(BrokerClosure.model_validate(payload))
+
+    ledger = service.completion_state(payload["request"]["incident_id"])
+    assert ledger.outcome_commit == receipt.outcome_commit
+    assert ClosureReceipt.model_validate_json(receipt.model_dump_json()) == receipt
+    outcome = MemoryRepository(target).outcomes()[-1]
+    assert outcome.classification == classification
+    assert [item.verdict.value for item in outcome.diagnosis_verification] == [verdict]
+    repair = outcome.diagnosis_verification[0].repair
+    assert repair is not None
+    assert repair.attributed is True

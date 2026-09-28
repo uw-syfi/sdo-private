@@ -1587,3 +1587,21 @@ def test_receipt_diagnosis_uses_every_controller_fact_and_withholds_credit_from_
         [{**verification[0], "repair": {**verification[0]["repair"], "attributed": True}}]
     ) == ("responder")
     assert _recovery_attribution([]) is None
+
+
+@pytest.mark.parametrize(
+    ("fixture", "verdict", "attribution"),
+    [("closure_repaired.json", "confirmed", "responder"), ("closure_own_edit.json", "contradicted", "responder")],
+)
+def test_the_receipts_diagnosis_is_recomputed_from_a_go_encoded_closure(
+    fixture: str, verdict: str, attribution: str
+) -> None:
+    """The receipt silently drops its diagnosis when the closure fails validation, so parse the Go encoding."""
+
+    root = Path(__file__).resolve().parents[5]
+    closure = json.loads((root / "tests" / "fixtures" / "sdo" / "contracts" / "go" / fixture).read_text("utf-8"))
+
+    verification = _diagnosis_verification(closure)
+
+    assert [item["verdict"] for item in verification] == [verdict]
+    assert _recovery_attribution(verification) == attribution
