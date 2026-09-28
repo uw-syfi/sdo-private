@@ -12,7 +12,7 @@ from sdo.contracts import (
     StateChanges,
     UsageMetrics,
 )
-from sdo.operational_memory.diagnosis import verify_diagnosis
+from sdo.operational_memory.diagnosis import RootCauseVerification, recovered_by_responder, verify_diagnosis
 from sdo.operational_memory.models import OutcomeClassification, OutcomeRecord, OutcomeTimestamps
 
 
@@ -32,6 +32,10 @@ class OutcomeFacts(BaseModel):
     # fault that landed after the request's dispatch-time diff was taken
     # (N11); ``verify_diagnosis`` checks state-change evidence against both.
     final_state_changes: StateChanges | None = None
+    # When the controller saw the health detectors begin their final clear
+    # streak. A repair action backs a root cause only if it started by then
+    # (F8). None from controllers that predate it.
+    health_cleared_at: datetime | None = None
     health_verified: bool
     fault_confirmed: bool
     missed_fault_detected: bool = False
@@ -57,8 +61,16 @@ class OutcomeFacts(BaseModel):
 
 
 def derive_outcome(facts: OutcomeFacts) -> OutcomeRecord:
-    classification = _classification(facts)
     result = facts.result
+    verification = verify_diagnosis(
+        facts.request,
+        result,
+        final_detector_states=facts.final_health_detector_state,
+        incident_detector_states=facts.incident_detector_states,
+        final_state_changes=facts.final_state_changes,
+        health_cleared_at=facts.health_cleared_at,
+    )
+    classification = _classification(facts, verification)
     applied_playbooks = [] if result is None else [playbook.path for playbook in result.applied_playbooks]
     completed_at = facts.verified_at if facts.health_verified else facts.responder_completed_at
     if completed_at is None:  # verified incidents are validated to have verified_at.
@@ -90,17 +102,11 @@ def derive_outcome(facts: OutcomeFacts) -> OutcomeRecord:
             verified_at=facts.verified_at if facts.health_verified else None,
             completed_at=completed_at,
         ),
-        diagnosis_verification=verify_diagnosis(
-            facts.request,
-            result,
-            final_detector_states=facts.final_health_detector_state,
-            incident_detector_states=facts.incident_detector_states,
-            final_state_changes=facts.final_state_changes,
-        ),
+        diagnosis_verification=verification,
     )
 
 
-def _classification(facts: OutcomeFacts) -> OutcomeClassification:
+def _classification(facts: OutcomeFacts, verification: list[RootCauseVerification]) -> OutcomeClassification:
     if facts.missed_fault_detected:
         return OutcomeClassification.FALSE_NEGATIVE
     if facts.dispatch_error or facts.result is None or facts.result.status == IncidentStatus.FAILED:
@@ -113,6 +119,10 @@ def _classification(facts: OutcomeFacts) -> OutcomeClassification:
         return OutcomeClassification.CANCELLED
     if not facts.fault_confirmed:
         return OutcomeClassification.FALSE_POSITIVE
+    if recovered_by_responder(verification) is False:
+        # Health cleared in time, but the responder's own repair backs none of
+        # its causes: someone else recovered the incident (F8).
+        return OutcomeClassification.EXTERNAL_RECOVERY
     return OutcomeClassification.SUCCESS
 
 

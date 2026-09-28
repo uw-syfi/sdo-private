@@ -12,7 +12,9 @@ from sdo.contracts import (
     DetectorEvaluationStatus,
     IncidentRequest,
     IncidentResult,
+    ObjectRef,
     PriorOutcomeEvidence,
+    RootCauseEvidence,
 )
 from sdo.operational_memory.broker_service import (
     BrokerClosure,
@@ -1271,7 +1273,6 @@ def test_repeated_exact_match_success_records_deterministic_noop_reflection(
         {"match_reason": "detector-rule-resource-kind"},
         {"incident_status": DetectorEvaluationStatus.FIRING},
         {"incident_detector_fired": False, "incident_status": DetectorEvaluationStatus.FIRING},
-        {"repair_success": False},
         {"applied_playbook": False},
         {"owned": False},
     ],
@@ -1296,6 +1297,28 @@ def test_non_exact_or_unproven_warm_success_still_runs_full_reflection(
     state = service.completion_state("inc-20260709-0001")
     assert len(backend.calls) == 1
     assert state.reflection_skipped_reason is None
+
+
+def test_a_warm_success_whose_every_repair_failed_is_an_unlearned_external_recovery(tmp_path: Path) -> None:
+    """No successful repair action backs the cause, so health recovered for another reason (F8)."""
+
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _own_playbook(target)
+    _init_repository(target)
+    backend = RecordingSessionBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+
+    receipt = service.process_closure(_warm_closure(workspace.path, workspace.base_commit, repair_success=False))
+
+    state = service.completion_state("inc-20260709-0001")
+    assert backend.calls == []
+    assert state.reflection_skipped_reason is None
+    assert receipt.reflection_commit is None
+    assert MemoryRepository(target).outcomes()[-1].classification == OutcomeClassification.EXTERNAL_RECOVERY
 
 
 class PlaybookOnlyBackend(RecordingSessionBackend):
@@ -1422,3 +1445,103 @@ def test_broker_cli_reflection_session_defaults_to_resume() -> None:
     assert parser.parse_args([*required, "--reflection-session", "fresh"]).reflection_session == "fresh"
     with pytest.raises(SystemExit):
         parser.parse_args([*required, "--reflection-session", "transcript"])
+
+
+# F8: a cause is learned only when the responder's own repair backs it.
+
+
+class AlwaysReflectReflector(SessionReflector):
+    """A reflector that would reflect on anything; the broker must still refuse to learn."""
+
+    def should_reflect(self, outcome: object, *, health_verified: bool, session_id: str | None) -> bool:
+        del outcome, health_verified, session_id
+        return True
+
+
+def _attribution_closure(worktree: Path, base_commit: str, *, cause: str, repaired: str) -> BrokerClosure:
+    """A verified closure whose dispatch diff was fully reverted before verification.
+
+    ``cause`` is the ``Kind/name`` the responder blamed and ``repaired`` the one its action touched.
+    """
+
+    closure = _closure(worktree, base_commit)
+    state_changes = IncidentRequest.model_validate_json(_fixture("incident_request_state_changes.json")).state_changes
+    assert state_changes is not None
+    assert closure.result is not None
+    cause_kind, cause_name = cause.split("/")
+    repaired_kind, repaired_name = repaired.split("/")
+    result = closure.result
+    root_cause = result.confirmed_root_causes[0].model_copy(
+        update={
+            "summary": f"{cause} caused the incident",
+            "resources": [ObjectRef(kind=cause_kind, namespace="hotel-reservation", name=cause_name)],
+            "evidence": [RootCauseEvidence(kind="live-observation", source=f"kubectl get {cause}", observation="bad")],
+        }
+    )
+    action = result.repair_actions[0].model_copy(
+        update={
+            "target": repaired,
+            "resources": [ObjectRef(kind=repaired_kind, namespace="hotel-reservation", name=repaired_name)],
+            "started_at": datetime(2026, 7, 9, 18, 2, tzinfo=timezone.utc),
+            "completed_at": datetime(2026, 7, 9, 18, 3, tzinfo=timezone.utc),
+        }
+    )
+    cleared = datetime(2026, 7, 9, 18, 5, 30, tzinfo=timezone.utc)
+    return closure.model_copy(
+        update={
+            "request": closure.request.model_copy(update={"state_changes": state_changes}),
+            "result": result.model_copy(update={"confirmed_root_causes": [root_cause], "repair_actions": [action]}),
+            "final_state_changes": state_changes.model_copy(update={"changes": []}),
+            "health_cleared_at": cleared,
+        }
+    )
+
+
+@pytest.mark.parametrize("reflector_type", [SessionReflector, AlwaysReflectReflector])
+def test_a_wrong_cause_fixed_by_someone_else_is_never_learned(
+    tmp_path: Path, reflector_type: type[SessionReflector]
+) -> None:
+    """F8: the responder blamed frontend and restarted it; someone else reverted the real fault."""
+
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = RecordingSessionBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=reflector_type(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+    closure = _attribution_closure(
+        workspace.path, workspace.base_commit, cause="Deployment/frontend", repaired="Deployment/frontend"
+    )
+
+    receipt = service.process_closure(closure)
+
+    outcome = MemoryRepository(target).outcomes()[-1]
+    assert outcome.classification == OutcomeClassification.EXTERNAL_RECOVERY
+    assert [verification.verdict.value for verification in outcome.diagnosis_verification] == ["unattributed"]
+    assert receipt.reflection_commit is None
+    assert backend.calls == []
+    assert service.completion_state("inc-20260709-0001").accepted_detector_paths == []
+
+
+def test_a_correct_cause_backed_by_its_own_repair_is_confirmed_and_learned(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = RecordingSessionBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+    closure = _attribution_closure(
+        workspace.path, workspace.base_commit, cause="ConfigMap/geo-config", repaired="ConfigMap/geo-config"
+    )
+
+    receipt = service.process_closure(closure)
+
+    outcome = MemoryRepository(target).outcomes()[-1]
+    assert outcome.classification == OutcomeClassification.SUCCESS
+    assert [verification.verdict.value for verification in outcome.diagnosis_verification] == ["confirmed"]
+    assert receipt.reflection_commit is not None
+    assert len(backend.calls) == 1

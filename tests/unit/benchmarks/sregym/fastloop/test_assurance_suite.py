@@ -166,7 +166,20 @@ def test_a_fault_missing_from_the_requests_diff_is_cited_as_a_live_observation_n
         request,
         objects=("Service/frontend", "ConfigMap/mongo-rate-script"),
         summary="two faults",
-        actions=[],
+        # The responder's own repair of both objects backs the cause (F8).
+        actions=[
+            {
+                "action_id": "correct",
+                "kind": "kubectl",
+                "target": "Service/frontend,ConfigMap/mongo-rate-script",
+                "summary": "recover both faults",
+                "details": "recover both faults",
+                "started_at": T0.isoformat(),
+                "completed_at": (T0 + timedelta(seconds=1)).isoformat(),
+                "success": True,
+                "reversible": True,
+            }
+        ],
         started_at=T0,
         verification=[],
     )

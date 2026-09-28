@@ -11,6 +11,7 @@ from sdo.contracts import (
     IncidentRequest,
     IncidentResult,
     IncidentStatus,
+    ObjectRef,
     RootCauseEvidence,
     StateChange,
     StateChanges,
@@ -165,3 +166,84 @@ def test_outcome_verifies_state_change_evidence_against_the_controllers_closing_
 
     late_verification = outcome.diagnosis_verification[1]
     assert late_verification.evidence[0].verified is True
+
+
+def _attribution_facts(*causes: ConfirmedRootCause, repaired: tuple[str, ...]) -> OutcomeFacts:
+    """A verified closure over the state-change fixture in which every dispatch change was reverted.
+
+    ``repaired`` names the ``Kind/name`` objects the responder's own actions touched.
+    """
+
+    request = IncidentRequest.model_validate_json(_contract_fixture("incident_request_state_changes.json"))
+    result = IncidentResult.model_validate_json(_contract_fixture("incident_result.json"))
+    template = result.repair_actions[0]
+    actions = [
+        template.model_copy(
+            update={
+                "action_id": f"repair-{index}",
+                "target": key,
+                "resources": [ObjectRef(kind=key.split("/")[0], name=key.split("/")[1])],
+            }
+        )
+        for index, key in enumerate(repaired)
+    ]
+    result = result.model_copy(update={"confirmed_root_causes": list(causes), "repair_actions": actions})
+    cleared = template.started_at + timedelta(minutes=5)
+    return OutcomeFacts(
+        request=request,
+        result=result,
+        final_health_detector_state=result.final_detector_states,
+        final_state_changes=StateChanges(baseline_at=cleared, observed_at=cleared, changes=[]),
+        health_cleared_at=cleared,
+        health_verified=True,
+        fault_confirmed=True,
+        responder_backend="codex",
+        responder_model="gpt-5",
+        detected_at=template.started_at - timedelta(minutes=2),
+        dispatched_at=template.started_at - timedelta(minutes=1),
+        responder_completed_at=cleared,
+        verified_at=cleared + timedelta(seconds=30),
+    )
+
+
+def _blaming(kind: str, name: str) -> ConfirmedRootCause:
+    return ConfirmedRootCause(
+        summary=f"{kind} {name} changed",
+        resources=[ObjectRef(kind=kind, name=name)],
+        evidence=[RootCauseEvidence(kind="state-change", source=f"{kind}/{name}", observation="changed")],
+        explained_detectors=["missing-configmap"],
+    )
+
+
+def test_health_restored_by_someone_else_is_an_external_recovery_not_a_success() -> None:
+    """F8: every cited cause is unattributed, so SDO did not recover the incident."""
+
+    wrong = ConfirmedRootCause(
+        summary="frontend pods are wedged",
+        resources=[ObjectRef(kind="Deployment", name="frontend")],
+        evidence=[RootCauseEvidence(kind="live-observation", source="kubectl get pods", observation="wedged")],
+        explained_detectors=["missing-configmap"],
+    )
+
+    outcome = derive_outcome(_attribution_facts(wrong, repaired=("Deployment/frontend",)))
+
+    assert outcome.classification == OutcomeClassification.EXTERNAL_RECOVERY
+    assert [verification.verdict for verification in outcome.diagnosis_verification] == [DiagnosisVerdict.UNATTRIBUTED]
+    # Health really was verified in time; only the credit is withheld.
+    assert outcome.timestamps.verified_at is not None
+
+
+def test_a_composite_with_one_own_repair_is_still_an_sdo_success() -> None:
+    outcome = derive_outcome(
+        _attribution_facts(
+            _blaming("NetworkPolicy", "deny-all"),
+            _blaming("ConfigMap", "geo-config"),
+            repaired=("NetworkPolicy/deny-all",),
+        )
+    )
+
+    assert outcome.classification == OutcomeClassification.SUCCESS
+    assert [verification.verdict for verification in outcome.diagnosis_verification] == [
+        DiagnosisVerdict.CONFIRMED,
+        DiagnosisVerdict.UNATTRIBUTED,
+    ]

@@ -304,12 +304,15 @@ def _diagnosis_directive(outcome: OutcomeRecord) -> str:
         line += f"; verified evidence: {verified or 'none'}"
         if contradicted:
             line += f"; evidence the controller never observed: {contradicted}"
+        if verification.repair is not None:
+            line += f"; repair attribution: {verification.repair.reason}"
         lines.append(line + "\n")
     return (
         "Diagnosis verification (deterministic, by SDO):\n"
         f"{''.join(lines)}"
         "Learn only from confirmed causes: a playbook's diagnosis and any new incident detector must describe a "
-        "confirmed cause, never a contradicted or unverified one. Every playbook you create or refine must end "
+        "confirmed cause, never a contradicted, unverified, or unattributed one (an unattributed cause was not "
+        "backed by your own repair: something else restored health). Every playbook you create or refine must end "
         "with a `## Verification` section that records how this incident confirmed the cause: the verified "
         "evidence above, the detectors that flipped, and the check (for example `python3 -m sdo incident "
         "status`) that proved recovery.\n\n"

@@ -69,6 +69,14 @@
       "action_id": "action-1",
       "kind": "kubernetes_apply",
       "target": "ConfigMap/geo-config",
+      "resources": [
+        {
+          "api_version": "v1",
+          "kind": "ConfigMap",
+          "namespace": "hotel-reservation",
+          "name": "geo-config"
+        }
+      ],
       "summary": "Applied the repaired ConfigMap and waited for the rollout",
       "details": "ConfigMap applied without recording secret values",
       "started_at": "2026-07-09T18:08:00Z",

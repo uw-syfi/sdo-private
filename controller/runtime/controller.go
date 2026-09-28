@@ -78,23 +78,27 @@ type Controller struct {
 	// durable is the state stateStore last confirmed durable. With a store
 	// attached, an effect runs only while this state records it, so a
 	// restarted controller can recover every effect that ran.
-	durable                    *RuntimeState
-	incidentOpen               bool
-	responderDone              bool
-	currentIncidentRequest     *IncidentRequest
-	dispatchState              string
-	incidentFindingKeys        []string
-	cleanedHelpers             []string
-	healthDetectorIDs          []string
-	detectorSpecs              map[string]sdk.DetectorSpec
-	currentIncidentResult      *IncidentResult
-	dispatchError              string
-	incidentDetectedAt         time.Time
-	incidentDispatchedAt       time.Time
-	responderCompletedAt       time.Time
-	detectorReviewRequired     bool
-	detectorReviewRequiredAt   time.Time
-	detectorReviewReason       string
+	durable                  *RuntimeState
+	incidentOpen             bool
+	responderDone            bool
+	currentIncidentRequest   *IncidentRequest
+	dispatchState            string
+	incidentFindingKeys      []string
+	cleanedHelpers           []string
+	healthDetectorIDs        []string
+	detectorSpecs            map[string]sdk.DetectorSpec
+	currentIncidentResult    *IncidentResult
+	dispatchError            string
+	incidentDetectedAt       time.Time
+	incidentDispatchedAt     time.Time
+	responderCompletedAt     time.Time
+	detectorReviewRequired   bool
+	detectorReviewRequiredAt time.Time
+	detectorReviewReason     string
+	// detectorClearSince maps each detector to the start of its current
+	// streak of clear evaluations (F8); a firing or erroring evaluation ends
+	// the streak. Guarded by mu.
+	detectorClearSince         map[string]time.Time
 	pendingClosure             *IncidentClosure
 	closureState               string
 	closureReceipt             *ClosureReceipt
@@ -498,6 +502,7 @@ func (c *Controller) recordEvaluation(detectorID string, now time.Time, findings
 	c.history = append(c.history, DetectorEvaluation{
 		DetectorID: detectorID, EvaluatedAt: now.UTC(), Status: status, Fingerprints: fingerprints,
 	})
+	c.trackClearStreak(detectorID, now, status == DetectorEvaluationClear)
 	if len(c.history) > 100 {
 		c.history = append([]DetectorEvaluation(nil), c.history[len(c.history)-100:]...)
 	}
@@ -508,9 +513,48 @@ func (c *Controller) recordDetectorError(detectorID string, now time.Time, err e
 		DetectorID: detectorID, EvaluatedAt: now.UTC(), Status: DetectorEvaluationError, Error: err.Error(),
 		Fingerprints: []string{},
 	})
+	c.trackClearStreak(detectorID, now, false)
 	if c.OnError != nil {
 		c.OnError(fmt.Errorf("detector %q: %w", detectorID, err))
 	}
+}
+
+// trackClearStreak records when detectorID began its current streak of clear
+// evaluations, and ends the streak on any other evaluation.
+func (c *Controller) trackClearStreak(detectorID string, now time.Time, clear bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !clear {
+		delete(c.detectorClearSince, detectorID)
+		return
+	}
+	if c.detectorClearSince == nil {
+		c.detectorClearSince = make(map[string]time.Time)
+	}
+	if _, ok := c.detectorClearSince[detectorID]; !ok {
+		c.detectorClearSince[detectorID] = now.UTC()
+	}
+}
+
+// healthClearedAtLocked is when the closure gate's detectors began their
+// final clear streak: the latest streak start among them. A repair action
+// that started after it cannot have restored health (F8). nil when a gate
+// detector has no clear streak on record. Called with c.mu held.
+func (c *Controller) healthClearedAtLocked(finalStates []DetectorEvaluation) *time.Time {
+	var cleared time.Time
+	for _, state := range finalStates {
+		since, ok := c.detectorClearSince[state.DetectorID]
+		if !ok {
+			return nil
+		}
+		if since.After(cleared) {
+			cleared = since
+		}
+	}
+	if cleared.IsZero() {
+		return nil
+	}
+	return &cleared
 }
 
 // detectorOrigins maps each learned incident detector to the incident it was
@@ -700,6 +744,7 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 		DispatchError: c.dispatchError, FinalDetectorStates: finalStates,
 		IncidentDetectorStates: c.incidentDetectorStates(),
 		FinalStateChanges:      c.finalStateChangesLocked(now),
+		HealthClearedAt:        c.healthClearedAtLocked(finalStates),
 		DetectedAt:             c.incidentDetectedAt, DispatchedAt: c.incidentDispatchedAt,
 		ResponderCompletedAt: c.responderCompletedAt, VerifiedAt: verifiedAt,
 		CleanedHelpers:       append([]string(nil), c.cleanedHelpers...),
@@ -849,6 +894,7 @@ func (c *Controller) ExportState() RuntimeState {
 		DetectorReviewRequired:     c.detectorReviewRequired,
 		DetectorReviewRequiredAt:   c.detectorReviewRequiredAt,
 		DetectorReviewReason:       c.detectorReviewReason,
+		DetectorClearSince:         cloneClearSince(c.detectorClearSince),
 		IncidentFindingKeys:        append([]string(nil), c.incidentFindingKeys...),
 		PendingClosure:             cloneIncidentClosure(c.pendingClosure),
 		ClosureState:               closureState,
@@ -884,6 +930,7 @@ func (c *Controller) RestoreState(state RuntimeState) error {
 	c.detectorReviewRequired = state.DetectorReviewRequired
 	c.detectorReviewRequiredAt = state.DetectorReviewRequiredAt
 	c.detectorReviewReason = state.DetectorReviewReason
+	c.detectorClearSince = cloneClearSince(state.DetectorClearSince)
 	c.dispatchState = state.DispatchState
 	c.incidentFindingKeys = append([]string(nil), state.IncidentFindingKeys...)
 	c.pendingClosure = cloneIncidentClosure(state.PendingClosure)

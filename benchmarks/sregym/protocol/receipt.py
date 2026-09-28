@@ -63,6 +63,7 @@ class _RepairActionReceipt(BaseModel):
     action_id: str = Field(min_length=1)
     kind: str = Field(min_length=1)
     target: str = Field(min_length=1)
+    resources: list[dict[str, Any]] = Field(default_factory=list)
     summary: str = Field(min_length=1)
     details: str = Field(min_length=1)
     started_at: datetime
@@ -159,6 +160,11 @@ def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle
     if receipt.get("detector_review_required_at"):
         raise ProductionReceiptValidationError(
             "production receipt health cleared only after detector review; the responder did not restore it"
+        )
+    if receipt.get("recovery_attribution") == "external":
+        raise ProductionReceiptValidationError(
+            "production receipt has recovery_attribution=external: the responder's own repair backs none of its "
+            "root causes, so it did not restore health"
         )
     verification = _string_keyed_objects(receipt.get("independent_verification"))
     if not verification or any(evidence.get("passed") is not True for evidence in verification):

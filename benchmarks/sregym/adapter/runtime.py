@@ -457,6 +457,7 @@ def _production_receipt(
     rollout_record = _validated_controller_rollout_record(ledger)
     controller_update_rollout = rollout_record is not None
     recorded_at = datetime.now(timezone.utc)
+    diagnosis_verification = _diagnosis_verification(closure)
     receipt: dict[str, Any] = {
         "schema_version": "sdo.production-receipt/v1",
         "recorded_at": recorded_at.isoformat(),
@@ -493,7 +494,8 @@ def _production_receipt(
         **_reflection_telemetry(ledger),
         "phase_timings_seconds": _phase_timings(closure, recorded_at),
         "memory_reuse": _memory_reuse_summary(closure, result),
-        "diagnosis_verification": _diagnosis_verification(closure),
+        "diagnosis_verification": diagnosis_verification,
+        "recovery_attribution": _recovery_attribution(diagnosis_verification),
         "validator_network_policy_canaries": ledger.get("validator_network_policy_canaries", []),
         "acknowledged": ledger.get("acknowledged") is True,
         "cleaned": ledger.get("cleaned") is True,
@@ -547,8 +549,22 @@ def _diagnosis_verification(closure: dict[str, Any]) -> list[dict[str, Any]]:
             parsed.result,
             final_detector_states=parsed.final_detector_states,
             incident_detector_states=parsed.incident_detector_states,
+            final_state_changes=parsed.final_state_changes,
+            health_cleared_at=parsed.health_cleared_at,
         )
     ]
+
+
+def _recovery_attribution(verification: list[dict[str, Any]]) -> str | None:
+    """``responder`` when its own repair backs a verified cause, ``external`` when none does (F8).
+
+    ``None`` when no cause carries a repair attribution.
+    """
+
+    attributions = [item.get("repair") for item in verification if isinstance(item.get("repair"), dict)]
+    if not attributions:
+        return None
+    return "responder" if any(attribution.get("attributed") is True for attribution in attributions) else "external"
 
 
 def _memory_reuse_summary(closure: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:

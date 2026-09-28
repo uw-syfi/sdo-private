@@ -164,6 +164,8 @@ def test_scripted_responder_repairs_through_the_real_structured_turn(
     assert {(ref.kind, ref.name) for ref in cause.resources} >= {("NetworkPolicy", POLICY)}
     assert cause.explained_detectors == ["traffic-health"]
     assert [action.success for action in result.repair_actions] == [True]
+    # The repair names what it mutated, so SDO can attribute the confirmed cause to it (F8).
+    assert ("NetworkPolicy", POLICY) in {(ref.kind, ref.name) for ref in result.repair_actions[0].resources}
     assert result.verification_evidence[0].name == "sdo-incident-status"
     assert result.verification_evidence[0].passed is True
     (turn,) = _turn_records(scripted["store"])
@@ -213,6 +215,9 @@ def test_wrong_only_honest_fails_and_claimed_lies_about_verification(
     assert claimed.status.value == "completed"
     assert claimed.verification_evidence[0].passed is True
     assert not (scripted["state"] / "deleted").exists()
+    # The wrong repair truthfully records that it restarted frontend, not the NetworkPolicy.
+    (wrong,) = claimed.repair_actions
+    assert [(ref.kind, ref.name) for ref in wrong.resources] == [("Deployment", "frontend")]
 
 
 def test_resumed_reflection_accounts_only_its_own_tokens_and_writes_valid_memory(

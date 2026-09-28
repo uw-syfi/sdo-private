@@ -274,6 +274,9 @@ class TrafficWorkload(TrafficModel):
 class OutcomeClassification(str, Enum):
     SUCCESS = "success"
     PARTIAL = "partial"
+    #: Health cleared in time, but the responder's own repair backs none of
+    #: its confirmed causes: someone else recovered the incident (F8).
+    EXTERNAL_RECOVERY = "external_recovery"
     FALSE_POSITIVE = "false_positive"
     FALSE_NEGATIVE = "false_negative"
     FAILED = "failed"

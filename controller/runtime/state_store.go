@@ -27,29 +27,32 @@ const (
 var ErrStateConflict = errors.New("controller state conflict")
 
 type RuntimeState struct {
-	Version                    string                  `json:"version"`
-	SchedulerDeadlines         map[string]time.Time    `json:"scheduler_deadlines"`
-	FindingStates              map[string]FindingState `json:"finding_states"`
-	PendingBatch               BatcherState            `json:"pending_batch"`
-	History                    []DetectorEvaluation    `json:"history"`
-	IncidentOpen               bool                    `json:"incident_open"`
-	ResponderDone              bool                    `json:"responder_done"`
-	IncidentRequest            *IncidentRequest        `json:"incident_request,omitempty"`
-	IncidentResult             *IncidentResult         `json:"incident_result,omitempty"`
-	DispatchError              string                  `json:"dispatch_error,omitempty"`
-	IncidentDetectedAt         time.Time               `json:"incident_detected_at,omitempty"`
-	IncidentDispatchedAt       time.Time               `json:"incident_dispatched_at,omitempty"`
-	ResponderCompletedAt       time.Time               `json:"responder_completed_at,omitempty"`
-	DetectorReviewRequired     bool                    `json:"detector_review_required,omitempty"`
-	DetectorReviewRequiredAt   time.Time               `json:"detector_review_required_at,omitempty"`
-	DetectorReviewReason       string                  `json:"detector_review_reason,omitempty"`
-	DispatchState              string                  `json:"dispatch_state"`
-	IncidentFindingKeys        []string                `json:"incident_finding_keys"`
-	PendingClosure             *IncidentClosure        `json:"pending_closure,omitempty"`
-	ClosureState               string                  `json:"closure_state,omitempty"`
-	ClosureReceipt             *ClosureReceipt         `json:"closure_receipt,omitempty"`
-	ClosureFailure             *ClosureFailure         `json:"closure_failure,omitempty"`
-	LastAcknowledgedIncidentID string                  `json:"last_acknowledged_incident_id,omitempty"`
+	Version                  string                  `json:"version"`
+	SchedulerDeadlines       map[string]time.Time    `json:"scheduler_deadlines"`
+	FindingStates            map[string]FindingState `json:"finding_states"`
+	PendingBatch             BatcherState            `json:"pending_batch"`
+	History                  []DetectorEvaluation    `json:"history"`
+	IncidentOpen             bool                    `json:"incident_open"`
+	ResponderDone            bool                    `json:"responder_done"`
+	IncidentRequest          *IncidentRequest        `json:"incident_request,omitempty"`
+	IncidentResult           *IncidentResult         `json:"incident_result,omitempty"`
+	DispatchError            string                  `json:"dispatch_error,omitempty"`
+	IncidentDetectedAt       time.Time               `json:"incident_detected_at,omitempty"`
+	IncidentDispatchedAt     time.Time               `json:"incident_dispatched_at,omitempty"`
+	ResponderCompletedAt     time.Time               `json:"responder_completed_at,omitempty"`
+	DetectorReviewRequired   bool                    `json:"detector_review_required,omitempty"`
+	DetectorReviewRequiredAt time.Time               `json:"detector_review_required_at,omitempty"`
+	DetectorReviewReason     string                  `json:"detector_review_reason,omitempty"`
+	// DetectorClearSince is the start of each detector's current clear
+	// streak, so a restarted controller keeps HealthClearedAt exact (F8).
+	DetectorClearSince         map[string]time.Time `json:"detector_clear_since,omitempty"`
+	DispatchState              string               `json:"dispatch_state"`
+	IncidentFindingKeys        []string             `json:"incident_finding_keys"`
+	PendingClosure             *IncidentClosure     `json:"pending_closure,omitempty"`
+	ClosureState               string               `json:"closure_state,omitempty"`
+	ClosureReceipt             *ClosureReceipt      `json:"closure_receipt,omitempty"`
+	ClosureFailure             *ClosureFailure      `json:"closure_failure,omitempty"`
+	LastAcknowledgedIncidentID string               `json:"last_acknowledged_incident_id,omitempty"`
 	// IncidentView is published for responders and never restored.
 	IncidentView *IncidentView `json:"incident_view,omitempty"`
 }
@@ -296,11 +299,15 @@ func cloneIncidentClosure(closure *IncidentClosure) *IncidentClosure {
 	copy.Result = cloneIncidentResult(closure.Result)
 	copy.FinalDetectorStates = append([]DetectorEvaluation(nil), closure.FinalDetectorStates...)
 	copy.IncidentDetectorStates = append([]DetectorEvaluation(nil), closure.IncidentDetectorStates...)
+	copy.FinalStateChanges = cloneStateChanges(closure.FinalStateChanges)
+	if closure.HealthClearedAt != nil {
+		clearedAt := *closure.HealthClearedAt
+		copy.HealthClearedAt = &clearedAt
+	}
 	if closure.DetectorReviewRequiredAt != nil {
 		reviewAt := *closure.DetectorReviewRequiredAt
 		copy.DetectorReviewRequiredAt = &reviewAt
 	}
-	copy.FinalStateChanges = cloneStateChanges(closure.FinalStateChanges)
 	return &copy
 }
 
@@ -323,4 +330,15 @@ func cloneClosureReceipt(receipt *ClosureReceipt) *ClosureReceipt {
 	}
 	copy := *receipt
 	return &copy
+}
+
+func cloneClearSince(since map[string]time.Time) map[string]time.Time {
+	if len(since) == 0 {
+		return nil
+	}
+	copy := make(map[string]time.Time, len(since))
+	for id, at := range since {
+		copy[id] = at
+	}
+	return copy
 }

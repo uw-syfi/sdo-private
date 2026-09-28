@@ -186,8 +186,9 @@ def scripted_result(
 def stray_result(request: dict[str, Any]) -> dict[str, Any]:
     """The answer for an incident no injected fault explains: nothing repaired, so ``cancelled``.
 
-    A ``completed`` result with no successful repair action fails the broker's recorded-actions
-    rule on every retry, and a permanent closure failure blocks every later incident.
+    ``cancelled`` is the honest answer for a finding that healed on its own. Since F16 the broker
+    also closes a ``completed`` result with no repair action as cancelled when health is already
+    clear, but it still rejects that shape while health is not verified clear.
     """
 
     result = scripted_result(
@@ -198,11 +199,22 @@ def stray_result(request: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _action(action_id: str, *, target: str, summary: str, started: datetime, success: bool) -> dict[str, Any]:
+def _action(
+    action_id: str,
+    *,
+    target: str,
+    summary: str,
+    started: datetime,
+    success: bool,
+    objects: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """A repair receipt; ``objects`` are the ``Kind/name`` objects it mutated (F8 attribution)."""
+
     return {
         "action_id": action_id,
         "kind": "kubectl",
         "target": target,
+        "resources": [{"kind": item.split("/", 1)[0], "name": item.split("/", 1)[1]} for item in objects],
         "summary": summary,
         "details": summary,
         "started_at": started.isoformat(),
@@ -750,6 +762,7 @@ class AssuranceSuite:
                     summary=f"recover {', '.join(problems)}",
                     started=began,
                     success=True,
+                    objects=objects,
                 )
             )
             clear_deadline = time.monotonic() + bounds.clear_seconds + 60
@@ -921,7 +934,11 @@ class AssuranceSuite:
             request,
             objects=objects,
             summary="re-injected fault",
-            actions=[_action("correct", target=",".join(objects), summary="recover", started=since, success=True)],
+            actions=[
+                _action(
+                    "correct", target=",".join(objects), summary="recover", started=since, success=True, objects=objects
+                )
+            ],
             started_at=since,
             verification=[],
         )
