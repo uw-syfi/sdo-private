@@ -182,11 +182,22 @@ def scripted_result(
     }
 
 
-def _action(action_id: str, *, target: str, summary: str, started: datetime, success: bool) -> dict[str, Any]:
+def _action(
+    action_id: str,
+    *,
+    target: str,
+    summary: str,
+    started: datetime,
+    success: bool,
+    objects: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """A repair receipt; ``objects`` are the ``Kind/name`` objects it mutated (F8 attribution)."""
+
     return {
         "action_id": action_id,
         "kind": "kubectl",
         "target": target,
+        "resources": [{"kind": item.split("/", 1)[0], "name": item.split("/", 1)[1]} for item in objects],
         "summary": summary,
         "details": summary,
         "started_at": started.isoformat(),
@@ -668,6 +679,7 @@ class AssuranceSuite:
                     summary=f"recover {', '.join(problems)}",
                     started=began,
                     success=True,
+                    objects=objects,
                 )
             )
             clear_deadline = time.monotonic() + bounds.clear_seconds + 60
@@ -839,7 +851,11 @@ class AssuranceSuite:
             request,
             objects=objects,
             summary="re-injected fault",
-            actions=[_action("correct", target=",".join(objects), summary="recover", started=since, success=True)],
+            actions=[
+                _action(
+                    "correct", target=",".join(objects), summary="recover", started=since, success=True, objects=objects
+                )
+            ],
             started_at=since,
             verification=[],
         )

@@ -335,7 +335,8 @@ def _owns(owner: _ObjectKey, owned: _ObjectKey) -> bool:
 def _action_keys(action: RepairActionReceipt) -> list[_ObjectKey]:
     if action.resources:
         return [_ObjectKey.of(ref) for ref in action.resources]
-    keys = [_ObjectKey.parse(token) for token in action.target.split() if "/" in token]
+    tokens = action.target.replace(",", " ").split()
+    keys = [_ObjectKey.parse(token) for token in tokens if "/" in token]
     return [key for key in keys if key is not None]
 
 

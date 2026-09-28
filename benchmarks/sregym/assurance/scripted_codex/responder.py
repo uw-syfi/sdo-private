@@ -41,11 +41,21 @@ def _poll_status(turn: Turn, attempts: int) -> tuple[bool, str]:
     return False, output
 
 
-def _action(action_id: str, target: str, summary: str, started: str, success: bool, details: str) -> dict[str, Any]:
+def _action(
+    action_id: str,
+    target: str,
+    summary: str,
+    started: str,
+    success: bool,
+    details: str,
+    resources: list[dict[str, Any]],
+) -> dict[str, Any]:
     return {
         "action_id": action_id,
         "kind": "kubectl",
         "target": target,
+        # SDO credits a root cause only to a repair that mutated its resources (F8).
+        "resources": [resource for resource in resources if resource.get("name")],
         "summary": summary,
         "details": details.strip()[:2000] or summary,
         "started_at": started,
@@ -109,10 +119,19 @@ def _warm(
         return
     if directive.pause_before_repair_seconds:
         time.sleep(directive.pause_before_repair_seconds)
+    repaired = plan.root_cause(_warm_diagnosis_facts(facts, request), request)["resources"]
     action_started = utc_now()
     code, output = turn.run(repair)
     result["repair_actions"].append(
-        _action("playbook-repair", facts.target, f"applied playbook {playbook}", action_started, code == 0, output)
+        _action(
+            "playbook-repair",
+            facts.target,
+            f"applied playbook {playbook}",
+            action_started,
+            code == 0,
+            output,
+            repaired,
+        )
     )
     healthy, status_output = False, output
     for attempt in range(directive.status_attempts):
@@ -158,7 +177,15 @@ def _cold(
         healthy, status_output = _poll_status(turn, 3)
         claimed = mode == "wrong_only_claimed"
         result["repair_actions"].append(
-            _action("wrong-repair", facts.target, summary, action_started, code == 0 and (healthy or claimed), output)
+            _action(
+                "wrong-repair",
+                facts.target,
+                summary,
+                action_started,
+                code == 0 and (healthy or claimed),
+                output,
+                plan.claimed_root_cause(facts, request)["resources"],
+            )
         )
         if claimed:
             result["status"] = "completed"
@@ -169,11 +196,12 @@ def _cold(
             result["verification_evidence"].append(_verification(healthy, status_output))
             result["repair_changes"] = ["the attempted restart did not restore health; the cause is still unknown"]
             return
+    repaired = plan.root_cause(facts, request)["resources"]
     for index, (command, summary) in enumerate(plan.correct_repair(facts)):
         action_started = utc_now()
         code, output = turn.run(command)
         result["repair_actions"].append(
-            _action(f"repair-{index + 1}", facts.target, summary, action_started, code == 0, output)
+            _action(f"repair-{index + 1}", facts.target, summary, action_started, code == 0, output, repaired)
         )
     healthy, status_output = _poll_status(turn, directive.status_attempts)
     result["verification_evidence"].append(_verification(healthy, status_output))

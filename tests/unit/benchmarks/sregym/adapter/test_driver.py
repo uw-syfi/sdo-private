@@ -27,6 +27,7 @@ from benchmarks.sregym.adapter.runtime import (
     RuntimeConfig,
     _controller_update_rollout_succeeded,
     _diagnosis_verification,
+    _recovery_attribution,
     _load_incident_ledger,
     _memory_reuse_summary,
     _phase_timings,
@@ -802,6 +803,10 @@ def test_strict_production_receipt_requires_job_route_reflection_clear_ack_and_c
     with pytest.raises(ControllerInstallError, match="detector review"):
         validate_production_receipt({**receipt, "detector_review_required_at": "2026-07-09T18:05:30Z"})
     validate_production_receipt({**receipt, "detector_review_required_at": None})
+    with pytest.raises(ControllerInstallError, match="recovery_attribution"):
+        validate_production_receipt({**receipt, "recovery_attribution": "external"})
+    validate_production_receipt({**receipt, "recovery_attribution": "responder"})
+    validate_production_receipt({**receipt, "recovery_attribution": None})
     with pytest.raises(ControllerInstallError, match="validator_evidence_commit=reflection_commit"):
         validate_production_receipt({**receipt, "validator_evidence_commit": "outcome"})
 
@@ -1548,3 +1553,38 @@ def test_receipt_diagnosis_verification_comes_from_the_broker_closure() -> None:
         "flipped": True,
     }
     assert _diagnosis_verification({}) == []
+
+
+def test_receipt_diagnosis_uses_every_controller_fact_and_withholds_credit_from_an_external_fix() -> None:
+    """F8: the receipt must not credit SDO with a recovery its own repair does not back."""
+
+    fixtures = Path(__file__).resolve().parents[4] / "fixtures" / "sdo" / "contracts"
+    request = json.loads((fixtures / "incident_request_state_changes.json").read_text(encoding="utf-8"))
+    result = json.loads((fixtures / "incident_result.json").read_text(encoding="utf-8"))
+    request["incident_id"] = result["incident_id"]
+    result["repair_actions"][0]["resources"] = [{"kind": "Deployment", "name": "frontend"}]
+    result["repair_actions"][0]["target"] = "Deployment/frontend"
+    result["confirmed_root_causes"][0]["resources"] = [{"kind": "Deployment", "name": "frontend"}]
+    closure = {
+        "request": request,
+        "result": result,
+        "final_detector_states": result["final_detector_states"],
+        # Someone else reverted every baseline change before verification.
+        "final_state_changes": {**request["state_changes"], "changes": []},
+        "health_cleared_at": "2026-07-09T18:12:00Z",
+        "detected_at": "2026-07-09T18:00:31Z",
+        "dispatched_at": "2026-07-09T18:01:00Z",
+        "responder_completed_at": "2026-07-09T18:13:05Z",
+        "verified_at": "2026-07-09T18:13:10Z",
+    }
+
+    verification = _diagnosis_verification(closure)
+
+    assert [item["verdict"] for item in verification] == ["unattributed"]
+    assert "NetworkPolicy/deny-all" in verification[0]["repair"]["externally_reverted"]
+    assert _recovery_attribution(verification) == "external"
+    assert _recovery_attribution([{**verification[0], "repair": {**verification[0]["repair"], "attributed": True}}]) == (
+        "responder"
+    )
+    assert _recovery_attribution([]) is None
+
