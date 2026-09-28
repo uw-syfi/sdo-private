@@ -752,6 +752,31 @@ def test_failed_or_unverified_outcome_never_reflects_as_success(tmp_path: Path) 
     assert backend.calls == []
 
 
+def test_health_that_cleared_only_after_detector_review_is_not_a_responder_success(tmp_path: Path) -> None:
+    """A responder that claimed a wrong fix must not be credited when health recovers after its window."""
+
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    backend = RecordingSessionBackend()
+    service = _service(target, worktrees, AcceptRepairValidator(), reflector=SessionReflector(backend))
+    workspace = service.prepare_incident("inc-20260709-0001")
+    payload = _closure(workspace.path, workspace.base_commit).model_dump(mode="json")
+    payload["detector_review_required_at"] = "2026-07-09T18:05:30Z"
+    payload["detector_review_reason"] = "health detectors did not clear within 2m0s after responder completion"
+    closure = BrokerClosure.model_validate(payload)
+
+    receipt = service.process_closure(closure)
+
+    outcome = MemoryRepository(target).outcomes()[-1]
+    assert outcome.classification == OutcomeClassification.PARTIAL
+    assert outcome.timestamps.verified_at is None
+    assert receipt.reflection_commit is None
+    assert backend.calls == []
+
+
 def test_reflection_retries_after_backend_failure_before_any_edit(tmp_path: Path) -> None:
     target = tmp_path / "target"
     worktrees = tmp_path / "worktrees"

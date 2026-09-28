@@ -117,6 +117,20 @@ class BrokerClosure(BaseModel):
     verified_at: datetime
     # Responder helper objects the controller deleted, as Kind/namespace/name.
     cleaned_helpers: list[str] = Field(default_factory=list)
+    # Set when health did not clear within the controller's verification
+    # window after the responder completed; later recovery is not credited to it.
+    detector_review_required_at: datetime | None = None
+    detector_review_reason: str | None = None
+
+    @property
+    def health_verified(self) -> bool:
+        """Every final health detector is clear, within the responder's verification window."""
+
+        return (
+            self.detector_review_required_at is None
+            and bool(self.final_detector_states)
+            and all(evaluation.status.value == "clear" for evaluation in self.final_detector_states)
+        )
 
 
 class ClosureReceipt(BaseModel):
@@ -407,9 +421,7 @@ class BrokerService:
 
     def _outcome(self, closure: BrokerClosure, ledger: BrokerLedger) -> OutcomeRecord:
         result = closure.result
-        health_verified = bool(closure.final_detector_states) and all(
-            evaluation.status.value == "clear" for evaluation in closure.final_detector_states
-        )
+        health_verified = closure.health_verified
         surfaced = [playbook.path for playbook in closure.request.surfaced_playbooks]
         applied = [] if result is None else [playbook.path for playbook in result.applied_playbooks]
         return derive_outcome(
@@ -438,9 +450,7 @@ class BrokerService:
     @staticmethod
     def _validate_recorded_actions(closure: BrokerClosure) -> None:
         result = closure.result
-        health_verified = bool(closure.final_detector_states) and all(
-            evaluation.status.value == "clear" for evaluation in closure.final_detector_states
-        )
+        health_verified = closure.health_verified
         if not health_verified or result is None or result.status.value != "completed":
             return
         if not any(action.success for action in result.repair_actions):
@@ -511,9 +521,7 @@ class BrokerService:
             ledger.stale_memory_detected = architecture_fingerprint != source_fingerprint
             self._save(ledger)
         session_id = None if closure.result is None else closure.result.responder_session_id
-        health_verified = bool(closure.final_detector_states) and all(
-            evaluation.status.value == "clear" for evaluation in closure.final_detector_states
-        )
+        health_verified = closure.health_verified
         if not self.reflector.should_reflect(outcome, health_verified=health_verified, session_id=session_id):
             ledger.reflection_completed = True
             self._save(ledger)

@@ -514,6 +514,65 @@ func TestControllerRequiresDetectorReviewWhenPostResponseHealthNeverClears(t *te
 	}
 }
 
+// Health that clears only after the verification window elapsed was not
+// restored by the responder within its window (a human or an unrelated
+// change may have fixed it), so the closure must say so.
+func TestClosureAfterDetectorReviewRecordsTheLateVerification(t *testing.T) {
+	interval := time.Second
+	health := controllerDetector(
+		"health", interval,
+		stateFinding("health"), stateFinding("health"), stateFinding("health"), stateFinding("health"),
+		stateFinding("health"), sdk.Finding{}, sdk.Finding{},
+	)
+	health.spec.Class = sdk.DetectorClassHealth
+	health.spec.Owner = sdk.DetectorOwnerHealthJudge
+	health.spec.Persistence = sdk.PersistencePolicy{Firing: 2, Clearing: 2}
+	health.spec.Batching = sdk.BatchingPolicy{Severity: sdk.SeverityCritical}
+	health.spec.OriginatingCommit = "health-objective"
+	for index := range health.samples {
+		if len(health.samples[index]) > 0 {
+			health.samples[index][0].Severity = sdk.SeverityCritical
+		}
+	}
+	dispatcher := &recordingDispatcher{requests: make(chan IncidentRequest, 1)}
+	config := testControllerConfig()
+	config.VerificationTimeout = 2 * time.Second
+	controller, err := NewController(
+		config, []sdk.Detector{health}, staticProvider{snapshot: sdktest.Snapshot{}}, dispatcher, time.Unix(0, 0),
+	)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	closed := make(chan IncidentClosure, 1)
+	controller.OnIncidentClosed = func(closure IncidentClosure) { closed <- closure }
+
+	for sample := 0; sample < 2; sample++ {
+		if err := controller.Step(context.Background(), time.Unix(int64(sample), 0), nil); err != nil {
+			t.Fatalf("firing step: %v", err)
+		}
+	}
+	executePendingEffect(t, controller)
+	awaitRequest(t, dispatcher.requests)
+	awaitDispatchCompletionQueued(t, controller)
+	for sample := 2; sample < 7; sample++ {
+		if err := controller.Step(context.Background(), time.Unix(int64(sample), 0), nil); err != nil {
+			t.Fatalf("step %d: %v", sample, err)
+		}
+	}
+	var closure IncidentClosure
+	select {
+	case closure = <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("late health recovery did not close the incident")
+	}
+	if closure.DetectorReviewRequiredAt.IsZero() || closure.DetectorReviewReason == "" {
+		t.Fatalf("closure hid that verification came after detector review: %#v", closure)
+	}
+	if !closure.VerifiedAt.After(closure.DetectorReviewRequiredAt) {
+		t.Fatalf("closure verified before its review deadline: %#v", closure)
+	}
+}
+
 func controllerDetector(id string, interval time.Duration, samples ...sdk.Finding) *sequenceDetector {
 	sequences := make([][]sdk.Finding, 0, len(samples))
 	for _, finding := range samples {

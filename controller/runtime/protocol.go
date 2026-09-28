@@ -161,6 +161,11 @@ type IncidentClosure struct {
 	DispatchedAt           time.Time            `json:"dispatched_at"`
 	ResponderCompletedAt   time.Time            `json:"responder_completed_at"`
 	VerifiedAt             time.Time            `json:"verified_at"`
+	// DetectorReviewRequiredAt is set when health did not clear within the
+	// verification window after the responder completed. Health that
+	// clears later was not verifiably restored by the responder.
+	DetectorReviewRequiredAt time.Time `json:"detector_review_required_at,omitempty"`
+	DetectorReviewReason     string    `json:"detector_review_reason,omitempty"`
 	// CleanedHelpers are the responder helper objects the controller
 	// deleted after the responder completed, as Kind/namespace/name.
 	CleanedHelpers []string `json:"cleaned_helpers,omitempty"`
