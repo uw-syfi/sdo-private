@@ -120,15 +120,18 @@ type TimingMetrics struct {
 }
 
 type RepairActionReceipt struct {
-	ActionID    string    `json:"action_id"`
-	Kind        string    `json:"kind"`
-	Target      string    `json:"target"`
-	Summary     string    `json:"summary"`
-	Details     string    `json:"details"`
-	StartedAt   time.Time `json:"started_at"`
-	CompletedAt time.Time `json:"completed_at"`
-	Success     bool      `json:"success"`
-	Reversible  bool      `json:"reversible"`
+	ActionID string `json:"action_id"`
+	Kind     string `json:"kind"`
+	Target   string `json:"target"`
+	// Resources are the objects the action mutated; diagnosis verification
+	// credits a root cause only to a repair that touched its resources (F8).
+	Resources   []sdk.ObjectRef `json:"resources,omitempty"`
+	Summary     string          `json:"summary"`
+	Details     string          `json:"details"`
+	StartedAt   time.Time       `json:"started_at"`
+	CompletedAt time.Time       `json:"completed_at"`
+	Success     bool            `json:"success"`
+	Reversible  bool            `json:"reversible"`
 }
 
 type IncidentResult struct {
@@ -168,6 +171,10 @@ type IncidentClosure struct {
 	DispatchedAt         time.Time     `json:"dispatched_at"`
 	ResponderCompletedAt time.Time     `json:"responder_completed_at"`
 	VerifiedAt           time.Time     `json:"verified_at"`
+	// HealthClearedAt is when the closure gate's detectors began their final
+	// streak of clear evaluations. Only a repair action that started by then
+	// can back a root cause (F8). nil when no streak is on record.
+	HealthClearedAt *time.Time `json:"health_cleared_at,omitempty"`
 	// DetectorReviewRequiredAt is set when health did not clear within the
 	// verification window after the responder completed. Health that
 	// clears later was not verifiably restored by the responder.

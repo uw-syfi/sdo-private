@@ -19,7 +19,17 @@ type outcomeMemoryRecord struct {
 	ConfirmedRootCauses []ConfirmedRootCause  `json:"confirmed_root_causes"`
 	AppliedPlaybooks    []string              `json:"applied_playbooks"`
 	RepairActions       []RepairActionReceipt `json:"repair_actions"`
+	// DiagnosisVerification is SDO's deterministic verdict per root cause,
+	// aligned by index with ConfirmedRootCauses. Absent in older records.
+	DiagnosisVerification []struct {
+		Verdict string `json:"verdict"`
+	} `json:"diagnosis_verification"`
 }
+
+// discreditedVerdicts mark a root cause SDO found false (contradicted) or not
+// backed by the responder's own repair (unattributed, F8). Such a cause is
+// never surfaced to a later responder as a known root cause.
+var discreditedVerdicts = map[string]struct{}{"contradicted": {}, "unattributed": {}}
 
 // relevantOutcomeEvidence returns up to maxRelevantOutcomes prior successes
 // related to findings, newest first. origins maps a learned incident
@@ -51,7 +61,13 @@ func relevantOutcomeEvidence(
 			continue
 		}
 		rootCauses := make([]string, 0, len(record.ConfirmedRootCauses))
-		for _, cause := range record.ConfirmedRootCauses {
+		aligned := len(record.DiagnosisVerification) == len(record.ConfirmedRootCauses)
+		for index, cause := range record.ConfirmedRootCauses {
+			if aligned {
+				if _, discredited := discreditedVerdicts[record.DiagnosisVerification[index].Verdict]; discredited {
+					continue
+				}
+			}
 			rootCauses = append(rootCauses, cause.Summary)
 		}
 		actions := make([]string, 0, len(record.RepairActions))
