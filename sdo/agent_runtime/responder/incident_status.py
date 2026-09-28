@@ -42,7 +42,7 @@ EXIT_HEALTHY = 0
 EXIT_UNHEALTHY = 1
 EXIT_UNAVAILABLE = 3
 
-_MAX_FAILURES_SHOWN = 3
+_MAX_FAILURES_SHOWN = 2
 
 
 class IncidentStatusState(str, Enum):
@@ -148,7 +148,7 @@ class IncidentStatus:
         if self.state == IncidentStatusState.UNHEALTHY:
             lines.append(
                 "The controller will not close this incident while these scenarios fail. Keep repairing, then run "
-                "`sdo incident status` again before submitting mitigation or returning the result."
+                "`python3 -m sdo incident status` again before submitting mitigation or returning the result."
             )
         return "\n".join(lines)
 
