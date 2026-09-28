@@ -247,3 +247,47 @@ does not fail the run.
 
   In a live eval each stray costs a responder session. The stray rate is
   reported with the flake results below.
+
+## N13. Stray incidents: root cause (coordinator-directed)
+
+- **Which detector.** Always `traffic-health` alone, on all three scenarios
+  (or one) through `Service/frontend`: 3 timeouts in the 5-sample window for
+  about 3 s (`context deadline exceeded`, sometimes `dial tcp: lookup
+  frontend...: i/o timeout`). No other health detector fires, and the diff
+  names only the last recovery's `restartedAt` rollout, or nothing.
+- **Real stall, not a detector or window bug.** The failures are real
+  timeouts of real prober requests, including `user-login-check`, which does
+  not touch any service a fault or recovery changed, and including DNS
+  lookups. So the kind worker's data plane stalls for about 3 s. The
+  traffic window then clears normally.
+- **Trigger.** In the fault runs, strays opened 4–15 s after a responder
+  exited, i.e. right after the controller's helper cleanup deleted the
+  suite's labelled pods and Job, and after SREGym recoveries recreated
+  pods. The churn soak (`churn1`, assure-s1, no fault, 6 create/delete
+  cycles of pods and Jobs in both namespaces) reproduced one: the stall began
+  within a second of a Job pod being created (12:12:28, calico programming
+  the new endpoint and its dispatch chains), and the controller dispatched an
+  incident 7 s later. The other 5 cycles and the 45-min quiet soak produced
+  none. So it is stochastic, about 1 in 6–10 pod-network changes on this
+  3-CPU kind worker. CFS throttling of the worker was negligible, so CPU
+  starvation is not the cause.
+- **Would production dispatch?** Yes. The finding reaches the firing
+  threshold (2 evaluations) in about 0.5 s because traffic windows are
+  re-evaluated on each poll, and the controller dispatches a responder.
+  In a live eval each stray costs a responder session.
+- **Not changed here.** The detector reports the SLO violation correctly by
+  the health judge's own rule. The lever is the judge's persistence policy:
+  firing counts evaluations, not time, so a 3 s stall is enough. A
+  minimum-duration (e.g. firing only if unhealthy across ≥ 10 s) rule for
+  traffic findings would suppress these without delaying real faults much
+  (the suite's traffic detection is 3–5 s). That is the judge's policy to
+  change; it is recommended, not applied.
+- **Harness bug found on the way.** The suite answered strays with a
+  `completed` result with no repair action. The broker rejects that on every
+  retry, the closure fails permanently, and a permanent closure failure
+  blocks all later incidents, so every later case timed out
+  (`flake-singles2`, `churn1` post-soak). Strays are now answered
+  `cancelled` (`e3d2e95`). **SDO sharp edge:** a real responder that finds a
+  self-healed transient and returns `completed` with no action would halt
+  the controller the same way; the responder prompt or the broker should
+  steer that case to `cancelled`.
