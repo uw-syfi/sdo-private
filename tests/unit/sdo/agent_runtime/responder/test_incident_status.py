@@ -199,7 +199,13 @@ def test_status_model_rejects_a_healthy_state_without_a_burst() -> None:
         IncidentStatusReport(state=IncidentStatusState.HEALTHY, burst=None, detail="")
 
 
-def _view(request_path: Path, *, findings: list[dict[str, Any]], changes: list[dict[str, Any]] | None = None) -> str:
+def _view(
+    request_path: Path,
+    *,
+    findings: list[dict[str, Any]],
+    changes: list[dict[str, Any]] | None = None,
+    clearing: list[dict[str, Any]] | None = None,
+) -> str:
     request = IncidentRequest.model_validate_json(request_path.read_text(encoding="utf-8"))
     view: dict[str, Any] = {
         "incident_id": request.incident_id,
@@ -207,6 +213,8 @@ def _view(request_path: Path, *, findings: list[dict[str, Any]], changes: list[d
         "blocking_detectors": sorted({finding["detector_id"] for finding in findings}),
         "blocking_findings": findings,
     }
+    if clearing is not None:
+        view["clearing_findings"] = clearing
     if changes is not None:
         view["state_changes"] = {
             "baseline_at": "2026-09-28T09:58:00Z",
@@ -268,6 +276,51 @@ def test_the_controllers_health_detectors_block_what_traffic_cannot_see(
     assert "mongodb-geo" in text
     assert "will not close" in text
     assert status.to_json()["controller"]["blocking_detectors"] == ["health-objective"]
+
+
+def test_findings_the_gate_confirmed_clear_do_not_block_submission(
+    prober: tuple[_FakeProber, str], tmp_path: Path
+) -> None:
+    """After a correct fix the controller confirms the finding clear in seconds; closure's count does not gate."""
+
+    _, url = prober
+    request_path = _traffic_request(tmp_path)
+    payload = _view(
+        request_path,
+        findings=[],
+        clearing=[_finding("health-objective", "configmap-missing", "ConfigMap", "mongo-geo-script")],
+    )
+
+    status = incident_status(
+        prober_url=url, request_path=request_path, controller_state="ns/cm", controller_reader=_reader(payload)
+    )
+
+    assert status.state == IncidentStatusState.HEALTHY
+    assert status.exit_code == EXIT_HEALTHY
+    assert status.blocking_findings == ()
+    assert [finding.primary_resource.name for finding in status.clearing_findings] == ["mongo-geo-script"]
+    text = status.render()
+    assert "mongo-geo-script" in text
+    assert "confirmed clear" in text
+    assert status.to_json()["controller"]["clearing_detectors"] == ["health-objective"]
+
+
+def test_a_partial_fix_still_blocks_on_the_finding_that_fires(prober: tuple[_FakeProber, str], tmp_path: Path) -> None:
+    _, url = prober
+    request_path = _traffic_request(tmp_path)
+    payload = _view(
+        request_path,
+        findings=[_finding("health-objective", "configmap-missing", "ConfigMap", "mongo-rate-script")],
+        clearing=[_finding("health-objective", "configmap-missing", "ConfigMap", "mongo-geo-script")],
+    )
+
+    status = incident_status(
+        prober_url=url, request_path=request_path, controller_state="ns/cm", controller_reader=_reader(payload)
+    )
+
+    assert status.state == IncidentStatusState.UNHEALTHY
+    assert [finding.primary_resource.name for finding in status.blocking_findings] == ["mongo-rate-script"]
+    assert [finding.primary_resource.name for finding in status.clearing_findings] == ["mongo-geo-script"]
 
 
 def test_traffic_findings_in_the_view_defer_to_the_fresher_burst(

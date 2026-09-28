@@ -27,11 +27,17 @@ func controllerStateLocation(controlNamespace string) string {
 type IncidentView struct {
 	IncidentID string    `json:"incident_id"`
 	ObservedAt time.Time `json:"observed_at"`
-	// BlockingDetectors are the detectors whose active findings keep the
-	// incident open: the health detectors, or without any, the detectors that
-	// raised the incident.
+	// BlockingFindings are the active findings closure waits on (every
+	// health detector's, or without any, the incident's own) that the submit
+	// gate has not confirmed clear (GateConfirmationPolicy); BlockingDetectors
+	// names their detectors. A responder must not submit while any remains.
 	BlockingDetectors []string      `json:"blocking_detectors"`
 	BlockingFindings  []sdk.Finding `json:"blocking_findings"`
+	// ClearingFindings are the findings closure still counts as active but
+	// the gate has confirmed clear on consecutive fresh evaluations. They
+	// hold closure only until the health judge's own clear persistence is
+	// met, and do not block submission.
+	ClearingFindings []sdk.Finding `json:"clearing_findings"`
 	// StateChanges is the current configuration diff against the healthy
 	// baseline, including changes made after the request was taken.
 	StateChanges *StateChanges `json:"state_changes,omitempty"`
@@ -51,9 +57,18 @@ func (c *Controller) refreshIncidentView(now time.Time, evaluated bool) {
 		c.mu.Unlock()
 		return
 	}
-	findings := c.blockingFindingsLocked()
+	active := c.blockingFindingsLocked()
 	c.mu.Unlock()
 
+	findings := make([]sdk.Finding, 0, len(active))
+	clearing := make([]sdk.Finding, 0)
+	for _, finding := range active {
+		if c.gateConfirmedKey(FindingStateKey(finding.DetectorID, FindingFingerprint(finding)), now) {
+			clearing = append(clearing, finding)
+			continue
+		}
+		findings = append(findings, finding)
+	}
 	blocking := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, finding := range findings {
@@ -69,7 +84,8 @@ func (c *Controller) refreshIncidentView(now time.Time, evaluated bool) {
 	}
 	view := &IncidentView{
 		IncidentID: incidentID, ObservedAt: now.UTC(),
-		BlockingDetectors: blocking, BlockingFindings: findings, StateChanges: changes,
+		BlockingDetectors: blocking, BlockingFindings: findings, ClearingFindings: clearing,
+		StateChanges: changes,
 	}
 	c.mu.Lock()
 	c.incidentView = view
@@ -114,5 +130,6 @@ func cloneIncidentView(view *IncidentView) *IncidentView {
 	copy.BlockingDetectors = append(make([]string, 0, len(view.BlockingDetectors)), view.BlockingDetectors...)
 	copy.BlockingFindings = append(make([]sdk.Finding, 0, len(view.BlockingFindings)), view.BlockingFindings...)
 	copy.StateChanges = cloneStateChanges(view.StateChanges)
+	copy.ClearingFindings = append(make([]sdk.Finding, 0, len(view.ClearingFindings)), view.ClearingFindings...)
 	return &copy
 }

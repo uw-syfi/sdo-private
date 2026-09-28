@@ -45,6 +45,9 @@ type ControllerConfig struct {
 	// DispatchRetry bounds how quickly a transient dispatch failure
 	// re-executes the dispatch effect.
 	DispatchRetry DispatchRetryPolicy
+	// GateConfirmation is the responder gate's clear hysteresis, published in
+	// the incident view. Zero makes the gate follow closure's clear count.
+	GateConfirmation GateConfirmationPolicy
 }
 
 type dispatchCompletion struct {
@@ -54,14 +57,20 @@ type dispatchCompletion struct {
 }
 
 type Controller struct {
-	config        ControllerConfig
-	scheduler     *Scheduler
-	tracker       *FindingStateTracker
-	batcher       *Batcher
-	provider      SnapshotProvider
-	dispatcher    Dispatcher
-	history       []DetectorEvaluation
-	results       chan dispatchCompletion
+	config     ControllerConfig
+	scheduler  *Scheduler
+	detectors  map[string]sdk.Detector
+	tracker    *FindingStateTracker
+	batcher    *Batcher
+	provider   SnapshotProvider
+	dispatcher Dispatcher
+	history    []DetectorEvaluation
+	results    chan dispatchCompletion
+	// gateClears and gateProbes hold the submit gate's confirmation of active
+	// findings (GateConfirmationPolicy); they are never persisted, so a
+	// restarted controller confirms again from fresh evaluations.
+	gateClears    map[string]*gateClear
+	gateProbes    map[string]time.Time
 	stateStore    StateStore
 	stateRevision string
 
@@ -146,6 +155,9 @@ func NewController(
 	if config.ConfirmationInterval < 0 {
 		return nil, fmt.Errorf("confirmation interval must not be negative")
 	}
+	if err := config.GateConfirmation.validate(); err != nil {
+		return nil, err
+	}
 	if config.VerificationTimeout == 0 {
 		config.VerificationTimeout = config.ResponseTimeout
 	}
@@ -170,10 +182,12 @@ func NewController(
 	}
 	healthDetectorIDs := make([]string, 0)
 	detectorSpecs := make(map[string]sdk.DetectorSpec, len(detectors))
+	byID := make(map[string]sdk.Detector, len(detectors))
 	tracker := NewFindingStateTracker(config.FiringThreshold, config.ClearThreshold)
 	for _, detector := range detectors {
 		spec := detector.Spec()
 		detectorSpecs[spec.ID] = spec
+		byID[spec.ID] = detector
 		if spec.Persistence.Firing > 0 && spec.Persistence.Clearing > 0 {
 			tracker.SetPolicy(spec.ID, spec.Persistence.Firing, spec.Persistence.Clearing, spec.Persistence.MinDuration)
 		}
@@ -183,8 +197,9 @@ func NewController(
 	}
 	sort.Strings(healthDetectorIDs)
 	return &Controller{
-		config: config, scheduler: NewScheduler(detectors, start),
-		tracker: tracker,
+		config: config, scheduler: NewScheduler(detectors, start), detectors: byID,
+		tracker:    tracker,
+		gateClears: make(map[string]*gateClear), gateProbes: make(map[string]time.Time),
 		batcher: NewDebouncedBatcher(config.BatchDebounce), provider: provider, dispatcher: dispatcher,
 		results: make(chan dispatchCompletion, 1), healthDetectorIDs: healthDetectorIDs,
 		detectorSpecs:    detectorSpecs,
@@ -207,7 +222,9 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 	c.processDispatchCompletions(now)
 	c.processBrokerCompletions()
 	detectors := c.scheduler.SelectEvents(now, events)
-	if len(detectors) == 0 {
+	probes := c.dueGateProbes(now, detectors)
+	if len(detectors) == 0 && len(probes) == 0 {
+		c.forgetGate()
 		c.maybeCloseIncident(now)
 		err := c.dispatchReady(ctx, now)
 		c.refreshIncidentView(now, false)
@@ -224,6 +241,7 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 		spec := detector.Spec()
 		findings, detectErr := detector.Detect(ctx, snapshot)
 		if detectErr != nil {
+			c.resetGate(spec.ID)
 			c.recordDetectorError(spec.ID, now, detectErr)
 			errored = true
 			continue
@@ -239,6 +257,7 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 			}
 			finding.Fingerprint = FindingFingerprint(finding)
 			if validationErr := core.ValidateFinding(spec, finding); validationErr != nil {
+				c.resetGate(spec.ID)
 				c.recordDetectorError(spec.ID, now, validationErr)
 				valid = false
 				errored = true
@@ -250,6 +269,7 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 			continue
 		}
 		changes := c.tracker.Observe(now, spec.ID, validFindings)
+		c.observeGate(spec.ID, now, validFindings)
 		sampleFindings = append(sampleFindings, validFindings...)
 		c.recordEvaluation(spec.ID, now, validFindings)
 		c.batcher.RemoveKeys(changes.Cleared)
@@ -274,14 +294,18 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 			}
 		}
 	}
-	sort.Slice(sampleFindings, func(left int, right int) bool {
-		return sampleFindings[left].Fingerprint < sampleFindings[right].Fingerprint
-	})
-	if c.OnEvaluation != nil {
-		c.OnEvaluation(sampleFindings)
-	}
-	if c.Baseline != nil {
-		c.Baseline.Observe(now, !errored && c.quiet())
+	c.probeGate(ctx, now, snapshot, probes)
+	c.forgetGate()
+	if len(detectors) > 0 {
+		sort.Slice(sampleFindings, func(left int, right int) bool {
+			return sampleFindings[left].Fingerprint < sampleFindings[right].Fingerprint
+		})
+		if c.OnEvaluation != nil {
+			c.OnEvaluation(sampleFindings)
+		}
+		if c.Baseline != nil {
+			c.Baseline.Observe(now, !errored && c.quiet())
+		}
 	}
 
 	c.maybeCloseIncident(now)
@@ -447,7 +471,10 @@ func (c *Controller) NextWake() time.Time {
 	verificationPending := c.incidentOpen && c.responderDone && !c.detectorReviewRequired
 	c.mu.Unlock()
 	if verificationPending && (next.IsZero() || verificationDeadline.Before(next)) {
-		return verificationDeadline
+		next = verificationDeadline
+	}
+	if probe := c.nextGateProbe(); !probe.IsZero() && (next.IsZero() || probe.Before(next)) {
+		next = probe
 	}
 	return c.closureRetryWake(c.dispatchRetryWake(next))
 }
