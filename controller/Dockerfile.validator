@@ -27,8 +27,12 @@ COPY --from=go-runtime /go/pkg/mod /go/pkg/mod
 COPY --from=go-runtime /go/build-cache /opt/sdo/go-build-cache
 COPY --from=go-runtime /opt/sdo/controller /opt/sdo/controller
 RUN chmod -R a+rX /opt/sdo/controller
-RUN python -m pip install --no-cache-dir \
+RUN python -m pip install --no-cache-dir --no-deps \
+      annotated-types==0.7.0 \
       pydantic==2.12.5 \
-      pyyaml==6.0.3
+      pydantic-core==2.41.5 \
+      pyyaml==6.0.3 \
+      typing-extensions==4.15.0 \
+      typing-inspection==0.4.2
 WORKDIR /opt/sdo
 CMD ["python", "-m", "controller.builder.check_cli", "--help"]

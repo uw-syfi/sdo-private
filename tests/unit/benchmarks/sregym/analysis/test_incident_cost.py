@@ -232,7 +232,7 @@ def test_lifecycle_override_replaces_discovered_lifecycle(pipeline: Path) -> Non
 def test_cli_prints_tables_and_writes_json(pipeline: Path, codex_dirs: list[Path], tmp_path: Path, capsys) -> None:
     output = tmp_path / "report.json"
 
-    assert main([str(pipeline), "--codex", *map(str, codex_dirs), "--json", str(output)]) == 0
+    assert main([str(pipeline), "--codex", *map(str, codex_dirs), "--json", str(output), "--include-invalid"]) == 0
 
     printed = capsys.readouterr().out
     assert "SDO stages" in printed
@@ -442,7 +442,7 @@ def test_codex_runs_report_when_the_mitigation_was_applied(tmp_path: Path) -> No
 
 def test_json_report_carries_judge_excluded_stage_time(pipeline: Path, tmp_path: Path) -> None:
     out = tmp_path / "report.json"
-    main([str(pipeline), "--json", str(out)])
+    main([str(pipeline), "--json", str(out), "--include-invalid"])
 
     for stage in json.loads(out.read_text(encoding="utf-8"))["stages"]:
         assert "judge_excluded_seconds" in stage["verdict"]
@@ -591,7 +591,7 @@ def test_cumulative_time_and_tables_use_the_judge_free_ttm(tmp_path: Path, capsy
     assert report.codex[PROBLEM_A].mean_ttd_seconds == pytest.approx(20.0)
     assert report.codex[PROBLEM_A].mean_ttm_seconds == pytest.approx(70.0)
 
-    main([str(root), "--codex", str(codex)])
+    main([str(root), "--codex", str(codex), "--include-invalid"])
     printed = capsys.readouterr().out
     for column in ("ttd_s", "ttm_s", "raw_incl_judge_s", "last_mut_s", "mean_ttd_s", "mean_ttm_s", "sdo_ttm_s"):
         assert column in printed
@@ -781,7 +781,7 @@ class TestPricing:
         codex = _codex_experiment(tmp_path / "codex", [(PROBLEM_A, True, 2_000)])
         _config(codex, "codex", "gpt-6-luna")
         out = tmp_path / "report.json"
-        assert main([str(root), "--codex", str(codex), "--json", str(out), *argv]) == 0
+        assert main([str(root), "--codex", str(codex), "--json", str(out), "--include-invalid", *argv]) == 0
         return out.name, json.loads(out.read_text(encoding="utf-8"))
 
     def test_weights_and_usd_come_from_agentshims_table(self, tmp_path: Path, capsys) -> None:

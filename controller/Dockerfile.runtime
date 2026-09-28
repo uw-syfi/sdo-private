@@ -29,11 +29,17 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 RUN npm install --global "@openai/codex@${CODEX_VERSION}" "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && npm cache clean --force
-RUN python3 -m pip install --break-system-packages --no-cache-dir \
+# Every package, transitive ones included, is pinned to uv.lock; --no-deps
+# keeps pip from resolving anything else.
+RUN python3 -m pip install --break-system-packages --no-cache-dir --no-deps \
       agentshim==0.7.0 \
+      annotated-types==0.7.0 \
       loguru==0.7.3 \
       pydantic==2.12.5 \
-      pyyaml==6.0.3
+      pydantic-core==2.41.5 \
+      pyyaml==6.0.3 \
+      typing-extensions==4.15.0 \
+      typing-inspection==0.4.2
 ENV PATH="/usr/local/go/bin:${PATH}" \
     PYTHONPATH=/opt/sdo \
     HOME=/tmp \
@@ -63,8 +69,15 @@ CMD ["python3", "-m", "sdo.agent_runtime.responder.job"]
 
 FROM responder AS sregym-responder
 # Benchmark transport clients; production images stay free of them.
-RUN python3 -m pip install --break-system-packages --no-cache-dir \
+RUN python3 -m pip install --break-system-packages --no-cache-dir --no-deps \
+      anyio==4.12.1 \
+      certifi==2026.1.4 \
+      charset-normalizer==3.4.4 \
+      h11==0.16.0 \
+      httpcore==1.0.9 \
       httpx==0.28.1 \
-      requests==2.32.5
+      idna==3.11 \
+      requests==2.32.5 \
+      urllib3==2.6.3
 COPY benchmarks /opt/sdo/benchmarks
 RUN chmod -R a+rX /opt/sdo/benchmarks

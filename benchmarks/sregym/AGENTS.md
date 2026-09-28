@@ -42,6 +42,13 @@ Report timing without judge time, the same way for every arm (`benchmarks.sregym
 - **Supplementary only:** the raw `mitigation_submitted_at - fault_injected_at` (`raw_incl_judge_s`, which includes diagnosis grading), and the CSV's `TTM` column (which also includes the mitigation oracle). Do not present either as a headline number.
 - None of these times includes SDO reflection, lifecycle or controller installation.
 
+## Run assurance
+
+- Every launch runs the preflight in `runner/preflight.py`. It aborts on low disk, floating or mismatched Codex CLI and agentshim pins, broken images, lane-isolation problems, any role or judge off `codex:gpt-6-luna` / `codex-gpt-6-luna` at `xhigh`, arm-parity differences, or an exhausted Codex quota. Check the arms of a comparison before launching them: `uv run python -m benchmarks.sregym.runner.preflight <arm.toml>...`.
+- Every run directory gets a `run_manifest.json` (`runner/manifest.py`).
+- Report only runs that `uv run python -m benchmarks.sregym.analysis.run_validity` classifies as `valid` or `agent_failure`. `incident_cost` excludes `invalid_infra` runs itself and prints why. Do not rename run directories by hand to mark them invalid.
+- Decisions: `experiments/assurance/HARNESS_DECISIONS.md`.
+
 ## Token metrics
 
 Report tokens the same way for every arm (SDO responder, SDO reflection, one-time lifecycle, and the raw Codex or Claude Code baseline); `benchmarks.sregym.analysis.incident_cost` computes all of these:

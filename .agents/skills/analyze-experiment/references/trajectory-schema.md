@@ -112,11 +112,13 @@ Typical paths:
 ```text
 third_party/sregym/logs/<run-or-pipeline>/
 ├── experiment_config.toml or pipeline_config.toml
+├── run_manifest.json                       # launch provenance (runs from 2026-09-28 on)
 ├── pipeline_state.json                     # pipelines
 ├── lifecycle_seed_stage<N>/                # SDO pipeline reuse evidence
 ├── sdo_persistent_controller.json          # persistent-controller pipelines
 └── stage_<N>_<name>/ or run root
     ├── experiment_config.toml
+    ├── run_manifest.json                   # per stage, written when the stage starts
     ├── application_workspace/
     └── problem_runs/<problem-id>/
         ├── results_*.csv
@@ -133,6 +135,30 @@ third_party/sregym/logs/<run-or-pipeline>/
         │       └── controller_logs/<pod>.log      # kubectl logs --timestamps of each sdo-controller-run pod
         └── <harness and agent logs>
 ```
+
+`run_manifest.json` (`benchmarks/sregym/runner/manifest.py`, `schema_version` 1) is written by the runner at launch into the experiment directory, the pipeline directory and each stage directory. Its fields:
+
+- `kind`: `experiment`, `pipeline` or `stage`.
+- `git`: `sha`, `dirty` and `dirty_paths`, plus `submodule` with `sha`, `recorded_sha` and `dirty`.
+- `images`: keyed by `<role>:<ref>`. Each entry has `id`, `repo_digests` and `id_at_preflight`; agent images also carry the probed `codex` and `agentshim` versions and `import_error`.
+- `versions`: `codex_cli` (`pin`, `host`, `stock_arm`) and `agentshim` (`pin`, `host`).
+- `models`: one mapping per arm or stage, from role to `provider`, `model`, `effort` and `source`. The roles are `responder`, `reflection`, `lifecycle_deployer`, `health_judge`, `baseline_agent` and `sregym_judge`.
+- `judge`: `model` and `effort`.
+- `kind_topology`: `clusters`, `worker_nodes` and the observed `nodes`.
+- `config`: `snapshot`, `sha256`, `source` and `source_sha256`.
+- `host`: `load_average`, `cpu_count` and `disk_free_bytes`.
+- `codex_quota` and `lanes`.
+- `preflight`: `ok`, `mode`, `waived`, `checks` and `facts`.
+
+A resumed run keeps its first manifest and appends each resume's manifest under `resumes`. Runs from before 2026-09-28 have no manifest.
+
+Classify runs before analyzing them: `uv run python -m benchmarks.sregym.analysis.run_validity <dir>... [--logs-root third_party/sregym/logs] [--legacy] [--json out.json]`. It labels each problem run:
+
+- `invalid_infra`, with reasons, for a harness or host fault. The causes are: no manifest or a waived preflight; no result row; a failed CLI install; exhausted Codex quota; tokens that do not reconcile between rollouts, usage records and result files; a passed stage without judge-free TTD/TTM, or a TTM before the TTD; an isolation-guard mismatch or no guard; another lane's kind nodes in agent output; an acknowledged submission the harness never graded; or a stopped pipeline that never published a stage's deferred receipt.
+- `agent_failure` for a real failure. The causes are: a failed oracle, `agent_error`, no valid SDO strict receipt, or leftover `sdo.dev/responder-helper=true` objects.
+- `valid` otherwise.
+
+A directory name prefix a person gave (`invalid_`, `sdobug_`, ...) is shown as `manual:` but never decides the class. `--legacy` accepts runs from before 2026-09-28: a missing manifest is noted instead of failing, and a missing guard is accepted when the run did not overlap another run in time. `incident_cost` applies the same classification and excludes `invalid_infra` runs, printing each one with its reasons. Pass `--legacy-runs` for pre-manifest runs, or `--include-invalid` to report every run.
 
 Current SREGym parallel runs instead write each run under `runs/<6-digit sequence>_<problem-id>/worker_<N>/results/`. A problem listed several times in `runner.problems` (kept in order, e.g. A B C D A B C D) and each of the `runner.repeat` independent attempts (passed as `--n-attempts`, expanded consecutively as A A B B; fresh fault injection and agent launch, not retries) gets its own sequence number, so group rows by `problem_id` across sequences rather than assuming one directory per problem.
 
