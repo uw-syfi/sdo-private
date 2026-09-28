@@ -102,7 +102,7 @@ def test_the_concise_prompt_states_each_requirement(requirement: str) -> None:
         # (a) reproduce a user-facing symptom first and record it
         "reproduce a concrete user-facing symptom",
         "end-to-end request",
-        "no ready endpoints",
+        "component that is unreachable",
         "exact command you ran and its output",
         # (b) evidence tying the root cause to the symptom
         "evidence that ties the root cause to that symptom",

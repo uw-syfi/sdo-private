@@ -50,8 +50,8 @@ VERIFICATION PROTOCOL (REQUIRED):
 Follow these steps in order. They apply to both tasks.
 
 1. REPRODUCE BEFORE DIAGNOSING. Before you submit a diagnosis, reproduce a concrete user-facing symptom: \
-for example, an end-to-end request to the application that fails or returns an error, or a Service that \
-has no ready endpoints. Record the exact command you ran and its output.
+for example, an end-to-end request to the application that fails or returns an error, or a component that \
+is unreachable. Record the exact command you ran and its output.
 2. TIE THE ROOT CAUSE TO THE SYMPTOM. Do not attribute the issue to a component until you can state the \
 evidence that ties the root cause to that symptom. Include the symptom (the command and the relevant output) \
 and that evidence in your diagnosis submission.
