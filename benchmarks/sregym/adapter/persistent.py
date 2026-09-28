@@ -85,6 +85,14 @@ class ClosureFailedError(PersistentControllerError):
     """Raised when the controller gave up committing an incident closure the broker kept rejecting."""
 
 
+class DetectionMissError(PersistentControllerError):
+    """Raised when no incident opened within the stage's detection deadline after injection.
+
+    An agent outcome (the detectors missed the fault), reported as a detection
+    miss censored at the deadline, not a measured TTD or TTM.
+    """
+
+
 def control_namespace_for(app_namespace: str) -> str:
     """Name the per-application SDO namespace after the application namespace."""
 
@@ -306,6 +314,13 @@ class StageInputs:
     verification_timeout_seconds: float = 3900.0
     # Opt-in shared lifecycle validation verdicts; run_lifecycle consults it.
     validation_cache: LifecycleValidationCache | None = None
+    #: End the stage as a detection miss if no incident has opened this long
+    #: after injection. None waits the whole verification budget.
+    detection_timeout_seconds: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.detection_timeout_seconds is not None and self.detection_timeout_seconds <= 0:
+            raise ValueError(f"detection_timeout_seconds must be positive, got {self.detection_timeout_seconds}")
 
 
 @dataclass(frozen=True)
@@ -404,7 +419,9 @@ def run_persistent_stage(
     ops.set_maintenance(control, paused=False, generation=generation)
     gate_timings = ops.inject_after_resume(control, generation, inject)
     injected = clock.monotonic()
-    verified = _wait_for_verified_incident(ops, control, known, inputs.verification_timeout_seconds, clock)
+    verified = _wait_for_verified_incident(
+        ops, control, known, inputs.verification_timeout_seconds, clock, inputs.detection_timeout_seconds
+    )
     verified_ready = clock.monotonic()
     paused_generation = f"{generation}-paused"
     ops.set_maintenance(control, paused=True, generation=paused_generation)
@@ -714,14 +731,31 @@ def _wait_for_controller_pod(ops: ClusterOps, control: str, clock: Clock, timeou
 
 
 def _wait_for_verified_incident(
-    ops: ClusterOps, control: str, known: set[str], timeout: float, clock: Clock
+    ops: ClusterOps,
+    control: str,
+    known: set[str],
+    timeout: float,
+    clock: Clock,
+    detection_timeout: float | None = None,
 ) -> VerifiedIncident:
-    """Return the first new incident the controller verified healthy, before reflection finishes."""
+    """Return the first new incident the controller verified healthy, before reflection finishes.
 
-    deadline = clock.monotonic() + timeout
+    With *detection_timeout*, a stage in which no new incident has opened by
+    then ends as a :class:`DetectionMissError`; once one opens, the full
+    *timeout* applies.
+    """
+
+    started = clock.monotonic()
+    deadline = started + timeout
+    detected = False
     state: dict[str, Any] = {}
     while clock.monotonic() < deadline:
         state = ops.runtime_state(control)
+        detected = detected or _new_incident_opened(state, known)
+        if detection_timeout is not None and not detected and clock.monotonic() - started >= detection_timeout:
+            raise DetectionMissError(
+                f"controller in {control!r}: no incident opened within {detection_timeout:.0f}s of fault injection"
+            )
         closure = state.get("pending_closure")
         if isinstance(closure, dict):
             raw_request = closure.get("request")
@@ -737,6 +771,22 @@ def _wait_for_verified_incident(
     raise PersistentControllerError(
         f"controller in {control!r} verified no new incident within {timeout:.0f}s{_open_incident_summary(state)}"
     )
+
+
+def _new_incident_opened(state: dict[str, Any], known: set[str]) -> bool:
+    """Whether the controller has opened (or already closed) an incident this stage did not start with."""
+
+    if state.get("incident_open"):
+        return True
+    for key in ("incident_request", "pending_closure"):
+        value = state.get(key)
+        if isinstance(value, dict):
+            request = value.get("request") if key == "pending_closure" else value
+            incident_id = request.get("incident_id") if isinstance(request, dict) else None
+            if isinstance(incident_id, str) and incident_id not in known:
+                return True
+    acknowledged = state.get("last_acknowledged_incident_id")
+    return isinstance(acknowledged, str) and bool(acknowledged) and acknowledged not in known
 
 
 def _open_incident_summary(state: dict[str, Any]) -> str:

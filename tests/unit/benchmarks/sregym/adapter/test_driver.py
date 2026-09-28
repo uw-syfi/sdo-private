@@ -362,6 +362,16 @@ def test_adapter_persists_validated_lifecycle_seed_outside_resettable_stage(tmp_
     assert not seed.with_name(seed.name + ".tmp").exists()
 
 
+def test_the_detection_deadline_comes_from_the_agent_config_and_defaults_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
+    assert driver._parse_args([]).detection_timeout_sec is None
+
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"detection_timeout_sec": 900}))
+    assert driver._parse_args([]).detection_timeout_sec == 900
+
+
 def test_sregym_passes_run_artifact_directory_to_sdo_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
     import benchmarks.sregym.adapter.driver as driver
 
@@ -1519,6 +1529,7 @@ def test_persistent_driver_reports_resolution_without_strict_receipt_or_job_clea
     assert inputs.runtime_config.persistent is True  # type: ignore[attr-defined]
     assert inputs.runtime_config.reflection_session == reflection_session  # type: ignore[attr-defined]
     assert inputs.stage_label == "stage_1_reused-incident"  # type: ignore[attr-defined]
+    assert inputs.detection_timeout_seconds is None  # type: ignore[attr-defined]
     assert inputs.state_path == state_path  # type: ignore[attr-defined]
     assert captured["kubeconfig"] == "/trusted/kubeconfig"
     assert os.environ["KUBECONFIG"] == "/proxy/kubeconfig"

@@ -13,6 +13,7 @@ from benchmarks.sregym.adapter.persistent import (
     STRICT_RECEIPT_FILENAME,
     Clock,
     ControllerPod,
+    DetectionMissError,
     PersistentControllerError,
     PersistentState,
     StageInputs,
@@ -242,8 +243,11 @@ def _inputs(
     application: str = "Hotel Reservation",
     fingerprint: str = "topology-1",
     receipt_dir: Path | None = None,
+    verification_timeout_seconds: float = 30,
+    detection_timeout_seconds: float | None = None,
 ) -> StageInputs:
     return StageInputs(
+        detection_timeout_seconds=detection_timeout_seconds,
         stage_label=stage,
         application=application,
         namespace=namespace,
@@ -251,7 +255,7 @@ def _inputs(
         runtime_config=_config(tmp_path, namespace, stage),
         receipt_dir=receipt_dir or tmp_path / stage / "agent",
         state_path=tmp_path / "sdo_persistent_controller.json",
-        verification_timeout_seconds=30,
+        verification_timeout_seconds=verification_timeout_seconds,
     )
 
 
@@ -617,6 +621,52 @@ class _ClosureFailedOps(FakeOps):
             }
         )
         return {}
+
+
+class _UndetectedOps(FakeOps):
+    """The fault is injected, but no detector ever opens an incident."""
+
+    def inject_after_resume(
+        self, control_namespace: str, generation: str, inject: Callable[[], None]
+    ) -> dict[str, float]:
+        inject()
+        return {}
+
+
+def test_no_incident_by_the_detection_deadline_is_a_detection_miss(tmp_path: Path) -> None:
+    ops = _UndetectedOps()
+    clock = _clock(ops)
+
+    with pytest.raises(DetectionMissError) as raised:
+        run_persistent_stage(
+            _inputs(tmp_path, "s0", verification_timeout_seconds=3900, detection_timeout_seconds=900),
+            ops=ops,
+            run_lifecycle=lambda: True,
+            inject=lambda: None,
+            clock=clock,
+        )
+
+    assert "no incident opened within 900s" in str(raised.value)
+    assert clock.monotonic() < 3900  # it did not wait out the verification budget
+
+
+def test_an_incident_that_opened_keeps_the_full_verification_budget(tmp_path: Path) -> None:
+    """The detection deadline only ends a stage in which nothing was ever detected."""
+
+    ops = _StuckOps()
+    clock = _clock(ops)
+
+    with pytest.raises(PersistentControllerError) as raised:
+        run_persistent_stage(
+            _inputs(tmp_path, "s0", verification_timeout_seconds=60, detection_timeout_seconds=10),
+            ops=ops,
+            run_lifecycle=lambda: True,
+            inject=lambda: None,
+            clock=clock,
+        )
+
+    assert not isinstance(raised.value, DetectionMissError)
+    assert "verified no new incident within 60s" in str(raised.value)
 
 
 def test_a_timeout_behind_a_permanently_failed_closure_says_so(tmp_path: Path) -> None:

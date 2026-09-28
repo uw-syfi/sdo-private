@@ -192,6 +192,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--provider", choices=("codex", "claude"), default=config.get("provider", "codex"))
     parser.add_argument("--model", default=config.get("model", os.getenv("MODEL_ID", "gpt-5.4")))
     parser.add_argument("--timeout-sec", type=int, default=int(config.get("timeout_sec", 1800)))
+    raw_detection = config.get("detection_timeout_sec")
+    parser.add_argument(
+        "--detection-timeout-sec",
+        type=int,
+        default=int(raw_detection) if raw_detection is not None else None,
+        help="persistent mode: end a stage as a detection miss if no incident opens this long after injection",
+    )
     parser.add_argument("--controller-image", default=config.get("controller_image", "sdo-controller:v0.1.0"))
     parser.add_argument(
         "--responder-image",
@@ -562,6 +569,9 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
                 state_path=Path(raw_state_path),
                 kubeconfig=trusted_kubeconfig,
                 verification_timeout_seconds=float(args.timeout_sec + 300),
+                detection_timeout_seconds=(
+                    float(args.detection_timeout_sec) if args.detection_timeout_sec is not None else None
+                ),
                 validation_cache=validation_cache,
             ),
             ops=KubectlClusterOps(),

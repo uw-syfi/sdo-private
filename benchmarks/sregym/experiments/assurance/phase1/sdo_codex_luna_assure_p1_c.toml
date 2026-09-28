@@ -62,6 +62,7 @@ responder_image = "sdo-sregym-responder:p1"
 validator_image = "sdo-detector-validator:p1"
 credentials_secret = "sdo-agent-credentials"
 persistent_controller = true
+detection_timeout_sec = 900  # coordinator decision 2026-09-28: no incident within 15 min of injection = detection miss, censored
 
 [[stages]]
 name = "r1-s3-network-policy-block"
