@@ -1335,3 +1335,96 @@ Wrapper scripts, lane events (`queue.events`, with a quota, disk and load readin
 - **Decision (user-directed): run the 3 SDO runs concurrently, one per lane, staggered 1 min.** sdo1 is on luna-w0 (08:19Z), sdo2 on luna-w1 (08:20Z) and sdo3 on luna-w2 (08:21Z), each seeded from `30e023d`, with load averages of 7.9, 5.3 and 9.0 at start.
   - The arms rotate across clusters: w1 ran stock Codex and w2 ran Codex + verify, before each hosted one SDO run.
   - No new lanes were needed, since w0 to w2 were idle.
+
+## Feedback-loop e2e results: `network_policy_block`, first encounter
+
+Code: branch `vic/exp/feedback-loop-e2e` at `13d5613` (merge `151bda5` + fixes `a3c02c4`, `0d42e22`, `13d5613`), SREGym `cbb9715f`. Judge `codex-gpt-6-luna` (xhigh); agents gpt-6-luna at `medium`; 1+1 kind lanes; `worker_cpu_limit = 3`.
+
+Tokens come from `incident_cost` (cache-aware). Cost weights are in base-input units: cache read 0.1, output 5. USD uses agentshim's 2026-09-27 gpt-6-luna table.
+
+Column definitions:
+- **TTD:** diagnosis POST minus injection; no judge time precedes it.
+- **TTM:** `incident_cost`'s judge-free headline, the last state-changing mutation after injection.
+- **Raw:** mitigation POST minus injection, including the diagnosis-grading wait.
+- A failed run's TTM is only when it stopped changing things, not a recovery.
+
+### Per-run results
+
+| Arm | Run | Lane | Diag | Mit | TTD s | TTM s | Raw s | Uncached in | Cached in | Output | Weighted tok | USD | Requests |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| SDO | sdo1 `20260928_081908` | w0 | pass | pass | 21.0 | 43.4 | 60.1 | 29,983 | 139,520 | 2,170 | 54,785 | 0.0055 | 8 |
+| SDO | sdo2 `20260928_082009` | w1 | pass | pass | 15.1 | 26.7 | 45.4 | 24,305 | 139,264 | 1,902 | 47,741 | 0.0048 | 9 |
+| SDO | sdo3 `20260928_082110` | w2 | pass | pass | 18.9 | 30.4 | 46.8 | 25,167 | 128,256 | 1,979 | 47,888 | 0.0048 | 8 |
+| **SDO mean** | | | **3/3** | **3/3** | **18.3** | **33.5** | **50.8** | 26,485 | 135,680 | 2,017 | 50,138 | 0.0050 | 8.3 |
+| Codex | #1 `20260928_052020` | w1 | fail | fail | 52.5 | 109.4 | 125.5 | 56,344 | 645,120 | 3,256 | 137,136 | 0.0137 | 16 |
+| Codex | #2 | w1 | pass | pass | 59.1 | 63.7 | 77.9 | 41,235 | 396,288 | 1,784 | 89,784 | 0.0090 | 12 |
+| Codex | #3 | w1 | fail | fail | 45.6 | 71.3 | 85.3 | 37,555 | 405,248 | 2,290 | 89,530 | 0.0090 | 13 |
+| **Codex mean** | | | **1/3** | **1/3** | **52.4** | **81.5** | **96.2** | 45,045 | 482,219 | 2,443 | 105,483 | 0.0105 | 13.7 |
+| Codex + verify | #1 `20260928_052039` | w2 | fail | fail | 145.1 | 261.1 | 276.1 | 58,493 | 866,560 | 6,913 | 179,714 | 0.0180 | 23 |
+| Codex + verify | #2 | w2 | fail | fail | 118.8 | 178.6 | 181.2 | 58,472 | 1,048,576 | 5,343 | 190,045 | 0.0190 | 28 |
+| Codex + verify | #3 | w2 | fail (7.33) | fail | 96.0 | 205.6 | 208.3 | 41,255 | 646,656 | 3,710 | 124,471 | 0.0124 | 22 |
+| **Codex + verify mean** | | | **0/3** | **0/3** | **120.0** | **215.1** | **221.9** | 52,740 | 853,931 | 5,322 | 164,743 | 0.0165 | 24.3 |
+
+- **SDO's incident rows count the responder only.**
+- **Reflection** runs after verified recovery and is not incident time. It cost 349,780, 623,987 and 549,990 raw tokens: 106k, 150k and 131k weighted, or $0.011 to $0.015.
+- **Supplementary SDO-0** (`20260928_074550`: unseeded lifecycle in the same stage; state diff broken by bug 2) passed both. TTD 23.4 s, TTM 29.1 s, raw 56.8 s; responder 233,193 tokens (59,797 weighted, $0.0060, 11 requests).
+- **One-time lifecycle** (seed `30e023d`): 2,086,905 raw tokens. That is 233,502 uncached input, 1,838,336 cached input and 15,067 output: 492,671 weighted, $0.049, 43 requests, about 13 min. The failed pre-fix lifecycle wasted another 3,629,184 tokens (729,049 weighted, 79 requests).
+
+### Loop evidence, SDO runs (from the controller logs, responder rollouts and strict receipts)
+
+| Evidence | sdo1 | sdo2 | sdo3 | SDO-0 (pre-fix diff) |
+|---|---|---|---|---|
+| First finding after injection | +0.0 s, `health-objective/network-policy-total-isolation` naming `deny-all-recommendation` | same | same | same |
+| Traffic detector fired | no | no | **yes, +20.4 s**: `scenario-slo.hotel-search` and `user-login-check` (timeout 3/5), then `hotel-recommendations` | no |
+| Probe warm and qualified | yes (3/3 scenarios) | yes | yes | yes |
+| Healthy-state diff in the prompt | `NetworkPolicy/deny-all-recommendation added: podSelector io.kompose.service=recommendation; policyTypes Ingress,Egress` (only change) | same | same | **"No … NetworkPolicy … changed"** (bug 2) |
+| Diff cited as evidence | not cited as `state-change` | `state-change`, verified | `state-change`, verified | n/a |
+| `sdo incident status` runs | 1 (+43.1 s): HEALTHY | 1 (+27.2 s): HEALTHY | 1 (+34.5 s): HEALTHY | 1 (+30.8 s): HEALTHY |
+| Submit helper refused (exit 4) | never | never | never | never |
+| Diagnosis verification | `confirmed` (detector finding verified) | `confirmed` (finding + state change verified) | `confirmed` (finding + state change verified) | `confirmed` |
+| Helpers created / cleaned | none created; `cleaned_helpers` empty | none | none | none |
+| Decoys touched or cited | no (0 commands; not in prompt or result) | no | no | no |
+| Repair | `kubectl delete networkpolicy deny-all-recommendation` | same | same | same |
+| Learned | incident detector + `network-policy-total-isolation` playbook from a `confirmed` cause | same | same | same |
+
+- **Why the traffic detector mostly stayed quiet.** The fault was repaired 25 to 35 s after injection. In sdo1, sdo2 and SDO-0 the probe saw no SLO violation in that window. In sdo3 every scenario timed out from +16 s, including ones that do not use `recommendation`.
+  - **Hypothesis (not verified):** frontend-to-recommendation gRPC connections opened before the policy kept working for a while, until something re-dialled.
+  - Either way, on this fault the end-to-end probe was a slow, intermittent backstop. The static rule and the fixed diff named the cause at dispatch.
+- **Fairness note on the static rule.** `network-policy-total-isolation` is generic. It fires for any NetworkPolicy that selects a required workload and denies all ingress and egress, and it names no fault or decoy. The health judge wrote it from the goal's all-Deployments objective and the judge prompt's generic NetworkPolicy coverage requirement. It still matches this fault exactly, so this problem is easy for SDO's static layer on a first encounter.
+
+### Codex arms: loop-relevant behaviour (from the rollouts)
+
+| | Stock #1 | Stock #2 | Stock #3 | Verify #1 | Verify #2 | Verify #3 |
+|---|---|---|---|---|---|---|
+| Fell for the decoys | **yes**: "revoked readWrite on rate/geo DB", patched `mongodb-rate` | no | **yes**: re-granted Mongo roles | partly: inspected them, then rejected the "privilege scripts" | no | no |
+| Found the NetworkPolicy | no | yes (4 NP commands) | no | no | no | no |
+| Reproduced a user-facing symptom | no (pods/logs only) | no end-to-end request | no | curl-style checks, never `/recommendations` | curled `/hotels` → 200 | curled `/hotels` → 200 |
+| Re-verified after its fix | logs and pods only | `get networkpolicy,pods` | Mongo client pod | yes, same checks | yes | yes |
+| Blamed | DB roles (decoy) | NetworkPolicy (correct) | DB roles (decoy) | Mongo startup race | user-Mongo startup race | Consul startup race |
+| Helpers left behind | none | none | **`grant-geo`, `verify-geo` pods (`--restart=Never`, never deleted)** | none | none | none (`--rm` + explicit delete) |
+
+### Takeaways
+
+- **What it shows.**
+  - On a first encounter with a decoy-bearing, historically flaky fault, SDO resolved 3/3 runs. It had a correct diagnosis at 15 to 21 s and the repair applied at 27 to 43 s, and it never touched the decoys.
+  - Stock Codex went 1/3, following the decoys twice. Codex + verify went 0/3.
+  - SDO's responder needed about a third of stock Codex's incident tokens: 164k against 530k raw, and 50k against 105k weighted. That was about half the dollar cost, without reflection.
+  - The mechanism that mattered was the deterministic evidence at dispatch: the health judge's static isolation rule fired at +0 s, and (after bug 2's fix) the diff listed exactly one change, the NetworkPolicy. It was not the traffic probe, which fired in only 1 of 4 runs and 20 s late.
+  - The incident-status gate was exercised but never had to refuse. Every responder fixed the right object first, and a single status check came back HEALTHY.
+- **Confidence.**
+  - High that the static layer plus the diff are what separate SDO from Codex here: 3/3 against 1/3 and 0/3, with qualitatively consistent traces.
+  - Low for rates: n=3 per arm, one problem.
+  - Low for anything about the gate's refusal path and the traffic detector's value, because neither was stressed.
+  - The verify-protocol regression (0/3) is n=3 but mechanistically clear. "Reproduce a user-facing symptom" without a map of the request paths made Codex probe `/hotels`, which still returned 200. It then grabbed the only abnormal evidence available, container restarts from app startup, and built a startup-race story. Verification without coverage anchored it on the wrong symptom rather than rescuing it.
+- **Implications for SDO.**
+  1. The healthy-state diff is powerful and was silently broken in the shipped branch. A frozen diff actively argues for the decoy story, so it needs a live liveness check. A no-LLM smoke that creates an object after `Start` returns, through the production `run.go` path, belongs in CI.
+  2. The traffic probe cannot be the primary detector for connection-level faults like NetworkPolicy isolation. Either it needs to open fresh connections per probe or scenario (so a deny policy shows at once), or the lifecycle should keep generating static config-level health rules like this one.
+  3. The gate's value on this problem is insurance, not effect. It needs a problem where the plausible first fix is wrong (for example `wrong_service_selector` with the decoys) to show a refusal-and-recover sequence.
+  4. The lifecycle audit false positive (bug 1) would have blocked every cold deployment that authors traffic generators. The new prompt makes route-pattern searches routine, so the audit's tests must include realistic judge commands.
+- **Next actions.**
+  - Get the branch landed on main (needs the user's approval; see "Landing the feedback loop").
+  - Add the run.go-path liveness smoke for the diff.
+  - Make the prober dial fresh connections for health probes and re-measure time-to-fire on `network_policy_block`.
+  - Run the same three arms on `wrong_service_selector_hotel_reservation`, where the gate should refuse the decoy fix, before claiming the gate works.
+- **Quota:** the Codex weekly window read 90% before every start and 90% at the end (08:28Z). There were no rate-limit or error events in any rollout.
+  - This round used about 12.9M agent tokens: 1.6M stock Codex, 2.7M Codex + verify, 2.0M SDO counted runs incl. reflection, 0.65M SDO-0, 2.1M lifecycle and 3.6M on the failed lifecycle. Judge tokens are not counted.
