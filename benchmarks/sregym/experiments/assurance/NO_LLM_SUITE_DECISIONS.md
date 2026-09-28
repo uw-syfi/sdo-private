@@ -147,3 +147,59 @@ does not fail the run.
   from `/tmp/<svc>_modified.yaml`, so on every named lane recovery applied a
   missing file. The isolation guard test only rejected `f"/tmp/` at the start
   of a string. Fixed test-first in SREGym `3018dbc2`.
+- **Recovery deletes every pod.** SREGym's `missing_service` recovery runs
+  `kubectl delete pods --all`, which removed the suite's labelled helpers and
+  its unlabelled bystander before the controller could clean up. The suite now
+  creates helpers after the correct fix, just before the scripted responder
+  returns (still before the controller's cleanup, which is what is tested).
+- **Absorption allow-list.** The re-injected diff may also name each broken
+  service's Deployment, which SREGym's recovery rolled out again; the first
+  version derived the Deployment name from the faulted object's name.
+
+## N10. SDO bug: `incident status` and the gate were traffic-only (fixed)
+
+- **Found** in the first full single-fault pass (`singles1`, assure-s0).
+  On `missing_configmap` (geo and rate) and `network_policy_block`,
+  `sdo incident status` exited 0 and the submission gate accepted a
+  mitigation, on the fault and after the decoy Mongo re-grant, while the
+  controller's `health-objective` and `service-endpoints` detectors fired and
+  closure was refused. User traffic really is healthy there: geo serves from
+  an in-memory index loaded at startup, and the NetworkPolicy leaves
+  established connections open. So a responder that "verifies" with status
+  would submit a wrong fix, and the gate would pass it.
+- **Fix** (test-first):
+  - `controller/runtime` publishes an `incident_view` in the
+    `sdo-controller-state` ConfigMap while an incident is open: the active
+    findings of the detectors closure waits on, and the current state diff.
+    It is refreshed at each evaluation, never restored after a restart.
+    Responders get its location as `SDO_CONTROLLER_STATE` (local and Job
+    mode; the responder Role can already read ConfigMaps in the control
+    namespace).
+  - `sdo incident status` reads it with kubectl. Active non-traffic findings
+    make it unhealthy (traffic findings defer to the fresher burst). A view of
+    another incident, or none, falls back to the burst alone.
+- **Cost.** After a correct fix, status now stays unhealthy until the
+  controller's next evaluation clears the detectors (verify took 14–30 s in
+  `singles1`), so a gated mitigation submits later. That is the point: the
+  gate now agrees with closure. Live-eval TTM on these faults will rise by
+  up to that much; the coordinator should know before comparing runs across
+  this change.
+
+## N11. SDO gap: a composite's later fault is missing from the request's diff
+
+- **Found** in `composites1` (assure-s1). SREGym injects a composition's
+  faults one after another; `missing_configmap` alone takes about 6 s (scale
+  to zero and back). The controller dispatched on the first fault in under a
+  second, so the request's diff named only it (`configmap-geo+selector`,
+  `configmap-geo+configmap-rate`). `policy-block+selector` passed only because
+  the NetworkPolicy fault is instantaneous.
+- **Decision.** The request stays an immutable dispatch snapshot (holding
+  dispatch for a batching window would slow every incident). The live view
+  (N10) carries the current diff, and `sdo incident status` lists changes
+  made after the request. The suite's diff check accepts an object named by
+  either, and records which came from the live view.
+- **Remaining gap.** `verify_diagnosis` still checks `state-change` evidence
+  only against the request's diff, so a responder that cites the later
+  change as a state change gets `contradicted`. The scripted responder cites
+  it as a `live-observation`. Carrying the final view's diff into the closure
+  would close this; not done here.
