@@ -6,7 +6,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from sdo.contracts import IncidentRequest, IncidentResult, IncidentStatus
+from sdo.contracts import (
+    ConfirmedRootCause,
+    IncidentRequest,
+    IncidentResult,
+    IncidentStatus,
+    RootCauseEvidence,
+    StateChange,
+    StateChanges,
+)
 from sdo.operational_memory import DiagnosisVerdict
 from sdo.operational_memory.models import OutcomeClassification
 from sdo.operational_memory.outcomes import OutcomeFacts, derive_outcome
@@ -102,3 +110,51 @@ def test_outcome_records_the_diagnosis_verification() -> None:
     assert verification.verdict == DiagnosisVerdict.CONFIRMED
     assert verification.detectors[0].detector_id == "missing-configmap"
     assert verification.detectors[0].flipped
+
+
+def test_outcome_verifies_state_change_evidence_against_the_controllers_closing_diff() -> None:
+    """N11: OutcomeFacts.final_state_changes is the controller's diff as of
+
+    verification time. A composite's later fault can land after the
+    request's dispatch-time diff was taken but is present here; derive_outcome
+    must thread it into diagnosis verification so citing that fault is
+    confirmed rather than contradicted.
+    """
+
+    request = IncidentRequest.model_validate_json(_contract_fixture("incident_request.json"))
+    result = IncidentResult.model_validate_json(_contract_fixture("incident_result.json"))
+    late_cause = ConfirmedRootCause(
+        summary="frontend's readiness probe also changed",
+        resources=result.confirmed_root_causes[0].resources,
+        evidence=[
+            RootCauseEvidence(
+                kind="state-change", source="Deployment/frontend", observation="readiness probe path changed"
+            )
+        ],
+        explained_detectors=[],
+    )
+    result = result.model_copy(update={"confirmed_root_causes": [*result.confirmed_root_causes, late_cause]})
+    detected = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    facts = OutcomeFacts(
+        request=request,
+        result=result,
+        final_health_detector_state=result.final_detector_states,
+        final_state_changes=StateChanges(
+            baseline_at=detected,
+            observed_at=detected + timedelta(seconds=6),
+            changes=[StateChange(kind="Deployment", name="frontend", change="modified")],
+        ),
+        health_verified=True,
+        fault_confirmed=True,
+        responder_backend="codex",
+        responder_model="gpt-5",
+        detected_at=detected,
+        dispatched_at=detected + timedelta(seconds=1),
+        responder_completed_at=detected + timedelta(seconds=2),
+        verified_at=detected + timedelta(seconds=3),
+    )
+
+    outcome = derive_outcome(facts)
+
+    late_verification = outcome.diagnosis_verification[1]
+    assert late_verification.evidence[0].verified is True

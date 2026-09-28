@@ -672,6 +672,7 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 		Request: *cloneIncidentRequest(c.currentIncidentRequest), Result: cloneIncidentResult(c.currentIncidentResult),
 		DispatchError: c.dispatchError, FinalDetectorStates: finalStates,
 		IncidentDetectorStates: c.incidentDetectorStates(),
+		FinalStateChanges:      c.finalStateChangesLocked(now),
 		DetectedAt:             c.incidentDetectedAt, DispatchedAt: c.incidentDispatchedAt,
 		ResponderCompletedAt: c.responderCompletedAt, VerifiedAt: verifiedAt,
 		CleanedHelpers:       append([]string(nil), c.cleanedHelpers...),
@@ -750,6 +751,18 @@ func (c *Controller) incidentDetectorStates() []DetectorEvaluation {
 	sort.Strings(ids)
 	states, _ := c.latestEvaluations(ids, c.responderCompletedAt, false)
 	return states
+}
+
+// finalStateChangesLocked is the configuration diff against the healthy
+// baseline at verification time (N11): a composite's later fault can land a
+// few seconds after dispatch, so the dispatch-time request diff can miss it
+// while it is already visible here. Called with c.mu held; StateBaseline
+// implementations keep their own lock, so there is no ordering hazard.
+func (c *Controller) finalStateChangesLocked(now time.Time) *StateChanges {
+	if c.Baseline == nil {
+		return nil
+	}
+	return c.Baseline.Changes(now)
 }
 
 func (c *Controller) latestEvaluations(

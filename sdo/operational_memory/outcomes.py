@@ -9,6 +9,7 @@ from sdo.contracts import (
     IncidentRequest,
     IncidentResult,
     IncidentStatus,
+    StateChanges,
     UsageMetrics,
 )
 from sdo.operational_memory.diagnosis import verify_diagnosis
@@ -26,6 +27,11 @@ class OutcomeFacts(BaseModel):
     final_health_detector_state: list[DetectorEvaluation] = Field(default_factory=list)
     # Post-response evaluations of the incident's non-health detectors.
     incident_detector_states: list[DetectorEvaluation] = Field(default_factory=list)
+    # The controller's configuration diff against the healthy baseline as of
+    # verification time (its closing view). It can name a composite's later
+    # fault that landed after the request's dispatch-time diff was taken
+    # (N11); ``verify_diagnosis`` checks state-change evidence against both.
+    final_state_changes: StateChanges | None = None
     health_verified: bool
     fault_confirmed: bool
     missed_fault_detected: bool = False
@@ -89,6 +95,7 @@ def derive_outcome(facts: OutcomeFacts) -> OutcomeRecord:
             result,
             final_detector_states=facts.final_health_detector_state,
             incident_detector_states=facts.incident_detector_states,
+            final_state_changes=facts.final_state_changes,
         ),
     )
 
