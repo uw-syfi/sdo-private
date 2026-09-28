@@ -15,6 +15,10 @@
 # judge is codex-gpt-6-luna at the Codex CLI backend's default xhigh, never
 # overridden. Enforced by tests/unit/benchmarks/sregym/runner/test_assurance_configs.py.
 #
+# Exec parity (2026-09-28, user-directed): allow_exec = true lets this arm's kubectl exec, attach and
+# port-forward through SREGym's agent proxy (app namespaces only), matching SDO's responder Role.
+# exec_disclosure stays off. The pre-parity configs are in git history at 0fbe1d4.
+#
 # DO NOT LAUNCH before the 2026-10-03 18:19 UTC quota reset and the PLAN.md
 # preconditions. Settings copied from ../../codex_luna_baseline.toml.
 
@@ -48,3 +52,4 @@ docker_builder = "sdo-example"
 
 [agent.codex]
 verify_protocol = "concise"
+allow_exec = true  # exec parity with SDO's responder Role (docs/fairness-DECISIONS.md); no disclosure text

@@ -139,6 +139,15 @@ def test_each_sdo_pipeline_runs_its_rotation_twice_on_one_persistent_controller(
         assert sdo["persistent_controller"] is True
 
 
+@pytest.mark.parametrize("name", sorted(SDO))
+def test_each_sdo_pipeline_keeps_going_past_a_failed_incident_and_censors_undetected_ones(name: str) -> None:
+    config = load_pipeline_config(PHASE1 / name)
+
+    assert config.continue_on_agent_failure is True
+    for stage in _resolved(PHASE1 / name):
+        assert stage.agent_config["sdo_codex"]["detection_timeout_sec"] == 900
+
+
 #: The fresh, fairness-corrected lifecycle seed (RUNBOOK.md, "Seed"): lifecycle commit dd6bc81
 #: ("sdo: capture goal, architecture, and independent health judge"), produced 2026-09-28 by an
 #: unseeded single-stage run of missing_configmap_hotel_reservation on private (:seed-fresh)
@@ -189,7 +198,8 @@ def test_the_codex_arm_is_the_default_concise_verify_baseline_not_stock_or_full(
     """Phase 1 has no stock arm (user decision, 2026-09-28): every Codex lane runs the default."""
     for name in VERIFY:
         config = load_experiment_config(PHASE1 / name)
-        assert config.agent_config["codex"] == {"verify_protocol": "concise"}
+        # Exec parity (fairness-DECISIONS.md): exec on through the proxy, and no disclosure text.
+        assert config.agent_config["codex"] == {"verify_protocol": "concise", "allow_exec": True}
 
 
 def test_every_phase_one_problem_is_registered_in_the_sregym_submodule() -> None:
