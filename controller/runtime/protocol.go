@@ -67,6 +67,9 @@ type IncidentRequest struct {
 	ResponseDeadline        time.Time              `json:"response_deadline"`
 	CancellationToken       string                 `json:"cancellation_token"`
 	RepairPolicy            string                 `json:"repair_policy"`
+	// StateChanges is the application's configuration diff against its last
+	// healthy baseline when the incident opened; nil without a baseline.
+	StateChanges *StateChanges `json:"state_changes,omitempty"`
 }
 
 type ConfirmedRootCause struct {

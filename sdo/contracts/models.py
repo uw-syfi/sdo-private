@@ -81,6 +81,34 @@ class PriorOutcomeEvidence(ContractModel):
     exact_source_match: bool
 
 
+class StateFieldChange(ContractModel):
+    """One changed aspect of an object; data values appear only as digests.
+
+    Optional fields mirror the Go runtime's ``omitempty`` encoding.
+    """
+
+    field: str = Field(min_length=1)
+    before: str | None = None
+    after: str | None = None
+
+
+class StateChange(ContractModel):
+    kind: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    change: Literal["added", "removed", "modified"]
+    fields: list[StateFieldChange] | None = None
+
+
+class StateChanges(ContractModel):
+    """The application's configuration diff against its last healthy baseline."""
+
+    baseline_at: datetime
+    observed_at: datetime
+    changes: list[StateChange] = Field(default_factory=list)
+    omitted: int | None = Field(default=None, ge=0)
+    unobserved_kinds: list[str] | None = None
+
+
 class IncidentRequest(ContractModel):
     schema_version: Literal["sdo.dev/v1alpha1"] = SCHEMA_VERSION
     application: str = Field(min_length=1)
@@ -99,6 +127,7 @@ class IncidentRequest(ContractModel):
     response_deadline: datetime
     cancellation_token: str = Field(min_length=1)
     repair_policy: Literal["commit", "recorded-actions"] = "commit"
+    state_changes: StateChanges | None = None
 
 
 class ConfirmedRootCause(ContractModel):

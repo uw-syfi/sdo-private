@@ -10,6 +10,9 @@ from sdo.contracts.models import (
     ObjectRef,
     PriorOutcomeEvidence,
     RepairActionReceipt,
+    StateChange,
+    StateChanges,
+    StateFieldChange,
     UsageMetrics,
 )
 
@@ -25,5 +28,8 @@ __all__ = [
     "ObjectRef",
     "PriorOutcomeEvidence",
     "RepairActionReceipt",
+    "StateChange",
+    "StateChanges",
+    "StateFieldChange",
     "UsageMetrics",
 ]

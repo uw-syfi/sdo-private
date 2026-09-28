@@ -15,6 +15,7 @@ FIXTURE_DIR = Path(__file__).resolve().parents[3] / "fixtures" / "sdo" / "contra
     ("fixture_name", "model_type"),
     [
         ("incident_request.json", IncidentRequest),
+        ("incident_request_state_changes.json", IncidentRequest),
         ("incident_result.json", IncidentResult),
     ],
 )

@@ -26,6 +26,19 @@ func TestIncidentRequestGoldenFixtureRoundTrip(t *testing.T) {
 	}
 }
 
+func TestIncidentRequestStateChangesFixtureRoundTrip(t *testing.T) {
+	var request IncidentRequest
+	roundTripGoldenFixture(t, "incident_request_state_changes.json", &request)
+
+	if request.StateChanges == nil || len(request.StateChanges.Changes) != 3 || request.StateChanges.Omitted != 2 ||
+		request.StateChanges.Changes[0].Fields[0].Field != "selector" || request.StateChanges.UnobservedKinds[0] != "Secret" {
+		t.Fatalf("state changes must match the Python contract: %+v", request.StateChanges)
+	}
+	if err := request.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+}
+
 func TestIncidentResultGoldenFixtureRoundTrip(t *testing.T) {
 	var result IncidentResult
 	roundTripGoldenFixture(t, "incident_result.json", &result)

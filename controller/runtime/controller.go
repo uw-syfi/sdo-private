@@ -90,6 +90,10 @@ type Controller struct {
 	closureResults             chan closureCompletion
 	acknowledgmentResults      chan acknowledgmentCompletion
 
+	// Baseline, when set, records healthy configuration and attaches the
+	// diff against it to each new incident request.
+	Baseline StateBaseline
+
 	OnError          func(error)
 	OnResult         func(IncidentResult)
 	OnEvaluation     func([]sdk.Finding)
@@ -191,11 +195,13 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 	}
 
 	sampleFindings := make([]sdk.Finding, 0)
+	errored := false
 	for _, detector := range detectors {
 		spec := detector.Spec()
 		findings, detectErr := detector.Detect(ctx, snapshot)
 		if detectErr != nil {
 			c.recordDetectorError(spec.ID, now, detectErr)
+			errored = true
 			continue
 		}
 		validFindings := make([]sdk.Finding, 0, len(findings))
@@ -211,6 +217,7 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 			if validationErr := core.ValidateFinding(spec, finding); validationErr != nil {
 				c.recordDetectorError(spec.ID, now, validationErr)
 				valid = false
+				errored = true
 				break
 			}
 			validFindings = append(validFindings, finding)
@@ -249,9 +256,23 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 	if c.OnEvaluation != nil {
 		c.OnEvaluation(sampleFindings)
 	}
+	if c.Baseline != nil {
+		c.Baseline.Observe(now, !errored && c.quiet())
+	}
 
 	c.maybeCloseIncident(now)
 	return c.dispatchReady(ctx, now)
+}
+
+// quiet reports that nothing is wrong or pending: no incident or closure,
+// no active or pending finding, and nothing waiting in the batcher. Only a
+// quiet state may become the configuration baseline.
+func (c *Controller) quiet() bool {
+	c.mu.Lock()
+	busy := c.incidentOpen || c.pendingClosure != nil
+	c.mu.Unlock()
+	_, batched := c.batcher.Deadline()
+	return !busy && !batched && c.tracker.Quiet()
 }
 
 // EvaluateAll evaluates every detector against one fresh snapshot, for example
@@ -351,6 +372,9 @@ func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 		return nil
 	}
 	request := c.incidentRequest(now, batch)
+	if c.Baseline != nil {
+		request.StateChanges = c.Baseline.Changes(now)
+	}
 	c.mu.Lock()
 	c.incidentOpen = true
 	c.responderDone = false
