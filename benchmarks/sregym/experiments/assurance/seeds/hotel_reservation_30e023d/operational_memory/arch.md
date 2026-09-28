@@ -1,0 +1,42 @@
+---
+schema_version: 1
+generated_at_commit: 4a477b35abd0e10ed65121bc215b7187ad61954a
+generated_at: 2026-09-28T07:58:26.490695+00:00
+application: Hotel Reservation
+topology_fingerprint: 5c4bff53ef9cf258fbe6b8f4f59f9a176daff395bd8a4dcf63ed8513c277237e
+---
+# Hotel Reservation architecture
+
+The tracked repository contains several deployment forms for the same hotel reservation application: Kubernetes manifests under `kubernetes/`, a separate set under `knative/`, OpenShift manifests under `openshift/`, Helm charts under `helm-chart/hotelreservation/`, and Docker Compose definitions. Names below are kept verbatim from the controller feedback. The Kubernetes and Knative manifest sets contain overlapping resource names; OpenShift uses namespace `hotel-res` while the other listed Kubernetes resources use `default`.
+
+## Kubernetes workloads and service discovery
+
+In the `default` namespace, the application workload Deployments are `frontend`, `geo`, `profile`, `rate`, `recommendation`, `reservation`, `search`, and `user`. The workload pods use `io.kompose.service=<name>` labels, and their corresponding Services (`frontend`, `geo`, `profile`, `rate`, `recommendation`, `reservation`, `search`, and `user`) select those labels. Their application image in the Kubernetes manifests is `yinfangchen/hotelreservation:latest`. The `frontend` Service is also exposed by the tracked OpenShift Route `frontend-route` in the OpenShift deployment form.
+
+The database Deployments and Services are `mongodb-geo`, `mongodb-profile`, `mongodb-rate`, `mongodb-recommendation`, `mongodb-reservation`, and `mongodb-user`. Each Service selects the matching `io.kompose.service` pod label, and the database image is `mongo:4.4.6`. MongoDB Deployments use `/data/db` storage claims: respectively `geo-pvc`, `profile-pvc`, `rate-pvc`, `recommendation-pvc`, `reservation-pvc`, and `user-pvc`. Kubernetes `mongodb-geo` and `mongodb-rate` also mount their initialization scripts from ConfigMaps `mongo-geo-script` and `mongo-rate-script` at `/docker-entrypoint-initdb.d`.
+
+Cache Deployments and selector-matched Services are `memcached-profile`, `memcached-rate`, and `memcached-reserve`, all using image `memcached`. The service/application configuration connects profile to `memcached-profile`, rate to `memcached-rate`, and reservation to `memcached-reserve`. MongoDB endpoints similarly map geo, profile, rate, recommendation, reservation, and user to their same-named `mongodb-*` Services. Those connections and application ports are described in the configuration files below.
+
+Service-discovery and tracing workloads are `consul` and `jaeger`, each paired with Services selecting `io.kompose.service=consul` and `io.kompose.service=jaeger`. Kubernetes `consul` uses `hashicorp/consul:1.22.3`; Kubernetes `jaeger` uses `jaegertracing/all-in-one:1.57`. `jaeger-out` is an additional Jaeger Service in the Kubernetes and OpenShift manifests. The tracked Jaeger Services expose collector, agent, query, and related Jaeger ports; `consul` exposes its discovery/API and DNS ports.
+
+## Knative manifest set
+
+`knative/` provides alternate Deployments for `consul`, `frontend`, `jaeger`, the three `memcached-*` caches, and the six `mongodb-*` databases, plus Knative-form equivalents of the six MongoDB-backed application workloads. Its application Deployment image is `teresaliuchang/hotel_demo:v1.7`; the `consul` image is `hashicorp/consul:1.22.3`, `jaeger` uses `jaegertracing/all-in-one:latest`, each MongoDB uses `mongo:4.4.6`, and caches use `memcached`. For these conventional Deployment/Service pairs, the shared pod/service label is `io.kompose.service=<resource name>`.
+
+The Knative database storage relationships use PersistentVolumes `geo-pv`, `profile-pv`, `rate-pv`, `recommendation-pv`, `reservation-pv`, and `user-pv`, with matching claims `geo-pvc`, `profile-pvc`, `rate-pvc`, `recommendation-pvc`, `reservation-pvc`, and `user-pvc`. The volume manifests specify 1 GiB host-path storage under `/data/volumes/` and `DirectoryOrCreate`; each MongoDB pod claims its matching PVC. The seven Knative Serving resources are `srv-geo`, `srv-profile`, `srv-rate`, `srv-recommendation`, `srv-reservation`, `srv-search`, and `srv-user`; their YAML uses the `serving.knative.dev` Service form and the `teresaliuchang/hotel_demo:v1.7` image.
+
+## OpenShift deployment form
+
+OpenShift Deployments, Services, and claims are in namespace `hotel-res`. Workload pods carry `app-name=<workload>` and `death-star-project=hotel-res`; each corresponding Service selects both labels. This applies to `frontend`, `geo`, `profile`, `rate`, `recommendation`, `reservation`, `search`, and `user`, and to the database, cache, and infrastructure names below. The application Deployment images are built into the OpenShift internal registry as `image-registry.openshift-image-registry.svc:5000/hotel-res/hotel_reserv_frontend_single_node`, `hotel_reserv_geo_single_node`, `hotel_reserv_profile_single_node`, `hotel_reserv_rate_single_node`, `hotel_reserv_recommend_single_node`, `hotel_reserv_rsv_single_node`, `hotel_reserv_search_single_node`, and `hotel_reserv_user_single_node` (each with the registry/project prefix shown for the frontend image). Each of these application Deployments depends on ConfigMap `configmap-config-json`.
+
+OpenShift `consul` uses `hashicorp/consul:1.22.3`; `jaeger` uses `jaegertracing/all-in-one:latest`; the six `mongodb-*` Deployments use `mongo:4.4.6`; and `memcached-profile`, `memcached-rate`, and `memcached-reserve` use `memcached`. `hr-client` is an additional Deployment using image `ubuntu`, with pod labels `app=hr-client` and `death-star-project=hotel-res`. The OpenShift `jaeger-service.yaml` defines both `jaeger` and `jaeger-out` Services, each selecting `app-name=jaeger` and `death-star-project=hotel-res`.
+
+OpenShift PersistentVolumeClaims are named `geo`, `profile`, `rate`, `recommendation`, `reservation`, and `user`; each is mounted by the corresponding application Deployment. `frontend-route` routes to the OpenShift frontend Service. OpenShift also contains its own `consul`, `frontend`, `geo`, `jaeger`, cache, database, and application Service resources, all selector-backed as described above.
+
+## Configuration, build, and deployment inputs
+
+Root `config.json` supplies the Kubernetes/Compose-style service addresses and ports: Consul at `consul:8500`, Jaeger at `jaeger:6831`, frontend port 5000, and service ports 8081 (profile), 8082 (search), 8083 (geo), 8084 (rate), 8085 (recommendation), 8086 (user), and 8087 (reservation). It gives each database and cache address by its Service DNS name and port 27017 or 11211, and includes `KnativeDomainName`. OpenShift `openshift/configmaps/config.json` supplies the corresponding `hotel-res.svc.cluster.local` endpoints and per-service IP/port keys; those values are packaged in `configmap-config-json` and consumed by application Deployments. The source therefore defines separate address configuration for the Kubernetes/Compose and OpenShift forms.
+
+The Compose files build the application images from the repository root using `Dockerfile`, with service-specific entrypoints (`frontend`, `profile`, `search`, `geo`, `rate`, `recommendation`, `user`, and `reservation`). The Dockerfile starts from `golang:1.17.3`, copies the source into the Go workspace, vendors dependencies, and installs `./cmd/...`; the Compose service definitions assign the resulting component image names and declare runtime dependencies on Consul and their databases/caches. Compose also declares named data volumes `geo`, `profile`, `rate`, `recommendation`, `reservation`, and `user` for MongoDB data. Its service environment inputs include `TLS`, `GC`, `JAEGER_SAMPLE_RATIO`, `LOG_LEVEL`, and, for profile/rate/reservation, `MEMC_TIMEOUT`; cache containers specify `MEMCACHED_CACHE_SIZE` and `MEMCACHED_THREADS`.
+
+The OpenShift build scripts build and publish the component images to the internal registry. Kubernetes build scripts build the application image and also provide a separate buggy-geo build path. The tracked failure overlay `failures/buggy-geo-deployment.yaml` replaces the normal `geo` image with `yinfangchen/geo:buggy`; it still selects pods via `io.kompose.service=geo`. Helm chart templates and values provide another tracked deployment packaging path for the application, its databases, caches, `consul`, and `jaeger`, with per-chart configuration values and templates for the associated Deployment, Service, ConfigMap, and database storage resources.

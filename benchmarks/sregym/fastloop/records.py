@@ -20,7 +20,8 @@ if TYPE_CHECKING:
 
 SCHEMA_VERSION = "sdo.fastloop-incident/v1"
 AgentName = Literal["sdo", "codex"]
-OracleKind = Literal["sregym-mitigation-oracle", "health-check"]
+#: ``composition`` grades a composite fault: it passes only when every fault's own oracle passes.
+OracleKind = Literal["sregym-mitigation-oracle", "health-check", "composition"]
 
 
 class _PersistedModel(BaseModel):

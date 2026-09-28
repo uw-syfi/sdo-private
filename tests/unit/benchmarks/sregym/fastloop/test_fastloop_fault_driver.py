@@ -65,3 +65,74 @@ def test_oracle_verdict_is_typed() -> None:
 
     assert verdict.kind == "sregym-mitigation-oracle"
     assert verdict.success
+
+
+@dataclass
+class ComposingWorker(FakeWorker):
+    injected: int = 0
+
+    def request(self, op: str, *, timeout: float = 0, **args: Any) -> dict[str, Any]:
+        if op == "inject":
+            self.requests.append((op, args))
+            self.injected = self.injected + 1 if args.get("compose") else 1
+            start = 1790000000.0 + 10 * len(self.requests)
+            return {"started_at": start, "finished_at": start + 1.0, "fault": self.injected - 1}
+        if op == "recover":
+            self.requests.append((op, args))
+            return {"seconds": 1.5, "recovered": [args["fault"]] if "fault" in args else [1, 0]}
+        if op == "oracle":
+            self.requests.append((op, args))
+            return {"kind": "composition", "success": False, "details": {"faults": []}}
+        return super().request(op, timeout=timeout, **args)
+
+
+def test_a_composite_fault_injects_every_problem_into_one_composition() -> None:
+    worker = ComposingWorker()
+
+    composite = _driver(worker).inject_composite(["network_policy_block", "wrong_service_selector_hotel_reservation"])
+
+    assert [(op, args.get("problem_id"), args.get("compose")) for op, args in worker.requests] == [
+        ("inject", "network_policy_block", False),
+        ("inject", "wrong_service_selector_hotel_reservation", True),
+    ]
+    assert [fault.index for fault in composite.faults] == [0, 1]
+    assert composite.window.started_at == composite.faults[0].window.started_at
+    assert composite.window.finished_at == composite.faults[1].window.finished_at
+
+
+@pytest.mark.parametrize("problems", [[], ["a", "a"], ["a", ""]])
+def test_a_composite_fault_needs_distinct_problems(problems: list[str]) -> None:
+    with pytest.raises(ValueError, match="composite fault"):
+        _driver(ComposingWorker()).inject_composite(problems)
+
+
+def test_recovering_one_fault_of_a_composition_does_not_wait_for_health() -> None:
+    worker = ComposingWorker()
+    driver = _driver(worker)
+    driver.inject_composite(["a", "b"])
+
+    seconds = driver.recover_fault(1)
+
+    assert worker.requests[-1] == ("recover", {"fault": 1})
+    assert seconds == pytest.approx(1.5)
+    assert all(op != "health" for op, _ in worker.requests)
+
+
+def test_recovering_the_composition_reverts_the_rest_and_waits_for_health() -> None:
+    worker = ComposingWorker(health_sequence=[False, True])
+    driver = _driver(worker)
+    driver.inject_composite(["a", "b"])
+
+    driver.recover()
+
+    assert [op for op, _ in worker.requests][-3:] == ["recover", "health", "health"]
+
+
+def test_a_composition_oracle_is_typed() -> None:
+    worker = ComposingWorker()
+    driver = _driver(worker)
+    driver.inject_composite(["a", "b"])
+
+    assert driver.oracle().kind == "composition"
+    driver.oracle(fault=0)
+    assert worker.requests[-1] == ("oracle", {"fault": 0})

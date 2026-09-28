@@ -53,7 +53,8 @@ func TestControllerAttachesStateChangesAndBaselinesOnlyHealthyEvaluations(t *tes
 	if len(baseline.observations) != 3 || !baseline.observations[0] || baseline.observations[1] || baseline.observations[2] {
 		t.Fatalf("only the clear evaluation is healthy; a pending finding is not: %v", baseline.observations)
 	}
-	if request.StateChanges == nil || request.StateChanges.Changes[0].Name != "frontend" || len(baseline.asked) != 1 {
+	if request.StateChanges == nil || request.StateChanges.Changes[0].Name != "frontend" ||
+		len(baseline.asked) == 0 || !baseline.asked[0].Equal(start.Add(2*interval)) {
 		t.Fatalf("the dispatched request must carry the state diff taken when the incident opened: %+v", request.StateChanges)
 	}
 	if err := request.Validate(); err != nil {

@@ -1,0 +1,13 @@
+apiVersion: sdo.dev/v1alpha1
+kind: TrafficWorkload
+name: verify
+purpose: verify-burst
+ratePerSecond: 12
+duration: 3s
+scenarios:
+  - id: hotel-search
+    weight: 1
+  - id: hotel-recommendations
+    weight: 1
+  - id: user-login-check
+    weight: 1

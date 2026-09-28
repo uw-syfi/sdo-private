@@ -60,19 +60,9 @@ def _ensure_builder(name: str) -> None:
         subprocess.run(["docker", "buildx", "create", "--name", name, "--driver", "docker-container"], check=True)
 
 
-def _up(args: argparse.Namespace) -> int:
-    run_dir = args.run_dir.resolve()
-    run_dir.mkdir(parents=True, exist_ok=True)
-    workspace = run_dir / "application_workspace"
-    if not workspace.exists():
-        if args.seed is None:
-            raise SystemExit("--seed is required the first time (a git repository with the application source)")
-        subprocess.run(["git", "clone", "--quiet", str(args.seed.resolve()), str(workspace)], check=True)
-    private_tmp = None if args.no_sandbox else run_dir / "tmp"
-    if private_tmp is not None:
-        private_tmp.mkdir(exist_ok=True)
-    if args.builder:
-        _ensure_builder(args.builder)
+def up_worker_environment(args: argparse.Namespace, *, workspace: Path) -> dict[str, str]:
+    """The SREGym worker environment for ``up``: one reused kind lane deploying ``workspace`` from source."""
+
     images = Images(controller=args.controller_image, responder=args.responder_image, validator=args.validator_image)
     worker_env = {
         "SREGYM_KIND_CLUSTER_PREFIX": args.cluster_prefix,
@@ -87,9 +77,31 @@ def _up(args: argparse.Namespace) -> int:
         "SREGYM_PRESERVE_INFRASTRUCTURE": "1",
         # `up --redeploy` reuses the app image while its build context is unchanged.
         "SREGYM_SOURCE_BUILD_CACHE": "1",
+        # One control plane plus this many workers, as the experiment lanes (`kind_worker_nodes`).
+        "SREGYM_KIND_WORKER_NODES": str(args.kind_worker_nodes),
     }
     if args.builder:
         worker_env["SREGYM_DOCKER_BUILDER"] = args.builder
+    return worker_env
+
+
+def _up(args: argparse.Namespace) -> int:
+    if args.kind_worker_nodes < 0:
+        raise SystemExit("--kind-worker-nodes must not be negative")
+    run_dir = args.run_dir.resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    workspace = run_dir / "application_workspace"
+    if not workspace.exists():
+        if args.seed is None:
+            raise SystemExit("--seed is required the first time (a git repository with the application source)")
+        subprocess.run(["git", "clone", "--quiet", str(args.seed.resolve()), str(workspace)], check=True)
+    private_tmp = None if args.no_sandbox else run_dir / "tmp"
+    if private_tmp is not None:
+        private_tmp.mkdir(exist_ok=True)
+    if args.builder:
+        _ensure_builder(args.builder)
+    images = Images(controller=args.controller_image, responder=args.responder_image, validator=args.validator_image)
+    worker_env = up_worker_environment(args, workspace=workspace)
     placeholder = FastloopEnvironment(
         run_dir=run_dir,
         cluster=worker_env["SREGYM_KIND_CLUSTER_NAME"],
@@ -422,6 +434,12 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("--cluster-prefix", default="fastloop-w")
     up.add_argument("--worker-id", type=int, default=0)
     up.add_argument("--cpu-limit", default="3", help="docker --cpus per kind node, as the benchmark workers use")
+    up.add_argument(
+        "--kind-worker-nodes",
+        type=int,
+        default=1,
+        help="kind worker nodes beside the control plane (default 1, as every experiment lane)",
+    )
     up.add_argument("--builder", default="fastloop", help="private buildx builder for the application image")
     up.add_argument("--controller-image", default=Images().controller)
     up.add_argument("--responder-image", default=Images().responder)

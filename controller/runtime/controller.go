@@ -86,6 +86,7 @@ type Controller struct {
 	closureReceipt             *ClosureReceipt
 	closureFailure             *ClosureFailure
 	lastAcknowledgedIncidentID string
+	incidentView               *IncidentView
 	broker                     IncidentBroker
 	workspaceResults           chan workspaceCompletion
 	closureResults             chan closureCompletion
@@ -191,7 +192,9 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 	detectors := c.scheduler.SelectEvents(now, events)
 	if len(detectors) == 0 {
 		c.maybeCloseIncident(now)
-		return c.dispatchReady(ctx, now)
+		err := c.dispatchReady(ctx, now)
+		c.refreshIncidentView(now, false)
+		return err
 	}
 	snapshot, err := c.provider.Snapshot(ctx)
 	if err != nil {
@@ -265,7 +268,9 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 	}
 
 	c.maybeCloseIncident(now)
-	return c.dispatchReady(ctx, now)
+	err = c.dispatchReady(ctx, now)
+	c.refreshIncidentView(now, true)
+	return err
 }
 
 // quiet reports that nothing is wrong or pending: no incident or closure,
@@ -755,6 +760,7 @@ func (c *Controller) ExportState() RuntimeState {
 		ClosureReceipt:             cloneClosureReceipt(c.closureReceipt),
 		ClosureFailure:             cloneClosureFailure(c.closureFailure),
 		LastAcknowledgedIncidentID: c.lastAcknowledgedIncidentID,
+		IncidentView:               cloneIncidentView(c.incidentView),
 	}
 }
 
