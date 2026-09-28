@@ -551,6 +551,7 @@ def _diagnosis_verification(closure: dict[str, Any]) -> list[dict[str, Any]]:
             incident_detector_states=parsed.incident_detector_states,
             final_state_changes=parsed.final_state_changes,
             health_cleared_at=parsed.health_cleared_at,
+            observed_state_changes=parsed.observed_state_changes,
         )
     ]
 

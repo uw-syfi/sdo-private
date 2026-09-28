@@ -13,6 +13,7 @@ from sdo.contracts import (
     IncidentRequest,
     IncidentResult,
     ObjectRef,
+    ObservedStateChange,
     RepairActionReceipt,
     RootCauseEvidence,
     StateChange,
@@ -413,3 +414,150 @@ def test_legacy_free_form_targets_are_parsed_as_kubernetes_objects(target: str) 
     )
 
     assert verification.verdict == DiagnosisVerdict.CONFIRMED
+
+
+# rc2: a state-change citation must predate the responder's own repair.
+
+#: The controller first saw the dispatch diff's changes before any repair.
+DISPATCH_OBSERVED = datetime(2026, 7, 9, 18, 4, tzinfo=timezone.utc)
+
+
+def _observed(*entries: tuple[str, datetime]) -> list[ObservedStateChange]:
+    """What the controller saw change while the incident was open: the dispatch diff, then ``entries``."""
+
+    request = _request()
+    assert request.state_changes is not None
+    seen = [
+        ObservedStateChange(kind=change.kind, name=change.name, first_observed_at=DISPATCH_OBSERVED)
+        for change in request.state_changes.changes
+    ]
+    for key, first_observed_at in entries:
+        kind, name = key.split("/")
+        seen.append(ObservedStateChange(kind=kind, name=name, first_observed_at=first_observed_at))
+    return seen
+
+
+def _own_edit_cause() -> ConfirmedRootCause:
+    return _cause(
+        RootCauseEvidence(kind="detector-finding", source="missing-configmap", observation="requests fail"),
+        RootCauseEvidence(kind="state-change", source="Deployment/frontend", observation="frontend rollout changed"),
+        resources=(_FRONTEND,),
+        summary="a stale frontend rollout broke the service",
+    )
+
+
+def test_a_wrong_fix_citing_its_own_edit_is_not_confirmed() -> None:
+    """RC1's open hole: the closing-view diff holds the responder's own restart.
+
+    The real fault is invisible to the configuration diff and recovers by
+    other means. The responder restarts frontend and cites the restart's
+    ``restartedAt`` change, which the controller first saw only after that
+    repair started, as ``state-change`` evidence. Without the observation
+    time, this cause was ``confirmed``.
+    """
+
+    restart_leftover = StateChange(kind="Deployment", name="frontend", change="modified")
+
+    [verification] = verify_diagnosis(
+        _request(),
+        _result(_own_edit_cause(), actions=[_repair("restart-frontend", _FRONTEND)]),
+        final_detector_states=[_clear("missing-configmap")],
+        final_state_changes=_unchanged_except(extra=(restart_leftover,)),
+        observed_state_changes=_observed(("Deployment/frontend", REPAIRED.replace(second=5))),
+        health_cleared_at=HEALTH_CLEARED,
+    )
+
+    assert verification.verdict == DiagnosisVerdict.CONTRADICTED
+    own_edit = verification.evidence[1]
+    assert (own_edit.source, own_edit.verified) == ("Deployment/frontend", False)
+    assert own_edit.reason is not None
+    assert "restart-frontend" in own_edit.reason
+
+
+def test_the_same_citation_without_observation_times_was_confirmed() -> None:
+    """Records from controllers that predate the observation times keep N11's union rule."""
+
+    restart_leftover = StateChange(kind="Deployment", name="frontend", change="modified")
+
+    [verification] = verify_diagnosis(
+        _request(),
+        _result(_own_edit_cause(), actions=[_repair("restart-frontend", _FRONTEND)]),
+        final_detector_states=[_clear("missing-configmap")],
+        final_state_changes=_unchanged_except(extra=(restart_leftover,)),
+        health_cleared_at=HEALTH_CLEARED,
+    )
+
+    assert verification.verdict == DiagnosisVerdict.CONFIRMED
+
+
+def test_a_late_fault_seen_before_the_repair_is_still_confirmed() -> None:
+    """N11 keeps working: K2's late component lands after dispatch but before the responder's repair."""
+
+    late_fault = StateChange(kind="Deployment", name="frontend", change="modified")
+
+    [verification] = verify_diagnosis(
+        _request(),
+        _result(_own_edit_cause(), actions=[_repair("fix-probe", _FRONTEND)]),
+        final_detector_states=[_clear("missing-configmap")],
+        final_state_changes=_unchanged_except(extra=(late_fault,)),
+        observed_state_changes=_observed(("Deployment/frontend", DISPATCH_OBSERVED.replace(second=6))),
+        health_cleared_at=HEALTH_CLEARED,
+    )
+
+    assert verification.verdict == DiagnosisVerdict.CONFIRMED
+    assert [check.verified for check in verification.evidence] == [True, True]
+
+
+def test_a_late_fault_the_responder_reverted_exactly_is_confirmed_from_what_was_observed() -> None:
+    """RC1's other direction: an exact revert leaves the late fault in neither diff.
+
+    The controller still saw it change while the incident was open, before the repair.
+    """
+
+    [verification] = verify_diagnosis(
+        _request(),
+        _result(_own_edit_cause(), actions=[_repair("fix-probe", _FRONTEND)]),
+        final_detector_states=[_clear("missing-configmap")],
+        final_state_changes=_unchanged_except(),
+        observed_state_changes=_observed(("Deployment/frontend", DISPATCH_OBSERVED.replace(second=6))),
+        health_cleared_at=HEALTH_CLEARED,
+    )
+
+    assert verification.verdict == DiagnosisVerdict.CONFIRMED
+
+
+def test_a_change_first_seen_after_an_unrelated_repair_is_still_evidence() -> None:
+    """Only a repair of the cited object makes its change the responder's own."""
+
+    late_fault = StateChange(kind="Deployment", name="frontend", change="modified")
+
+    [verification] = verify_diagnosis(
+        _request(),
+        _result(
+            _own_edit_cause(),
+            actions=[
+                _repair("restore-configmap", _CONFIGMAP, started_at=REPAIRED.replace(minute=5)),
+                _repair("fix-probe", _FRONTEND),
+            ],
+        ),
+        final_detector_states=[_clear("missing-configmap")],
+        final_state_changes=_unchanged_except(extra=(late_fault,)),
+        observed_state_changes=_observed(("Deployment/frontend", REPAIRED.replace(minute=6))),
+        health_cleared_at=HEALTH_CLEARED,
+    )
+
+    assert verification.verdict == DiagnosisVerdict.CONFIRMED
+
+
+def test_a_change_the_controller_never_observed_is_contradicted() -> None:
+    [verification] = verify_diagnosis(
+        _request(),
+        _result(_own_edit_cause(), actions=[_repair("restart-frontend", _FRONTEND)]),
+        final_detector_states=[_clear("missing-configmap")],
+        final_state_changes=_unchanged_except(),
+        observed_state_changes=_observed(),
+        health_cleared_at=HEALTH_CLEARED,
+    )
+
+    assert verification.verdict == DiagnosisVerdict.CONTRADICTED
+    assert verification.evidence[1].verified is False

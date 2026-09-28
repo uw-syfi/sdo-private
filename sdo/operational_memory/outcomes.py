@@ -9,6 +9,7 @@ from sdo.contracts import (
     IncidentRequest,
     IncidentResult,
     IncidentStatus,
+    ObservedStateChange,
     StateChanges,
     UsageMetrics,
 )
@@ -36,6 +37,11 @@ class OutcomeFacts(BaseModel):
     # streak. A repair action backs a root cause only if it started by then
     # (F8). None from controllers that predate it.
     health_cleared_at: datetime | None = None
+    # Every object the controller saw differ from the baseline while the
+    # incident was open, with when it first saw it. A state-change citation
+    # must predate the responder's own repair of it. None from controllers
+    # that predate it.
+    observed_state_changes: list[ObservedStateChange] | None = None
     health_verified: bool
     fault_confirmed: bool
     missed_fault_detected: bool = False
@@ -69,6 +75,7 @@ def derive_outcome(facts: OutcomeFacts) -> OutcomeRecord:
         incident_detector_states=facts.incident_detector_states,
         final_state_changes=facts.final_state_changes,
         health_cleared_at=facts.health_cleared_at,
+        observed_state_changes=facts.observed_state_changes,
     )
     classification = _classification(facts, verification)
     applied_playbooks = [] if result is None else [playbook.path for playbook in result.applied_playbooks]

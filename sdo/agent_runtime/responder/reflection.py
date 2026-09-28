@@ -298,12 +298,14 @@ def _diagnosis_directive(outcome: OutcomeRecord) -> str:
         flipped = ", ".join(flip.detector_id for flip in verification.detectors if flip.flipped) or "none"
         verified = ", ".join(f"{check.kind} {check.source}" for check in verification.evidence if check.verified)
         contradicted = ", ".join(
-            f"{check.kind} {check.source}" for check in verification.evidence if check.verified is False
+            f"{check.kind} {check.source}" + (f" ({check.reason})" if check.reason else "")
+            for check in verification.evidence
+            if check.verified is False
         )
         line = f"- {verification.verdict.value}: {verification.summary}; detectors flipped: {flipped}"
         line += f"; verified evidence: {verified or 'none'}"
         if contradicted:
-            line += f"; evidence the controller never observed: {contradicted}"
+            line += f"; evidence not confirmed by the controller: {contradicted}"
         if verification.repair is not None:
             line += f"; repair attribution: {verification.repair.reason}"
         lines.append(line + "\n")

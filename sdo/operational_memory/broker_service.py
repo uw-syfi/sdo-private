@@ -15,6 +15,7 @@ from sdo.contracts import (
     DetectorEvaluationStatus,
     IncidentRequest,
     IncidentResult,
+    ObservedStateChange,
     StateChanges,
 )
 from sdo.operational_memory.commit_broker import CommitBroker, CommitBrokerError
@@ -129,6 +130,11 @@ class BrokerClosure(BaseModel):
     # repair action that started by then can back a root cause. None from
     # controllers that predate it.
     health_cleared_at: datetime | None = None
+    # Every object the controller saw differ from the healthy baseline while
+    # the incident was open, with its first observation. A state-change
+    # citation must predate the responder's own repair of that object. None
+    # from controllers that predate it.
+    observed_state_changes: list[ObservedStateChange] | None = None
     # Responder helper objects the controller deleted, as Kind/namespace/name.
     cleaned_helpers: list[str] = Field(default_factory=list)
     # Set when health did not clear within the controller's verification
@@ -450,6 +456,7 @@ class BrokerService:
                 incident_detector_states=closure.incident_detector_states,
                 final_state_changes=closure.final_state_changes,
                 health_cleared_at=closure.health_cleared_at,
+                observed_state_changes=closure.observed_state_changes,
                 health_verified=health_verified,
                 fault_confirmed=bool(result and result.confirmed_root_causes),
                 inspected_playbooks=surfaced,

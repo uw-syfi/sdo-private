@@ -7,7 +7,11 @@ claims against controller-owned facts:
 - every cited detector finding, synthetic scenario, or state change must
   exist in the incident request or in the controller's closing-time diff
   (a live observation cannot be checked and is accepted as live but
-  unverified);
+  unverified). A state change outside the dispatch-time diff must also
+  predate the responder's own repair of that object: the closing view holds
+  the responder's own edits (a restart's ``restartedAt``), and a change the
+  controller first saw after the repair started is that repair, not the
+  cause;
 - every explained detector must have fired at dispatch and be clear after
   the fix; and
 - the responder's own recorded repair must back the cause (F8): a successful
@@ -54,6 +58,7 @@ if TYPE_CHECKING:
         IncidentRequest,
         IncidentResult,
         ObjectRef,
+        ObservedStateChange,
         RepairActionReceipt,
         StateChanges,
     )
@@ -85,6 +90,9 @@ class EvidenceCheck(BaseModel):
     source: str
     #: True when the reference exists, False when it does not, None when it cannot be checked.
     verified: bool | None = None
+    #: Why a check failed, when the reference existed but is not evidence (for
+    #: example, a state change first observed after the responder's own repair).
+    reason: str | None = None
 
 
 class DetectorFlip(BaseModel):
@@ -132,6 +140,7 @@ def verify_diagnosis(
     incident_detector_states: Iterable[DetectorEvaluation] = (),
     final_state_changes: StateChanges | None = None,
     health_cleared_at: datetime | None = None,
+    observed_state_changes: Iterable[ObservedStateChange] | None = None,
 ) -> list[RootCauseVerification]:
     """Verify each confirmed root cause of ``result`` against controller facts.
 
@@ -146,6 +155,15 @@ def verify_diagnosis(
     detectors began their final clear streak. Only a repair action that
     started by then can back a cause. ``None`` (a controller that predates
     the fact) skips the timing check.
+
+    ``observed_state_changes`` is every object the controller saw differ from
+    the baseline while the incident was open, with when it first saw it. With
+    it, a state-change citation outside the dispatch-time diff counts only
+    if the controller observed it before the responder's first repair action
+    on that object started, so a wrong fix cannot cite its own edit. It is
+    also how a late fault the responder reverted exactly, gone from both
+    diffs, still verifies. ``None`` (a controller that predates it) keeps the
+    union of the two diffs.
     """
 
     if result is None:
@@ -160,7 +178,9 @@ def verify_diagnosis(
         for finding in request.findings
         if finding.rule_id.startswith(SCENARIO_RULE_PREFIX)
     }
-    changed = _changed_object_keys(request.state_changes, final_state_changes)
+    changed = _StateChangeEvidence.of(
+        request.state_changes, final_state_changes, observed_state_changes, result.repair_actions
+    )
     latest: dict[str, DetectorEvaluation] = {}
     for evaluation in sorted([*final_detector_states, *incident_detector_states], key=lambda item: item.evaluated_at):
         latest[evaluation.detector_id] = evaluation
@@ -181,45 +201,94 @@ def recovered_by_responder(verifications: Iterable[RootCauseVerification]) -> bo
     return any(attribution.attributed for attribution in attributions)
 
 
-def _changed_object_keys(
-    dispatch_state_changes: StateChanges | None,
-    final_state_changes: StateChanges | None,
-) -> set[str] | None:
-    """The ``kind/name`` of every object the controller ever saw change.
+@dataclass(frozen=True)
+class _StateChangeEvidence:
+    """What the controller saw change, and when, for checking ``state-change`` citations."""
 
-    ``None`` only when neither diff is available, meaning state-change
-    evidence cannot be checked at all (no baseline was ever configured).
-    """
+    #: ``Kind/name`` in the dispatch-time diff: observed before any repair.
+    dispatch: frozenset[str]
+    #: ``Kind/name`` in either diff (N11's union), for records without observation times.
+    changed: frozenset[str]
+    #: ``Kind/name`` to first observation while the incident was open; None in older records.
+    observed: dict[str, datetime] | None
+    #: Every recorded repair action with the objects it names, successful or not.
+    actions: tuple[tuple[RepairActionReceipt, tuple[_ObjectKey, ...]], ...]
+    #: False when no diff and no observation exist: no baseline was ever configured.
+    checkable: bool
 
-    if dispatch_state_changes is None and final_state_changes is None:
-        return None
-    keys: set[str] = set()
-    for state_changes in (dispatch_state_changes, final_state_changes):
-        if state_changes is not None:
-            keys.update(f"{change.kind}/{change.name}" for change in state_changes.changes)
-    return keys
+    @classmethod
+    def of(
+        cls,
+        dispatch_state_changes: StateChanges | None,
+        final_state_changes: StateChanges | None,
+        observed_state_changes: Iterable[ObservedStateChange] | None,
+        receipts: Iterable[RepairActionReceipt],
+    ) -> _StateChangeEvidence:
+        dispatch = frozenset(_labels(dispatch_state_changes))
+        changed = dispatch | frozenset(_labels(final_state_changes))
+        observed = None
+        if observed_state_changes is not None:
+            observed = {}
+            for item in observed_state_changes:
+                label = f"{item.kind}/{item.name}"
+                if label not in observed or item.first_observed_at < observed[label]:
+                    observed[label] = item.first_observed_at
+        actions = tuple((receipt, tuple(_action_keys(receipt))) for receipt in receipts)
+        checkable = dispatch_state_changes is not None or final_state_changes is not None or observed is not None
+        return cls(dispatch, changed, observed, actions, checkable)
+
+    def check(self, source: str) -> tuple[bool | None, str | None]:
+        if not self.checkable:
+            return None, None
+        if source in self.dispatch:
+            return True, None
+        if self.observed is None:
+            return source in self.changed, None
+        first_observed = self.observed.get(source)
+        if first_observed is None:
+            return False, "the controller never observed this object change while the incident was open"
+        cited = _ObjectKey.parse(source)
+        own = sorted(
+            (
+                (receipt.started_at, receipt.action_id)
+                for receipt, keys in self.actions
+                if cited is not None and any(cited.matches(key) for key in keys)
+            ),
+        )
+        if own and first_observed >= own[0][0]:
+            started_at, action_id = own[0]
+            return False, (
+                f"first observed at {first_observed.isoformat()}, after the responder's own repair "
+                f"{action_id} of it started at {started_at.isoformat()}: the change is that repair, not the cause"
+            )
+        return True, None
+
+
+def _labels(state_changes: StateChanges | None) -> list[str]:
+    return [] if state_changes is None else [f"{change.kind}/{change.name}" for change in state_changes.changes]
 
 
 def _verify(
     cause: ConfirmedRootCause,
     fired: set[str],
     scenarios: set[str],
-    changed: set[str] | None,
+    changed: _StateChangeEvidence,
     latest: dict[str, DetectorEvaluation],
     repairs: _Repairs,
 ) -> RootCauseVerification:
     checks = []
     for item in cause.evidence:
         verified: bool | None
+        reason: str | None = None
         if item.kind == "detector-finding":
             verified = item.source in fired
         elif item.kind == "synthetic-traffic":
             verified = item.source.removeprefix(SCENARIO_RULE_PREFIX) in scenarios
         elif item.kind == "state-change":
-            verified = None if changed is None else item.source in changed
+            verified, reason = changed.check(item.source)
         else:
             verified = None
-        checks.append(EvidenceCheck(kind=item.kind, source=item.source, verified=verified))
+        checks.append(EvidenceCheck(kind=item.kind, source=item.source, verified=verified, reason=reason))
     flips = []
     for detector_id in cause.explained_detectors:
         evaluation = latest.get(detector_id)

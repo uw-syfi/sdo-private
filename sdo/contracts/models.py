@@ -110,6 +110,20 @@ class StateChanges(ContractModel):
     unobserved_kinds: list[str] | None = None
 
 
+class ObservedStateChange(ContractModel):
+    """An object the controller saw differ from the healthy baseline while an incident was open.
+
+    ``first_observed_at`` is the first time its diff showed the object changed,
+    at dispatch or at a later evaluation. A ``state-change`` citation is
+    evidence of the cause only if it was observed before the responder's own
+    repair of that object started; otherwise it is the repair's own edit.
+    """
+
+    kind: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    first_observed_at: datetime
+
+
 class IncidentView(ContractModel):
     """The open incident as the controller sees it at its latest evaluation.
 

@@ -12,6 +12,7 @@ from sdo.contracts import (
     IncidentResult,
     IncidentStatus,
     ObjectRef,
+    ObservedStateChange,
     RootCauseEvidence,
     StateChange,
     StateChanges,
@@ -247,3 +248,35 @@ def test_a_composite_with_one_own_repair_is_still_an_sdo_success() -> None:
         DiagnosisVerdict.CONFIRMED,
         DiagnosisVerdict.UNATTRIBUTED,
     ]
+
+
+def test_a_cause_citing_the_responders_own_edit_is_contradicted_in_the_outcome() -> None:
+    """rc2: the observation times reach verification through the outcome facts."""
+
+    own_edit = ConfirmedRootCause(
+        summary="a stale frontend rollout broke the service",
+        resources=[ObjectRef(kind="Deployment", name="frontend")],
+        evidence=[RootCauseEvidence(kind="state-change", source="Deployment/frontend", observation="rollout")],
+        explained_detectors=["missing-configmap"],
+    )
+    facts = _attribution_facts(own_edit, repaired=("Deployment/frontend",))
+    assert facts.result is not None
+    repaired_at = facts.result.repair_actions[0].started_at
+    facts = facts.model_copy(
+        update={
+            "final_state_changes": StateChanges(
+                baseline_at=repaired_at,
+                observed_at=repaired_at,
+                changes=[StateChange(kind="Deployment", name="frontend", change="modified")],
+            ),
+            "observed_state_changes": [
+                ObservedStateChange(
+                    kind="Deployment", name="frontend", first_observed_at=repaired_at + timedelta(seconds=3)
+                )
+            ],
+        }
+    )
+
+    outcome = derive_outcome(facts)
+
+    assert [verification.verdict for verification in outcome.diagnosis_verification] == [DiagnosisVerdict.CONTRADICTED]
