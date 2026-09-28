@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from benchmarks.sregym.adapter import STRICT_RECEIPT_FILENAME, control_namespace_for
+from benchmarks.sregym.adapter import REJECTED_RECEIPT_FILENAME, STRICT_RECEIPT_FILENAME, control_namespace_for
 from benchmarks.sregym.assurance.chaos import ChaosContext, ChaosThread
 from benchmarks.sregym.assurance.scripted_codex.directive import (
     DIRECTIVE_CONFIGMAP,
@@ -457,7 +457,16 @@ class ScriptedAgent:
         receipt_path = artifacts / STRICT_RECEIPT_FILENAME
         receipt: dict[str, Any] = json.loads(receipt_path.read_text(encoding="utf-8")) if receipt_path.is_file() else {}
         checks = record.checks
-        checks.append(Check("strict-receipt", bool(receipt), outcome.error or str(receipt_path)))
+        rejected_path = artifacts / REJECTED_RECEIPT_FILENAME
+        # A closure the responder did not mitigate (for example F16's cancelled no-op) must be
+        # refused by strict validation; its evidence is the rejected receipt.
+        evidence = receipt
+        if not receipt and expect.resolution != "mitigated" and rejected_path.is_file():
+            rejected = json.loads(rejected_path.read_text(encoding="utf-8"))
+            evidence = rejected.get("receipt") or {}
+            checks.append(Check("strict-receipt-rejected", True, str(rejected.get("validation_error"))[:300]))
+        else:
+            checks.append(Check("strict-receipt", bool(receipt), outcome.error or str(receipt_path)))
         orphans = [
             str(path)
             for path in self._run_dir.rglob(STRICT_RECEIPT_FILENAME)
@@ -525,7 +534,7 @@ class ScriptedAgent:
             attempts = int(receipt.get("reflection_attempts") or 0)
             checks.append(Check("reflection-attempts", attempts >= expect.min_reflection_attempts, str(attempts)))
         checks.extend(self._memory_checks(spec, incident_id))
-        checks.extend(self._token_checks(receipt, outcome, turns, artifacts))
+        checks.extend(self._token_checks(evidence, outcome, turns, artifacts))
         checks.extend(self._leak_checks(spec, incident_id))
         record.metrics.update(
             {
