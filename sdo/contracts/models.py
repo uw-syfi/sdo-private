@@ -109,6 +109,21 @@ class StateChanges(ContractModel):
     unobserved_kinds: list[str] | None = None
 
 
+class IncidentView(ContractModel):
+    """The open incident as the controller sees it at its latest evaluation.
+
+    Published in the controller's state ConfigMap (Go ``runtime.IncidentView``)
+    while an incident is open. The request is a snapshot from dispatch; the
+    view shows what still blocks closure and the configuration diff now.
+    """
+
+    incident_id: str = Field(min_length=1)
+    observed_at: datetime
+    blocking_detectors: list[str] = Field(default_factory=list)
+    blocking_findings: list[Finding] = Field(default_factory=list)
+    state_changes: StateChanges | None = None
+
+
 class IncidentRequest(ContractModel):
     schema_version: Literal["sdo.dev/v1alpha1"] = SCHEMA_VERSION
     application: str = Field(min_length=1)

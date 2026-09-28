@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,6 +16,7 @@ from sdo.agent_runtime.responder.incident_status import (
     EXIT_HEALTHY,
     EXIT_UNAVAILABLE,
     EXIT_UNHEALTHY,
+    ControllerViewError,
     IncidentStatusReport,
     IncidentStatusState,
     incident_status,
@@ -23,6 +25,9 @@ from sdo.contracts import IncidentRequest
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+# The package re-exports the function under the module's name.
+incident_status_module = importlib.import_module("sdo.agent_runtime.responder.incident_status")
 
 FIXTURE_DIR = Path(__file__).resolve().parents[4] / "fixtures" / "sdo" / "contracts"
 
@@ -192,3 +197,195 @@ def test_cli_prints_json_and_exits_with_the_verdict(
 def test_status_model_rejects_a_healthy_state_without_a_burst() -> None:
     with pytest.raises(ValueError, match="burst"):
         IncidentStatusReport(state=IncidentStatusState.HEALTHY, burst=None, detail="")
+
+
+def _view(request_path: Path, *, findings: list[dict[str, Any]], changes: list[dict[str, Any]] | None = None) -> str:
+    request = IncidentRequest.model_validate_json(request_path.read_text(encoding="utf-8"))
+    view: dict[str, Any] = {
+        "incident_id": request.incident_id,
+        "observed_at": "2026-09-28T10:00:05Z",
+        "blocking_detectors": sorted({finding["detector_id"] for finding in findings}),
+        "blocking_findings": findings,
+    }
+    if changes is not None:
+        view["state_changes"] = {
+            "baseline_at": "2026-09-28T09:58:00Z",
+            "observed_at": "2026-09-28T10:00:05Z",
+            "changes": changes,
+        }
+    return json.dumps({"version": "sdo.controller/v1", "incident_view": view})
+
+
+def _finding(detector: str, rule: str, kind: str, name: str) -> dict[str, Any]:
+    return {
+        "detector_id": detector,
+        "rule_id": rule,
+        "status": "active",
+        "severity": "critical",
+        "summary": f"{kind} {name} is unavailable",
+        "evidence": f"deployment hotel-reservation/{name} has 0/1 available replicas",
+        "primary_resource": {"api_version": "apps/v1", "kind": kind, "namespace": "hotel-reservation", "name": name},
+        "fingerprint": f"{detector}/{rule}/{name}",
+    }
+
+
+def _reader(payload: str | None, calls: list[str] | None = None) -> Any:
+    def read(location: str) -> str:
+        if calls is not None:
+            calls.append(location)
+        if payload is None:
+            raise ControllerViewError('configmaps "sdo-controller-state" is forbidden')
+        return payload
+
+    return read
+
+
+def test_the_controllers_health_detectors_block_what_traffic_cannot_see(
+    prober: tuple[_FakeProber, str], tmp_path: Path
+) -> None:
+    """A deleted ConfigMap behind an in-memory cache leaves traffic healthy, but closure still waits."""
+
+    _, url = prober
+    request_path = _traffic_request(tmp_path)
+    calls: list[str] = []
+    payload = _view(
+        request_path, findings=[_finding("health-objective", "deployment-unavailable", "Deployment", "mongodb-geo")]
+    )
+
+    status = incident_status(
+        prober_url=url,
+        request_path=request_path,
+        controller_state="hotel-reservation-sdo/sdo-controller-state",
+        controller_reader=_reader(payload, calls),
+    )
+
+    assert calls == ["hotel-reservation-sdo/sdo-controller-state"]
+    assert status.state == IncidentStatusState.UNHEALTHY
+    assert status.exit_code == EXIT_UNHEALTHY
+    assert status.blocking_findings[0].primary_resource.name == "mongodb-geo"
+    text = status.render()
+    assert "health-objective" in text
+    assert "mongodb-geo" in text
+    assert "will not close" in text
+    assert status.to_json()["controller"]["blocking_detectors"] == ["health-objective"]
+
+
+def test_traffic_findings_in_the_view_defer_to_the_fresher_burst(
+    prober: tuple[_FakeProber, str], tmp_path: Path
+) -> None:
+    _, url = prober
+    request_path = _traffic_request(tmp_path)
+    payload = _view(
+        request_path, findings=[_finding("traffic-health", "scenario-slo.search-hotels", "Service", "frontend")]
+    )
+
+    status = incident_status(
+        prober_url=url, request_path=request_path, controller_state="ns/cm", controller_reader=_reader(payload)
+    )
+
+    assert status.state == IncidentStatusState.HEALTHY
+    assert status.blocking_findings == ()
+
+
+def test_a_view_of_another_incident_or_an_unreadable_one_falls_back_to_the_burst(
+    prober: tuple[_FakeProber, str], tmp_path: Path
+) -> None:
+    _, url = prober
+    request_path = _traffic_request(tmp_path)
+    stale = json.loads(
+        _view(request_path, findings=[_finding("health-objective", "deployment-unavailable", "Deployment", "geo")])
+    )
+    stale["incident_view"]["incident_id"] = "an-earlier-incident"
+
+    other = incident_status(
+        prober_url=url,
+        request_path=request_path,
+        controller_state="ns/cm",
+        controller_reader=_reader(json.dumps(stale)),
+    )
+    unreadable = incident_status(
+        prober_url=url, request_path=request_path, controller_state="ns/cm", controller_reader=_reader(None)
+    )
+    closed = incident_status(
+        prober_url=url,
+        request_path=request_path,
+        controller_state="ns/cm",
+        controller_reader=_reader(json.dumps({"version": "sdo.controller/v1"})),
+    )
+
+    for status in (other, unreadable, closed):
+        assert status.state == IncidentStatusState.HEALTHY
+        assert status.blocking_findings == ()
+    assert "an-earlier-incident" in other.controller_detail
+    assert "forbidden" in unreadable.controller_detail
+    assert "no open incident" in closed.controller_detail
+
+
+def test_changes_after_the_request_was_taken_are_reported(prober: tuple[_FakeProber, str], tmp_path: Path) -> None:
+    """A second fault that lands after dispatch is missing from the request's diff; status shows it."""
+
+    _, url = prober
+    request_path = _traffic_request(tmp_path)
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    request["state_changes"] = {
+        "baseline_at": "2026-09-28T09:58:00Z",
+        "observed_at": "2026-09-28T10:00:00Z",
+        "changes": [{"kind": "ConfigMap", "name": "mongo-geo-script", "change": "removed"}],
+    }
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+    payload = _view(
+        request_path,
+        findings=[],
+        changes=[
+            {"kind": "ConfigMap", "name": "mongo-geo-script", "change": "removed"},
+            {"kind": "ConfigMap", "name": "mongo-rate-script", "change": "removed"},
+        ],
+    )
+
+    status = incident_status(
+        prober_url=url, request_path=request_path, controller_state="ns/cm", controller_reader=_reader(payload)
+    )
+
+    assert [(change.kind, change.name) for change in status.new_state_changes] == [("ConfigMap", "mongo-rate-script")]
+    assert "ConfigMap/mongo-rate-script removed" in status.render()
+    assert status.to_json()["controller"]["new_state_changes"][0]["name"] == "mongo-rate-script"
+
+
+def test_the_cli_reads_the_controller_state_the_controller_names(
+    prober: tuple[_FakeProber, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, url = prober
+    request_path = _traffic_request(tmp_path)
+    payload = _view(
+        request_path, findings=[_finding("health-objective", "deployment-unavailable", "Deployment", "mongodb-geo")]
+    )
+    calls: list[str] = []
+    monkeypatch.setenv("SDO_PROBER_URL", url)
+    monkeypatch.setenv("SDO_REQUEST_PATH", str(request_path))
+    monkeypatch.setenv("SDO_CONTROLLER_STATE", "hotel-reservation-sdo/sdo-controller-state")
+    monkeypatch.setattr(incident_status_module, "read_controller_state", _reader(payload, calls))
+
+    assert main(["incident", "status"]) == EXIT_UNHEALTHY
+    assert calls == ["hotel-reservation-sdo/sdo-controller-state"]
+
+
+def test_the_controller_state_is_read_with_kubectl(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[list[str]] = []
+
+    class Completed:
+        returncode = 0
+        stdout = json.dumps({"data": {"runtime-state.json": '{"version": "sdo.controller/v1"}'}})
+        stderr = ""
+
+    def run(argv: list[str], **_: Any) -> Completed:
+        seen.append(argv)
+        return Completed()
+
+    monkeypatch.setattr(incident_status_module.subprocess, "run", run)
+
+    assert (
+        incident_status_module.read_controller_state("ctl/sdo-controller-state") == '{"version": "sdo.controller/v1"}'
+    )
+    assert seen == [["kubectl", "get", "configmap", "sdo-controller-state", "-n", "ctl", "-o", "json"]]
+    with pytest.raises(ControllerViewError, match="NAMESPACE/NAME"):
+        incident_status_module.read_controller_state("no-slash")

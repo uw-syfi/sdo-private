@@ -304,6 +304,8 @@ def test_every_path_verifies_with_incident_status_before_submitting(tmp_path: Pa
     for prompt in (_responder_prompt(cold), _responder_prompt(_warm_request(tmp_path))):
         assert "`python3 -m sdo incident status`" in prompt
         assert "same synthetic traffic the controller requires before it closes this incident" in prompt
+        assert "other health detectors still fire" in prompt
+        assert "changed after this request was taken" in prompt
         assert "Do not submit mitigation through any channel, and do not return a completed result" in prompt
         assert "reports unavailable" in prompt
         assert "`sdo-incident-status`" in prompt
