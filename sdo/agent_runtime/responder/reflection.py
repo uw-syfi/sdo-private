@@ -282,8 +282,37 @@ def _learning_request(
         f"{_INCIDENT_DETECTOR_SKELETON}\n"
         f"Required action for this {outcome.classification.value} outcome: "
         f"{_classification_directive(outcome.classification)}\n\n"
+        f"{_diagnosis_directive(outcome)}"
         f"Current outcome:\n{outcome.model_dump_json(indent=2)}\n\n"
         f"Outcome history:\n{json.dumps([record.model_dump(mode='json') for record in history], indent=2)}\n"
+    )
+
+
+def _diagnosis_directive(outcome: OutcomeRecord) -> str:
+    """Summarize SDO's deterministic diagnosis check and how learning must use it."""
+
+    if not outcome.diagnosis_verification:
+        return ""
+    lines = []
+    for verification in outcome.diagnosis_verification:
+        flipped = ", ".join(flip.detector_id for flip in verification.detectors if flip.flipped) or "none"
+        verified = ", ".join(f"{check.kind} {check.source}" for check in verification.evidence if check.verified)
+        contradicted = ", ".join(
+            f"{check.kind} {check.source}" for check in verification.evidence if check.verified is False
+        )
+        line = f"- {verification.verdict.value}: {verification.summary}; detectors flipped: {flipped}"
+        line += f"; verified evidence: {verified or 'none'}"
+        if contradicted:
+            line += f"; evidence the controller never observed: {contradicted}"
+        lines.append(line + "\n")
+    return (
+        "Diagnosis verification (deterministic, by SDO):\n"
+        f"{''.join(lines)}"
+        "Learn only from confirmed causes: a playbook's diagnosis and any new incident detector must describe a "
+        "confirmed cause, never a contradicted or unverified one. Every playbook you create or refine must end "
+        "with a `## Verification` section that records how this incident confirmed the cause: the verified "
+        "evidence above, the detectors that flipped, and the check (for example `python3 -m sdo incident "
+        "status`) that proved recovery.\n\n"
     )
 
 
