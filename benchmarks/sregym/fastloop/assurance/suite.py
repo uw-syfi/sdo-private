@@ -50,6 +50,7 @@ from benchmarks.sregym.fastloop.assurance.results import (
     GateProbe,
     HelperResult,
     PartialFixResult,
+    StrayIncident,
     WrongFixResult,
 )
 from benchmarks.sregym.fastloop.codex_agent import SubmissionStub
@@ -223,6 +224,9 @@ class AssuranceSuite:
         self.bounds = bounds or Bounds()
         self._quiet_since: datetime | None = None
         self._runs = 0
+        self._last_case = ""
+        #: Incidents the controller opened that no injected fault explains, in order.
+        self.stray_incidents: list[StrayIncident] = []
 
     # --- probes -----------------------------------------------------------------------------------
 
@@ -319,6 +323,64 @@ class AssuranceSuite:
             if not self.controller.alive():
                 raise HarnessError("controller exited while waiting for a settled baseline")
             time.sleep(min(remaining, 5.0))
+
+    def settle(self) -> None:
+        """Answer stray incidents until the controller has been quiet past the settle period with none open."""
+
+        while True:
+            self.wait_settled()
+            strays = self.open_requests()
+            if not strays:
+                return
+            for path in strays:
+                self.stray_incidents.append(self._close_stray(path))
+
+    def open_requests(self) -> list[Path]:
+        """Incident requests whose responder has not been answered."""
+
+        return [
+            path
+            for path in sorted(self.spool.glob("*.request.json"))
+            if not result_path(self.spool, path.name.removesuffix(".request.json")).exists()
+        ]
+
+    def _close_stray(self, path: Path) -> StrayIncident:
+        """Answer an incident no fault explains with an empty result, and wait for its closure."""
+
+        request = json.loads(path.read_text(encoding="utf-8"))
+        incident_id = str(request["incident_id"])
+        dispatched = datetime.fromtimestamp(path.stat().st_mtime, tz=utcnow().tzinfo)
+        findings = request.get("findings") or []
+        stray = StrayIncident(
+            incident_id=incident_id,
+            dispatched_at=dispatched,
+            after_case=self._last_case,
+            findings=sorted(
+                {
+                    f"{item['detector_id']}:{item['rule_id']}:{item['primary_resource']['name']}"
+                    for item in findings
+                    if isinstance(item, dict)
+                }
+            ),
+            evidence=str(findings[0].get("evidence", ""))[:500] if findings else "",
+            state_changes=diff_reading(request, ()).named,
+        )
+        logger.warning("stray incident %s after %s: %s", incident_id, self._last_case, stray.findings)
+        result = scripted_result(
+            request, objects=(), summary="no fault injected", actions=[], started_at=utcnow(), verification=[]
+        )
+        result["confirmed_root_causes"] = []
+        result_path(self.spool, incident_id).write_text(json.dumps(result), encoding="utf-8")
+        try:
+            ledger = self.wait_closure(incident_id, timeout=self.bounds.verify_seconds + 120)
+            closure = ledger.get("closure") or {}
+            verified = closure.get("verified_at")
+            if verified:
+                verified_at = datetime.fromisoformat(str(verified).replace("Z", "+00:00"))
+                stray.closed_seconds = round((verified_at - dispatched).total_seconds(), 3)
+        except HarnessError as exc:
+            stray.error = str(exc)
+        return stray
 
     def known_requests(self) -> set[str]:
         return {path.name for path in self.spool.glob("*.request.json")}
@@ -492,7 +554,8 @@ class AssuranceSuite:
         self._runs += 1
         tag = f"{self._runs}-{int(time.time())}"
         bounds = self.bounds
-        self.wait_settled()
+        self.settle()
+        self._last_case = f"{name} #{iteration}"
         started = utcnow()
         run = FaultRun(case=name, kind=kind, iteration=iteration, problems=problems, started_at=started)  # type: ignore[arg-type]
         checks = run.checks

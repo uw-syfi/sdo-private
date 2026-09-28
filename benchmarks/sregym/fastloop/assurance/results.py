@@ -161,6 +161,22 @@ class SoakResult(BaseModel):
     checks: list[Check] = Field(default_factory=list)
 
 
+class StrayIncident(BaseModel):
+    """An incident the controller opened that no injected fault explains."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    incident_id: str
+    dispatched_at: datetime
+    #: The run that finished last before it opened.
+    after_case: str = ""
+    findings: list[str] = Field(default_factory=list)
+    evidence: str = ""
+    state_changes: list[str] = Field(default_factory=list)
+    closed_seconds: float | None = None
+    error: str = ""
+
+
 class SuiteResults(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -174,6 +190,7 @@ class SuiteResults(BaseModel):
     finished_at: datetime | None = None
     runs: list[FaultRun] = Field(default_factory=list)
     soak: SoakResult | None = None
+    stray_incidents: list[StrayIncident] = Field(default_factory=list)
     port_forward_restarts: int = 0
     notes: list[str] = Field(default_factory=list)
 

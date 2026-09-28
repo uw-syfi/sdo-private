@@ -354,5 +354,27 @@ def test_the_harness_reads_the_ledger_the_broker_service_writes(tmp_path: Path) 
     assert broker_ledger(repository, "hotel-reservation-2") is None
 
 
+def test_an_unanswered_request_is_an_open_incident(tmp_path: Path) -> None:
+    from benchmarks.sregym.fastloop.assurance.harness import Kubectl
+    from benchmarks.sregym.fastloop.assurance.suite import AssuranceSuite
+
+    suite = AssuranceSuite(
+        kubectl=Kubectl(tmp_path / "kubeconfig"),
+        driver=None,  # type: ignore[arg-type]
+        controller=None,  # type: ignore[arg-type]
+        namespace="hotel-reservation",
+        control_namespace="hotel-reservation-sdo",
+        app_root=tmp_path,
+        spool=tmp_path,
+        prober_url="http://127.0.0.1:9",
+        helper_image="image",
+    )
+    for incident in ("answered", "stray"):
+        responder.request_path(tmp_path, incident).write_text("{}", encoding="utf-8")
+    responder.result_path(tmp_path, "answered").write_text("{}", encoding="utf-8")
+
+    assert suite.open_requests() == [responder.request_path(tmp_path, "stray")]
+
+
 def test_spool_names_are_file_safe() -> None:
     assert responder.spool_name("Hotel Reservation/1") == "Hotel_Reservation_1"

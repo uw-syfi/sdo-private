@@ -38,7 +38,7 @@ from benchmarks.sregym.fastloop.assurance.harness import (
     deploy_prober,
     utcnow,
 )
-from benchmarks.sregym.fastloop.assurance.results import Check, FaultRun, SuiteResults
+from benchmarks.sregym.fastloop.assurance.results import Check, FaultRun, StrayIncident, SuiteResults
 from benchmarks.sregym.fastloop.assurance.seed import build_seed_repository
 from benchmarks.sregym.fastloop.assurance.soak import run_soak
 from benchmarks.sregym.fastloop.assurance.suite import AssuranceSuite, Bounds
@@ -158,10 +158,10 @@ def _run(args: argparse.Namespace) -> int:
             for iteration in range(1, args.iterations + 1):
                 for case in faults:
                     run = suite.run_single(case, iteration=iteration, hold=_hold(args.hold, iteration))
-                    _record(results, run, controller, results_path)
+                    _record(results, run, controller, results_path, suite.stray_incidents)
                 for case in composites:
                     run = suite.run_composite(case, iteration=iteration)
-                    _record(results, run, controller, results_path)
+                    _record(results, run, controller, results_path, suite.stray_incidents)
             if args.soak_minutes > 0:
                 results.soak = run_soak(
                     suite,
@@ -175,7 +175,7 @@ def _run(args: argparse.Namespace) -> int:
                 # Nothing accumulated in the diff during the soak: the next fault's diff names only its object.
                 run = suite.run_single(single_fault("selector-mismatch"), iteration=0)
                 run.case = "post-soak selector-mismatch"
-                _record(results, run, controller, results_path)
+                _record(results, run, controller, results_path, suite.stray_incidents)
     except HarnessError as exc:
         logger.error("assurance run aborted: %s", exc)
         results.notes.append(f"aborted: {exc}")
@@ -187,6 +187,7 @@ def _run(args: argparse.Namespace) -> int:
         results.finished_at = utcnow()
         results.save(results_path)
     print(format_table(results))
+    print(f"stray incidents: {len(results.stray_incidents)}")
     print(f"results: {results_path}")
     failed = [run for run in results.runs if not run.passed]
     if results.soak is not None and not all(check.passed for check in results.soak.checks):
@@ -194,7 +195,16 @@ def _run(args: argparse.Namespace) -> int:
     return exit_code or (1 if failed else 0)
 
 
-def _record(results: SuiteResults, run: FaultRun, controller: ControllerProcess, path: Path) -> None:
+def _record(
+    results: SuiteResults,
+    run: FaultRun,
+    controller: ControllerProcess,
+    path: Path,
+    strays: list[StrayIncident],
+) -> None:
+    for stray in strays[len(results.stray_incidents) :]:
+        print(f"[STRAY] {stray.incident_id} after {stray.after_case}: {stray.findings}", flush=True)
+    results.stray_incidents = list(strays)
     if controller.started_at is not None and run.injection_started_at is not None and not results.runs:
         uptime = (run.injection_started_at - controller.started_at).total_seconds()
         run.checks.append(
