@@ -531,6 +531,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			delay = 2 * time.Second
 		case applied.Paused:
 			delay = time.Hour
+			if wake := controller.PausedWake(); !wake.IsZero() {
+				delay = time.Until(wake)
+			}
 		default:
 			delay = time.Until(controller.NextWake())
 		}
@@ -681,6 +684,12 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 				continue
 			}
 			if applied.Paused {
+				if err := executePausedEffects(runCtx, controller); err != nil {
+					if runCtx.Err() != nil {
+						return nil
+					}
+					return err
+				}
 				continue
 			}
 			if err := controller.Step(runCtx, time.Now().UTC(), nil); err != nil {
@@ -896,6 +905,23 @@ func defaultIdentity() string {
 		hostname = "sdo-controller"
 	}
 	return hostname + "-" + strconv.Itoa(os.Getpid())
+}
+
+// executePausedEffects runs only operational-memory effects: a paused
+// controller neither prepares nor dispatches a responder.
+func executePausedEffects(ctx context.Context, controller *Controller) error {
+	if closure, ok := controller.PendingClosureEffect(); ok {
+		if err := controller.ExecuteClosureEffect(ctx, closure); err != nil {
+			return fmt.Errorf("execute persisted closure effect: %w", err)
+		}
+		return nil
+	}
+	if acknowledgment, ok := controller.PendingClosureAcknowledgmentEffect(); ok {
+		if err := controller.ExecuteClosureAcknowledgmentEffect(ctx, acknowledgment); err != nil {
+			return fmt.Errorf("execute persisted closure acknowledgment effect: %w", err)
+		}
+	}
+	return nil
 }
 
 func executePendingEffects(ctx context.Context, controller *Controller) error {
