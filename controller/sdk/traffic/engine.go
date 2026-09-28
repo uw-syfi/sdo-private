@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -48,7 +49,15 @@ type Sample struct {
 	Request string `json:"request,omitempty"`
 	// Error explains a failed sample: the transport error, the check's
 	// reason, or a bounded excerpt of the unexpected response body.
-	Error        string `json:"error,omitempty"`
+	Error string `json:"error,omitempty"`
+	// DialFailed marks a failure that happened while establishing the
+	// connection (DNS or TCP dial), rather than while sending the request,
+	// reading the response, or checking it. A NetworkPolicy or a stopped
+	// listener that refuses new connections shows up here, distinctly from
+	// an application-level error or a slow response, whether the dial
+	// failed outright (Outcome error) or hung until the dial timeout
+	// (Outcome timeout).
+	DialFailed   bool   `json:"dialFailed,omitempty"`
 	Requests     int    `json:"requests"`
 	CleanupError string `json:"cleanupError,omitempty"`
 }
@@ -176,6 +185,7 @@ func (e *Engine) Iterate(ctx context.Context, iteration uint64) (string, Sample)
 		}
 		if result.outcome != OutcomeOK {
 			sample.Outcome, sample.Step, sample.Request, sample.Error = result.outcome, step.Name, result.request, result.err
+			sample.DialFailed = result.dial
 			break
 		}
 	}
@@ -200,6 +210,7 @@ type stepResult struct {
 	sent    int
 	request string
 	err     string
+	dial    bool
 }
 
 func (e *Engine) step(ctx context.Context, scenario Scenario, step Step, rng *rand.Rand, state State, base string, cleanup bool) stepResult {
@@ -219,10 +230,11 @@ func (e *Engine) step(ctx context.Context, scenario Scenario, step Step, rng *ra
 	}
 	response, err := e.client.Do(built)
 	if err != nil {
+		dial := isDialError(err)
 		if isTimeout(requestCtx, err) {
-			return stepResult{outcome: OutcomeTimeout, sent: 1, request: line, err: bounded(err.Error())}
+			return stepResult{outcome: OutcomeTimeout, sent: 1, request: line, err: bounded(err.Error()), dial: dial}
 		}
-		return stepResult{outcome: OutcomeError, sent: 1, request: line, err: bounded(err.Error())}
+		return stepResult{outcome: OutcomeError, sent: 1, request: line, err: bounded(err.Error()), dial: dial}
 	}
 	defer response.Body.Close()
 	body, readErr := io.ReadAll(io.LimitReader(response.Body, MaxResponseBody))
@@ -376,6 +388,18 @@ func isTimeout(ctx context.Context, err error) bool {
 	}
 	var timeout interface{ Timeout() bool }
 	return errors.As(err, &timeout) && timeout.Timeout()
+}
+
+// isDialError reports whether err happened while establishing the
+// connection (DNS lookup or TCP dial), rather than while writing the
+// request, reading the response, or checking it. It covers both an
+// outright refusal and a dial that hung until its own timeout, so a
+// connection-level fault (for example a NetworkPolicy denying new
+// connections) is classified the same way whether the failure was fast or
+// slow.
+func isDialError(err error) bool {
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && opErr.Op == "dial"
 }
 
 func bounded(text string) string {

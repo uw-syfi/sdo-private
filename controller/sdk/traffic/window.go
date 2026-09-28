@@ -68,8 +68,12 @@ type SLOVerdict struct {
 	Latency     time.Duration
 	SLO         SLO
 	Violations  []string
-	// StatusCounts counts samples by last HTTP status, "transport" for
-	// failures with no response, and "timeout".
+	// StatusCounts counts samples by last HTTP status, "dial" for a
+	// connection that was refused or reset outright, "transport" for any
+	// other failure with no response, and "timeout" for any sample that hit
+	// its deadline, whether while dialing or while waiting on a slow
+	// response; Sample.DialFailed distinguishes a dial timeout from the
+	// rest of the "timeout" bucket.
 	StatusCounts   map[string]int
 	RecentFailures []Sample
 	Span           time.Duration
@@ -110,7 +114,10 @@ func Evaluate(scenarioID string, slo SLO, samples []Sample, now time.Time) SLOVe
 		}
 		if sample.Outcome != OutcomeTimeout {
 			key := "transport"
-			if sample.Status > 0 {
+			switch {
+			case sample.DialFailed:
+				key = "dial"
+			case sample.Status > 0:
 				key = strconv.Itoa(sample.Status)
 			}
 			verdict.StatusCounts[key]++
