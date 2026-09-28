@@ -127,3 +127,16 @@ def test_adapter_responder_instructions_ask_for_user_outcomes_not_a_fault_specif
 
     assert "ready endpoint" not in text
     assert "verify the affected user-facing requests succeed" in text
+
+
+@pytest.mark.parametrize("mode", ["concise", "full"])
+def test_codex_baseline_verify_prompts_carry_no_benchmark_tailored_token(mode: str) -> None:
+    """The baseline arm's verify text must be as neutral as SDO's prompts, or the comparison is unfair."""
+    from benchmarks.sregym.runner.codex_baseline import CONCISE_VERIFY_PROMPT, FULL_VERIFY_PROMPT
+
+    text = {"concise": CONCISE_VERIFY_PROMPT, "full": FULL_VERIFY_PROMPT}[mode]
+    hits = [pattern for pattern, _ in TAILORED_TOKENS if re.search(pattern, text, re.IGNORECASE)]
+
+    assert not hits, f"benchmark-tailored tokens in the {mode} verify prompt: {hits}"
+    for fault_class in ("configmap", "networkpolicy", "selector", "readiness"):
+        assert fault_class not in text.lower()
