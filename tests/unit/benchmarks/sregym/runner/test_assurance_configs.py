@@ -42,17 +42,23 @@ ROTATIONS = {
     "d": (K1, K2, S1, S2, S3),
 }
 SDO = {f"sdo_codex_luna_assure_p1_{rotation}.toml": rotation for rotation in ROTATIONS}
-STOCK = ("codex_luna_assure_p1_stock_1.toml", "codex_luna_assure_p1_stock_2.toml")
-VERIFY = ("codex_luna_verify_assure_p1_1.toml", "codex_luna_verify_assure_p1_2.toml")
+#: Phase 1 has no stock (no-verify) Codex arm (user decision, 2026-09-28): the
+#: sole Codex arm is the default, concise-verify baseline, on 4 lanes.
+VERIFY = (
+    "codex_luna_verify_assure_p1_1.toml",
+    "codex_luna_verify_assure_p1_2.toml",
+    "codex_luna_verify_assure_p1_3.toml",
+    "codex_luna_verify_assure_p1_4.toml",
+)
 LANES = {
     "sdo_codex_luna_assure_p1_a.toml": "assure-w0",
     "sdo_codex_luna_assure_p1_b.toml": "assure-w1",
     "sdo_codex_luna_assure_p1_c.toml": "assure-w2",
     "sdo_codex_luna_assure_p1_d.toml": "assure-w3",
-    STOCK[0]: "assure-w4",
-    STOCK[1]: "assure-w5",
-    VERIFY[0]: "assure-w6",
-    VERIFY[1]: "assure-w7",
+    VERIFY[0]: "assure-w4",
+    VERIFY[1]: "assure-w5",
+    VERIFY[2]: "assure-w6",
+    VERIFY[3]: "assure-w7",
 }
 LUNA = sorted(EXPERIMENTS.glob("*luna*.toml"))
 RULED = sorted(PHASE1.glob("*.toml")) + LUNA
@@ -143,11 +149,10 @@ def test_the_rotations_put_every_problem_once_at_every_stream_position() -> None
     assert all(count == 1 for count in positions.values())
 
 
-@pytest.mark.parametrize("pair", [STOCK, VERIFY], ids=["stock", "verify"])
-def test_each_codex_arm_makes_five_attempts_per_problem_over_two_interleaved_lanes(pair: tuple[str, str]) -> None:
-    configs = [load_experiment_config(PHASE1 / name) for name in pair]
+def test_the_codex_arm_makes_five_attempts_per_problem_over_four_interleaved_lanes() -> None:
+    configs = [load_experiment_config(PHASE1 / name) for name in VERIFY]
 
-    assert [len(config.problems) for config in configs] == [13, 12]
+    assert [len(config.problems) for config in configs] == [7, 6, 6, 6]
     assert Counter(problem for config in configs for problem in config.problems) == dict.fromkeys(PHASE_ONE, 5)
     assert configs[0].problems[:5] != configs[1].problems[:5]
     for config in configs:
@@ -157,16 +162,14 @@ def test_each_codex_arm_makes_five_attempts_per_problem_over_two_interleaved_lan
         assert config.repeat == 1
         assert config.app_filter == "hotel_reservation"
         assert config.deploy_from_source
+        assert config.agent_config["codex"]["verify_protocol"] == "concise"
 
 
-def test_the_verify_arm_differs_from_the_stock_arm_only_in_the_protocol_flag() -> None:
-    for stock_name, verify_name in zip(STOCK, VERIFY, strict=True):
-        stock = _toml(PHASE1 / stock_name)
-        verify = _toml(PHASE1 / verify_name)
-        assert verify.pop("agent") == {"codex": {"verify_protocol": True}}
-        assert "agent" not in stock
-        assert verify == stock
-        assert load_experiment_config(PHASE1 / verify_name).agent_config["codex"]["verify_protocol"] is True
+def test_the_codex_arm_is_the_default_concise_verify_baseline_not_stock_or_full() -> None:
+    """Phase 1 has no stock arm (user decision, 2026-09-28): every Codex lane runs the default."""
+    for name in VERIFY:
+        config = load_experiment_config(PHASE1 / name)
+        assert config.agent_config["codex"] == {"verify_protocol": "concise"}
 
 
 def test_every_phase_one_problem_is_registered_in_the_sregym_submodule() -> None:
