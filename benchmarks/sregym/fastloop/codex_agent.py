@@ -18,11 +18,13 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from benchmarks.sregym.fastloop.loop import AgentOutcome, InjectionWindow
@@ -30,7 +32,6 @@ from benchmarks.sregym.fastloop.records import AgentName, TokenCounts
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
     from types import TracebackType
 
 _STAGES = ("diagnosis", "mitigation", "done")
@@ -208,13 +209,26 @@ class CodexBaselineAgent:
         settings = self._settings
         incident_dir = settings.results_dir / f"{index:03d}_{problem_id}"
         incident_dir.mkdir(parents=True, exist_ok=True)
-        workdir = incident_dir / "workdir"
-        workdir.mkdir(exist_ok=True)
-        codex_home = incident_dir / "codex_home"
-        if codex_home.exists():
-            shutil.rmtree(codex_home)
-        codex_home.mkdir()
-        shutil.copyfile(settings.auth_file, codex_home / "auth.json")
+        # Codex sees its working directory and home; neither may name the injected problem.
+        with tempfile.TemporaryDirectory(prefix="codex-incident-") as scratch:
+            workdir = Path(scratch) / "workdir"
+            workdir.mkdir()
+            codex_home = Path(scratch) / "codex_home"
+            codex_home.mkdir()
+            shutil.copyfile(settings.auth_file, codex_home / "auth.json")
+            return self._run(settings, index, incident_dir, problem_id, inject, workdir=workdir, codex_home=codex_home)
+
+    def _run(
+        self,
+        settings: CodexSettings,
+        index: int,
+        incident_dir: Path,
+        problem_id: str,
+        inject: Callable[[], InjectionWindow],
+        *,
+        workdir: Path,
+        codex_home: Path,
+    ) -> AgentOutcome:
         self._stub.reset()
         prompt = self._prompt_for(problem_id, self._stub.url)
         (incident_dir / "prompt.txt").write_text(prompt, encoding="utf-8")

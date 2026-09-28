@@ -98,8 +98,10 @@ FAKE_CODEX = textwrap.dedent(
         urllib.request.urlopen(request).read()
     assert os.environ["KUBECONFIG"].endswith("agent.kubeconfig")
     home = os.environ["CODEX_HOME"]
+    # Neither the working directory nor the Codex home names the injected problem.
+    assert "missing_configmap" not in os.getcwd(), os.getcwd()
+    assert "missing_configmap" not in home, home
     # A fresh home per incident: the baseline must not carry Codex memories between incidents.
-    assert home.endswith("_missing_configmap_hotel_reservation/codex_home"), home
     assert sorted(os.listdir(home)) == ["auth.json"], os.listdir(home)
     open(os.path.join(home, "memories_1.sqlite"), "w").write("learned")
     post("mongo-geo-script ConfigMap was deleted")
