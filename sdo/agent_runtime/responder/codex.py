@@ -335,6 +335,29 @@ def _inlined_health_objective(request: IncidentRequest) -> str:
     return f"Health objective (`{request.health_objective_path}`, inlined; do not re-read it):\n{text.rstrip()}\n\n"
 
 
+#: arch.md is inlined only when it is at most this long; otherwise it stays a path. Deployer-owned and
+#: read-only for the responder, so it is capped like the warm playbook text rather than goal.md's tighter
+#: bound. Without this, every incident (cold and warm) pays a separate shell round-trip to read it.
+_ARCH_INLINE_MAX_CHARS = 8_000
+
+
+def _inlined_architecture_summary(request: IncidentRequest) -> str:
+    worktree = Path(request.repository_worktree)
+    arch = _contained_file(worktree, request.architecture_summary_path, worktree.resolve())
+    if arch is None:
+        return ""
+    try:
+        text = arch.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+    if len(text) > _ARCH_INLINE_MAX_CHARS:
+        return ""
+    return (
+        f"Architecture summary (`{request.architecture_summary_path}`, inlined; do not re-read it):\n"
+        f"{text.rstrip()}\n\n"
+    )
+
+
 def _cold_instructions() -> str:
     return (
         "The incident request may contain compact relevant_outcomes selected deterministically from prior verified "
@@ -460,6 +483,11 @@ def _state_changes_section(request: IncidentRequest) -> str:
 
 def _verification_instructions() -> str:
     return (
+        "Prefer one blocking command over checking in on a backgrounded one: give a command enough time to "
+        "finish inside a single call (for example `kubectl rollout status deployment/<NAME> --timeout=60s` or "
+        "`kubectl wait --for=condition=Ready pod -l <SELECTOR> --timeout=60s`) rather than starting it in the "
+        "background and returning in a later turn to check on it; each check-in is a separate model turn that "
+        "resends the whole conversation so far.\n\n"
         "Verify before you submit or return: after the repair, run `python3 -m sdo incident status` (exit 0 "
         "healthy, 1 unhealthy, 3 unavailable; about 3-5 seconds). It runs the health judge's verify burst through "
         "SDO's isolated prober, the same synthetic traffic the controller requires before it closes this incident. "
@@ -506,6 +534,7 @@ def _responder_prompt(request: IncidentRequest) -> str:
         "with its target, timing, result, and reversibility. In recorded-actions mode, a successful live-only "
         "repair must have at least one successful receipt; repository changes are still committed when present.\n\n"
         f"{additional_context}\n"
+        f"{_inlined_architecture_summary(request)}"
         f"{_inlined_health_objective(request)}"
         f"{_detector_evidence(request)}\n"
         f"{_state_changes_section(request)}"
