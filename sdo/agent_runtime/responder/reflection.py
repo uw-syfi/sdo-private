@@ -178,9 +178,10 @@ _SELF_CHECK_RULES = (
 
 _RESPONDER_PERMISSIONS = (
     "The responder that runs a playbook works from its own pod under the responder's RBAC in the application "
-    "namespace: it may `kubectl get`, `describe`, `logs`, and watch pods, Services, Endpoints, Events, and "
-    "ConfigMaps; create, apply, or patch ConfigMaps; patch Deployments, StatefulSets, DaemonSets, and ReplicaSets "
-    "(including `kubectl rollout restart`); delete pod; and delete NetworkPolicies. It cannot run "
+    "namespace, which is namespace-scoped edit on application resources: it may get, list, watch, create, apply, "
+    "patch, and delete configmaps, services, pods, persistentvolumeclaims, deployments, statefulsets, daemonsets, "
+    "replicasets, networkpolicies, ingresses, and jobs (including `kubectl rollout restart`), and read pod logs, "
+    "events, endpoints, and endpointslices. It has no access to Secrets or RBAC objects, and it cannot run "
     + ", ".join(f"`kubectl {verb}`" for verb in RESPONDER_FORBIDDEN_KUBECTL_VERBS)
     + " against the application, and the broker's validator rejects playbook steps that need them. Send "
     "representative requests from the responder pod to the Service DNS name with python3 (the image has no curl "
@@ -198,11 +199,9 @@ _PLAYBOOK_RULES = (
     "health objective needs one. "
     f"{_RESPONDER_PERMISSIONS}Put multi-step repair and verification "
     "commands in executable scripts under `.sdo/playbooks/<playbook>/scripts/` (`.sh`, parameters as positional "
-    "arguments, `set -eu`) and reference them from the README. After restoring a missing mount source (a "
-    "ConfigMap or Secret), delete the pods stuck on it or rollout-restart their workload instead of waiting for "
-    "the kubelet mount backoff. Include a `scripts/verify.sh` (and a `scripts/diagnose.sh` when the preconditions "
-    "need their own check): when this playbook is reused before its incident detector fires, the responder runs "
-    "it as its one sanity check. "
+    "arguments, `set -eu`) and reference them from the README. Include a `scripts/verify.sh` (and a "
+    "`scripts/diagnose.sh` when the preconditions need their own check): when this playbook is reused before its "
+    "incident detector fires, the responder runs it as its one sanity check. "
 )
 
 

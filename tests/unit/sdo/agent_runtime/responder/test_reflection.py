@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
 from agentshim.providers.codex import CodexSandboxConfig, parse_sandbox
 
 from sdo.agent_runtime.responder.reflection import (
@@ -348,10 +349,9 @@ def test_reflection_requires_executable_playbooks_that_trust_the_incident_detect
     assert "copy-pasteable verification commands" in prompt
     assert "representative request" in prompt
     assert ".sdo/playbooks/<playbook>/scripts/" in prompt
-    # Restored mount sources must not wait on the kubelet backoff.
-    assert "ConfigMap or Secret" in prompt
-    assert "rollout-restart" in prompt
-    assert "kubelet" in prompt
+    # Repair steps come from the verified incident, not from a fault-specific tip SDO ships.
+    assert "kubelet" not in prompt
+    assert "mount source" not in prompt
     # The incident detector already establishes the playbook's preconditions.
     assert "do not prescribe re-diagnosis" in prompt
 
@@ -595,8 +595,20 @@ def test_reflection_states_which_kubectl_verbs_the_responder_may_use(tmp_path: P
     for verb in RESPONDER_FORBIDDEN_KUBECTL_VERBS:
         assert f"`kubectl {verb}`" in prompt
     assert "responder's RBAC" in prompt
-    for allowed in ("get", "logs", "patch", "rollout restart", "delete pod"):
+    for allowed in ("get", "logs", "patch", "rollout restart", "delete"):
         assert allowed in prompt
+    # The permission text states the responder Role as deployed, not a list of benchmark repairs.
+    assert "delete NetworkPolicies" not in prompt
+    granted = prompt.split("It has no access", 1)[0]
+    rbac = Path(__file__).resolve().parents[5] / "controller/runtime/deploy/rbac.yaml"
+    role = next(
+        document
+        for document in yaml.safe_load_all(rbac.read_text(encoding="utf-8"))
+        if document and document["kind"] == "Role" and document["metadata"]["name"] == "sdo-responder"
+    )
+    for rule in role["rules"]:
+        for resource in rule["resources"]:
+            assert resource.replace("pods/log", "pod logs") in granted, resource
     # The representative request comes from the responder's own pod, which has python3 but no curl or wget.
     assert "python3" in prompt
     assert ".svc" in prompt

@@ -424,9 +424,7 @@ def _warm_instructions(playbooks: list[WarmPlaybook], namespace: str) -> str:
         "Fast procedure:\n"
         "1. Run one combined sanity check: a single shell command covering the evidence above.\n"
         "2. If it agrees, submit the diagnosis through any configured environment-specific channel, then apply the "
-        "playbook's repair exactly (use its scripts when present). After restoring a missing ConfigMap or Secret "
-        "that a pod failed to mount, delete the stuck pods or rollout-restart their workload instead of waiting "
-        "for the kubelet mount backoff.\n"
+        "playbook's repair exactly (use its scripts when present).\n"
         "3. Run the playbook's verification and `python3 -m sdo incident status` together in one command, then, "
         "once it reports healthy, submit mitigation through any configured channel and return "
         "the IncidentResult, listing the applied playbook's path exactly as shown above in applied_playbooks.\n"
@@ -477,9 +475,9 @@ def _state_changes_section(request: IncidentRequest) -> str:
         "ConfigMap and Secret values shown only as digests):\n"
         f"{''.join(lines)}{omitted}{unobserved}"
         "A change listed here happened after the application was last verified healthy and is a prime suspect. "
-        "Objects not listed existed unchanged while the application was healthy: however suspicious their names "
-        "or contents look, they did not cause this incident on their own. If no listed change explains the "
-        "symptoms, the fault is likely not a configuration change in these kinds.\n\n"
+        "Objects not listed existed unchanged while the application was healthy, so they did not cause a new "
+        "incident on their own. If no listed change explains the symptoms, the fault is likely not a "
+        "configuration change in these kinds.\n\n"
     )
 
 
