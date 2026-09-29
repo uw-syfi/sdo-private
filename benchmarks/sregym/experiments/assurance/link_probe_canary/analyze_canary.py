@@ -81,7 +81,8 @@ def analyze_stage(name: str, problem: str, results: Path) -> dict:
     link_keys = {k: v for k, v in first.items() if "|link-reachability." in k}
     session = receipt.get("responder_session_id")
     rollouts = [
-        p for p in sorted(results.rglob("sdo_runtime/codex/sessions/**/rollout-*.jsonl"))
+        p
+        for p in sorted(results.rglob("sdo_runtime/codex/sessions/**/rollout-*.jsonl"))
         if isinstance(session, str) and session in p.name
     ]
     commands: list[tuple[float, str]] = []
@@ -97,15 +98,14 @@ def analyze_stage(name: str, problem: str, results: Path) -> dict:
     commands.sort()
     mutations = [(rel(t), c[:220]) for t, c in commands if _is_state_change(c)]
     np_deleted = [
-        (rel(t), c[:200]) for t, c in commands
+        (rel(t), c[:200])
+        for t, c in commands
         if "deny-all-recommendation" in c and re.search(r"\b(delete|patch|replace|apply)\b", c)
     ]
     incident_id = receipt.get("incident_id")
     open_epoch = int(incident_id.rsplit("-", 1)[1]) / 1e9 if isinstance(incident_id, str) else None
     verified = _timestamp(receipt.get("verified_at")) if receipt.get("verified_at") else None
-    gate_refusals = [
-        rel(t) for t, c in commands if "incident status" in c or "incident close" in c
-    ]
+    gate_refusals = [rel(t) for t, c in commands if "incident status" in c or "incident close" in c]
     return {
         "stage": name,
         "problem": problem,
@@ -126,7 +126,10 @@ def analyze_stage(name: str, problem: str, results: Path) -> dict:
         "responder_touched_deny_all_recommendation": np_deleted,
         "incident_status_or_close_calls_s": gate_refusals,
         "confirmed_root_causes": [
-            {"summary": c.get("summary"), "resources": [f"{r.get('kind')}/{r.get('name')}" for r in c.get("resources", [])]}
+            {
+                "summary": c.get("summary"),
+                "resources": [f"{r.get('kind')}/{r.get('name')}" for r in c.get("resources", [])],
+            }
             for c in receipt.get("confirmed_root_causes", [])
         ],
     }

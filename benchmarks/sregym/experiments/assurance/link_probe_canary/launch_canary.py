@@ -12,14 +12,18 @@ import json
 import subprocess
 import sys
 import time
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 from benchmarks.sregym.assurance import phase1_budget as budget
 from benchmarks.sregym.assurance.phase1_launch import QuotaGate, SystemQuotaReader, lane_env
 
 ROOT = Path.cwd()
-LAUNCH = Path("/mnt/data/shli/sdo-private/.claude/worktrees/agent-abba78c07e386ad4a/benchmarks/sregym/experiments/assurance/phase1/.launch")
+LAUNCH = Path(
+    "/mnt/data/shli/sdo-private/.claude/worktrees/agent-abba78c07e386ad4a"
+    "/benchmarks/sregym/experiments/assurance/phase1/.launch"
+)
 LOGS = Path("/mnt/data/shli/assure-runs/lp1-logs")
 STOP = 96.0
 
@@ -36,8 +40,13 @@ planned_percent = planned_tokens * budget.POINTS_PER_TOKEN
 gate = QuotaGate(stop_percent=STOP)
 used = SystemQuotaReader().used_percent()
 decision = {
-    "canary": config.name, "lane": lane, "at": time.time(), "used_percent_at_start": used,
-    "planned_nominal_tokens": planned_tokens, "planned_nominal_percent": planned_percent, "stop_percent": STOP,
+    "canary": config.name,
+    "lane": lane,
+    "at": time.time(),
+    "used_percent_at_start": used,
+    "planned_nominal_tokens": planned_tokens,
+    "planned_nominal_percent": planned_percent,
+    "stop_percent": STOP,
     "decision": "start" if gate.can_start_matrix(used, planned_percent) else "abort_quota_start",
 }
 print("QuotaGate:", json.dumps(decision, indent=2))
@@ -54,7 +63,11 @@ log = LOGS / f"{lane}.{config.stem}.log"
 with log.open("ab") as stream:
     proc = subprocess.Popen(
         [sys.executable, "-m", "benchmarks.sregym.run", str(config)],
-        cwd=ROOT, env=env, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True,
+        cwd=ROOT,
+        env=env,
+        stdout=stream,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
     )
 label = f"{lane} lp-canary {config.name}"
 for name, entry in (
