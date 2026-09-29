@@ -1,0 +1,464 @@
+{
+ "/mnt/data/shli/sdo-private/.claude/worktrees/lp-canary/third_party/sregym/logs/20260929_023655_pipeline_lp1-canary-a": [
+  {
+   "stage": "s3-network-policy-block",
+   "problem": "network_policy_block",
+   "diagnosis_success": "True",
+   "mitigation_success": "True",
+   "diagnosis_submitted_s": 33.9,
+   "mitigation_submitted_s": 59.0,
+   "injection_request_s": 0.11,
+   "first_findings_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 5.7
+   },
+   "link_findings_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 5.7
+   },
+   "link_last_active_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 38.7
+   },
+   "incident_open_s": 6.7,
+   "incident_id": "Hotel Reservation-1790649619799658542",
+   "gate_clear_verified_at_s": 93.2,
+   "incident_resolution_seconds": 86.47336,
+   "responder_commands": 19,
+   "responder_mutations": [
+    [
+     38.0,
+     "kubectl delete networkpolicy deny-all-recommendation -n hotel-reservation && python3 -m sdo incident status"
+    ]
+   ],
+   "responder_touched_deny_all_recommendation": [
+    [
+     38.0,
+     "kubectl delete networkpolicy deny-all-recommendation -n hotel-reservation && python3 -m sdo incident status"
+    ]
+   ],
+   "incident_status_or_close_calls_s": [
+    17.6,
+    38.0,
+    48.4
+   ],
+   "confirmed_root_causes": [
+    {
+     "summary": "The newly added NetworkPolicy isolated recommendation pods, causing fresh frontend-to-recommendation TCP dials to time out.",
+     "resources": [
+      "NetworkPolicy/deny-all-recommendation"
+     ]
+    }
+   ],
+   "ttd_s": 33.75533676147461,
+   "ttm_judge_free_s": 41.54243278503418,
+   "first_mutation_s": 37.87443280220032,
+   "last_mutation_s": 41.54243278503418,
+   "responder_tokens": 132762,
+   "reflection_tokens": 407377,
+   "lifecycle_tokens": 0
+  },
+  {
+   "stage": "k1-policy-and-rate-configmap",
+   "problem": "composite_policy_and_rate_configmap_hotel_reservation",
+   "diagnosis_success": "True",
+   "mitigation_success": "True",
+   "diagnosis_submitted_s": 40.2,
+   "mitigation_submitted_s": 84.5,
+   "injection_request_s": 6.59,
+   "first_findings_s": {
+    "recommendation.network-isolation|recommendation-network-isolation.deny-all": 0.1,
+    "health-objective|deployment-rollout-unobserved": 0.4,
+    "health-objective|service-without-ready-endpoints": 0.4,
+    "service-endpoints|service-has-no-ready-endpoints": 0.4,
+    "health-objective|deployment-unavailable": 0.4,
+    "traffic-links|link-reachability.frontend.recommendation.8085": 5.7
+   },
+   "link_findings_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 5.7
+   },
+   "link_last_active_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 60.7
+   },
+   "incident_open_s": 0.6,
+   "incident_id": "Hotel Reservation-1790649913146759789",
+   "gate_clear_verified_at_s": 148.7,
+   "incident_resolution_seconds": 148.068162,
+   "responder_commands": 13,
+   "responder_mutations": [
+    [
+     59.6,
+     "date -u +%Y-%m-%dT%H:%M:%SZ; kubectl apply -f kubernetes/rate/mongo-rate-script.yaml; kubectl delete networkpolicy deny-all-recommendation; date -u +%Y-%m-%dT%H:%M:%SZ; kubectl rollout status deployment/mongodb-rate --ti"
+    ]
+   ],
+   "responder_touched_deny_all_recommendation": [
+    [
+     59.6,
+     "date -u +%Y-%m-%dT%H:%M:%SZ; kubectl apply -f kubernetes/rate/mongo-rate-script.yaml; kubectl delete networkpolicy deny-all-recommendation; date -u +%Y-%m-%dT%H:%M:%SZ; kubectl rollout status deployme"
+    ]
+   ],
+   "incident_status_or_close_calls_s": [
+    7.6,
+    81.0
+   ],
+   "confirmed_root_causes": [
+    {
+     "summary": "mongodb-rate could not start because its required initialization ConfigMap was missing, leaving the Deployment unavailable and its Service without ready endpoints.",
+     "resources": [
+      "Deployment/mongodb-rate",
+      "Service/mongodb-rate",
+      "ConfigMap/mongo-rate-script"
+     ]
+    },
+    {
+     "summary": "The newly added deny-all policy isolated recommendation pods, causing fresh frontend-to-recommendation connections to time out.",
+     "resources": [
+      "NetworkPolicy/deny-all-recommendation",
+      "Service/recommendation"
+     ]
+    }
+   ],
+   "ttd_s": 33.61980128288269,
+   "ttm_judge_free_s": 59.177921772003174,
+   "first_mutation_s": 52.993921756744385,
+   "last_mutation_s": 59.177921772003174,
+   "responder_tokens": 304644,
+   "reflection_tokens": 250984,
+   "lifecycle_tokens": 0
+  },
+  {
+   "stage": "s1-missing-configmap",
+   "problem": "missing_configmap_hotel_reservation",
+   "diagnosis_success": "True",
+   "mitigation_success": "True",
+   "diagnosis_submitted_s": 40.0,
+   "mitigation_submitted_s": 80.3,
+   "injection_request_s": 6.53,
+   "first_findings_s": {
+    "health-objective|deployment-rollout-unobserved": 0.4,
+    "health-objective|service-without-ready-endpoints": 0.4,
+    "service-endpoints|service-has-no-ready-endpoints": 0.4,
+    "health-objective|deployment-unavailable": 0.4
+   },
+   "link_findings_s": {},
+   "link_last_active_s": {},
+   "incident_open_s": 0.9,
+   "incident_id": "Hotel Reservation-1790650284093125322",
+   "gate_clear_verified_at_s": 125.5,
+   "incident_resolution_seconds": 124.59371,
+   "responder_commands": 15,
+   "responder_mutations": [
+    [
+     55.4,
+     "kubectl apply -n hotel-reservation -f kubernetes/geo/mongo-geo-script.yaml && kubectl rollout status deployment/mongodb-geo -n hotel-reservation --timeout=90s && kubectl get deployment mongodb-geo -n hotel-reservation -o"
+    ]
+   ],
+   "responder_touched_deny_all_recommendation": [],
+   "incident_status_or_close_calls_s": [
+    10.0,
+    69.6,
+    76.7
+   ],
+   "confirmed_root_causes": [
+    {
+     "summary": "Removing the required mongo-geo-script ConfigMap prevented the mongodb-geo pod from mounting its init volume, leaving the Deployment unavailable and its Service without ready endpoints.",
+     "resources": [
+      "ConfigMap/mongo-geo-script",
+      "Deployment/mongodb-geo",
+      "Service/mongodb-geo"
+     ]
+    }
+   ],
+   "ttd_s": 33.508243560791016,
+   "ttm_judge_free_s": 59.069798707962036,
+   "first_mutation_s": 48.87479877471924,
+   "last_mutation_s": 59.069798707962036,
+   "responder_tokens": 306279,
+   "reflection_tokens": 354444,
+   "lifecycle_tokens": 0
+  },
+  {
+   "stage": "s3-network-policy-block-repeat",
+   "problem": "network_policy_block",
+   "diagnosis_success": "True",
+   "mitigation_success": "True",
+   "diagnosis_submitted_s": 27.0,
+   "mitigation_submitted_s": 53.1,
+   "injection_request_s": 0.09,
+   "first_findings_s": {
+    "recommendation.network-isolation|recommendation-network-isolation.deny-all": 0.1,
+    "traffic-links|link-reachability.frontend.recommendation.8085": 5.9
+   },
+   "link_findings_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 5.9
+   },
+   "link_last_active_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 33.4
+   },
+   "incident_open_s": 0.6,
+   "incident_id": "Hotel Reservation-1790650631389092607",
+   "gate_clear_verified_at_s": 87.4,
+   "incident_resolution_seconds": 86.837361,
+   "responder_commands": 5,
+   "responder_mutations": [
+    [
+     33.1,
+     "date -u +%Y-%m-%dT%H:%M:%SZ\nbash .sdo/playbooks/recommendation-network-isolation/scripts/repair.sh hotel-reservation\ndate -u +%Y-%m-%dT%H:%M:%SZ"
+    ]
+   ],
+   "responder_touched_deny_all_recommendation": [],
+   "incident_status_or_close_calls_s": [
+    38.1,
+    49.5
+   ],
+   "confirmed_root_causes": [
+    {
+     "summary": "The deny-all NetworkPolicy isolated recommendation pods, causing fresh frontend-to-recommendation connection failures.",
+     "resources": [
+      "NetworkPolicy/deny-all-recommendation"
+     ]
+    }
+   ],
+   "ttd_s": 26.864710092544556,
+   "ttm_judge_free_s": 33.11246156692505,
+   "first_mutation_s": 32.98146152496338,
+   "last_mutation_s": 33.11246156692505,
+   "responder_tokens": 144767,
+   "reflection_tokens": 0,
+   "lifecycle_tokens": 0
+  }
+ ],
+ "/mnt/data/shli/sdo-private/.claude/worktrees/lp-canary/third_party/sregym/logs/20260929_023857_pipeline_lp1-canary-b": [
+  {
+   "stage": "s3-network-policy-block",
+   "problem": "network_policy_block",
+   "diagnosis_success": "True",
+   "mitigation_success": "True",
+   "diagnosis_submitted_s": 32.4,
+   "mitigation_submitted_s": 56.2,
+   "injection_request_s": 0.09,
+   "first_findings_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 5.8
+   },
+   "link_findings_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 5.8
+   },
+   "link_last_active_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 36.3
+   },
+   "incident_open_s": 6.8,
+   "incident_id": "Hotel Reservation-1790649684452234098",
+   "gate_clear_verified_at_s": 120.6,
+   "incident_resolution_seconds": 113.830634,
+   "responder_commands": 16,
+   "responder_mutations": [
+    [
+     35.6,
+     "kubectl delete networkpolicy deny-all-recommendation -n hotel-reservation"
+    ]
+   ],
+   "responder_touched_deny_all_recommendation": [
+    [
+     35.6,
+     "kubectl delete networkpolicy deny-all-recommendation -n hotel-reservation"
+    ]
+   ],
+   "incident_status_or_close_calls_s": [
+    15.9,
+    40.0,
+    47.7,
+    68.8
+   ],
+   "confirmed_root_causes": [
+    {
+     "summary": "The deny-all-recommendation policy isolated recommendation pods and blocked fresh frontend connections to the recommendation service.",
+     "resources": [
+      "NetworkPolicy/deny-all-recommendation"
+     ]
+    }
+   ],
+   "ttd_s": 32.32331204414368,
+   "ttm_judge_free_s": 35.728675842285156,
+   "first_mutation_s": 35.531675815582275,
+   "last_mutation_s": 35.728675842285156,
+   "responder_tokens": 196641,
+   "reflection_tokens": 417551,
+   "lifecycle_tokens": 0
+  },
+  {
+   "stage": "k1-policy-and-rate-configmap",
+   "problem": "composite_policy_and_rate_configmap_hotel_reservation",
+   "diagnosis_success": "True",
+   "mitigation_success": "True",
+   "diagnosis_submitted_s": 31.7,
+   "mitigation_submitted_s": 140.6,
+   "injection_request_s": 6.45,
+   "first_findings_s": {
+    "deny-all-recommendation-policy|deny-all-recommendation-policy": 0.1,
+    "health-objective|deployment-rollout-unobserved": 0.3,
+    "health-objective|service-without-ready-endpoints": 0.3,
+    "service-endpoints|service-has-no-ready-endpoints": 0.3,
+    "health-objective|deployment-unavailable": 0.3,
+    "traffic-links|link-reachability.frontend.recommendation.8085": 6.1
+   },
+   "link_findings_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 6.1
+   },
+   "link_last_active_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 67.6
+   },
+   "incident_open_s": 0.6,
+   "incident_id": "Hotel Reservation-1790650006021595918",
+   "gate_clear_verified_at_s": 202.7,
+   "incident_resolution_seconds": 202.153042,
+   "responder_commands": 40,
+   "responder_mutations": [
+    [
+     67.3,
+     "kubectl apply -n hotel-reservation -f kubernetes/rate/mongo-rate-script-configmap.yaml"
+    ],
+    [
+     67.3,
+     "kubectl delete networkpolicy deny-all-recommendation -n hotel-reservation"
+    ],
+    [
+     125.2,
+     "kubectl delete pod mongodb-rate-56cc8659c9-b4fwd -n hotel-reservation && kubectl rollout status deployment/mongodb-rate -n hotel-reservation --timeout=90s && kubectl get deployment mongodb-rate -n hotel-reservation -o js"
+    ]
+   ],
+   "responder_touched_deny_all_recommendation": [
+    [
+     67.3,
+     "kubectl delete networkpolicy deny-all-recommendation -n hotel-reservation"
+    ]
+   ],
+   "incident_status_or_close_calls_s": [
+    8.2,
+    102.3,
+    128.4,
+    137.0
+   ],
+   "confirmed_root_causes": [
+    {
+     "summary": "The deny-all NetworkPolicy isolated recommendation pods and caused fresh frontend connections to recommendation to time out.",
+     "resources": [
+      "NetworkPolicy/deny-all-recommendation"
+     ]
+    },
+    {
+     "summary": "The missing mongo-rate-script ConfigMap prevented the Mongo rate pod from mounting its required initialization volume, leaving its deployment unavailable and service without endpoints.",
+     "resources": [
+      "Deployment/mongodb-rate",
+      "Service/mongodb-rate",
+      "ConfigMap/mongo-rate-script"
+     ]
+    }
+   ],
+   "ttd_s": 25.243969917297363,
+   "ttm_judge_free_s": 119.9255428314209,
+   "first_mutation_s": 60.821542739868164,
+   "last_mutation_s": 119.9255428314209,
+   "responder_tokens": 559655,
+   "reflection_tokens": 581576,
+   "lifecycle_tokens": 0
+  },
+  {
+   "stage": "s1-missing-configmap",
+   "problem": "missing_configmap_hotel_reservation",
+   "diagnosis_success": "True",
+   "mitigation_success": "True",
+   "diagnosis_submitted_s": 34.1,
+   "mitigation_submitted_s": 83.9,
+   "injection_request_s": 6.53,
+   "first_findings_s": {
+    "health-objective|deployment-rollout-unobserved": 0.4,
+    "health-objective|service-without-ready-endpoints": 0.4,
+    "service-endpoints|service-has-no-ready-endpoints": 0.4,
+    "health-objective|deployment-unavailable": 0.4
+   },
+   "link_findings_s": {},
+   "link_last_active_s": {},
+   "incident_open_s": 0.9,
+   "incident_id": "Hotel Reservation-1790650494828055533",
+   "gate_clear_verified_at_s": 125.8,
+   "incident_resolution_seconds": 124.914557,
+   "responder_commands": 28,
+   "responder_mutations": [
+    [
+     48.2,
+     "cat > kubernetes/geo/mongo-geo-script-configmap.yaml <<'EOF'\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: mongo-geo-script\ndata:\n  k8s-geo-mongo.sh: |\n    #!/bin/bash\n\n    ADMIN_USER=\"admin\"\n    ADMIN_PWD=\"admin\"\n\n  "
+    ]
+   ],
+   "responder_touched_deny_all_recommendation": [],
+   "incident_status_or_close_calls_s": [
+    11.6,
+    72.2,
+    80.3
+   ],
+   "confirmed_root_causes": [
+    {
+     "summary": "Removing mongo-geo-script prevented the mongodb-geo pod from mounting its initialization script, leaving the Deployment unavailable and its Service without ready endpoints.",
+     "resources": [
+      "ConfigMap/mongo-geo-script",
+      "Deployment/mongodb-geo",
+      "Service/mongodb-geo"
+     ]
+    }
+   ],
+   "ttd_s": 27.530304431915283,
+   "ttm_judge_free_s": 61.124276876449585,
+   "first_mutation_s": 41.70283889770508,
+   "last_mutation_s": 59.29383897781372,
+   "responder_tokens": 296086,
+   "reflection_tokens": 454369,
+   "lifecycle_tokens": 0
+  },
+  {
+   "stage": "s3-network-policy-block-repeat",
+   "problem": "network_policy_block",
+   "diagnosis_success": "True",
+   "mitigation_success": "True",
+   "diagnosis_submitted_s": 33.7,
+   "mitigation_submitted_s": 72.1,
+   "injection_request_s": 0.09,
+   "first_findings_s": {
+    "deny-all-recommendation-policy|deny-all-recommendation-policy": 0.1,
+    "traffic-links|link-reachability.frontend.recommendation.8085": 6.1
+   },
+   "link_findings_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 6.1
+   },
+   "link_last_active_s": {
+    "traffic-links|link-reachability.frontend.recommendation.8085": 42.6
+   },
+   "incident_open_s": 0.6,
+   "incident_id": "Hotel Reservation-1790650850295668306",
+   "gate_clear_verified_at_s": 108.3,
+   "incident_resolution_seconds": 107.668351,
+   "responder_commands": 6,
+   "responder_mutations": [
+    [
+     42.4,
+     "date -u +%Y-%m-%dT%H:%M:%SZ\nbash .sdo/playbooks/deny-all-recommendation-network-policy/scripts/repair.sh hotel-reservation deny-all-recommendation\ndate -u +%Y-%m-%dT%H:%M:%SZ"
+    ]
+   ],
+   "responder_touched_deny_all_recommendation": [],
+   "incident_status_or_close_calls_s": [
+    49.6,
+    68.5
+   ],
+   "confirmed_root_causes": [
+    {
+     "summary": "NetworkPolicy/deny-all-recommendation isolated recommendation ingress and egress without allow rules, blocking fresh frontend connections.",
+     "resources": [
+      "NetworkPolicy/deny-all-recommendation"
+     ]
+    }
+   ],
+   "ttd_s": 33.576645612716675,
+   "ttm_judge_free_s": 46.322691440582275,
+   "first_mutation_s": 42.26462268829346,
+   "last_mutation_s": 42.38362264633179,
+   "responder_tokens": 183619,
+   "reflection_tokens": 0,
+   "lifecycle_tokens": 0
+  }
+ ]
+}
