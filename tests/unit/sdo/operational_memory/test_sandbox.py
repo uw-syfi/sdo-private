@@ -217,3 +217,13 @@ def test_container_sandbox_default_timeout_allows_cold_offline_go_build(tmp_path
 
     assert captured["timeout"] == 600
     assert result.returncode == 0
+
+
+def test_container_sandbox_image_comes_from_the_environment_unless_given(monkeypatch) -> None:
+    from sdo.operational_memory.sandbox import DEFAULT_VALIDATOR_IMAGE, ContainerSandboxRunner
+
+    monkeypatch.delenv("SDO_VALIDATOR_IMAGE", raising=False)
+    assert ContainerSandboxRunner().image == DEFAULT_VALIDATOR_IMAGE
+    monkeypatch.setenv("SDO_VALIDATOR_IMAGE", "sdo-detector-validator:private")
+    assert ContainerSandboxRunner().image == "sdo-detector-validator:private"
+    assert ContainerSandboxRunner(image="explicit:tag").image == "explicit:tag"

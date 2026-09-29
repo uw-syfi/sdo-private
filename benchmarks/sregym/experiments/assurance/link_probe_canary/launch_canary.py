@@ -47,6 +47,8 @@ if decision["decision"] != "start" or dry:
     sys.exit(0 if dry else "gate refused the start")
 
 env = lane_env(lane, gate)
+# Host-side lifecycle validation would otherwise use the shared :v0.1.0 validator, which predates the link detector.
+env["SDO_VALIDATOR_IMAGE"] = "sdo-detector-validator:lp1"
 LOGS.mkdir(parents=True, exist_ok=True)
 log = LOGS / f"{lane}.{config.stem}.log"
 with log.open("ab") as stream:

@@ -66,13 +66,16 @@ for _attempt in range(20):
 """
 
 
+DEFAULT_VALIDATOR_IMAGE = "sdo-detector-validator:v0.1.0"
+
+
 class ContainerSandboxRunner:
     """Run untrusted detector compilation in a locked-down OCI container."""
 
     def __init__(
         self,
         *,
-        image: str = "sdo-detector-validator:v0.1.0",
+        image: str | None = None,
         runtime: str | None = None,
         timeout_seconds: int = 600,
         cpu_limit: str = "1",
@@ -81,7 +84,9 @@ class ContainerSandboxRunner:
         authoring_check: bool = False,
         command_runner: CommandRunner | None = None,
     ) -> None:
-        self.image = image
+        # SDO_VALIDATOR_IMAGE selects a private validator tag for host-side lifecycle validation, so a
+        # run on a privately tagged build never validates against a stale shared tag.
+        self.image = image or os.environ.get("SDO_VALIDATOR_IMAGE", "").strip() or DEFAULT_VALIDATOR_IMAGE
         self.runtime = runtime or shutil.which("docker") or shutil.which("podman") or "docker"
         self.timeout_seconds = timeout_seconds
         self.cpu_limit = cpu_limit
