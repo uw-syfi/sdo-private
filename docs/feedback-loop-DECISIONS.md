@@ -705,3 +705,122 @@ Branch `vic/perf/status-clear-latency`. This follows up on the cost recorded in
   scale-down and scale-up. This is a baseline and diff timing effect under
   `--hold none` (N11 territory). The gate never reads the diff. It happened
   in 1 of 24 cases and was not reproduced in the other 23.
+
+### D29. Per-link reachability probe: a fresh dial of every declared dependency edge
+
+Branch `vic/feat/link-reachability-probe`. It closes the latent gap that
+`benchmarks/sregym/experiments/assurance/NP_MASKING.md` confirmed for D25: a
+connection-establishment fault on a dependency (there, a policy that denies new
+connections) leaves every user-facing probe green, because the caller (the
+frontend) keeps an established connection to the dependency and reuses it. A
+fresh TCP dial from a separate pod to `recommendation:8085` times out within 3
+s while every HTTP probe passes for 10 minutes.
+
+- **Decision.** A generic, deterministic "link reachability" check:
+  - **Declaration.** A new workload purpose, `link-probe`, in
+    `.sdo/diagnostics/traffic/workloads/<name>.yaml`:
+    `links: [{from, to, port}]` plus optional `interval` (default 1 s),
+    `timeout` (default 1 s) and `failures` (default 5). It runs no scenarios and
+    needs no generator code. The catalog's `DependsOn` was not used: it names
+    Services without ports and lists them per user journey, so it cannot say
+    which port a caller uses.
+  - **Prober.** `controller/runtime/prober` runs one loop per link. Each probe
+    is a new `net.Dialer` TCP connect to `<to>.<ns>.svc.<domain>:<port>` with the
+    workload timeout, closed at once. No connection is pooled or reused, and a
+    blocked edge (its dial lasts the whole timeout) never delays another edge.
+    Samples go into a bounded per-link ring; the window rides in the existing
+    `traffic.Window` (`Window.Links`), so the HTTP API, the controller's
+    observer, snapshots and `sdktest` needed no new plumbing.
+  - **Detector.** `traffic.NewLinkDetector` (`controller/sdk/traffic/link.go`)
+    reports an edge when its last `failures` samples all failed, the newest is
+    no older than the SLO `maxAge`, and the edge had connected at least once
+    (`Qualified`). The finding's rule is `link-reachability.<from>.<to>.<port>`,
+    its primary resource is `Service/<to>`, the caller is a related resource, and
+    the summary and evidence name the edge (`frontend -> recommendation:8085`)
+    and quote the dial errors. It is deterministic Go and calls no LLM.
+  - **Wake-up.** `TrafficObserver` now also wakes the controller while a
+    qualified link holds a failed dial in its last `failures` samples, so
+    detection does not wait for the detector interval, exactly as for scenarios.
+    A link window is warm once every link has a sample.
+  - **Gate.** The rule prefix is not `scenario-slo.`, so the link finding is an
+    ordinary blocking finding: `sdo incident status` refuses while it is active
+    and D28's clear hysteresis applies. The verify burst does not cover links,
+    so the gate is what verifies the repair of a link fault.
+  - **Judge.** `TRAFFIC_AUTHORING` (item 4) tells the health judge: for each
+    service-to-service dependency the application source declares, add one link
+    to `workloads/links.yaml`, ports taken from the source, both names
+    source-backed Services in the deployer handoff (checked by
+    `_traffic_errors`), no datastores it does not run itself. It names no cause
+    of unreachability. The lifecycle installs `traffic-<workload>` for a
+    `link-probe` workload with `NewLinkDetector`.
+- **Hysteresis (D27/D28 style).** The consecutive-failure count is the
+  hysteresis: with a 1 s timeout and 1 s interval, 5 failures span at least
+  about 5 s, which clears the roughly 3 s kind data-plane stalls that motivated
+  D27 (N13) with margin. The link detector does not take the 9 s
+  `DefaultHealthMinDuration`, which would double count the same protection. One
+  success breaks the run, so a flapping edge never fires; finding-state
+  persistence (`firing: 2, clearing: 2`) still applies on top. Detection latency
+  is about `failures` timeouts plus one observer poll.
+- **Source identity: the open question.** A probe from the prober pod sees the
+  edge with the prober's identity, not the caller's. A policy that denies all
+  ingress to the target (the injected fault) is seen. A narrower legitimate
+  policy ("allow only frontend") would also block the prober and look the same.
+  Options considered:
+  1. Run the probe under the caller's labels (a helper pod that copies the
+     caller's pod-template labels). It tests the real path, but the helper would
+     also match the caller's Service selector and receive user traffic, needs
+     Kubernetes credentials the isolated prober deliberately lacks, and needs
+     one pod per caller. Rejected.
+  2. Probe from the prober and alarm only when the edge is unreachable from
+     everywhere the prober can observe. The prober has exactly one vantage
+     point, so this reduces to option 3.
+  3. **Chosen default: probe from the prober, and only report a transition.**
+     An edge is a signal only after it has connected at least once
+     (`Qualified`), and `Reset` keeps that fact. An edge the prober was never
+     admitted to (a narrow allow-list that pre-dates the controller) never
+     alarms. A policy added while the controller runs that excludes the prober
+     does alarm: that is a real, sudden change of what the application's
+     namespace admits, the state diff shows the same object, and the finding
+     names the edge so the responder's first step is to read policies. Deny-all
+     is the case we must catch; the narrow-allow-list-added-mid-run case is a
+     known false-positive risk, accepted and recorded here.
+  Documented residual: an edge that is broken before the prober first sees it
+  is silent (the scenario probes still cover the user paths through it), and
+  the probe cannot see a fault only the caller's identity hits. A `source:
+  caller` mode remains possible later if a namespace-local helper with the
+  caller's ServiceAccount and labels becomes acceptable.
+- **gRPC.** Not implemented: the controller modules do not depend on grpc-go,
+  and adding it to the prober would grow the image and its attack surface for
+  little: a TCP handshake to the Service port is exactly what the policy fault
+  denies. `Link.Protocol` is validated as `tcp` so an application-level check
+  can be added without a format break.
+- **Neutrality.** No NetworkPolicy-, SREGym- or benchmark-specific token appears
+  in the SDK, prober, observer, judge instruction or the tests' fixtures'
+  detector. `tests/unit/sdo/agent_runtime/lifecycle/test_link_reachability.py`
+  pins that (instruction text and the Go sources), and the tailored rule that
+  `docs/fairness-DECISIONS.md` removed stays removed. The existing
+  `tests/unit/test_benchmark_neutrality.py` was not extended in this branch: a
+  permission check denied reading it, so no blind edit was made.
+- **Alternatives.**
+  - *Make the frontend redial* (short keep-alive): application change, out of
+    scope (D25).
+  - *A NetworkPolicy state-change detector*: complementary and cheap, but it
+    encodes one mechanism; the link probe catches any cause of a dial failure
+    (a policy, a dropped route, a Service with no ready endpoints, a listener
+    that stopped).
+  - *Probe the pod IPs too*: same vantage point, no extra information.
+- **Tests.** Go: `controller/sdk/traffic/link_test.go` (defaults and validation,
+  finding after N failures naming the edge, quiet when healthy, hysteresis,
+  never-qualified and stale samples ignored, configurable N, no min duration),
+  `controller/runtime/prober/link_test.go` (fresh dial per sample on a real
+  listener, a blocked dial recorded while another link stays healthy, `Reset`
+  keeps qualification), `controller/runtime/link_observer_test.go` (warm-up,
+  quiet when healthy, wake on failure). Python:
+  `test_link_reachability.py` (workload model, judge instruction, detector
+  install, source-backed edges, neutrality) and the seed overlay tests.
+- **Seed overlay.** The no-LLM suite's checked-in seed has no `link-probe`
+  workload (the judge that authored it predates this instruction).
+  `assurance seed --overlay links` copies
+  `seeds/overlays/links` (a `links.yaml` for hotel-reservation's seven edges,
+  the generated `traffic-links` detector and the manifest that installs it,
+  produced by the lifecycle's own installer) over the seed's `.sdo`.

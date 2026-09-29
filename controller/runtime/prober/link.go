@@ -37,8 +37,10 @@ func newLinkProbe(workload traffic.Workload) *linkProbe {
 
 // runLinks probes every link of a link-probe workload until ctx ends. Each
 // link has its own loop, so one blocked edge (its dial lasts the whole
-// timeout) never delays the others, and a probe starts only after the
-// previous one of the same link finished.
+// timeout) never delays the others. Probes start on a fixed cadence (start
+// to start), and a probe of a link starts only after the previous one of the
+// same link finished, so a blocked link is sampled every max(interval,
+// timeout), not every interval plus timeout.
 func (p *Prober) runLinks(ctx context.Context, probe *linkProbe) {
 	var running sync.WaitGroup
 	for _, state := range probe.links {
@@ -47,11 +49,19 @@ func (p *Prober) runLinks(ctx context.Context, probe *linkProbe) {
 			defer running.Done()
 			interval := probe.workload.Interval.Duration()
 			for {
+				started := p.config.Clock.Now()
 				p.dialLink(ctx, probe.workload, state)
+				wait := interval - p.config.Clock.Now().Sub(started)
+				if wait <= 0 {
+					if ctx.Err() != nil {
+						return
+					}
+					continue
+				}
 				select {
 				case <-ctx.Done():
 					return
-				case <-p.config.Clock.After(interval):
+				case <-p.config.Clock.After(wait):
 				}
 			}
 		}(state)

@@ -140,3 +140,29 @@ func TestLinkProbeResetKeepsQualification(t *testing.T) {
 		}
 	}
 }
+
+func TestLinkProbeSamplesABlockedLinkOnTheIntervalNotIntervalPlusTimeout(t *testing.T) {
+	documents := map[string][]byte{
+		"links": []byte(`{"apiVersion": "sdo.dev/v1alpha1", "kind": "TrafficWorkload", "name": "links", "purpose": "link-probe",
+			"interval": "100ms", "timeout": "80ms", "failures": 3, "links": [{"from": "web", "to": "backend", "port": 9001}]}`),
+	}
+	workloads, err := prober.ParseWorkloads(documents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := prober.New(prober.Config{Namespace: "shop", Catalog: catalog(), Workloads: workloads,
+		LinkAddress: func(link traffic.Link) string { return link.To },
+		DialContext: func(ctx context.Context, network string, _ string) (net.Conn, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeFor(t, p, time.Second)
+	got := len(linkObservations(t, p)["backend"].Samples)
+	// A fixed cadence gives about 10 samples; interval-plus-timeout would give about 5.
+	if got < 8 {
+		t.Fatalf("a blocked link was sampled only %d times in 1s", got)
+	}
+}
