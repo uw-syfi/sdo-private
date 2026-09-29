@@ -16,8 +16,10 @@ from benchmarks.sregym.adapter.persistent import (
     DetectionMissError,
     PersistentControllerError,
     PersistentState,
+    ReceiptRejectedError,
     StageInputs,
     control_namespace_for,
+    drain_pending_incident,
     publish_deferred_receipts,
     run_persistent_stage,
     teardown,
@@ -486,10 +488,10 @@ def test_a_rejected_receipt_is_kept_with_its_validation_error_and_logs(tmp_path:
     ops.reflectable.add("incident-1")
     ops.incomplete.add("incident-1")
 
+    # The rejection is that incident's own outcome, not a teardown failure.
     errors = teardown(tmp_path / "sdo_persistent_controller.json", ops=ops, clock=_clock(ops))
 
-    assert len(errors) == 1
-    assert "completed=true" in errors[0]
+    assert errors == []
     receipt_dir = tmp_path / "s0" / "agent"
     assert not (receipt_dir / STRICT_RECEIPT_FILENAME).exists()
     rejected = json.loads((receipt_dir / REJECTED_RECEIPT_FILENAME).read_text(encoding="utf-8"))
@@ -497,6 +499,39 @@ def test_a_rejected_receipt_is_kept_with_its_validation_error_and_logs(tmp_path:
     assert rejected["receipt"]["incident_id"] == "incident-1"
     assert ops.events.count(("logs", "hotel-sdo")) == 2
     assert ("delete", "hotel-sdo") in ops.events
+    assert PersistentState.load(tmp_path / "sdo_persistent_controller.json").controllers == {}
+
+
+def test_a_rejected_receipt_does_not_stop_the_next_stage_from_injecting(tmp_path: Path) -> None:
+    ops = FakeOps()
+    _run(tmp_path, ops, "s0", [])
+    ops.reflectable.update({"incident-1", "incident-2"})
+    ops.incomplete.add("incident-1")
+
+    # _run asserts the s1 fault was injected after the previous drain was rejected.
+    _run(tmp_path, ops, "s1", [])
+
+    rejected = json.loads((tmp_path / "s0" / "agent" / REJECTED_RECEIPT_FILENAME).read_text(encoding="utf-8"))
+    assert "completed=true" in rejected["validation_error"]
+    state = PersistentState.load(tmp_path / "sdo_persistent_controller.json")
+    assert state.controllers["hotel"].pending is not None
+    assert state.controllers["hotel"].pending.incident_id == "incident-2"
+    assert teardown(tmp_path / "sdo_persistent_controller.json", ops=ops, clock=_clock(ops)) == []
+    assert (tmp_path / "s1" / "agent" / STRICT_RECEIPT_FILENAME).is_file()
+
+
+def test_a_rejected_receipt_is_still_reported_to_a_caller_that_drains_one_incident(tmp_path: Path) -> None:
+    ops = FakeOps()
+    _run(tmp_path, ops, "s0", [])
+    ops.reflectable.add("incident-1")
+    ops.incomplete.add("incident-1")
+    state = PersistentState.load(tmp_path / "sdo_persistent_controller.json")
+    record = state.controllers["hotel"]
+
+    with pytest.raises(ReceiptRejectedError, match="completed=true"):
+        drain_pending_incident(
+            record, ops=ops, repository=tmp_path / "s0" / "application_workspace", drained_by="fastloop"
+        )
 
 
 def test_a_permanently_failed_closure_ends_the_drain_with_the_broker_error(tmp_path: Path) -> None:

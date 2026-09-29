@@ -28,6 +28,7 @@ from benchmarks.sregym.adapter import (
     PersistentState,
     StageInputs,
     drain_pending_incident,
+    receipt_resolution,
     run_persistent_stage,
 )
 from benchmarks.sregym.fastloop.loop import AgentOutcome, InjectionWindow
@@ -211,7 +212,14 @@ class SdoPersistentAgent:
             # A failed drain must not block the next incident; its evidence stays on disk.
             record.pending = None
             state.save(settings.state_path)
-        receipt = self._receipt(Path(str(outcome.artifacts_dir)))
+        receipt_dir = Path(str(outcome.artifacts_dir))
+        receipt = self._receipt(receipt_dir)
+        # Only a receipt that passed strict validation states how the incident closed.
+        resolution = (
+            receipt.get("resolution") or receipt_resolution(receipt)
+            if (receipt_dir / STRICT_RECEIPT_FILENAME).is_file()
+            else None
+        )
         memory = receipt.get("memory_reuse")
         memory = memory if isinstance(memory, dict) else {}
         attempts = receipt.get("reflection_attempts")
@@ -232,6 +240,7 @@ class SdoPersistentAgent:
             match_reasons=tuple(str(reason) for reason in memory.get("match_reasons", []) or []),
             reflection_attempts=attempts if isinstance(attempts, int) else None,
             reflection_skipped_reason=skipped if isinstance(skipped, str) else None,
+            sdo_resolution=resolution if isinstance(resolution, str) else None,
             error=error,
         )
 

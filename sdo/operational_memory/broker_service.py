@@ -37,7 +37,13 @@ if TYPE_CHECKING:
 #: Recoveries the responder is not credited with: health that cleared only
 #: after the verification window (F4), or that the responder's own repair
 #: does not back (F8). The broker never reflects on them.
-_UNCREDITED_RECOVERIES = frozenset({OutcomeClassification.PARTIAL, OutcomeClassification.EXTERNAL_RECOVERY})
+_UNCREDITED_RECOVERIES = frozenset(
+    {
+        OutcomeClassification.PARTIAL,
+        OutcomeClassification.EXTERNAL_RECOVERY,
+        OutcomeClassification.CLEARED_WITHOUT_ACTION,
+    }
+)
 
 
 class BrokerServiceError(RuntimeError):
@@ -486,7 +492,7 @@ class BrokerService:
         because nothing needed repair. Rejecting that here on every retry
         would fail the closure permanently and block every later incident
         (CHAOS_DECISIONS.md F16), so it is left to commit; ``derive_outcome``
-        classifies it CANCELLED rather than crediting it as a mitigation, and
+        classifies it CLEARED_WITHOUT_ACTION rather than crediting it as a mitigation, and
         it is never reflected on. A ``completed`` claim with no action while
         health is still not verified cannot be trusted and is rejected
         regardless.

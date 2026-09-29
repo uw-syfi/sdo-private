@@ -54,6 +54,29 @@ def _contract_fixture(name: str) -> str:
             # no repository commit. This must not be credited as SUCCESS/FALSE_POSITIVE or
             # learned from (CHAOS_DECISIONS.md F16).
             lambda facts: facts.model_copy(update={"result": facts.result.model_copy(update={"repair_actions": []})}),
+            OutcomeClassification.CLEARED_WITHOUT_ACTION,
+        ),
+        (
+            # The same no-op reported as cancelled (phase-1 S3 flicker stages): health cleared with
+            # no mutation by the responder, so it is not a mitigation and not merely cancelled (D30).
+            lambda facts: facts.model_copy(
+                update={
+                    "result": facts.result.model_copy(update={"status": IncidentStatus.CANCELLED, "repair_actions": []})
+                }
+            ),
+            OutcomeClassification.CLEARED_WITHOUT_ACTION,
+        ),
+        (
+            # A cancelled responder that never restored health is still just cancelled.
+            lambda facts: facts.model_copy(
+                update={
+                    "health_verified": False,
+                    "verified_at": None,
+                    "result": facts.result.model_copy(
+                        update={"status": IncidentStatus.CANCELLED, "repair_actions": []}
+                    ),
+                }
+            ),
             OutcomeClassification.CANCELLED,
         ),
         (lambda facts: facts, OutcomeClassification.SUCCESS),

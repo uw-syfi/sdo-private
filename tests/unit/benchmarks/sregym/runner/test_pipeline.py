@@ -1448,9 +1448,10 @@ class TestPersistentControllerPipeline:
         return d
 
     @staticmethod
-    def _config() -> PipelineConfig:
+    def _config(*, continue_on_agent_failure: bool = False) -> PipelineConfig:
         return PipelineConfig(
             name="persistent",
+            continue_on_agent_failure=continue_on_agent_failure,
             defaults={
                 "agent": "sdo_codex",
                 "model": "gpt-test",
@@ -1468,8 +1469,9 @@ class TestPersistentControllerPipeline:
         teardown_writes_receipts: bool,
         receipt_stages: tuple[int, ...] = (0, 1),
         teardown_returncode: int = 0,
+        continue_on_agent_failure: bool = False,
     ) -> tuple[int, list[list[str]], list[dict[str, str]], Path]:
-        config = self._config()
+        config = self._config(continue_on_agent_failure=continue_on_agent_failure)
         pipeline_dir = tmp_path / "pipeline"
         pipeline_dir.mkdir()
         calls: list[list[str]] = []
@@ -1544,6 +1546,31 @@ class TestPersistentControllerPipeline:
         states = read_pipeline_state(pipeline_dir).stages
         assert states[0].status == "failed"
         assert "strict receipt" in states[0].error
+
+    def test_a_rejected_receipt_is_an_agent_failure_for_that_stage_only(self, sregym_dir, tmp_path: Path) -> None:
+        rc, _calls, _envs, pipeline_dir = self._run(
+            sregym_dir,
+            tmp_path,
+            teardown_writes_receipts=True,
+            receipt_stages=(1,),
+            continue_on_agent_failure=True,
+        )
+
+        assert rc == 0
+        states = read_pipeline_state(pipeline_dir).stages
+        assert states[0].status == "agent_failure"
+        assert "strict receipt" in states[0].error
+        assert states[1].status == "completed"
+
+    def test_a_rejected_receipt_still_fails_the_pipeline_unless_agent_failures_continue(
+        self, sregym_dir, tmp_path: Path
+    ) -> None:
+        rc, _calls, _envs, pipeline_dir = self._run(
+            sregym_dir, tmp_path, teardown_writes_receipts=True, receipt_stages=(1,)
+        )
+
+        assert rc == 1
+        assert read_pipeline_state(pipeline_dir).stages[0].status == "failed"
 
 
 def test_runner_preserve_label_matches_the_installed_controller_namespace_label() -> None:

@@ -31,7 +31,7 @@ if TYPE_CHECKING:
         run_persistent_stage,
         teardown,
     )
-    from benchmarks.sregym.adapter.runtime import RuntimeConfig
+    from benchmarks.sregym.adapter.runtime import RuntimeConfig, receipt_resolution
 
 _EXPORTS: dict[str, str] = {
     "DeployedLifecycle": "driver",
@@ -50,6 +50,7 @@ _EXPORTS: dict[str, str] = {
     "run_persistent_stage": "persistent",
     "teardown": "persistent",
     "RuntimeConfig": "runtime",
+    "receipt_resolution": "runtime",
 }
 
 __all__ = [
@@ -66,6 +67,7 @@ __all__ = [
     "control_namespace_for",
     "deployed_lifecycle",
     "drain_pending_incident",
+    "receipt_resolution",
     "run_or_reuse_lifecycle",
     "run_persistent_stage",
     "teardown",

@@ -58,6 +58,7 @@ class FakeAgent:
     model: str = "gpt-test"
     events: list[str] = field(default_factory=list)
     fail_on: set[int] = field(default_factory=set)
+    resolution: str | None = None
 
     def resolve(self, index: int, problem_id: str, inject: Callable[[], InjectionWindow]) -> AgentOutcome:
         self.events.append(f"resolve:{index}")
@@ -85,6 +86,7 @@ class FakeAgent:
             reflection_seconds=30.0,
             reflection_tokens=TokenCounts(input_tokens=1000, output_tokens=20),
             reflection_attempts=1,
+            sdo_resolution=self.resolution,
         )
 
     def close(self) -> None:
@@ -114,6 +116,17 @@ def test_each_incident_is_graded_before_recovery_and_learning_follows_recovery(t
     assert first.incident_wall_seconds == pytest.approx(107.0)
     assert (records[0].warm_path, records[1].warm_path) == (False, True)
     assert [record.index for record in load_records(tmp_path / "incidents.jsonl")] == [0, 1]
+
+
+def test_the_run_record_says_when_sdo_did_not_mitigate_the_incident(tmp_path: Path) -> None:
+    clock = FakeClock()
+    driver = FakeDriver(clock)
+    agent = FakeAgent(clock, resolution="cleared_without_sdo_action")
+
+    records = run_incidents(agent, driver, _config(tmp_path, 1), monotonic=clock.monotonic)
+
+    assert records[0].sdo_resolution == "cleared_without_sdo_action"
+    assert load_records(tmp_path / "incidents.jsonl")[0].sdo_resolution == "cleared_without_sdo_action"
 
 
 def test_a_failed_incident_is_recorded_recovered_and_the_loop_continues(tmp_path: Path) -> None:
