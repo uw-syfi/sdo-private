@@ -212,7 +212,9 @@ def _link_probe_detector_ids(workspace_path: Path) -> frozenset[str]:
         documents = load_workload_documents(workspace_path)
     except ValueError:
         return frozenset()
-    return frozenset(f"traffic-{name}" for name, document in documents.items() if document.get("purpose") == "link-probe")
+    return frozenset(
+        f"traffic-{name}" for name, document in documents.items() if document.get("purpose") == "link-probe"
+    )
 
 
 def _write_generated_contract_test(
