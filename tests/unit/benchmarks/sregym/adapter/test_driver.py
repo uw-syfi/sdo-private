@@ -353,9 +353,8 @@ def test_adapter_persists_validated_lifecycle_seed_outside_resettable_stage(tmp_
     provenance = repository / ".sdo" / "lifecycle-provenance.yaml"
     provenance.parent.mkdir()
     provenance.write_text("health_judge: validated\n", encoding="utf-8")
-    logs_dir = repository.parent / "problem_runs" / "run" / "agent"
 
-    seed = persist_lifecycle_seed(repository, logs_dir)
+    seed = persist_lifecycle_seed(repository)
 
     assert seed == tmp_path / "pipeline" / "lifecycle_seed_stage1"
     assert (seed / ".git").is_dir()
@@ -371,6 +370,39 @@ def test_the_detection_deadline_comes_from_the_agent_config_and_defaults_off(mon
 
     monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"detection_timeout_sec": 900}))
     assert driver._parse_args([]).detection_timeout_sec == 900
+
+
+def test_lifecycle_seed_checkpoint_ignores_sregyms_own_ephemeral_logs_dir(tmp_path: Path) -> None:
+    """SREGym hands the adapter its own per-run staging directory as
+    AGENT_LOGS_DIR (``<sregym_dir>/.runtime/<agent>/<artifact_id>``); it is
+    never nested under the pipeline's ``stage_<n>_<name>`` directory while the
+    agent runs — SREGym only renames it there after the process exits. The
+    checkpoint must be located from the application workspace's own ancestry
+    instead, since our own pipeline always places it at
+    ``<stage_dir>/application_workspace``.
+    """
+    repository = tmp_path / "pipeline" / "stage_0_seed" / "application_workspace"
+    repository.mkdir(parents=True)
+    (repository / ".git").mkdir()
+
+    seed = persist_lifecycle_seed(repository)
+
+    assert seed == tmp_path / "pipeline" / "lifecycle_seed_stage0"
+    assert seed.is_dir()
+
+
+def test_lifecycle_seed_checkpoint_warns_loudly_when_no_stage_directory_is_found(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    repository = tmp_path / "standalone" / "application_workspace"
+    repository.mkdir(parents=True)
+    (repository / ".git").mkdir()
+
+    with caplog.at_level("WARNING"):
+        seed = persist_lifecycle_seed(repository)
+
+    assert seed is None
+    assert any("lifecycle seed checkpoint" in record.message for record in caplog.records)
 
 
 def test_sregym_passes_run_artifact_directory_to_sdo_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1543,6 +1575,127 @@ def test_persistent_driver_reports_resolution_without_strict_receipt_or_job_clea
     assert events == ["stage", "submit", "cleanup"]
     assert (logs_dir / "sdo_incident_resolution.json").is_file()
     assert not list(logs_dir.glob("sdo_production_receipt_*.json"))
+
+
+def test_persistent_stage0_lifecycle_seed_survives_sregyms_ephemeral_logs_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Drives the real persistent-controller path (``run_persistent_stage`` is
+    not mocked) with a realistic ``AGENT_LOGS_DIR``: SREGym's own per-run
+    staging directory, never nested under the pipeline's stage directory. The
+    checkpoint must still land at ``<pipeline_dir>/lifecycle_seed_stage0``,
+    before the incident is injected, and a checkpoint failure must be a loud,
+    recorded field rather than silent.
+    """
+    import benchmarks.sregym.adapter.driver as driver
+    from tests.unit.benchmarks.sregym.adapter.test_persistent import FakeOps
+
+    pipeline_dir = tmp_path / "pipeline"
+    repository = pipeline_dir / "stage_0_seed" / "application_workspace"
+    repository.mkdir(parents=True)
+    (repository / ".git").mkdir()
+
+    # SREGym's real per-run staging path (third_party/sregym/main.py's
+    # ``RunArtifacts.create(staging_root=Path(".runtime"), ...)``), relative
+    # to the sregym submodule's own working directory: never nested under
+    # our pipeline tree while the driver process runs.
+    logs_dir = tmp_path / "sregym-checkout" / ".runtime" / "sdo_codex" / "anon_deadbeef"
+    logs_dir.mkdir(parents=True)
+    state_path = pipeline_dir / "sdo_persistent_controller.json"
+
+    monkeypatch.setenv("SREGYM_DEFER_CLEANUP", "1")
+    monkeypatch.setenv("SDO_PERSISTENT_CONTROLLER_STATE", str(state_path))
+    monkeypatch.setattr(driver, "get_api_base", lambda: "http://localhost:8000")
+    monkeypatch.setattr(driver, "poll_stage_sync", lambda *_args, **_kwargs: "awaiting_fault_injection")
+    monkeypatch.setattr(driver, "get_app_info", lambda *_args, **_kwargs: {"app_name": "Demo", "namespace": "demo"})
+    monkeypatch.setattr(driver, "_application_repository", lambda: repository)
+    monkeypatch.setattr(
+        driver,
+        "_deployed_lifecycle_context",
+        lambda *_args, **_kwargs: driver.DeployedLifecycleContext(health_objective="healthy", active_resources=[]),
+    )
+    # A fresh stage 0: no reusable lifecycle, matching the RUNBOOK's seed bootstrap.
+    monkeypatch.setattr(driver, "run_or_reuse_lifecycle", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(driver, "request_fault_injection", lambda *_args, **_kwargs: None)
+    ops = FakeOps()
+    monkeypatch.setattr(driver, "KubectlClusterOps", lambda: ops)
+
+    args = driver._parse_args(["--persistent-controller", "--logs-dir", str(logs_dir)])
+    resolution = driver._run_persistent(args, "http://localhost:8000", 0.0)
+
+    seed_dir = pipeline_dir / "lifecycle_seed_stage0"
+    assert seed_dir.is_dir(), f"lifecycle seed checkpoint was not written to {seed_dir}"
+    assert resolution.get("lifecycle_seed_checkpoint_error") is None
+    # The checkpoint is captured by run_lifecycle(), which run_persistent_stage
+    # always calls before it installs the controller or injects the incident.
+    assert [event[0] for event in ops.events[:2]] == ["install", "active"]
+
+
+def test_persistent_stage0_lifecycle_seed_excludes_the_incident_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The checkpoint must hold only the validated lifecycle commit — never a
+    later incident commit made once the fault is injected.
+    """
+    import benchmarks.sregym.adapter.driver as driver
+    from tests.unit.benchmarks.sregym.adapter.test_persistent import FakeOps
+
+    pipeline_dir = tmp_path / "pipeline"
+    repository = pipeline_dir / "stage_0_seed" / "application_workspace"
+    repository.mkdir(parents=True)
+
+    def git(*git_args: str) -> str:
+        return subprocess.run(
+            ["git", *git_args], cwd=repository, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "sdo@example.com")
+    git("config", "user.name", "sdo")
+    (repository / "goal.md").write_text("health objective\n", encoding="utf-8")
+    git("add", "goal.md")
+    git("commit", "-q", "-m", "sdo: capture goal, architecture, and independent health judge")
+    lifecycle_sha = git("rev-parse", "HEAD")
+
+    def commit_incident_after_injection(*_args: object, **_kwargs: object) -> None:
+        (repository / "incident.md").write_text("mitigated\n", encoding="utf-8")
+        git("add", "incident.md")
+        git("commit", "-q", "-m", "sdo(incident-1): repaired missing ConfigMap")
+
+    logs_dir = tmp_path / "sregym-checkout" / ".runtime" / "sdo_codex" / "anon_deadbeef"
+    logs_dir.mkdir(parents=True)
+    state_path = pipeline_dir / "sdo_persistent_controller.json"
+
+    monkeypatch.setenv("SREGYM_DEFER_CLEANUP", "1")
+    monkeypatch.setenv("SDO_PERSISTENT_CONTROLLER_STATE", str(state_path))
+    monkeypatch.setattr(driver, "get_api_base", lambda: "http://localhost:8000")
+    monkeypatch.setattr(driver, "poll_stage_sync", lambda *_args, **_kwargs: "awaiting_fault_injection")
+    monkeypatch.setattr(driver, "get_app_info", lambda *_args, **_kwargs: {"app_name": "Demo", "namespace": "demo"})
+    monkeypatch.setattr(driver, "_application_repository", lambda: repository)
+    monkeypatch.setattr(
+        driver,
+        "_deployed_lifecycle_context",
+        lambda *_args, **_kwargs: driver.DeployedLifecycleContext(health_objective="healthy", active_resources=[]),
+    )
+    monkeypatch.setattr(driver, "run_or_reuse_lifecycle", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(driver, "request_fault_injection", commit_incident_after_injection)
+    ops = FakeOps()
+    monkeypatch.setattr(driver, "KubectlClusterOps", lambda: ops)
+
+    args = driver._parse_args(["--persistent-controller", "--logs-dir", str(logs_dir)])
+    driver._run_persistent(args, "http://localhost:8000", 0.0)
+
+    seed_dir = pipeline_dir / "lifecycle_seed_stage0"
+    seed_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=seed_dir, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    seed_log = subprocess.run(
+        ["git", "log", "--oneline"], cwd=seed_dir, check=True, capture_output=True, text=True
+    ).stdout
+
+    assert seed_head == lifecycle_sha
+    assert "incident" not in seed_log
+    assert git("rev-parse", "HEAD") != lifecycle_sha  # the repository moved on to the incident commit
 
 
 def test_persistent_mode_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -70,14 +70,30 @@ def _cleanup_defer_timeout_seconds() -> float:
     return timeout
 
 
-def persist_lifecycle_seed(repository: Path, logs_dir: Path) -> Path | None:
-    """Checkpoint validated lifecycle memory outside a resettable stage directory."""
+def persist_lifecycle_seed(repository: Path) -> Path | None:
+    """Checkpoint validated lifecycle memory outside a resettable stage directory.
 
+    The stage directory is located from *repository*'s own ancestors, not
+    from SREGym's ``AGENT_LOGS_DIR``: our pipeline always places the
+    application workspace at ``<stage_dir>/application_workspace``
+    (``application_workspace_dir`` in the SREGym harness), but SREGym's own
+    per-run logs directory is an ephemeral staging path
+    (``<sregym_dir>/.runtime/<agent>/<artifact_id>``) that is never nested
+    under the stage directory while the agent runs — it is only renamed
+    there, by SREGym, after the driver process exits. Keying the search off
+    ``logs_dir`` therefore never found the stage directory in a real
+    benchmark run, and the checkpoint silently never got written.
+    """
+
+    resolved_repository = repository.resolve()
     stage_dir = next(
-        (parent for parent in logs_dir.resolve().parents if re.fullmatch(r"stage_(\d+)_.+", parent.name)),
+        (parent for parent in resolved_repository.parents if re.fullmatch(r"stage_(\d+)_.+", parent.name)),
         None,
     )
     if stage_dir is None:
+        logger.warning(
+            "lifecycle seed checkpoint skipped: %s has no stage_<n>_<name> ancestor directory", resolved_repository
+        )
         return None
     stage_index = re.fullmatch(r"stage_(\d+)_.+", stage_dir.name)
     if stage_index is None:
@@ -522,6 +538,8 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
     ambient_kubeconfig = os.environ.get("KUBECONFIG")
     validation_cache = LifecycleValidationCache.from_env()
 
+    lifecycle_seed_checkpoint_error: list[str] = []
+
     def lifecycle() -> bool:
         # Host-side lifecycle keeps the benchmark's agent access path.
         with _environment("KUBECONFIG", ambient_kubeconfig):
@@ -533,8 +551,8 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
                 model=args.model,
                 validation_cache=validation_cache,
             )
-        if args.logs_dir:
-            persist_lifecycle_seed(repository, Path(args.logs_dir))
+        if args.logs_dir and persist_lifecycle_seed(repository) is None:
+            lifecycle_seed_checkpoint_error.append(f"lifecycle seed checkpoint was not written for {repository}")
         return reused
 
     config = RuntimeConfig(
@@ -580,6 +598,8 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
             inject=lambda: request_fault_injection(api_base),
         )
     resolution["driver_phase_timings_seconds"]["conductor_wait"] = conductor_ready - started
+    if lifecycle_seed_checkpoint_error:
+        resolution["lifecycle_seed_checkpoint_error"] = lifecycle_seed_checkpoint_error[0]
     return resolution
 
 
@@ -622,8 +642,9 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             backend=lifecycle_type(model=args.model),
         )
     lifecycle_ready = time.monotonic()
-    if args.logs_dir:
-        persist_lifecycle_seed(repository, Path(args.logs_dir))
+    lifecycle_seed_checkpoint_error: str | None = None
+    if args.logs_dir and persist_lifecycle_seed(repository) is None:
+        lifecycle_seed_checkpoint_error = f"lifecycle seed checkpoint was not written for {repository}"
     trusted_kubeconfig = os.getenv("SREGYM_BASE_KUBECONFIG", "").strip()
     if trusted_kubeconfig:
         os.environ["KUBECONFIG"] = trusted_kubeconfig
@@ -656,6 +677,8 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     receipt["lifecycle_reused"] = lifecycle_reused
     receipt["lifecycle_validation"] = validation_report(validation_cache)
     receipt["fault_injection_deferred"] = fault_deferred
+    if lifecycle_seed_checkpoint_error is not None:
+        receipt["lifecycle_seed_checkpoint_error"] = lifecycle_seed_checkpoint_error
     if gate is not None:
         receipt["fault_gate_timings_seconds"] = gate.timings
     receipt["driver_phase_timings_seconds"] = {
