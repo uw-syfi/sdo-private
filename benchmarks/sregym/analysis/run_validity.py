@@ -77,7 +77,8 @@ _GUARD_BAD = re.compile(r"AgentKubeconfigMismatch|does not reach cluster")
 #: kind node names of SREGym lanes, whose cluster names end in ``-w<N>``.
 #: A lane's cluster is ``<prefix>-w<N>`` and its nodes ``<cluster>-control-plane`` or
 #: ``<cluster>-worker<M>``; static pods (``etcd-<node>``) embed a node name after a hyphen.
-_NODE = re.compile(r"(?<![A-Za-z0-9])([a-z][a-z0-9]*(?:-[a-z0-9]+)*?-w\d+)-(?:control-plane|worker\d*)(?![A-Za-z0-9])")
+# A leading "…" marks tool-output truncation, which can cut a node name mid-word.
+_NODE = re.compile(r"(?<![A-Za-z0-9…])([a-z][a-z0-9]*(?:-[a-z0-9]+)*?-w\d+)-(?:control-plane|worker\d*)(?![A-Za-z0-9])")
 _STATIC_POD_PREFIXES = ("etcd-", "kube-apiserver-", "kube-controller-manager-", "kube-scheduler-")
 _QUOTA = re.compile(r"usage limit|usage_limit|rate limit|rate_limit|quota", re.IGNORECASE)
 _HELPER_CLEANUP_FAILED = re.compile(r"clean up responder helpers:.*")

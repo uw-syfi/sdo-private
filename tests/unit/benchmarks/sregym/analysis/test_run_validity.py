@@ -124,6 +124,13 @@ def test_agent_output_from_another_lane_is_invalid_infra(tmp_path: Path) -> None
     assert any("luna-w1" in reason for reason in result.reasons)
 
 
+def test_a_node_name_cut_by_tool_output_truncation_is_not_another_lane(tmp_path: Path) -> None:
+    output = "hotel pods on luna-w0-worker2 ...     …20266 tokens truncated…na-w0-worker3   <none>"
+    result = _one(Run(tool_output=output).write(tmp_path / "exp"), LEGACY)
+
+    assert not any("foreign" in reason or "other lanes" in reason for reason in result.reasons), result.reasons
+
+
 def test_legacy_runs_without_the_guard_are_invalid_only_when_they_overlapped_another_run(tmp_path: Path) -> None:
     logs = tmp_path / "logs"
     alone = Run(worker_log="", manifest=None).write(logs / "20260927_100000_codex")
