@@ -149,3 +149,138 @@ unverified flag risks silently breaking every future run. Proposal only, pending
 - Defaulting `reflection_session` to `fresh` (already an open "next action" in `luna_reuse_DECISIONS.md`).
 - Any Codex CLI invocation flag change (Codex CLI harness boilerplate, tool-output token caps) that
   cannot be verified without a live Codex run while the weekly quota is at 90% (resets 2026-10-03).
+
+## First-incident token trim (phase-1 reflection audit, 2026-09-29)
+
+Offline analysis only: no LLM call, no cluster, no image rebuild. It backs branch
+`vic/feat/first-incident-token-trim` (off `vic/exp/phase1-run` at `9f7dddf`).
+
+### Data and method
+
+- Four SDO pipelines `20260928_2322*..2328*_pipeline_assure-p1-sdo-{a,b,c,d}` (read only, under
+  `.claude/worktrees/agent-abba78c07e386ad4a/third_party/sregym/logs/`), first-encounter stages only
+  (`stage_*_r1-*`): 16 responder sessions, 12 of which triggered an LLM reflection (the other 4 were exact-match repeats
+  that the broker skips deterministically, or a 1-request no-change).
+- Per-request numbers come from the Codex rollout `token_count` events (`last_token_usage`), one rollout per incident.
+  The resumed reflection is the second task of the responder's rollout. Cumulative stage folders repeat earlier sessions,
+  so each session file is counted once.
+- Weighted tokens use PLAN.md weights: uncached 1, cache read 0.1, output 8 (reasoning is part of output).
+- Prompt sizes use `o200k_base` (3.93-4.08 chars per token on these prompts; the replay tool uses 4.0).
+
+### Breakdown, the 12 first-encounter incidents that reflected
+
+| | Requests | Uncached in | Cache read | Output | of which reasoning | Weighted | Share |
+|---|---|---|---|---|---|---|---|
+| Responder | 146 (12.2 per incident) | 364,597 | 3,186,944 | 37,417 | 7,598 | 982,627 (81.9K each) | 35% |
+| Reflection | 127 (10.6 per incident) | 663,343 | 5,802,240 | 77,349 | 19,991 | 1,862,359 (155.2K each) | 65% |
+| First incident | 273 | 1,027,940 | 8,989,184 | 114,766 | 27,589 | 2,844,986 (237.1K each) | 100% |
+
+(All 16 responders: 185 requests, 469,577 uncached, 4,024,320 cached, 47,954 output, 1,255,641 weighted.)
+
+Reflection weighted tokens by what each model request did (12 reflections):
+
+| Request kind | Requests | Weighted | Share of reflection |
+|---|---|---|---|
+| Writes (`apply_patch`: playbook, scripts, detector, test, manifest) | 40 | 715,591 | 38% |
+| First request (whole context loaded, cold cache) | 12 | 476,892 | 26% |
+| Reads of `.sdo/` and app source | 33 | 302,862 | 16% |
+| Memory-check (validator self-check) | 17 | 160,518 | 9% |
+| Final answer | 11 | 93,097 | 5% |
+| Other shell | 9 | 68,783 | 4% |
+| Detector go test | 5 | 44,612 | 2% |
+
+Retries and loops in reflection:
+
+- **Broker validator rejections: 0.** Every ledger has `reflection_attempts=1` and `reflection_fresh_retry_attempts=0`.
+  No retry prompt was ever sent, so "fewer validator round trips" has no measured target in this data.
+- The agent's own self-check found no rule violation: 17 `memory_check` calls, all `OK` (one match in the log was an
+  `ls` listing). It ran the check more than once per reflection (1.4 on average), after each edit batch.
+- Detector `draft-test` failed 4 times in 12 reflections (logic errors in the agent's own test, not API errors),
+  each costing about 2 more write requests.
+- 4 of 12 reflections spent a request on `git diff` / `git status` / `cat` of their own edits after the last write.
+- Re-reads: 51 file-read commands in reflections; 11 re-read a path the responder had already read; 5 re-read a path
+  reflection had itself read. Exploration of `.sdo/` before the first write took 1 to 6 requests. It read existing
+  health detectors as Go templates (`service-endpoints` in 5 of 12, `objective` in 3 of 12) although the prompt says not
+  to explore SDK source, because a first incident has no incident detector to copy.
+
+What fills the reflection context (mean of 12, tokens):
+
+| Component | Tokens | Note |
+|---|---|---|
+| Harness base (Codex system, tools, skills, environment) | about 18.5K | first request of every session; about 12K of it is cache-hit on later fresh sessions |
+| Responder transcript carried by the resumed session | about 8.6K | dropped by a fresh session |
+| Reflection request, static instructions | 2.9K | memory rules, SDK reference, skeleton |
+| Reflection request, outcome sections | 10.4K (8.3K to 23.7K) | grows about 6K per prior outcome; duplicates the current outcome |
+
+Resumed reflections also pay their first request almost entirely uncached (37.1K uncached of 41.3K on average: the resume
+rewrites the transcript, so only the 12K harness prefix ever hits, and in pipelines `a` and `b` not even that).
+
+### Top 5 cost drivers of a first incident (weighted, 12 incidents, total 2,844,986)
+
+| # | Driver | Weighted | Share | Reducible without quality loss |
+|---|---|---|---|---|
+| 1 | Reflection output (77.3K tokens x 8; 53.7K of it in the 40 write requests) | 618,792 | 21.8% | Mostly no: it is the playbook, scripts, detector, test, manifest. The output contract stays identical. |
+| 2 | Reflection uncached input (663K; 445K is the first request) | 663,343 | 23.3% | Partly: prompt size (fixes 1 and 3) and a fresh session (fix 2) |
+| 3 | Reflection cache re-reads (5.8M x 0.1: about 11 requests re-reading 46-57K each) | 580,224 | 20.4% | Partly: smaller context and fewer requests |
+| 4 | Responder cache re-reads plus uncached input | 683,291 | 24.0% | Not in this branch: responder prompt is already trimmed (`1816e9c`); harness base is not ours |
+| 5 | Responder output (37.4K x 8) | 299,336 | 10.5% | No |
+
+Cross-cutting: the reflection request's outcome sections cost 248,382 weighted tokens (8.7% of a first incident): 10.4K
+tokens per reflection, re-read by about 10 requests. That is the single largest slice that is pure duplication.
+
+### Decisions
+
+1. **Bound the outcome sections of the reflection request (implemented).**
+   `sdo/agent_runtime/responder/reflection_outcomes.py`: the current outcome keeps every field verbatim except
+   `detector_history`, which is run-length encoded per detector (every status or fingerprint transition kept, with first
+   and last timestamp and count); prior incidents are compact summaries (findings without evidence, root causes,
+   repair actions, playbooks, verification verdicts, collapsed detector history); the current incident is no longer
+   repeated inside its own history. This applies Finding 3 above, which was a proposal only when history held 0-1
+   entries; in the phase-1 controller it held 1-6.
+   - Offline estimate (deterministic replay of the 12 recorded reflection requests with
+     `python -m benchmarks.sregym.analysis.reflection_prompt_replay <pipeline stage dirs>`): 124.7K to 47.9K outcome
+     tokens, **76.8K prompt tokens saved, 153,235 weighted tokens, 12.8K per reflection, 5.4% of first-incident cost
+     (8.2% of reflection)**. It grows with history: 4.9K-9.5K weighted with no prior outcome and 19.6K-22.1K with 5 (the
+     mean over the recorded reflections with 3 or more prior outcomes is 20.5K).
+   - Quality: the reflection output contract, the SDK reference, memory rules and the topology review are untouched.
+     What is dropped is raw evidence text and per-timestamp evaluations of past incidents. Risk: low.
+2. **Default the first reflection to a fresh session (implemented).** `DEFAULT_REFLECTION_SESSION = "fresh"` is now the
+   default of `BrokerService`, the broker CLI, `ControllerInstallConfig`, the SREGym driver, the assurance CLI and
+   fastloop. `resume` stays selectable. Receipts already accept `same_session_reflection=false` for `fresh`.
+   - Offline estimate: small. Dropping the resumed responder transcript removes about 8.6K tokens from every request, but
+     the brief adds up to about 8K, so the deterministic difference is within 0-3K weighted per reflection (under 1%).
+   - Measured, not offline: `luna_reuse_DECISIONS.md` 3.3 measured fresh at 553K vs resumed 690K raw and 149K vs 204K
+     weighted (-27% of reflection, n=3 per arm, one outlier). If that holds it is about -18% of a first incident. The
+     mechanism is plausibly the cold-cache resume (first request 37.1K uncached) plus a shorter session. Confidence: low
+     to medium; the canary must confirm. Risk: reflection no longer sees the responder's own reasoning, only the brief.
+3. **Give reflection a worked incident detector and one final verification command (implemented, prompt only).**
+   - `INCIDENT_DETECTOR_EXAMPLE_FILES` in `reflection.py` is a `detector.go` plus `detector_test.go` (2.7K chars, about
+     0.7K tokens) that compiled and passed under `go test` against `controller/sdk` when written, with the
+     `sdk.ObjectRefFrom` and `sdktest.Snapshot` usage that recorded reflections learned by reading health detectors. A
+     unit test keeps it gofmt-clean. Prompt says not to read health detector source.
+   - The self-check rules now ask to batch edits and verify once, after the last edit, with one command chaining
+     `chmod +x`, `bash -n`, `gofmt -l`, `draft-test`, and `memory_check`, and not to re-read the edits with git or cat.
+     The validation contract (memory check, draft-test scope, the broker validator) is unchanged.
+   - Expected: removes about 1 to 3 read requests in the reflections that have no incident detector to copy (5 of 12)
+     and about 1 memory-check or review request per reflection: 3 to 5% of a first incident, plus about 1.4K weighted of
+     added prompt. Behavioural, so unverified offline. Risk: the agent may copy the example's shape too literally; the
+     validator and the near-miss test requirement still apply.
+
+Expected total: about 8% to 28% off a first incident (the low end is fix 1 alone plus half of fix 3; the high end
+includes the measured -27% fresh effect on reflection, and the fixes overlap so they do not add exactly). That moves
+the first-encounter ratio including reflection from 1.88x to roughly 1.4x-1.7x Codex. It does not reach parity: reflection
+output (21.8% of a first incident) is the deliverable and is left alone. **The actual savings get measured in the next
+live canary**: compare per-incident `reflection_usage` and the responder-turn requests against the phase-1 numbers above.
+
+Commits: `9d5c8f4` (fix 1), `049389a` (fix 2), `3a88269` (fix 3), `3cb0d67` (replay tool).
+
+### Considered and not done
+
+- Cap tool-output size: all reflection tool outputs total 206K chars over 12 reflections (about 4.3K tokens each), the
+  largest single output is 8K chars. A cap saves under 1%.
+- Fewer validator round trips through up-front schema hints: there were no broker rejections to remove. The remaining
+  round trips are the agent's own self-checks, covered by fix 3.
+- Inline `.sdo/playbooks/README.md` and `manifest.yaml` in the request: read in 9 of 12 reflections, but the inline text
+  (about 2.5K tokens x 2.1) costs about as much as the request it saves; revisit if the manifest stays small.
+- Responder-side trims: responder polling and prompt size were handled in `1816e9c`; first-request harness base (about
+  18.5K tokens) belongs to the Codex CLI, not SDO.
