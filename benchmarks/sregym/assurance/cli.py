@@ -31,7 +31,7 @@ from benchmarks.sregym.assurance.harness import (
 )
 from benchmarks.sregym.assurance.scenarios import SCENARIOS, IncidentSpec
 from benchmarks.sregym.fastloop.environment import FastloopEnvironment, Images
-from sdo.operational_memory import DEFAULT_REFLECTION_SESSION
+from sdo.controller_install import DEFAULT_REFLECTION_SESSION
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
