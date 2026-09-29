@@ -1,0 +1,17 @@
+pod "recommendation-9fc95b9b9-7zcvh" deleted from hotel-reservation namespace
+NAME                             READY   STATUS    RESTARTS      AGE   IP               NODE                 NOMINATED NODE   READINESS GATES
+recommendation-9fc95b9b9-w7h6q   1/1     Running   3 (31s ago)   75s   192.168.59.140   np-verify0-worker3   <none>           <none>
+{"level":"info","time":"2026-09-28T22:32:29Z","message":"TLS disabled."}
+{"level":"info","time":"2026-09-28T22:32:29Z","message":"Set global log level: info"}
+{"level":"info","time":"2026-09-28T22:32:29Z","message":"Tune: setGCPercent to 100"}
+2026-09-28T22:32:29Z INF cmd/recommendation/main.go:24 > Reading config...
+2026-09-28T22:32:29Z INF cmd/recommendation/main.go:37 > Read database URL: mongodb-recommendation:27017
+2026-09-28T22:32:29Z INF cmd/recommendation/main.go:38 > Initializing DB connection...
+{"running":{"startedAt":"2026-09-28T22:32:29Z"}}
+{"terminated":{"containerID":"containerd://029ebff72f94fcbb311c4654db2b0571195441ed988951c9d67928c558398e0f","exitCode":2,"finishedAt":"2026-09-28T22:32:01Z","reason":"Error","startedAt":"2026-09-28T22:31:51Z"}}
+main.initializeDatabase({0xc000032640, 0xc000193c50})
+	/go/src/github.com/harlow/go-micro-services/cmd/recommendation/db.go:22 +0xa5
+main.main()
+	/go/src/github.com/harlow/go-micro-services/cmd/recommendation/main.go:39 +0x808
+NAME                             READY   STATUS    RESTARTS      AGE
+recommendation-9fc95b9b9-w7h6q   1/1     Running   3 (35s ago)   79s

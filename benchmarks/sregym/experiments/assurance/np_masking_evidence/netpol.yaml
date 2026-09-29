@@ -1,0 +1,12 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-recommendation
+  namespace: hotel-reservation
+spec:
+  podSelector:
+    matchLabels:
+      io.kompose.service: recommendation
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []

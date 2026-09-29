@@ -1,0 +1,5 @@
+frontend_deleted 1790634516.719770119
+pod/frontend-75c9f766f4-8v56c
+pod "frontend-75c9f766f4-8v56c" deleted from hotel-reservation namespace
+NAME                        READY   STATUS    RESTARTS   AGE    IP             NODE                NOMINATED NODE   READINESS GATES
+frontend-75c9f766f4-dkgsw   1/1     Running   0          100s   192.168.7.80   np-verify0-worker   <none>           <none>
