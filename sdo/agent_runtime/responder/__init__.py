@@ -17,6 +17,7 @@ from sdo.agent_runtime.responder.reflection import (
     ReflectionTurn,
     SessionReflector,
 )
+from sdo.agent_runtime.responder.reflection_outcomes import current_outcome_view, history_view
 
 __all__ = [
     "INCIDENT_REASONING_EFFORT",
@@ -28,6 +29,8 @@ __all__ = [
     "SessionReflector",
     "VerifyBurstResult",
     "VerifyScenarioVerdict",
+    "current_outcome_view",
+    "history_view",
     "incident_status",
     "live_incident_status",
     "prepare_claude_home",

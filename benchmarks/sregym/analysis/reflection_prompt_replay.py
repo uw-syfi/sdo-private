@@ -19,7 +19,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from sdo.agent_runtime.responder.reflection_outcomes import current_outcome_view, history_view
+from sdo.agent_runtime.responder import current_outcome_view, history_view
 from sdo.operational_memory import OutcomeRecord
 
 #: o200k measured 3.93-4.08 characters per token on recorded reflection prompts.

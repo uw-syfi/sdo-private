@@ -300,7 +300,7 @@ def test_reinstall_reuses_a_healthy_controller_with_the_same_install_fingerprint
 
 @pytest.mark.parametrize(
     "stale_override",
-    [{"responder_image": "responder:old"}, {"reflection_session": "fresh"}],
+    [{"responder_image": "responder:old"}, {"reflection_session": "resume"}],
     ids=["responder-image", "reflection-session"],
 )
 def test_reinstall_replaces_a_controller_whose_install_fingerprint_differs(
