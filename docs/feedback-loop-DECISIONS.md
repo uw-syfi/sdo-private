@@ -705,3 +705,71 @@ Branch `vic/perf/status-clear-latency`. This follows up on the cost recorded in
   scale-down and scale-up. This is a baseline and diff timing effect under
   `--hold none` (N11 territory). The gate never reads the diff. It happened
   in 1 of 24 cases and was not reproduced in the other 23.
+
+### D30. A strict receipt records how the incident closed; only a mitigation needs reflection
+
+Branch `vic/fix/receipt-rejections`, from the phase-1 live run (`vic/exp/phase1-run`,
+`benchmarks/sregym/experiments/assurance/PHASE1_RESULTS.md`, section 5). D29 is taken on another branch.
+
+- **What failed.** 5 of 40 strict receipts were rejected, in two shapes.
+  - *External recovery (B2, B9, C8).* `recovery_attribution = external`,
+    `reflection_attempts = 0`, `reflection_commit = null`, `same_session_reflection = false`, and one recorded
+    repair action. The broker never reflects on an `external_recovery` outcome (F8), so no reflection and no
+    reflection commit exist, yet the receipt validator required `same_session_reflection=true` (mode `resume`), a
+    reflection commit, and `validator_evidence_commit = reflection_commit`. It also rejected `external` outright
+    (F17). The receipt could never pass.
+  - *Cancelled no-op (C5, D9, S3 flicker stages).* The gate cleared before any repair, the responder recorded
+    no action and reported `cancelled`, so `completed = false` and `repair_actions = []`. The validator required
+    `completed=true` and a successful repair action.
+  - In B9 the health-clear time (00:58:23) precedes the recorded repair's start (00:58:30), so attribution said
+    `external` although the responder did change the cluster. This is an attribution-timing question (a responder
+    that applies its fix before it records the action), not fixed here; the receipt is now valid and not counted
+    as a mitigation either way.
+- **Why one receipt killed a stage.** The receipt is validated when the *next* stage drains it, before that
+  stage injects. `drain_pending_incident` wrote the rejected file and raised, leaving `record.pending` set. The
+  next stage's install raised before injection (C stage 9), and teardown drained the same incident again, failed
+  again, and returned an error (B and C teardown exit 1).
+- **Decision (contract).** A receipt is an audit record of a verified closure, and credit is a separate field.
+  `receipt_resolution` derives one of three values from the receipt's own evidence, and the builder writes it as
+  `resolution`; an explicit value that disagrees with the evidence is rejected.
+  - `sdo_mitigated`: a successful repair action or a proposal commit, attribution not `external`. Unchanged
+    contract: `completed=true`, same-session reflection per `reflection_session_mode`, a reflection commit,
+    `validator_evidence_commit = reflection_commit`.
+  - `external_recovery`: the responder repaired something but attribution is `external`. Valid; reflection is
+    optional (none is recorded), `completed` may be either value, and `validator_evidence_commit` equals the
+    reflection commit if there is one, else the outcome commit.
+  - `cleared_without_sdo_action`: no successful action and no proposal commit. Same rules as `external_recovery`.
+  - Every kind still requires the integrity evidence: dispatch, acknowledgement, cleanup, empty remaining
+    worktrees, passing independent verification, clear detectors with no late detector review, lifecycle
+    provenance, valid actions and commits. Only `sdo_mitigated` is counted as SDO's fix. A responder that recorded
+    a successful repair but reports `cancelled` is still `sdo_mitigated` and still rejected for `completed=true`.
+- **Decision (outcomes).** New classification `cleared_without_action` for a verified-clear closure where the
+  responder made no successful change and no repository commit, whether it reported `completed` (previously
+  `cancelled`, F16) or `cancelled`. `cancelled` now means only a cancelled responder that also failed to restore
+  health, or one that did change something. The broker never reflects on it, and the controller only surfaces
+  `success` outcomes as prior evidence, so no Go change is needed. `external_recovery` is unchanged.
+- **Decision (run records).** Fastloop `IncidentRecord.sdo_resolution` carries the validated receipt's
+  resolution (null when no receipt validated); the no-LLM suite's `mitigated` check reads the resolution, not
+  `completed`, and expects `cleared_without_action` for the healed-stray scenario.
+- **Decision (blast radius).** A rejected receipt is now that incident's outcome only. `drain_pending_incident`
+  still writes `sdo_rejected_production_receipt.json` and raises `ReceiptRejectedError`, but the pipeline
+  callers (`run_persistent_stage`, `teardown`) record a warning, clear `pending` and go on: the next stage
+  injects and teardown returns no error. After teardown the runner marks a stage whose strict receipt is
+  missing `agent_failure` (not `failed`) under `continue_on_agent_failure`, only when the teardown itself had no
+  error; otherwise the pipeline still fails as before. Fastloop's `learn` still reports the rejection as the
+  record's `error`.
+- **Alternatives.**
+  - *Make the reflection optional for every receipt.* Rejected: a mitigation's learning is what the strict receipt
+    proves; only the credited case keeps that requirement.
+  - *Keep rejecting external receipts and only fix the stage kill.* Rejected: it discards valid evidence, and the
+    phase-1 reports counted the five as product failures.
+  - *A separate receipt filename for non-mitigated closures.* Rejected: every consumer (run validity, cost
+    analysis, pipeline gate) would need to learn a second file for the same incident.
+- **Tests.** `tests/unit/benchmarks/sregym/protocol/test_receipt_resolution.py` validates the five real
+  rejected receipts (fixtures in `tests/fixtures/sregym/phase1_rejected_receipts/`) and pins the mitigation
+  contract; `test_persistent.py` covers the next-stage injection, teardown and single-drain paths;
+  `test_pipeline.py` covers the per-stage `agent_failure`; `test_outcomes.py` and `test_broker_service.py` cover
+  `cleared_without_action`; `test_fastloop_*` cover the run record.
+- **Not done.** No live run. B9's attribution timing (above) and whether the responder should record actions at
+  the time it applies them are open.
+

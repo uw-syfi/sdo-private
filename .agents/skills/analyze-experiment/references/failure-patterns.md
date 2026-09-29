@@ -6,6 +6,8 @@
 
 Check incident IDs, commit hashes, final detector state, independent verification, acknowledgement, cleanup, and remaining worktrees. Report benchmark success and production completion separately.
 
+A receipt whose `resolution` (D30) is `external_recovery` or `cleared_without_sdo_action` is valid but is not an SDO mitigation: count it under "cleared without SDO action", never in the mitigated total, whatever the oracle says. In fastloop records the same value is `sdo_resolution`. Runs from before D30 rejected such receipts (`sdo_rejected_production_receipt.json` with `same_session_reflection=true` or `completed=true` required); reclassify them from the rejected receipt's own fields instead of counting a product failure. A remaining rejected receipt is that stage's `agent_failure` only: it no longer blocks the next stage or fails the teardown.
+
 ## Lifecycle provenance mismatch
 
 **Signature:** deployer commit or topology fingerprint differs from the current application workspace, judge sessions are reused unexpectedly, or the objective digest differs from `goal.md`.
