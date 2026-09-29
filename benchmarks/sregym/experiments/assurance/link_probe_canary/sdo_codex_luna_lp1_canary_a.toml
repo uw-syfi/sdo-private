@@ -1,0 +1,85 @@
+# Link-probe canary pipeline a; lane assure-w0. Branch vic/exp/link-probe-canary (D29 link-reachability probe on
+# top of the phase-1 exec-parity commit befd946), images :lp1, Codex gpt-6-luna for every SDO role, judge codex-gpt-6-luna
+# (xhigh). [defaults] as phase1/sdo_codex_luna_assure_p1_a.toml apart from the :lp1 images; exec permissions are the same
+# (the responder Role's pods/exec grant is in the image code).
+#
+# Seed: /mnt/data/shli/assure-runs/seed-lp1-714e5bb, the lifecycle commit 714e5bb of a FRESH unseeded lifecycle run
+# (seed_gen_lp1.toml, 2026-09-29 02:08Z) in which the health judge authored workloads/links.yaml itself (7 edges, none
+# from the hand-written overlay). The lifecycle_seed_stage0 checkpoint was not written on this branch (fixed on
+# vic/fix/persist-lifecycle-seed), so the seed is the stage-0 application_workspace reset to the lifecycle commit.
+#
+# Stages: S3 network_policy_block, K1 composite (policy + rate ConfigMap), S1 missing_configmap (regression check),
+# S3 again (repeat). Launch with launch_canary.py (registers PIDs for quota_watchdog.py).
+
+[pipeline]
+name = "lp1-canary-a"
+workspace_seed = "/mnt/data/shli/assure-runs/seed-lp1-714e5bb"
+continue_on_agent_failure = true  # a failed incident is data; keep the rotation going
+
+[defaults]
+agent = "sdo_codex"
+model = "gpt-6-luna"
+reasoning_effort = "medium"  # explicit on every arm; SDO pins its incident agents to medium
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+application_workspace = "persistent"
+require_strict_receipt = true
+
+[defaults.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+kind_worker_nodes = 1  # 1 control plane + 1 worker per lane
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+cleanup_defer_timeout_seconds = 4200
+docker_builder = "sdo-example"
+
+[defaults.variants]
+enabled = false
+
+[defaults.agent_config.sdo_codex]
+backend = "agent-cli"
+provider = "codex"
+model = "gpt-6-luna"
+timeout_sec = 3600
+controller_image = "sdo-controller:lp1"
+responder_image = "sdo-sregym-responder:lp1"
+validator_image = "sdo-detector-validator:lp1"
+credentials_secret = "sdo-agent-credentials"
+persistent_controller = true
+detection_timeout_sec = 900  # coordinator decision 2026-09-28: no incident within 15 min of injection = detection miss, censored
+
+[[stages]]
+name = "s3-network-policy-block"
+chain_kb = false
+chain_application_workspace = false
+
+[stages.runner]
+problems = ["network_policy_block"]
+
+[[stages]]
+name = "k1-policy-and-rate-configmap"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["composite_policy_and_rate_configmap_hotel_reservation"]
+
+[[stages]]
+name = "s1-missing-configmap"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["missing_configmap_hotel_reservation"]
+
+[[stages]]
+name = "s3-network-policy-block-repeat"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["network_policy_block"]

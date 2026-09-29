@@ -228,7 +228,7 @@ func TestTrafficDetectorsConsumeContinuousProbeWorkloads(t *testing.T) {
 \t\t\tcontinue
 \t\t}
 \t\tfor _, name := range consumer.TrafficWorkloads() {
-\t\t\tif purposes[name] != traffic.PurposeHealthProbe {
+\t\t\tif purposes[name] != traffic.PurposeHealthProbe && purposes[name] != traffic.PurposeLinkProbe {
 \t\t\t\tt.Errorf("detector %s consumes %q, which is not a health-probe workload", detector.Spec().ID, name)
 \t\t\t}
 \t\t}
