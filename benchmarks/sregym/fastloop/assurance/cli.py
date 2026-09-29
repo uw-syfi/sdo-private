@@ -54,7 +54,9 @@ STATE_START_DEADLINE_SECONDS = 30.0
 
 
 def _seed(args: argparse.Namespace) -> int:
-    commit = build_seed_repository(args.out.resolve(), sregym_dir=args.sregym_dir.resolve())
+    commit = build_seed_repository(
+        args.out.resolve(), sregym_dir=args.sregym_dir.resolve(), overlays=tuple(args.overlay)
+    )
     print(f"seed repository {args.out} at {commit}")
     return 0
 
@@ -296,6 +298,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     seed = commands.add_parser("seed", help="rebuild the lifecycle seed repository")
     seed.add_argument("--out", type=Path, required=True)
+    seed.add_argument(
+        "--overlay",
+        action="append",
+        default=[],
+        help="seeds/overlays/<name> to copy over the seed's .sdo (repeat); for example `links`",
+    )
     seed.add_argument("--sregym-dir", type=Path, default=Path(__file__).resolve().parents[4] / "third_party" / "sregym")
     seed.set_defaults(handler=_seed)
 

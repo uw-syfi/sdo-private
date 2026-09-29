@@ -188,6 +188,18 @@ when the same scenarios recover. Every scenario must therefore succeed against t
    any health-class detector that leaves it unset, so a scenario must violate its SLO continuously for that long,
    not just reach the evaluation count, before it fires; real faults still fire within it plus about one poll. Do
    not set `Persistence.MinDuration` back to a lower value for a traffic-health detector.
+4. Link reachability: a user journey can stay healthy while one of the services it depends on has become impossible
+   to reach afresh, because the caller keeps using connections it opened earlier. For each service-to-service
+   dependency the application source declares (a client dial, a configured peer address, an environment variable or
+   config value naming another service and port, and the architecture summary's dependency edges), add one link to
+   .sdo/diagnostics/traffic/workloads/links.yaml: apiVersion sdo.dev/v1alpha1, kind TrafficWorkload, name `links`,
+   purpose `link-probe`, and `links: [{from: <calling Service>, to: <called Service>, port: <the port the called
+   Service exposes>}]`. Both names must be source-backed Services in the deployer handoff and the port the one the
+   caller really uses, taken from the source, not guessed. Do not declare links to datastores or services the
+   application does not run itself. Optional: interval (default 1s), timeout (default 1s), failures (default 5, the
+   consecutive failed fresh TCP dials that report an edge). No scenarios and no generator code are involved; the
+   controller installs the detector, which decides deterministically from the prober's dials and names the failing
+   edge. Do not encode any particular cause of an unreachable edge.
 Omit synthetic traffic only for an application that serves no HTTP."""
 
 
@@ -432,8 +444,8 @@ checking for a required resource that is absent, and use each observed object's 
 {TRAFFIC_AUTHORING}
 Return each file in traffic_files as {{path, content}} with path relative to .sdo/diagnostics/traffic/ (for example
 generators/generators.go or workloads/health.yaml); the controller writes the files, compiles and checks them in the
-isolated validator, and installs the detector that judges each health-probe workload. Repeat every file in full on
-later rounds.
+isolated validator, and installs the detector that judges each health-probe or link-probe workload. Repeat every file
+in full on later rounds.
 """
         draft, session_id = self._execute(repository, prompt, HealthJudgeDraft)
         return HealthJudgeArtifact(**draft.model_dump(), session_id=session_id)
@@ -508,7 +520,7 @@ resource objects absent from the deployer handoff.
 {TRAFFIC_AUTHORING}
 `sdo detector check` also compiles the generators, proves every scenario fails against unreachable and erroring
 targets and its declared fault classes, and checks the workloads. The controller installs the detector that judges
-each health-probe workload; do not write that detector or edit the manifest.
+each health-probe or link-probe workload; do not write that detector or edit the manifest.
 
 Return only metadata in the final structured response. Set round to {round_index}, source_commit to
 {deployer.source_commit!r}, copy the objective digest exactly, list objective-relevant failure patterns, and use only

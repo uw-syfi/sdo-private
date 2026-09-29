@@ -1,0 +1,28 @@
+apiVersion: sdo.dev/v1alpha1
+kind: TrafficWorkload
+name: links
+purpose: link-probe
+description: Fresh TCP dial of every service-to-service dependency the application
+  source declares.
+links:
+- from: frontend
+  to: search
+  port: 8082
+- from: frontend
+  to: profile
+  port: 8081
+- from: frontend
+  to: recommendation
+  port: 8085
+- from: frontend
+  to: user
+  port: 8086
+- from: frontend
+  to: reservation
+  port: 8087
+- from: search
+  to: geo
+  port: 8083
+- from: search
+  to: rate
+  port: 8084

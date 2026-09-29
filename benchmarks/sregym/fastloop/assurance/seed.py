@@ -16,6 +16,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SEEDS_DIR = REPO_ROOT / "benchmarks" / "sregym" / "experiments" / "assurance" / "seeds"
 DEFAULT_SEED = "hotel_reservation_30e023d"
+#: Optional trees copied over the seed's ``.sdo`` (``seeds/overlays/<name>/``), for example ``links``:
+#: the ``link-probe`` workload the health judge would author, its detector and the manifest that installs it.
+OVERLAYS_DIRNAME = "overlays"
 #: Where the checked-in seed keeps its ``.sdo`` directory (a dot directory would be discovered as an app root).
 MEMORY_DIRNAME = "operational_memory"
 HOTEL_SOURCE_SUBDIR = Path("SREGym-applications") / "hotelReservation"
@@ -43,6 +46,7 @@ def build_seed_repository(
     sregym_dir: Path,
     seed: str = DEFAULT_SEED,
     seeds_dir: Path = SEEDS_DIR,
+    overlays: tuple[str, ...] = (),
 ) -> str:
     """Create ``target`` as a two-commit git repository (source snapshot, then lifecycle memory).
 
@@ -55,6 +59,10 @@ def build_seed_repository(
         raise SeedError(f"{source} is missing; run `git -C {sregym_dir} submodule update --init SREGym-applications`")
     if not (memory / "diagnostics" / "manifest.yaml").is_file():
         raise SeedError(f"{memory} is not a seed's operational memory")
+    overlay_dirs = [seeds_dir / OVERLAYS_DIRNAME / name for name in overlays]
+    for name, overlay in zip(overlays, overlay_dirs, strict=True):
+        if not overlay.is_dir():
+            raise SeedError(f"seed overlay {name!r} is missing: {overlay}")
     if target.exists():
         raise SeedError(f"{target} already exists")
     shutil.copytree(source, target, ignore=shutil.ignore_patterns(".git", ".gitmodules"))
@@ -62,6 +70,8 @@ def build_seed_repository(
     _git(target, "add", "-A")
     _git(target, "commit", "-q", "-m", _SNAPSHOT_MESSAGE, author=("SREGym", "sregym@localhost"))
     shutil.copytree(memory, target / ".sdo")
+    for overlay in overlay_dirs:
+        shutil.copytree(overlay, target / ".sdo", dirs_exist_ok=True)
     _git(target, "add", "-A", ".sdo")
     _git(target, "commit", "-q", "-m", _LIFECYCLE_MESSAGE, author=("SDO Lifecycle", "sdo-lifecycle@localhost"))
     return _git(target, "rev-parse", "HEAD")
