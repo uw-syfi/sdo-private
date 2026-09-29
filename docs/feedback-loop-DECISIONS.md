@@ -824,3 +824,25 @@ s while every HTTP probe passes for 10 minutes.
   `seeds/overlays/links` (a `links.yaml` for hotel-reservation's seven edges,
   the generated `traffic-links` detector and the manifest that installs it,
   produced by the lifecycle's own installer) over the seed's `.sdo`.
+- **Measured (no LLM, own kind cluster `link-probe0`, since deleted).** The
+  lane came up with 1 control plane plus 1 worker. It ran the no-LLM assurance
+  suite (`assurance run`) on seed `hotel_reservation_30e023d` plus the `links`
+  overlay, on the branch's controller and prober. Detection latency is the first
+  `traffic-links` finding minus the injection (the seed's older tailored
+  `health-objective` rule still fires at +0.01 s, so the suite's own `detect_s`
+  does not measure the link probe).
+
+  | Run | Result |
+  |---|---|
+  | `network_policy_block`, probes at interval plus timeout (first build) | `link-reachability.frontend.recommendation.8085` at +9.6 s; the 5 failures spanned 8.0 s |
+  | `network_policy_block`, fixed cadence, 3 injections | +6.3 s, +5.6 s, +5.4 s |
+  | Healthy soak, 10 min, 120 evaluations | 0 evaluations with findings, 0 incidents, 0 stray incidents |
+  | `selector-mismatch`, `missing-configmap` | Both PASS with the same checks as before (wrong fixes refused with exit 1 and gate exit 4). `missing-configmap` additionally raised `link-reachability.search.geo.8083` (geo crash-looping, so search cannot reach it), a correct extra signal. `selector-mismatch` raised no link finding (frontend is not a declared target) |
+
+  The first build spaced probes by the timeout plus the interval, so a blocked
+  edge was sampled every 2 s, which is why the fixed cadence
+  (`max(interval, timeout)` per link) was made and is pinned by
+  `TestLinkProbeSamplesABlockedLinkOnTheIntervalNotIntervalPlusTimeout`. The soak
+  ran on the first build; the healthy path is unchanged by the fix and a 3 s
+  stall now gives at most 3 failures, below the threshold of 5, but the soak was
+  not repeated on the fixed build.
