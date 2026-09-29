@@ -50,6 +50,8 @@ class BrokerServiceError(RuntimeError):
 #: always fresh.
 ReflectionSessionMode = Literal["resume", "fresh"]
 REFLECTION_SESSION_MODES: tuple[ReflectionSessionMode, ...] = ("resume", "fresh")
+#: A fresh first attempt starts from a bounded incident brief instead of re-sending the responder transcript.
+DEFAULT_REFLECTION_SESSION: ReflectionSessionMode = "fresh"
 
 
 class ReflectionProposal(Protocol):
@@ -269,7 +271,7 @@ class BrokerService:
         reflector: OutcomeReflector | None = None,
         repair_policy: Literal["commit", "recorded-actions"] = "commit",
         max_reflection_attempts: int = 3,
-        reflection_session: ReflectionSessionMode = "resume",
+        reflection_session: ReflectionSessionMode = DEFAULT_REFLECTION_SESSION,
     ) -> None:
         if repair_policy not in ("commit", "recorded-actions"):
             raise ValueError(f"unsupported repair policy: {repair_policy!r}")

@@ -33,6 +33,7 @@ from benchmarks.sregym.fastloop.fault_driver import SregymFaultDriver
 from benchmarks.sregym.fastloop.loop import LoopConfig, run_incidents
 from benchmarks.sregym.fastloop.records import AgentSummary, IncidentRecord, load_records, summarize
 from benchmarks.sregym.fastloop.worker_client import SregymWorker, worker_argv
+from sdo.operational_memory import DEFAULT_REFLECTION_SESSION
 
 if TYPE_CHECKING:
     from benchmarks.sregym.fastloop.loop import IncidentAgent
@@ -460,7 +461,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("-n", "--incidents", type=int, default=1)
     run.add_argument("--model", default="gpt-6-luna")
     run.add_argument("--provider", choices=("codex", "claude"), default="codex", help="SDO agent provider")
-    run.add_argument("--reflection-session", choices=("resume", "fresh"), default="resume")
+    run.add_argument("--reflection-session", choices=("resume", "fresh"), default=DEFAULT_REFLECTION_SESSION)
     run.add_argument("--reasoning-effort", default=None, help="Codex baseline reasoning effort (default: Codex's)")
     run.add_argument("--timeout", type=int, default=3600, help="per-incident agent timeout in seconds")
     run.add_argument(

@@ -55,6 +55,7 @@ from sdo.agent_runtime.lifecycle import (
     validation_report,
 )
 from sdo.controller_install import kubectl
+from sdo.operational_memory import DEFAULT_REFLECTION_SESSION
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +214,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--reflection-session",
         choices=("resume", "fresh"),
-        default=config.get("reflection_session", "resume"),
+        default=config.get("reflection_session", DEFAULT_REFLECTION_SESSION),
     )
     parser.add_argument(
         "--persistent-controller",
