@@ -218,20 +218,42 @@ class TrafficWorkloadScenario(TrafficModel):
     slo: TrafficSLO | None = None
 
 
+TRAFFIC_LINK_DEFAULT_FAILURES = 5
+TRAFFIC_LINK_MAX_LINKS = 64
+
+
+class TrafficLink(TrafficModel):
+    """One declared service-to-service dependency edge: ``from`` calls ``to`` on ``port``."""
+
+    source: str = Field(alias="from", pattern=_DNS_LABEL)
+    target: str = Field(alias="to", pattern=_DNS_LABEL)
+    port: int = Field(ge=1, le=65535)
+    protocol: Literal["tcp"] = "tcp"
+
+    @model_validator(mode="after")
+    def validate_edge(self) -> TrafficLink:
+        if self.source == self.target:
+            raise ValueError(f"link {self.source!r} calls itself")
+        return self
+
+
 class TrafficWorkload(TrafficModel):
     """A workload profile: which generator scenarios run, how often, and against which SLO.
 
     Stored at ``.sdo/diagnostics/traffic/workloads/<name>.yaml``. A
     ``health-probe`` runs continuously and feeds traffic health detectors; a
     ``verify-burst`` runs for a few seconds on demand to verify a repair; a
-    ``journey`` runs on demand for a bounded time.
+    ``journey`` runs on demand for a bounded time. A ``link-probe`` runs
+    continuously with no scenarios: it dials each declared ``links`` edge afresh
+    every ``interval`` and lets a link detector report an edge after ``failures``
+    consecutive failed dials.
     """
 
     api_version: Literal["sdo.dev/v1alpha1"] = Field(alias="apiVersion")
     kind: Literal["TrafficWorkload"]
     name: str = Field(pattern=_DNS_LABEL)
     description: str = ""
-    purpose: Literal["health-probe", "verify-burst", "journey"]
+    purpose: Literal["health-probe", "verify-burst", "journey", "link-probe"]
     arrival: Literal["uniform", "poisson"] = "uniform"
     rate_per_second: float = Field(default=4.0, gt=0, le=TRAFFIC_MAX_RATE_PER_SECOND, alias="ratePerSecond")
     duration: str | None = None
@@ -239,10 +261,20 @@ class TrafficWorkload(TrafficModel):
     iteration_timeout: str = Field(default="10s", alias="iterationTimeout")
     seed: int | None = Field(default=None, ge=0, lt=2**64)
     slo: TrafficSLO = Field(default_factory=TrafficSLO)
-    scenarios: list[TrafficWorkloadScenario] = Field(min_length=1)
+    scenarios: list[TrafficWorkloadScenario] = Field(default_factory=list)
+    links: list[TrafficLink] = Field(default_factory=list)
+    interval: str | None = None
+    failures: int | None = Field(default=None, ge=2, le=60)
 
     @model_validator(mode="after")
     def validate_profile(self) -> TrafficWorkload:
+        if self.purpose == "link-probe":
+            self._validate_link_probe()
+            return self
+        if self.links or self.interval is not None or self.failures is not None:
+            raise ValueError("links, interval and failures apply only to a link-probe workload")
+        if not self.scenarios:
+            raise ValueError("at least one scenario is required")
         if self.purpose == "health-probe":
             if self.duration is not None:
                 raise ValueError("a health-probe runs continuously and takes no duration")
@@ -262,6 +294,23 @@ class TrafficWorkload(TrafficModel):
             if slo.min_samples is not None and slo.window is not None and slo.min_samples > slo.window:
                 raise ValueError(f"scenario {scenario.id!r}: slo minSamples must not exceed window")
         return self
+
+    def _validate_link_probe(self) -> None:
+        if self.duration is not None:
+            raise ValueError("a link-probe runs continuously and takes no duration")
+        if self.scenarios:
+            raise ValueError("a link-probe runs no scenarios")
+        if not 0 < len(self.links) <= TRAFFIC_LINK_MAX_LINKS:
+            raise ValueError(f"a link-probe needs 1 to {TRAFFIC_LINK_MAX_LINKS} links")
+        edges = [(link.source, link.target, link.port) for link in self.links]
+        duplicates = sorted({f"{a} -> {b}:{c}" for a, b, c in edges if edges.count((a, b, c)) > 1})
+        if duplicates:
+            raise ValueError(f"link(s) listed twice: {', '.join(duplicates)}")
+        if self.interval is not None and not 0.1 <= go_duration_seconds(self.interval) <= 60:
+            raise ValueError("interval must be in [100ms, 1m]")
+        timeout = go_duration_seconds(self.timeout)
+        if not 0 < timeout <= TRAFFIC_MAX_TIMEOUT_SECONDS:
+            raise ValueError("timeout must be in (0, 10s]")
 
     def scenario_slo(self, scenario_id: str) -> TrafficSLO:
         slo = _merge_slo(TRAFFIC_DEFAULT_SLO, self.slo)

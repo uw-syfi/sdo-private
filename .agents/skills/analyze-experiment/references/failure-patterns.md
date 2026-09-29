@@ -36,6 +36,12 @@ Such a seed (for example `30e023d`) carries checks written knowing the SREGym fa
 
 Inspect firing/clearing thresholds, debounce state, snapshot versions, durable controller state, leader transitions, and incident idempotency keys.
 
+## Link reachability finding (latent dependency fault)
+
+**Signature:** a finding with rule `link-reachability.<from>.<to>.<port>` (detector `traffic-<workload>` for a `purpose: link-probe` workload in `.sdo/diagnostics/traffic/workloads/`) while every `scenario-slo.*` scenario stays green.
+
+The prober dials each declared edge afresh every interval and the finding needs `failures` consecutive failed dials of an edge that had connected before. The caller may still hold an old connection, so user-facing probes can stay healthy for the whole fault. Check that the edge and port are grounded in the application source, that the fix restored fresh connectivity for the same edge (the finding must clear), and that no finding appeared for an edge the prober never reached (those are never reported: the prober's own identity may simply not be admitted there). Detection time is the first failed dial plus about `failures` intervals; a link detector should not carry the scenario detector's 9 s minimum duration.
+
 ## Responder detour or thrashing
 
 **Signature:** the responder performs broad exploration, repeats hypotheses, changes unrelated source, or alternates between fixes without improving detector/health evidence.

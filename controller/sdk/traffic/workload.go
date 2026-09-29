@@ -41,6 +41,9 @@ const (
 	PurposeVerifyBurst Purpose = "verify-burst"
 	// PurposeJourney runs on demand for a bounded time, for longer user flows.
 	PurposeJourney Purpose = "journey"
+	// PurposeLinkProbe runs continuously and feeds link reachability
+	// detectors: it dials declared service-to-service edges afresh (link.go).
+	PurposeLinkProbe Purpose = "link-probe"
 )
 
 // Arrival is the inter-arrival pattern of iterations.
@@ -105,7 +108,13 @@ type Workload struct {
 	IterationTimeout Duration           `json:"iterationTimeout,omitempty"`
 	Seed             uint64             `json:"seed,omitempty"`
 	SLO              SLO                `json:"slo,omitempty"`
-	Scenarios        []WorkloadScenario `json:"scenarios"`
+	Scenarios        []WorkloadScenario `json:"scenarios,omitempty"`
+	// Links, Interval and Failures configure a link-probe workload: the
+	// dependency edges to dial afresh, how often, and how many consecutive
+	// failed dials report an edge.
+	Links    []Link   `json:"links,omitempty"`
+	Interval Duration `json:"interval,omitempty"`
+	Failures int      `json:"failures,omitempty"`
 }
 
 // ParseWorkloadJSON strictly decodes a workload, applies defaults, and
@@ -134,6 +143,17 @@ func (w Workload) WithDefaults() Workload {
 	}
 	if w.Timeout == 0 {
 		w.Timeout = Duration(DefaultTimeout)
+		if w.Purpose == PurposeLinkProbe {
+			w.Timeout = Duration(DefaultLinkTimeout)
+		}
+	}
+	if w.Purpose == PurposeLinkProbe {
+		if w.Interval == 0 {
+			w.Interval = Duration(DefaultLinkInterval)
+		}
+		if w.Failures == 0 {
+			w.Failures = DefaultLinkFailures
+		}
 	}
 	if w.IterationTimeout == 0 {
 		w.IterationTimeout = Duration(DefaultIterationTimeout)
@@ -171,13 +191,17 @@ func (w Workload) Validate() error {
 		if w.Duration != 0 {
 			return fmt.Errorf("traffic workload %s: a health-probe runs continuously and takes no duration", w.Name)
 		}
+	case PurposeLinkProbe:
+		if w.Duration != 0 {
+			return fmt.Errorf("traffic workload %s: a link-probe runs continuously and takes no duration", w.Name)
+		}
 	case PurposeVerifyBurst, PurposeJourney:
 		if w.Duration.Duration() <= 0 || w.Duration.Duration() > MaxBurstDuration {
 			return fmt.Errorf("traffic workload %s: duration must be in (0, %s]", w.Name, MaxBurstDuration)
 		}
 	default:
-		return fmt.Errorf("traffic workload %s: purpose must be %q, %q, or %q",
-			w.Name, PurposeHealthProbe, PurposeVerifyBurst, PurposeJourney)
+		return fmt.Errorf("traffic workload %s: purpose must be %q, %q, %q, or %q",
+			w.Name, PurposeHealthProbe, PurposeVerifyBurst, PurposeJourney, PurposeLinkProbe)
 	}
 	if w.Arrival != ArrivalUniform && w.Arrival != ArrivalPoisson {
 		return fmt.Errorf("traffic workload %s: arrival must be %q or %q", w.Name, ArrivalUniform, ArrivalPoisson)
@@ -193,6 +217,12 @@ func (w Workload) Validate() error {
 	}
 	if err := validateSLO(w.SLO); err != nil {
 		return fmt.Errorf("traffic workload %s: %w", w.Name, err)
+	}
+	if err := w.validateLinks(); err != nil {
+		return err
+	}
+	if w.Purpose == PurposeLinkProbe {
+		return nil
 	}
 	if len(w.Scenarios) == 0 {
 		return fmt.Errorf("traffic workload %s: at least one scenario is required", w.Name)
@@ -221,6 +251,9 @@ func (w Workload) Validate() error {
 // ValidateAgainst checks that every scenario the workload names exists in the
 // catalog, and that a health probe includes at least one read scenario.
 func (w Workload) ValidateAgainst(catalog Catalog) error {
+	if w.Purpose == PurposeLinkProbe {
+		return nil
+	}
 	reads := 0
 	for _, selected := range w.Scenarios {
 		scenario, ok := catalog.Scenario(selected.ID)
@@ -236,6 +269,9 @@ func (w Workload) ValidateAgainst(catalog Catalog) error {
 	}
 	return nil
 }
+
+// SLO returns the workload's effective SLO, defaults included.
+func (w Window) SLO() SLO { return mergeSLO(defaultSLO(), w.Workload.SLO) }
 
 // ScenarioSLO is the effective SLO of one scenario of the workload.
 func (w Workload) ScenarioSLO(id string) SLO {

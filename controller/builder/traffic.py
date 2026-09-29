@@ -213,7 +213,7 @@ func TestTrafficWorkloadsRunOnlyProvidedScenarios(t *testing.T) {
 \t}
 }
 
-func TestTrafficDetectorsConsumeHealthProbeWorkloads(t *testing.T) {
+func TestTrafficDetectorsConsumeContinuousProbeWorkloads(t *testing.T) {
 \tworkloads, err := prober.ParseWorkloads(TrafficWorkloads)
 \tif err != nil {
 \t\tt.Fatal(err)

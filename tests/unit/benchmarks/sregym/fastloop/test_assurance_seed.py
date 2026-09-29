@@ -62,3 +62,25 @@ def test_the_seed_never_overwrites_a_directory(tmp_path: Path) -> None:
     (tmp_path / "seed").mkdir()
     with pytest.raises(SeedError, match="already exists"):
         build_seed_repository(tmp_path / "seed", sregym_dir=_fake_sregym(tmp_path))
+
+
+def test_the_links_overlay_adds_a_link_probe_workload_and_its_detector(tmp_path: Path) -> None:
+    target = tmp_path / "seed"
+
+    build_seed_repository(target, sregym_dir=_fake_sregym(tmp_path), overlays=("links",))
+
+    diagnostics = target / ".sdo" / "diagnostics"
+    manifest = (diagnostics / "manifest.yaml").read_text(encoding="utf-8")
+    for detector in ("health-objective", "service-endpoints", "traffic-health", "traffic-links"):
+        assert f"id: {detector}" in manifest
+    workload = (diagnostics / "traffic" / "workloads" / "links.yaml").read_text(encoding="utf-8")
+    assert "purpose: link-probe" in workload
+    assert "traffic.NewLinkDetector(" in (diagnostics / "detectors/health/traffic-links/detector.go").read_text(
+        encoding="utf-8"
+    )
+    assert (diagnostics / "traffic" / "workloads" / "health.yaml").is_file()
+
+
+def test_an_unknown_overlay_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(SeedError, match="overlay 'nope'"):
+        build_seed_repository(tmp_path / "seed", sregym_dir=_fake_sregym(tmp_path), overlays=("nope",))

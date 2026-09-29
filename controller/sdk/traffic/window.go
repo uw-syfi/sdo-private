@@ -34,6 +34,8 @@ type Window struct {
 	Workload   Workload               `json:"workload"`
 	ObservedAt time.Time              `json:"observedAt"`
 	Scenarios  []ScenarioObservations `json:"scenarios"`
+	// Links holds a link-probe workload's per-edge observations.
+	Links []LinkObservations `json:"links,omitempty"`
 	// Skipped counts arrivals dropped because MaxInFlight iterations were running.
 	Skipped int `json:"skipped,omitempty"`
 	// LoadError is set when the workload could not be loaded or run.
