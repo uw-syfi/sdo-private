@@ -66,6 +66,47 @@ def _hotel_app(app_root: Path, *, workload: str = "health") -> Path:
     return diagnostics
 
 
+LINK_DETECTOR = """package trafficlinks
+
+import (
+    "time"
+
+    "sdo.dev/controller/sdk"
+    "sdo.dev/controller/sdk/traffic"
+)
+
+func New() sdk.Detector {
+    return traffic.NewLinkDetector(sdk.DetectorSpec{
+        ID: "traffic-links", Class: sdk.DetectorClassHealth, Owner: sdk.DetectorOwnerHealthJudge,
+        Watches: []sdk.WatchKind{traffic.Watch}, Interval: 10 * time.Second,
+        Persistence: sdk.PersistencePolicy{Firing: 2, Clearing: 2},
+        Batching: sdk.BatchingPolicy{Severity: sdk.SeverityCritical, Debounce: 500 * time.Millisecond},
+        Playbooks: []string{}, OriginatingCommit: "lifecycle-bootstrap",
+    }, "links")
+}
+"""
+
+LINK_WORKLOAD = """apiVersion: sdo.dev/v1alpha1
+kind: TrafficWorkload
+name: links
+purpose: link-probe
+links:
+  - from: frontend
+    to: search
+    port: 8082
+"""
+
+
+def _add_link_probe(diagnostics: Path) -> None:
+    (diagnostics / "traffic" / "workloads" / "links.yaml").write_text(LINK_WORKLOAD, encoding="utf-8")
+    detector = diagnostics / "detectors" / "health" / "traffic-links"
+    detector.mkdir(parents=True)
+    (detector / "detector.go").write_text(LINK_DETECTOR, encoding="utf-8")
+    manifest = diagnostics / "manifest.yaml"
+    registration = TRAFFIC_REGISTRATION.replace("traffic-health", "traffic-links")
+    manifest.write_text(manifest.read_text(encoding="utf-8") + registration, encoding="utf-8")
+
+
 def _workspace(app_root: Path, tool_root: Path) -> BuildWorkspace:
     _write_tool_root(tool_root)
     return BuildWorkspace.create(
@@ -121,6 +162,17 @@ def test_check_accepts_the_hotel_generators_and_builds_the_prober(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
     _hotel_app(tmp_path / "app")
+
+    exit_code = check_main(["test", "--app", str(tmp_path / "app")])
+
+    output = capfd.readouterr()
+    assert exit_code == 0, output.out + output.err
+
+
+def test_check_accepts_a_link_probe_detector_beside_the_health_detector(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    _add_link_probe(_hotel_app(tmp_path / "app"))
 
     exit_code = check_main(["test", "--app", str(tmp_path / "app")])
 

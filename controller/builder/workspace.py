@@ -12,7 +12,7 @@ import yaml
 
 from controller.builder.manifest import DetectorManifest, duration_nanoseconds, load_manifest
 from controller.builder.paths import find_diagnostics_dir
-from controller.builder.traffic import write_generated_traffic
+from controller.builder.traffic import load_workload_documents, write_generated_traffic
 
 MODULE_RE = re.compile(r"^\s*module\s+(\S+)\s*$", re.MULTILINE)
 DEFAULT_MODULE_PATH = "app-diagnostics"
@@ -196,10 +196,28 @@ def _write_generated_registration(
         "}\n"
     )
     (generated_dir / "detectors.go").write_text(source, encoding="utf-8")
-    _write_generated_contract_test(generated_dir, manifest)
+    _write_generated_contract_test(
+        generated_dir, manifest, link_probe_detector_ids=_link_probe_detector_ids(workspace_path)
+    )
 
 
-def _write_generated_contract_test(generated_dir: Path, manifest: DetectorManifest) -> None:
+def _link_probe_detector_ids(workspace_path: Path) -> frozenset[str]:
+    """IDs of the installed ``traffic-<workload>`` detectors that judge a link-probe workload.
+
+    traffic.NewLinkDetector, unlike traffic.NewDetector, leaves Persistence.MinDuration unset: its
+    consecutive-failure count is its hysteresis.
+    """
+
+    try:
+        documents = load_workload_documents(workspace_path)
+    except ValueError:
+        return frozenset()
+    return frozenset(f"traffic-{name}" for name, document in documents.items() if document.get("purpose") == "link-probe")
+
+
+def _write_generated_contract_test(
+    generated_dir: Path, manifest: DetectorManifest, *, link_probe_detector_ids: frozenset[str] = frozenset()
+) -> None:
     registrations = []
     for index, detector in enumerate(manifest.detectors):
         watches = ", ".join(
@@ -218,7 +236,11 @@ def _write_generated_contract_test(generated_dir: Path, manifest: DetectorManife
             for watch in detector.watches
         )
         persistence_fields = f"Firing: {detector.persistence.firing}, Clearing: {detector.persistence.clearing}"
-        if detector.detector_class == "health" and watches_synthetic_traffic:
+        if (
+            detector.detector_class == "health"
+            and watches_synthetic_traffic
+            and detector.id not in link_probe_detector_ids
+        ):
             persistence_fields += f", MinDuration: {_TRAFFIC_HEALTH_DEFAULT_MIN_DURATION_NS}"
         registrations.append(
             "\tassertRegistration(t, detectors["
