@@ -1,6 +1,7 @@
 """Typed, validated operational-memory storage and commit brokerage."""
 
 from sdo.operational_memory.broker_service import (
+    DEFAULT_REFLECTION_SESSION,
     REFLECTION_SESSION_MODES,
     BrokerClosure,
     BrokerService,
@@ -66,6 +67,7 @@ __all__ = [
     "PLACEHOLDER_RE",
     "PLAYBOOK_INDEX_PATH",
     "PLAYBOOK_SCRIPT_SUFFIX",
+    "DEFAULT_REFLECTION_SESSION",
     "REFLECTION_SESSION_MODES",
     "SOURCE_REPAIR_CHECK_COMMAND",
     "TRAFFIC_DIRECTORY",

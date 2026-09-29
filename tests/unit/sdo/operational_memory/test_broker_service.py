@@ -306,6 +306,8 @@ def _service(target: Path, worktrees: Path, validator: AcceptRepairValidator, **
         validator=MemoryValidator(run_diagnostics=False),
         proposal_validator=validator,
     )
+    # Most tests script a resumed responder session; the default is asserted separately.
+    kwargs.setdefault("reflection_session", "resume")
     return BrokerService(target, worktrees, broker=broker, responder_model="gpt-5", **kwargs)
 
 
@@ -1403,7 +1405,19 @@ def test_fresh_reflection_mode_starts_the_first_attempt_in_a_fresh_session(tmp_p
     assert state.reflection_fresh_retry_attempts == 0
 
 
-def test_reflection_session_mode_defaults_to_resume_and_is_recorded(tmp_path: Path) -> None:
+def test_reflection_session_mode_defaults_to_fresh(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    broker = CommitBroker(target, validator=MemoryValidator(run_diagnostics=False))
+
+    service = BrokerService(target, tmp_path / "worktrees", broker=broker, responder_model="gpt-5")
+
+    assert service.reflection_session == "fresh"
+
+
+def test_explicit_resume_mode_resumes_the_responder_session_and_is_recorded(tmp_path: Path) -> None:
     target = tmp_path / "target"
     worktrees = tmp_path / "worktrees"
     target.mkdir()
@@ -1437,14 +1451,14 @@ def test_ledgers_written_before_reflection_modes_parse_without_a_mode() -> None:
     assert ledger.reflection_session_mode is None
 
 
-def test_broker_cli_reflection_session_defaults_to_resume() -> None:
+def test_broker_cli_reflection_session_defaults_to_fresh() -> None:
     from sdo.agent_runtime.responder.broker_cli import _argument_parser
 
     required = ["--repository", "/repo", "--worktree-root", "/worktrees"]
     parser = _argument_parser()
 
-    assert parser.parse_args(required).reflection_session == "resume"
-    assert parser.parse_args([*required, "--reflection-session", "fresh"]).reflection_session == "fresh"
+    assert parser.parse_args(required).reflection_session == "fresh"
+    assert parser.parse_args([*required, "--reflection-session", "resume"]).reflection_session == "resume"
     with pytest.raises(SystemExit):
         parser.parse_args([*required, "--reflection-session", "transcript"])
 

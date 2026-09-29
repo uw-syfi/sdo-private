@@ -1,19 +1,25 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 import yaml
 from agentshim.providers.codex import CodexSandboxConfig, parse_sandbox
 
 from sdo.agent_runtime.responder.reflection import (
+    INCIDENT_DETECTOR_EXAMPLE_FILES,
+    MEMORY_CHECK_COMMAND,
     ClaudeSessionBackend,
     CodexSessionBackend,
     ReflectionTurn,
     SessionReflector,
 )
+from sdo.agent_runtime.responder.reflection_outcomes import current_outcome_view
 from sdo.contracts import IncidentRequest, IncidentResult
 from sdo.operational_memory import (
     BrokerClosure,
@@ -194,7 +200,7 @@ def test_first_reflection_resumes_same_session_with_broker_facts_and_bounded_val
     assert "originatingIncident" in prompt
     assert "outcome-sha" in prompt
     assert "sharp fault-specific playbook" in prompt
-    assert outcome.model_dump_json(indent=2) in prompt
+    assert json.dumps(current_outcome_view(outcome), indent=2) in prompt
 
 
 def test_reflection_retry_after_validation_failure_uses_a_short_fresh_session(tmp_path: Path) -> None:
@@ -222,7 +228,7 @@ def test_reflection_retry_after_validation_failure_uses_a_short_fresh_session(tm
     assert "rolled back" in prompt
     assert "Reflect using the same incident context" not in prompt
     # The original structured request is repeated in full.
-    assert outcome.model_dump_json(indent=2) in prompt
+    assert json.dumps(current_outcome_view(outcome), indent=2) in prompt
     assert "Required action for this success outcome" in prompt
     assert "a" * 64 in prompt
     assert "learning_decision=updated" in prompt
@@ -616,3 +622,38 @@ def test_reflection_states_which_kubectl_verbs_the_responder_may_use(tmp_path: P
     # The representative request comes from the responder's own pod, which has python3 but no curl or wget.
     assert "python3" in prompt
     assert ".svc" in prompt
+
+
+def test_reflection_request_carries_a_worked_incident_detector_so_it_need_not_read_health_detectors(
+    tmp_path: Path,
+) -> None:
+    prompt = _first_reflection_prompt(tmp_path)
+
+    assert "Worked incident detector example" in prompt
+    # Constructors and helpers that recorded reflections learned by reading other detectors' source.
+    assert 'sdk.ObjectRefFrom("Deployment", "apps/v1", &deployment)' in prompt
+    assert "sdktest.Snapshot{" in prompt
+    assert "near-miss" in prompt
+    assert "do not read health detector source" in prompt
+
+
+def test_worked_incident_detector_example_is_valid_formatted_go() -> None:
+    gofmt = shutil.which("gofmt")
+    if gofmt is None:
+        pytest.skip("gofmt is not installed")
+
+    for name, source in INCIDENT_DETECTOR_EXAMPLE_FILES.items():
+        result = subprocess.run([gofmt, "-l", "-e"], input=source, capture_output=True, text=True, check=False)
+        assert result.returncode == 0, f"{name}: {result.stderr}"
+        assert result.stdout.strip() == "", f"{name} is not gofmt-clean"
+
+
+def test_reflection_request_asks_for_one_final_verification_command(tmp_path: Path) -> None:
+    prompt = _first_reflection_prompt(tmp_path)
+
+    assert "verify once, after your last edit, in a single command" in prompt
+    assert "chmod +x" in prompt
+    assert "do not re-read your edits with `git diff`, `git status`, or `cat`" in prompt
+    # The existing validation contract is unchanged.
+    assert MEMORY_CHECK_COMMAND in prompt
+    assert "check_cli draft-test" in prompt

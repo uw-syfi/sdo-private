@@ -1,7 +1,7 @@
 """Production durable broker CLI with mandatory reflection.
 
-The first reflection attempt resumes the responder session unless
-``--reflection-session fresh`` opts into a fresh session from an incident brief.
+The first reflection attempt starts a fresh session from an incident brief unless
+``--reflection-session resume`` opts into resuming the responder session.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from sdo.agent_runtime.responder import (
     prepare_codex_home,
 )
 from sdo.operational_memory import (
+    DEFAULT_REFLECTION_SESSION,
     REFLECTION_SESSION_MODES,
     BrokerClosure,
     BrokerService,
@@ -92,9 +93,9 @@ def _argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reflection-session",
         choices=REFLECTION_SESSION_MODES,
-        default="resume",
-        help="first reflection attempt: resume the responder session (default) or start a fresh session "
-        "from a compact incident brief",
+        default=DEFAULT_REFLECTION_SESSION,
+        help="first reflection attempt: start a fresh session from a compact incident brief (default) or "
+        "resume the responder session",
     )
     parser.add_argument(
         "--responder-turn-log",

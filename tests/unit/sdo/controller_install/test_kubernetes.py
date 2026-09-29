@@ -62,10 +62,10 @@ def _broker_args(config: ControllerInstallConfig) -> list[str]:
     return [arg.removeprefix("--broker-arg=") for arg in args if arg.startswith("--broker-arg=")]
 
 
-def test_reflection_session_mode_defaults_to_resume_and_is_passed_to_the_broker() -> None:
+def test_reflection_session_mode_defaults_to_fresh_and_is_passed_to_the_broker() -> None:
     broker = _broker_args(_config())
 
-    assert broker[broker.index("--reflection-session") + 1] == "resume"
+    assert broker[broker.index("--reflection-session") + 1] == "fresh"
     # A fresh reflection brief quotes the responder's commands from its per-turn log.
     assert broker[broker.index("--responder-turn-log") + 1] == "/workspace/.sdo-runtime/usage/responder-turns.jsonl"
 
@@ -300,7 +300,7 @@ def test_reinstall_reuses_a_healthy_controller_with_the_same_install_fingerprint
 
 @pytest.mark.parametrize(
     "stale_override",
-    [{"responder_image": "responder:old"}, {"reflection_session": "fresh"}],
+    [{"responder_image": "responder:old"}, {"reflection_session": "resume"}],
     ids=["responder-image", "reflection-session"],
 )
 def test_reinstall_replaces_a_controller_whose_install_fingerprint_differs(

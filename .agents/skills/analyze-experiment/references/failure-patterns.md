@@ -66,7 +66,7 @@ Check edits to human goals, architecture, health detectors, prior outcomes, or p
 
 **Signature:** an outcome commit exists but reflection is absent when required, uses a different session, produces no validated memory commit, or generalizes beyond evidence.
 
-Correlate classification, health verification, responder session ID, outcome commit, reflection commit, accepted detector paths, and controller-update rollout. A different session is expected when `reflection_session_mode=fresh` (an opt-in A/B arm) or for a validation retry (`reflection_fresh_retry_attempts`). Reflection agents are told to run `python3 -m sdo.operational_memory.memory_check --app . --actor responder` before returning; a rejection for a rule that check covers (index link, uppercase placeholder, script syntax, ownership, provenance) means the agent skipped or ignored it, so look for the command in the controller turn log's `shell_command_lines`.
+Correlate classification, health verification, responder session ID, outcome commit, reflection commit, accepted detector paths, and controller-update rollout. A different session is expected when `reflection_session_mode=fresh` (the default) or for a validation retry (`reflection_fresh_retry_attempts`). Reflection agents are told to run `python3 -m sdo.operational_memory.memory_check --app . --actor responder` before returning; a rejection for a rule that check covers (index link, uppercase placeholder, script syntax, ownership, provenance) means the agent skipped or ignored it, so look for the command in the controller turn log's `shell_command_lines`.
 
 ## Benchmark leakage
 

@@ -434,9 +434,9 @@ def test_sregym_adapter_passes_configured_model_to_initial_lifecycle(
     }
     assert captured == ["gpt-5.5"]
     assert runtime_configs[0].repair_policy == "recorded-actions"
-    assert runtime_configs[0].reflection_session == "resume"
-    assert driver._run(driver._parse_args(["--reflection-session", "fresh"]))["completed"] is True
-    assert runtime_configs[1].reflection_session == "fresh"
+    assert runtime_configs[0].reflection_session == "fresh"
+    assert driver._run(driver._parse_args(["--reflection-session", "resume"]))["completed"] is True
+    assert runtime_configs[1].reflection_session == "resume"
     assert result["incident_resolution_seconds"] == 12.5
     assert result["incident_resolution_scope"] == "detected_to_independently_verified_health"
     assert result["excluded_from_incident_resolution_seconds"] == {
@@ -1373,9 +1373,9 @@ def test_sregym_agent_config_selects_the_reflection_session_mode(monkeypatch: py
     import benchmarks.sregym.adapter.driver as driver
 
     monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
-    assert driver._parse_args([]).reflection_session == "resume"
-    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"reflection_session": "fresh"}))
     assert driver._parse_args([]).reflection_session == "fresh"
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"reflection_session": "resume"}))
+    assert driver._parse_args([]).reflection_session == "resume"
     with pytest.raises(SystemExit):
         driver._parse_args(["--reflection-session", "transcript"])
 

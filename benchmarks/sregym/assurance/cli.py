@@ -31,6 +31,7 @@ from benchmarks.sregym.assurance.harness import (
 )
 from benchmarks.sregym.assurance.scenarios import SCENARIOS, IncidentSpec
 from benchmarks.sregym.fastloop.environment import FastloopEnvironment, Images
+from sdo.controller_install import DEFAULT_REFLECTION_SESSION
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -249,7 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--tag", default="assure", help="scripted image tag (build_images.sh)")
     run.add_argument("--timeout", type=int, default=900, help="responder timeout in seconds")
     run.add_argument("--verification-timeout", type=int, default=1200, help="seconds to wait for a verified incident")
-    run.add_argument("--reflection-session", choices=("resume", "fresh"), default="resume")
+    run.add_argument("--reflection-session", choices=("resume", "fresh"), default=DEFAULT_REFLECTION_SESSION)
     run.add_argument("--skip-image-load", action="store_true")
     run.add_argument(
         "--fresh", action="store_true", help="tear down the controller and reset the workspace to the seed first"

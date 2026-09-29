@@ -14,7 +14,7 @@ from typing import Any, Generic, Protocol, TypeVar, overload
 
 import yaml
 
-from sdo.operational_memory import REFLECTION_SESSION_MODES, SOURCE_REPAIR_CHECK_COMMAND
+from sdo.operational_memory import DEFAULT_REFLECTION_SESSION, REFLECTION_SESSION_MODES, SOURCE_REPAIR_CHECK_COMMAND
 
 
 class ControllerInstallError(RuntimeError):
@@ -64,7 +64,7 @@ class ControllerInstallConfig:
     repair_policy: str = "commit"
     agent_provider: str = "codex"
     # First reflection attempt: "resume" the responder session, or "fresh" (opt-in).
-    reflection_session: str = "resume"
+    reflection_session: str = DEFAULT_REFLECTION_SESSION
     # Namespace for the controller, its repository PVC, state, credentials,
     # and responder/validator Jobs. ``None`` co-locates them with the
     # application; a separate namespace survives application redeploys.

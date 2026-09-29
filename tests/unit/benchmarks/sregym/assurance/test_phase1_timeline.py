@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from benchmarks.sregym.assurance.phase1_timeline import (
     ExecUsage,
@@ -10,10 +10,17 @@ from benchmarks.sregym.assurance.phase1_timeline import (
     incident_open_epoch,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 def _call(ts: str, cmd: str, call_id: str = "c1") -> str:
     payload = {"type": "function_call", "call_id": call_id, "arguments": json.dumps({"cmd": cmd})}
     return json.dumps({"timestamp": ts, "payload": payload})
+
+
+def _controller_line(clock: str, findings: str, iteration: int) -> str:
+    return f'2026-09-29T{clock}Z {{"controller_iteration":{iteration},"findings":{findings}}}'
 
 
 def test_count_exec_usage_finds_exec_attach_and_port_forward(tmp_path: Path) -> None:
@@ -42,9 +49,11 @@ def test_first_finding_after_skips_healthy_lines_and_earlier_findings(tmp_path: 
     log.write_text(
         "\n".join(
             [
-                '2026-09-29T00:00:00.000000000Z {"controller_iteration":1,"findings":[{"detector_id":"a","rule_id":"r","status":"active"}]}',
-                '2026-09-29T00:00:10.000000000Z {"controller_iteration":2,"findings":[]}',
-                '2026-09-29T00:00:20.500000000Z {"controller_iteration":3,"findings":[{"detector_id":"traffic-health","rule_id":"s","status":"active"}]}',
+                _controller_line("00:00:00.000000000", '[{"detector_id":"a","rule_id":"r","status":"active"}]', 1),
+                _controller_line("00:00:10.000000000", "[]", 2),
+                _controller_line(
+                    "00:00:20.500000000", '[{"detector_id":"traffic-health","rule_id":"s","status":"active"}]', 3
+                ),
             ]
         ),
         encoding="utf-8",

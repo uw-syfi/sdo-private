@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from libs.agent_cli.structured import AgentProvider, StructuredTurnError, run_structured_turn, turn_usage
 from sdo.agent_runtime.responder.reflection_brief import incident_brief
+from sdo.agent_runtime.responder.reflection_outcomes import current_outcome_view, history_view
 from sdo.operational_memory import (
     DETECTOR_ID_PATTERN,
     DETECTOR_SDK_REFERENCE,
@@ -128,6 +129,102 @@ _INCIDENT_DETECTOR_SKELETON = """Incident detector layout (an existing incident 
 """
 
 
+#: A compiled, passing incident detector and its test (gofmt-clean), so the first incident detector needs no
+#: reading of other detectors' source; the example package is renamed to the fault's `<snake_name>`.
+INCIDENT_DETECTOR_EXAMPLE_FILES: dict[str, str] = {
+    "detector.go": """package example_fault
+
+import (
+\t"context"
+\t"time"
+
+\t"sdo.dev/controller/sdk"
+)
+
+const detectorID = "example-fault"
+
+type Detector struct{}
+
+func New() sdk.Detector { return Detector{} }
+
+func (Detector) Spec() sdk.DetectorSpec {
+\treturn sdk.DetectorSpec{
+\t\tID: detectorID, Class: sdk.DetectorClassIncident, Owner: sdk.DetectorOwnerResponder,
+\t\tDescription:         "Detects the confirmed signature.",
+\t\tWatches:             []sdk.WatchKind{{APIVersion: "apps/v1", Kind: "Deployment"}},
+\t\tInterval:            30 * time.Second,
+\t\tPersistence:         sdk.PersistencePolicy{Firing: 1, Clearing: 2},
+\t\tBatching:            sdk.BatchingPolicy{Severity: sdk.SeverityCritical, Debounce: 500 * time.Millisecond},
+\t\tPlaybooks:           []string{".sdo/playbooks/example-fault/README.md"},
+\t\tOriginatingIncident: "<incident id>", OriginatingCommit: "<outcome commit>",
+\t}
+}
+
+func (Detector) Detect(_ context.Context, snapshot sdk.DetectionContext) ([]sdk.Finding, error) {
+\tvar findings []sdk.Finding
+\tfor _, deployment := range snapshot.Deployments() {
+\t\tif deployment.Namespace != snapshot.Namespace() || deployment.Name != "example" {
+\t\t\tcontinue
+\t\t}
+\t\tfindings = append(findings, sdk.Finding{
+\t\t\tRuleID: "example-rule", Status: sdk.FindingActive, Severity: sdk.SeverityCritical,
+\t\t\tSummary:         "Deployment example matches the confirmed signature",
+\t\t\tEvidence:        "Deployment " + deployment.Namespace + "/" + deployment.Name + " ...",
+\t\t\tPrimaryResource: sdk.ObjectRefFrom("Deployment", "apps/v1", &deployment),
+\t\t\tPlaybooks:       []string{".sdo/playbooks/example-fault/README.md"},
+\t\t\tFingerprint:     detectorID + "/example-rule/" + deployment.Namespace + "/" + deployment.Name,
+\t\t})
+\t}
+\treturn findings, nil
+}
+""",
+    "detector_test.go": """package example_fault
+
+import (
+\t"context"
+\t"testing"
+
+\tappsv1 "k8s.io/api/apps/v1"
+\tmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+\t"sdo.dev/controller/sdk/sdktest"
+)
+
+func deployment(name string) appsv1.Deployment {
+\treturn appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "demo"}}
+}
+
+func TestMatchesTheConfirmedSignature(t *testing.T) {
+\tfindings, err := (Detector{}).Detect(context.Background(), sdktest.Snapshot{
+\t\tNamespaceName: "demo", DeploymentList: []appsv1.Deployment{deployment("example")},
+\t})
+\tif err != nil || len(findings) != 1 {
+\t\tt.Fatalf("want one finding, got %v, %#v", err, findings)
+\t}
+}
+
+func TestNearMissDoesNotMatch(t *testing.T) {
+\tfindings, err := (Detector{}).Detect(context.Background(), sdktest.Snapshot{
+\t\tNamespaceName: "demo", DeploymentList: []appsv1.Deployment{deployment("other")},
+\t})
+\tif err != nil || len(findings) != 0 {
+\t\tt.Fatalf("want no finding, got %v, %#v", err, findings)
+\t}
+}
+""",
+}
+
+
+def _incident_detector_example() -> str:
+    files = "".join(f"`{name}`:\n```go\n{source}```\n" for name, source in INCIDENT_DETECTOR_EXAMPLE_FILES.items())
+    return (
+        "Worked incident detector example (compiles and passes against controller/sdk; rename "
+        "`package example_fault` to the fault's `<snake_name>`, replace the predicate and names, keep one matching "
+        "case and one near-miss case; "
+        "do not read health detector source, it is not a template):\n"
+        f"{files}"
+    )
+
+
 _INCIDENT_DETECTOR_RULES = (
     f"Incident detectors must fire promptly: use `persistence.firing: {INCIDENT_DETECTOR_MAX_FIRING}` in the manifest "
     f"and `Firing: {INCIDENT_DETECTOR_MAX_FIRING}` in Spec(); the validator rejects a new or changed incident "
@@ -168,6 +265,10 @@ _SELF_CHECK_RULES = (
     "with its fix, and exits non-zero on failure. Fix every reported error and rerun it until it prints OK. "
     "Self-check scope: validate only the incident detector you added or changed, with "
     "`python3 -m controller.builder.check_cli draft-test --app . --detector-id <incident-detector-id>`. "
+    "Batch your edits, then verify once, after your last edit, in a single command that chains `chmod +x` and "
+    "`bash -n` on the playbook scripts, `gofmt -l`, the draft-test, and the memory check; fix what it reports and "
+    "rerun it only if it failed, and do not re-read your edits with `git diff`, `git status`, or `cat` "
+    "afterwards. "
     "Do not run the health detector's tests, `go test ./...`, or the full `check_cli test`: the broker's isolated "
     "validator runs the complete suite after you return. Do not `git commit`, `git add`, or `git stash`; leave "
     "your edits uncommitted in the worktree, because the broker commits accepted memory. Do not read "
@@ -277,12 +378,21 @@ def _learning_request(
         f"{_SELF_CHECK_RULES}\n"
         f"{DETECTOR_SDK_REFERENCE}\n"
         f"{_INCIDENT_DETECTOR_SKELETON}\n"
+        f"{_incident_detector_example()}\n"
         f"Required action for this {outcome.classification.value} outcome: "
         f"{_classification_directive(outcome.classification)}\n\n"
         f"{_diagnosis_directive(outcome)}"
-        f"Current outcome:\n{outcome.model_dump_json(indent=2)}\n\n"
-        f"Outcome history:\n{json.dumps([record.model_dump(mode='json') for record in history], indent=2)}\n"
+        f"Current outcome (repeated detector evaluations collapsed into runs):\n"
+        f"{json.dumps(current_outcome_view(outcome), indent=2)}\n\n"
+        f"{_history_section(outcome, history)}"
     )
+
+
+def _history_section(outcome: OutcomeRecord, history: list[OutcomeRecord]) -> str:
+    prior = history_view(history, current_incident_id=outcome.incident_id)
+    if not prior:
+        return "Outcome history (prior incidents, compact): none\n"
+    return f"Outcome history (prior incidents, compact; raw evidence omitted):\n{json.dumps(prior, indent=2)}\n"
 
 
 def _diagnosis_directive(outcome: OutcomeRecord) -> str:

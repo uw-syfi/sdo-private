@@ -21,7 +21,6 @@ import json
 import re
 import sys
 from dataclasses import asdict, dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -172,7 +171,11 @@ def _rollout_calls(path: Path) -> list[tuple[float, list[str]]]:
         record = json.loads(line)
         payload = record.get("payload")
         stamp = _timestamp(record.get("timestamp"))
-        if isinstance(payload, dict) and stamp is not None and payload.get("type") in {"function_call", "custom_tool_call"}:
+        if (
+            isinstance(payload, dict)
+            and stamp is not None
+            and payload.get("type") in {"function_call", "custom_tool_call"}
+        ):
             calls.append((stamp, _rollout_commands(payload)))
     return calls
 
@@ -204,7 +207,9 @@ def stage_timeline(stage: str, problem_id: str, results: Path) -> StageTimeline 
         session_start = _timestamp(json.loads(first_line).get("timestamp"))
     submitted = _num(row.get("mitigation_submitted_at"))
     last_mut = (
-        last_mutation_done_at(rollouts, after=injected, before=submitted) if rollouts and submitted is not None else None
+        last_mutation_done_at(rollouts, after=injected, before=submitted)
+        if rollouts and submitted is not None
+        else None
     )
     verified = _timestamp(receipt.get("verified_at")) if receipt.get("verified_at") else None
     reuse = receipt.get("memory_reuse") if isinstance(receipt.get("memory_reuse"), dict) else {}
