@@ -24,7 +24,6 @@ from benchmarks.sregym.analysis.incident_cost import (
     SdoStage,
     load_codex_runs,
     load_sdo_pipeline,
-    problem_results_dirs,
 )
 from benchmarks.sregym.analysis.stats import newcombe_interval, stratified_bootstrap_ratio, wilson_interval
 from benchmarks.sregym.assurance.phase1_analyze import PLAN_TOKEN_WEIGHTS, split_rounds
@@ -193,7 +192,11 @@ def cell(rows: Sequence[Row]) -> dict[str, Any]:
     }
 
 
-ARMS = (("sdo-r1", "SDO round 1 (first encounter)"), ("sdo-r2", "SDO round 2 (repeat)"), ("codex", "Codex (memoryless)"))
+ARMS = (
+    ("sdo-r1", "SDO round 1 (first encounter)"),
+    ("sdo-r2", "SDO round 2 (repeat)"),
+    ("codex", "Codex (memoryless)"),
+)
 
 
 def render_problem_table(rows: Sequence[Row], problems: Sequence[str]) -> str:
@@ -216,19 +219,27 @@ def render_problem_table(rows: Sequence[Row], problems: Sequence[str]) -> str:
     return "\n".join(lines)
 
 
+def _pick(rows: Sequence[Row], problem: str, arm: str, field: str, *, passed_only: bool) -> list[Any]:
+    return [
+        getattr(r, field)
+        for r in rows
+        if r.problem == problem and r.arm == arm and (r.e2e or not passed_only) and getattr(r, field) is not None
+    ]
+
+
 def _cells(rows: Sequence[Row], arm_num: str, arm_den: str, problems: Sequence[str], field: str, *, passed_only: bool):
-    out = {}
-    for problem in problems:
-        pick = lambda arm: [  # noqa: E731
-            getattr(r, field)
-            for r in rows
-            if r.problem == problem and r.arm == arm and (r.e2e or not passed_only) and getattr(r, field) is not None
-        ]
-        out[problem] = (pick(arm_num), pick(arm_den))
-    return out
+    return {
+        problem: (
+            _pick(rows, problem, arm_num, field, passed_only=passed_only),
+            _pick(rows, problem, arm_den, field, passed_only=passed_only),
+        )
+        for problem in problems
+    }
 
 
-def ratio_line(label: str, rows: Sequence[Row], num: str, den: str, problems: Sequence[str], field: str, *, passed_only: bool) -> str:
+def ratio_line(
+    label: str, rows: Sequence[Row], num: str, den: str, problems: Sequence[str], field: str, *, passed_only: bool
+) -> str:
     res = stratified_bootstrap_ratio(_cells(rows, num, den, problems, field, passed_only=passed_only))
     if res.point is None or res.ci_low is None or res.ci_high is None:
         return f"| {label} | - | - | - |"
@@ -239,16 +250,62 @@ def ratio_line(label: str, rows: Sequence[Row], num: str, den: str, problems: Se
 def render_ratios(rows: Sequence[Row], problems: Sequence[str]) -> str:
     head = ["| Ratio | Pooled | 95% CI (bootstrap) | Per problem |", "|---|---|---|---|"]
     body = [
-        ratio_line("TTM: Codex / SDO repeat (e2e passes only)", rows, "codex", "sdo-r2", problems, "ttm", passed_only=True),
+        ratio_line(
+            "TTM: Codex / SDO repeat (e2e passes only)", rows, "codex", "sdo-r2", problems, "ttm", passed_only=True
+        ),
         ratio_line("TTM: Codex / SDO first encounter", rows, "codex", "sdo-r1", problems, "ttm", passed_only=True),
         ratio_line("TTM: SDO repeat / SDO first (C5)", rows, "sdo-r2", "sdo-r1", problems, "ttm", passed_only=True),
-        ratio_line("last-mutation: Codex / SDO repeat", rows, "codex", "sdo-r2", problems, "last_mut", passed_only=True),
-        ratio_line("last-mutation: SDO repeat / SDO first", rows, "sdo-r2", "sdo-r1", problems, "last_mut", passed_only=True),
-        ratio_line("weighted tokens: SDO repeat (responder) / Codex", rows, "sdo-r2", "codex", problems, "weighted", passed_only=False),
-        ratio_line("weighted tokens: SDO repeat (+reflection) / Codex", rows, "sdo-r2", "codex", problems, "weighted_with_reflection", passed_only=False),
-        ratio_line("weighted tokens: SDO first (responder) / Codex", rows, "sdo-r1", "codex", problems, "weighted", passed_only=False),
-        ratio_line("weighted tokens: SDO first (+reflection) / Codex", rows, "sdo-r1", "codex", problems, "weighted_with_reflection", passed_only=False),
-        ratio_line("weighted tokens: SDO repeat / SDO first (responder)", rows, "sdo-r2", "sdo-r1", problems, "weighted", passed_only=False),
+        ratio_line(
+            "last-mutation: Codex / SDO repeat", rows, "codex", "sdo-r2", problems, "last_mut", passed_only=True
+        ),
+        ratio_line(
+            "last-mutation: SDO repeat / SDO first", rows, "sdo-r2", "sdo-r1", problems, "last_mut", passed_only=True
+        ),
+        ratio_line(
+            "weighted tokens: SDO repeat (responder) / Codex",
+            rows,
+            "sdo-r2",
+            "codex",
+            problems,
+            "weighted",
+            passed_only=False,
+        ),
+        ratio_line(
+            "weighted tokens: SDO repeat (+reflection) / Codex",
+            rows,
+            "sdo-r2",
+            "codex",
+            problems,
+            "weighted_with_reflection",
+            passed_only=False,
+        ),
+        ratio_line(
+            "weighted tokens: SDO first (responder) / Codex",
+            rows,
+            "sdo-r1",
+            "codex",
+            problems,
+            "weighted",
+            passed_only=False,
+        ),
+        ratio_line(
+            "weighted tokens: SDO first (+reflection) / Codex",
+            rows,
+            "sdo-r1",
+            "codex",
+            problems,
+            "weighted_with_reflection",
+            passed_only=False,
+        ),
+        ratio_line(
+            "weighted tokens: SDO repeat / SDO first (responder)",
+            rows,
+            "sdo-r2",
+            "sdo-r1",
+            problems,
+            "weighted",
+            passed_only=False,
+        ),
     ]
     return "\n".join([*head, *body])
 
@@ -268,7 +325,9 @@ def render_e2e_diffs(rows: Sequence[Row], problems: Sequence[str]) -> str:
         k2, n2 = counts(b)
         if n1 and n2:
             diff = newcombe_interval(k1, n1, k2, n2)
-            lines.append(f"| {label} ({k1}/{n1} vs {k2}/{n2}) | {diff.point:+.2f} | {diff.low:+.2f} to {diff.high:+.2f} |")
+            lines.append(
+                f"| {label} ({k1}/{n1} vs {k2}/{n2}) | {diff.point:+.2f} | {diff.low:+.2f} to {diff.high:+.2f} |"
+            )
     return "\n".join(lines)
 
 
