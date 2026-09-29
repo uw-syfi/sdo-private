@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -17,7 +18,6 @@ from sdo.controller_install import ControllerInstallError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 INJECTED = datetime(2026, 9, 27, 12, 0, 0, tzinfo=timezone.utc)
 DETECTED = INJECTED + timedelta(seconds=9)
@@ -58,6 +58,8 @@ class FakeOps:
     states: dict[str, dict[str, Any]] = field(default_factory=dict)
     logs: dict[str, list[str]] = field(default_factory=dict)
     reject_receipts: bool = False
+    #: Replaces the synthetic receipt, for a test that needs one that passes strict validation.
+    receipt_override: dict[str, Any] | None = None
     #: Reflection finishes before the driver's first poll sees the verified closure.
     reflect_before_first_poll: bool = False
 
@@ -134,6 +136,8 @@ class FakeOps:
 
     def collect_receipt(self, config: RuntimeConfig, incident_id: str, artifacts_dir: Path) -> dict[str, Any]:
         receipt = _receipt(incident_id, warm=incident_id != "incident-1")
+        if self.receipt_override is not None:
+            receipt = {**self.receipt_override, "incident_id": incident_id}
         if self.reject_receipts:
             receipt["completed"] = False
         return receipt
@@ -266,6 +270,18 @@ def test_a_rejected_receipt_keeps_its_tokens_reports_the_error_and_unblocks_the_
     )
     agent.resolve(1, "p", _inject)
     assert ops.incidents == 2
+
+
+def test_an_incident_cleared_without_sdo_action_is_recorded_as_such_not_as_a_mitigation(tmp_path: Path) -> None:
+    fixtures = Path(__file__).resolve().parents[4] / "fixtures" / "sregym" / "phase1_rejected_receipts"
+    real = json.loads((fixtures / "c5.json").read_text(encoding="utf-8"))["receipt"]
+    ops, calls = FakeOps(receipt_override=real), []
+    agent = _agent(tmp_path, ops, calls)
+
+    learned = agent.learn(agent.resolve(0, "p", _inject))
+
+    assert learned.error is None
+    assert learned.sdo_resolution == "cleared_without_sdo_action"
 
 
 def test_an_injection_failure_propagates_to_the_loop(tmp_path: Path) -> None:

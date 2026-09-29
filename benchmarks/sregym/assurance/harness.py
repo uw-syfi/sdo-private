@@ -25,7 +25,12 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from benchmarks.sregym.adapter import REJECTED_RECEIPT_FILENAME, STRICT_RECEIPT_FILENAME, control_namespace_for
+from benchmarks.sregym.adapter import (
+    REJECTED_RECEIPT_FILENAME,
+    STRICT_RECEIPT_FILENAME,
+    control_namespace_for,
+    receipt_resolution,
+)
 from benchmarks.sregym.assurance.chaos import ChaosContext, ChaosThread
 from benchmarks.sregym.assurance.scripted_codex.directive import (
     DIRECTIVE_CONFIGMAP,
@@ -458,8 +463,9 @@ class ScriptedAgent:
         receipt: dict[str, Any] = json.loads(receipt_path.read_text(encoding="utf-8")) if receipt_path.is_file() else {}
         checks = record.checks
         rejected_path = artifacts / REJECTED_RECEIPT_FILENAME
-        # A closure the responder did not mitigate (for example F16's cancelled no-op) must be
-        # refused by strict validation; its evidence is the rejected receipt.
+        # A closure the responder did not mitigate (for example F16's cancelled no-op) is a valid
+        # receipt whose resolution is not ``sdo_mitigated`` (D30); one that failed strict validation
+        # for another reason (for example a late detector review) leaves its evidence in the rejected receipt.
         evidence = receipt
         if not receipt and expect.resolution != "mitigated" and rejected_path.is_file():
             rejected = json.loads(rejected_path.read_text(encoding="utf-8"))
@@ -474,9 +480,11 @@ class ScriptedAgent:
             and json.loads(path.read_text(encoding="utf-8")).get("incident_id") == incident_id
         ]
         checks.append(Check("no-orphaned-receipt", not orphans, ", ".join(orphans)))
-        mitigated = bool(receipt.get("completed")) and outcome.resolved_at is not None
+        resolution = receipt_resolution(receipt) if receipt else None
+        record.metrics["receipt_resolution"] = resolution
+        mitigated = bool(receipt.get("completed")) and resolution == "sdo_mitigated" and outcome.resolved_at is not None
         if expect.resolution == "mitigated":
-            checks.append(Check("resolution", mitigated, f"completed={receipt.get('completed')}"))
+            checks.append(Check("resolution", mitigated, f"completed={receipt.get('completed')} {resolution}"))
         else:
             checks.append(Check("resolution", not mitigated, f"expected {expect.resolution}, got a verified closure"))
 

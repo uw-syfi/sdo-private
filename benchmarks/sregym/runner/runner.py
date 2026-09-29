@@ -696,6 +696,14 @@ def run_pipeline(
                 receipt_error = _stage_results_error(stage_dir, require_strict_receipt=True)
                 if receipt_error is not None and teardown_error is not None:
                     receipt_error = f"{receipt_error} ({teardown_error})"
+                if receipt_error is not None and config.continue_on_agent_failure and teardown_error is None:
+                    # A rejected receipt is that stage's own agent outcome (D30); the
+                    # other stages' evidence stands and the teardown itself succeeded.
+                    state.stages[index].status = "agent_failure"
+                    state.stages[index].error = f"deferred strict receipt: {receipt_error}"
+                    write_pipeline_state(state, pipeline_dir)
+                    print(f"\nStage {index} agent failure after the persistent controller drain: {receipt_error}")
+                    continue
                 if receipt_error is not None:
                     state.stages[index].status = "failed"
                     state.stages[index].error = f"deferred strict receipt: {receipt_error}"

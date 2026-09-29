@@ -17,7 +17,9 @@ from benchmarks.sregym.protocol.conductor import (
 )
 from benchmarks.sregym.protocol.mcp_client import submit_to_benchmark
 from benchmarks.sregym.protocol.receipt import (
+    RECEIPT_RESOLUTIONS,
     ProductionReceiptValidationError,
+    receipt_resolution,
     validate_production_receipt,
 )
 from benchmarks.sregym.protocol.schema import MAX_DIAGNOSIS_CANDIDATES, READY_STAGES, TERMINAL_STAGES
@@ -25,6 +27,7 @@ from benchmarks.sregym.protocol.schema import MAX_DIAGNOSIS_CANDIDATES, READY_ST
 __all__ = [
     "MAX_DIAGNOSIS_CANDIDATES",
     "READY_STAGES",
+    "RECEIPT_RESOLUTIONS",
     "TERMINAL_STAGES",
     "BenchmarkResult",
     "Oracle",
@@ -38,6 +41,7 @@ __all__ = [
     "get_problem_id",
     "poll_stage",
     "poll_stage_sync",
+    "receipt_resolution",
     "request_with_retry",
     "signal_cleanup",
     "submit_to_benchmark",

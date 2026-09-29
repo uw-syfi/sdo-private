@@ -37,6 +37,7 @@ from benchmarks.sregym.adapter.runtime import (
     runtime_resources,
     validate_production_receipt,
 )
+from benchmarks.sregym.protocol import receipt_resolution
 from benchmarks.sregym.runner.experiment import ExperimentConfig, config_to_env
 from benchmarks.sregym.runner.pipeline import load_pipeline_config, merge_stage_config
 from sdo.controller_install.kubernetes import (
@@ -820,8 +821,10 @@ def test_strict_production_receipt_requires_job_route_reflection_clear_ack_and_c
     with pytest.raises(ControllerInstallError, match="detector review"):
         validate_production_receipt({**receipt, "detector_review_required_at": "2026-07-09T18:05:30Z"})
     validate_production_receipt({**receipt, "detector_review_required_at": None})
-    with pytest.raises(ControllerInstallError, match="recovery_attribution"):
-        validate_production_receipt({**receipt, "recovery_attribution": "external"})
+    # An external recovery is a valid audit record that is never credited as a mitigation (D30).
+    validate_production_receipt({**receipt, "recovery_attribution": "external"})
+    assert receipt_resolution({**receipt, "recovery_attribution": "external"}) == "external_recovery"
+    assert receipt_resolution({**receipt, "recovery_attribution": "responder"}) == "sdo_mitigated"
     validate_production_receipt({**receipt, "recovery_attribution": "responder"})
     validate_production_receipt({**receipt, "recovery_attribution": None})
     with pytest.raises(ControllerInstallError, match="validator_evidence_commit=reflection_commit"):
@@ -897,8 +900,12 @@ def test_recorded_actions_receipt_accepts_actions_without_proposal_commit() -> N
     }
 
     validate_production_receipt(receipt)
-    with pytest.raises(ControllerInstallError, match="repair_actions"):
-        validate_production_receipt({**receipt, "repair_actions": []})
+    # No recorded change means nothing was mitigated; it is a valid audit record, never a mitigation (D30).
+    no_action = {**receipt, "repair_actions": []}
+    validate_production_receipt(no_action)
+    assert receipt_resolution(no_action) == "cleared_without_sdo_action"
+    with pytest.raises(ControllerInstallError, match="resolution"):
+        validate_production_receipt({**no_action, "resolution": "sdo_mitigated"})
 
 
 def test_strict_production_receipt_rejects_missing_false_or_duplicate_network_policy_canaries() -> None:

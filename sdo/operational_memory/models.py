@@ -277,6 +277,10 @@ class OutcomeClassification(str, Enum):
     #: Health cleared in time, but the responder's own repair backs none of
     #: its confirmed causes: someone else recovered the incident (F8).
     EXTERNAL_RECOVERY = "external_recovery"
+    #: Health was verified clear but the responder made no successful change (a
+    #: transient that healed on its own, or a responder that only observed): not a
+    #: mitigation, never learned from (D30).
+    CLEARED_WITHOUT_ACTION = "cleared_without_action"
     FALSE_POSITIVE = "false_positive"
     FALSE_NEGATIVE = "false_negative"
     FAILED = "failed"

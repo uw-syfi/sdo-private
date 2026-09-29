@@ -102,6 +102,9 @@ class IncidentRecord(_PersistedModel):
     match_reasons: list[str] = Field(default_factory=list)
     reflection_attempts: int | None = None
     reflection_skipped_reason: str | None = None
+    #: ``sdo_mitigated``, ``external_recovery`` or ``cleared_without_sdo_action`` from the validated strict
+    #: receipt (D30); ``None`` for the baseline or when no receipt validated.
+    sdo_resolution: str | None = None
     #: Wall time from verified recovery until reflection and detector rollout were live.
     reflection_seconds: float | None = None
     baseline_gate_seconds: float | None = None

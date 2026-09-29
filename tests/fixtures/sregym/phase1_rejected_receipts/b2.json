@@ -1,0 +1,250 @@
+{
+ "receipt": {
+  "accepted_detector_paths": [],
+  "acknowledged": true,
+  "architecture_topology_fingerprint": "5c4bff53ef9cf258fbe6b8f4f59f9a176daff395bd8a4dcf63ed8513c277237e",
+  "cleaned": true,
+  "completed": true,
+  "confirmed_root_causes": [
+   {
+    "evidence": [
+     {
+      "kind": "live-observation",
+      "observation": "The mongodb-rate pod events reported repeated FailedMount errors because ConfigMap mongo-rate-script was not found.",
+      "source": "kubectl describe pod -n hotel-reservation -l io.kompose.service=mongodb-rate"
+     },
+     {
+      "kind": "state-change",
+      "observation": "The incident state diff listed ConfigMap/mongo-rate-script as removed before repair.",
+      "source": "ConfigMap/mongo-rate-script"
+     }
+    ],
+    "explained_detectors": [
+     "health-objective",
+     "service-endpoints"
+    ],
+    "resources": [
+     {
+      "api_version": "v1",
+      "kind": "ConfigMap",
+      "name": "mongo-rate-script",
+      "namespace": "hotel-reservation"
+     }
+    ],
+    "static_context": [
+     "The mongodb-rate deployment manifest requires mongo-rate-script for its initialization volume; k8s-rate-mongo.sh contains the rate database initialization script."
+    ],
+    "summary": "Removal of the required mongo-rate-script ConfigMap prevented mongodb-rate from starting, leaving its deployment unavailable and its Service without ready endpoints."
+   }
+  ],
+  "controller_image": "sdo-controller:p1",
+  "controller_namespace": "hotel-reservation-sdo",
+  "controller_update_required": false,
+  "controller_update_rollout": false,
+  "controller_update_rollout_record": null,
+  "controller_workload": "batch/v1 Job/sdo-controller-run",
+  "detector_clear": [
+   {
+    "detector_id": "health-objective",
+    "error": null,
+    "evaluated_at": "2026-09-28T23:54:04.827244Z",
+    "fingerprints": [],
+    "status": "clear"
+   },
+   {
+    "detector_id": "service-endpoints",
+    "error": null,
+    "evaluated_at": "2026-09-28T23:54:04.827244Z",
+    "fingerprints": [],
+    "status": "clear"
+   },
+   {
+    "detector_id": "traffic-health",
+    "error": null,
+    "evaluated_at": "2026-09-28T23:54:06.338579Z",
+    "fingerprints": [],
+    "status": "clear"
+   }
+  ],
+  "detector_review_required_at": null,
+  "diagnosis_verification": [
+   {
+    "detectors": [
+     {
+      "cleared_after_fix": true,
+      "detector_id": "health-objective",
+      "fired_at_dispatch": true,
+      "flipped": true
+     },
+     {
+      "cleared_after_fix": true,
+      "detector_id": "service-endpoints",
+      "fired_at_dispatch": true,
+      "flipped": true
+     }
+    ],
+    "evidence": [
+     {
+      "kind": "live-observation",
+      "reason": null,
+      "source": "kubectl describe pod -n hotel-reservation -l io.kompose.service=mongodb-rate",
+      "verified": null
+     },
+     {
+      "kind": "state-change",
+      "reason": null,
+      "source": "ConfigMap/mongo-rate-script",
+      "verified": true
+     }
+    ],
+    "repair": {
+     "actions": [],
+     "attributed": false,
+     "externally_reverted": [],
+     "reason": "the responder's successful repair actions that started before health cleared at 2026-09-28T23:53:13.881672+00:00 touched none of the cause's resources (ConfigMap/mongo-rate-script)",
+     "repaired_resources": []
+    },
+    "summary": "Removal of the required mongo-rate-script ConfigMap prevented mongodb-rate from starting, leaving its deployment unavailable and its Service without ready endpoints.",
+    "verdict": "unattributed"
+   }
+  ],
+  "driver_phase_timings_seconds": {
+   "controller_install_or_reuse": 9.970874986611307,
+   "driver_total_before_submission": 156.56083458848298,
+   "fault_gate": 16.59066505357623,
+   "injection_to_verified_recovery": 112.13628299348056,
+   "inventory_and_lifecycle": 10.800529774278402,
+   "pause_for_redeploy": 7.062481780536473,
+   "reflection_drain": 0.0
+  },
+  "excluded_from_incident_resolution_seconds": {
+   "controller_baseline_wait": 9.486576845869422,
+   "controller_install_or_reuse": 9.970874986611307,
+   "inventory_and_lifecycle": 10.800529774278402,
+   "post_recovery_learning_and_receipt": 70.229473,
+   "previous_incident_reflection_drain": 0.0
+  },
+  "fault_gate_timings_seconds": {
+   "controller_baseline_wait": 9.486576845869422,
+   "fault_injection_request": 6.960843083448708
+  },
+  "fault_injection_deferred": true,
+  "incident_detector_states": [],
+  "incident_id": "Hotel Reservation-1790639529480295187",
+  "incident_resolution_scope": "detected_to_independently_verified_health",
+  "incident_resolution_seconds": 116.858284,
+  "independent_verification": [
+   {
+    "details": "HEALTHY. Verify burst passed hotel-recommendations, hotel-search, and hotel-user-login; controller health-objective detector confirmed clear for Deployment/mongodb-rate.",
+    "name": "sdo-incident-status",
+    "observed_at": "2026-09-28T23:53:41Z",
+    "passed": true
+   }
+  ],
+  "lifecycle_provenance": true,
+  "lifecycle_reused": true,
+  "lifecycle_validation": {
+   "cache": "disabled",
+   "source": null
+  },
+  "memory_reuse": {
+   "applied_playbook_count": 1,
+   "candidate_count": 1,
+   "match_reasons": [
+    "detector-rule-resource-kind"
+   ],
+   "warm_path": true
+  },
+  "namespace": "hotel-reservation",
+  "outcome_commit": "e157b34629ffe8725c475da3cab10f67c20f3579",
+  "phase_timings_seconds": {
+   "detection_to_dispatch": 0.0,
+   "operational_recovery": 116.858284,
+   "post_recovery_learning_and_receipt": 70.229473,
+   "responder": 113.53108,
+   "total": 187.087757,
+   "verification": 3.327204
+  },
+  "pre_cutover": false,
+  "pre_injection_costs_seconds": {
+   "controller_baseline_wait": 9.486576845869422,
+   "controller_install_or_reuse": 9.970874986611307,
+   "inventory_and_lifecycle": 10.800529774278402,
+   "previous_incident_reflection_drain": 0.0
+  },
+  "production_job_dispatch": true,
+  "proposal_commit": "6c27852f08ea23a157ea84a24424f4c3b9065f86",
+  "recorded_at": "2026-09-28T23:55:16.568052+00:00",
+  "recovery_attribution": "external",
+  "reflection_attempts": 0,
+  "reflection_commit": null,
+  "reflection_drain": {
+   "drained_by": "pipeline-teardown",
+   "waited_seconds": 0.18558136653155088
+  },
+  "reflection_drain_seconds": 0.0,
+  "reflection_fresh_retry_attempts": 0,
+  "reflection_session_mode": null,
+  "reflection_skipped_reason": null,
+  "reflection_usage": {},
+  "remaining_worktrees": [],
+  "repair_actions": [
+   {
+    "action_id": "restore-mongo-rate-script",
+    "completed_at": "2026-09-28T23:53:41Z",
+    "details": "Added kubernetes/rate/mongo-rate-script.yaml using the tracked k8s-rate-mongo.sh initialization logic and applied it to the hotel-reservation namespace. The ConfigMap became available, the mongodb-rate rollout completed, and the Service gained a ready endpoint.",
+    "kind": "apply",
+    "resources": [
+     {
+      "api_version": "v1",
+      "kind": "ConfigMap",
+      "name": "mongo-rate-script",
+      "namespace": "hotel-reservation"
+     }
+    ],
+    "reversible": true,
+    "started_at": "2026-09-28T23:53:23Z",
+    "success": true,
+    "summary": "Restored the missing MongoDB rate initialization ConfigMap.",
+    "target": "ConfigMap/mongo-rate-script"
+   }
+  ],
+  "repair_policy": "recorded-actions",
+  "resolution_phase_timings_seconds": {
+   "detection_to_dispatch": 0.0,
+   "operational_recovery": 116.858284,
+   "responder": 113.53108,
+   "verification": 3.327204
+  },
+  "responder_image": "sdo-sregym-responder:p1",
+  "responder_job_evidence": "live-job-and-durable-configmaps",
+  "responder_jobs": [
+   "sdo-hotel-reservation-1790639529480295187-43101980ed"
+  ],
+  "responder_session_id": "01a0ea6e-e873-7ce2-9ba6-f08c0039844e",
+  "same_session_reflection": false,
+  "schema_version": "sdo.production-receipt/v1",
+  "source_topology_fingerprint": "e9b70fb5fb9d050553fe3cef05f41754653c078c2be3c3424c85b208fa8c9ef4",
+  "stale_memory_detected": true,
+  "usage": {
+   "cache_read_input_tokens": 235776,
+   "cache_write_1h_input_tokens": 0,
+   "cache_write_input_tokens": 0,
+   "cached_input_tokens": 235776,
+   "input_tokens": 258660,
+   "llm_calls": 1,
+   "model_requests": 11,
+   "output_tokens": 2904,
+   "reasoning_output_tokens": 588,
+   "uncached_input_tokens": 22884
+  },
+  "validator_evidence_commit": "e157b34629ffe8725c475da3cab10f67c20f3579",
+  "validator_execution_required": false,
+  "validator_image": "sdo-detector-validator:p1",
+  "validator_mode": "kubernetes-job",
+  "validator_network_policy_canaries": [],
+  "validator_skipped_reason": "unchanged-diagnostics",
+  "verified_at": "2026-09-28T23:54:06.338579+00:00"
+ },
+ "validation_error": "production receipt requires same_session_reflection=true for reflection_session_mode=resume"
+}

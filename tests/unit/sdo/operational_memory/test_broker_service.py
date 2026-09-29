@@ -447,7 +447,7 @@ def _recorded_actions_closure(
     return closure.model_copy(update={"request": request, "result": result})
 
 
-def test_recorded_actions_healed_stray_closes_as_cancelled_and_does_not_learn(tmp_path: Path) -> None:
+def test_recorded_actions_healed_stray_closes_as_cleared_without_action_and_does_not_learn(tmp_path: Path) -> None:
     """N13 / F16: a completed result with no action, but health already clear, is a no-op.
 
     A real responder that finds an already-healed transient (for example a stray 3 s
@@ -477,7 +477,7 @@ def test_recorded_actions_healed_stray_closes_as_cancelled_and_does_not_learn(tm
 
     assert backend.calls == []
     outcome = MemoryRepository(target).outcomes()[-1]
-    assert outcome.classification == OutcomeClassification.CANCELLED
+    assert outcome.classification == OutcomeClassification.CLEARED_WITHOUT_ACTION
     assert outcome.repair_commit is None
     assert "SDO-Phase: proposal" not in _git(target, "log", "--format=%B")
 
@@ -506,7 +506,7 @@ def test_recorded_actions_healed_stray_does_not_block_the_next_incident(tmp_path
     assert next_receipt.outcome_commit is not None
     outcomes = MemoryRepository(target).outcomes()
     assert [outcome.incident_id for outcome in outcomes] == ["inc-20260709-0001", "inc-20260709-0002"]
-    assert outcomes[0].classification == OutcomeClassification.CANCELLED
+    assert outcomes[0].classification == OutcomeClassification.CLEARED_WITHOUT_ACTION
     assert outcomes[1].classification == OutcomeClassification.SUCCESS
 
 

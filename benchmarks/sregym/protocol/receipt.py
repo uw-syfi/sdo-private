@@ -17,6 +17,36 @@ class ProductionReceiptValidationError(ValueError):
     """Raised when an SDO receipt cannot prove production completion."""
 
 
+#: The controller verified health after a responder repair that backs its causes.
+SDO_MITIGATED = "sdo_mitigated"
+#: The responder repaired something, but none of it backs its causes: someone else restored health.
+EXTERNAL_RECOVERY = "external_recovery"
+#: Health cleared with no successful mutation by the responder (a transient that healed on its own).
+CLEARED_WITHOUT_SDO_ACTION = "cleared_without_sdo_action"
+RECEIPT_RESOLUTIONS = (SDO_MITIGATED, EXTERNAL_RECOVERY, CLEARED_WITHOUT_SDO_ACTION)
+
+
+def receipt_resolution(receipt: dict[str, Any]) -> str:
+    """How the incident closed, derived from the receipt's own evidence (D30).
+
+    Only ``sdo_mitigated`` credits SDO with the recovery and needs the
+    responder's completion and same-session reflection. The other two are
+    valid audit records of a verified closure that must never be counted as a
+    mitigation.
+    """
+
+    actions = receipt.get("repair_actions")
+    mutated = bool(receipt.get("proposal_commit")) or any(
+        isinstance(action, dict) and cast("dict[str, Any]", action).get("success") is True
+        for action in (cast("list[object]", actions) if isinstance(actions, list) else [])
+    )
+    if not mutated:
+        return CLEARED_WITHOUT_SDO_ACTION
+    if receipt.get("recovery_attribution") == "external":
+        return EXTERNAL_RECOVERY
+    return SDO_MITIGATED
+
+
 def _string_keyed_objects(value: object) -> list[dict[str, object]] | None:
     if not isinstance(value, list):
         return None
@@ -87,25 +117,32 @@ def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle
         raise ProductionReceiptValidationError("production receipt must exclude pre-cutover evidence")
     if receipt.get("validator_mode") != "kubernetes-job":
         raise ProductionReceiptValidationError("production receipt requires validator_mode=kubernetes-job")
-    for field in (
-        "production_job_dispatch",
-        "completed",
-        "acknowledged",
-        "cleaned",
-    ):
+    resolution = receipt_resolution(receipt)
+    declared = receipt.get("resolution")
+    if declared is not None and declared != resolution:
+        raise ProductionReceiptValidationError(
+            f"production receipt resolution={declared!r} contradicts its evidence, which shows {resolution!r}"
+        )
+    mitigated = resolution == SDO_MITIGATED
+    required = ["production_job_dispatch", "acknowledged", "cleaned"]
+    if mitigated:
+        required.insert(1, "completed")
+    for field in required:
         if receipt.get(field) is not True:
             raise ProductionReceiptValidationError(f"production receipt requires {field}=true")
     # The first reflection attempt resumes the responder session unless the
-    # run opted into a fresh session; then the receipt must say so.
+    # run opted into a fresh session; then the receipt must say so. Only a
+    # credited mitigation is reflected on, so the others carry no such claim.
     reflection_session_mode = receipt.get("reflection_session_mode")
     if reflection_session_mode not in (None, "resume", "fresh"):
         raise ProductionReceiptValidationError("production receipt has an invalid reflection_session_mode")
-    expected_same_session = reflection_session_mode != "fresh"
-    if receipt.get("same_session_reflection") is not expected_same_session:
-        raise ProductionReceiptValidationError(
-            f"production receipt requires same_session_reflection={str(expected_same_session).lower()} "
-            f"for reflection_session_mode={reflection_session_mode or 'resume'}"
-        )
+    if mitigated:
+        expected_same_session = reflection_session_mode != "fresh"
+        if receipt.get("same_session_reflection") is not expected_same_session:
+            raise ProductionReceiptValidationError(
+                f"production receipt requires same_session_reflection={str(expected_same_session).lower()} "
+                f"for reflection_session_mode={reflection_session_mode or 'resume'}"
+            )
     lifecycle_provenance = receipt.get("lifecycle_provenance")
     if lifecycle_provenance is not True and not (allow_test_lifecycle and lifecycle_provenance is False):
         raise ProductionReceiptValidationError("production receipt requires lifecycle_provenance=true")
@@ -137,20 +174,29 @@ def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle
     action_ids = [action.action_id for action in actions]
     if len(action_ids) != len(set(action_ids)):
         raise ProductionReceiptValidationError("production receipt repair_actions IDs must be unique")
-    if repair_policy == "commit" and (not isinstance(proposal_commit, str) or not proposal_commit):
+    if mitigated and repair_policy == "commit" and (not isinstance(proposal_commit, str) or not proposal_commit):
         raise ProductionReceiptValidationError("production receipt requires proposal_commit")
     if (
-        repair_policy == "recorded-actions"
+        mitigated
+        and repair_policy == "recorded-actions"
         and not proposal_commit
         and (not actions or not any(action.success for action in actions))
     ):
         raise ProductionReceiptValidationError("production receipt requires successful repair_actions")
-    for field in ("outcome_commit", "reflection_commit"):
+    # A non-mitigated closure is never reflected on, so its evidence commit is the outcome commit.
+    commit_fields = ("outcome_commit", "reflection_commit") if mitigated else ("outcome_commit",)
+    for field in commit_fields:
         if not isinstance(receipt.get(field), str) or not receipt[field]:
             raise ProductionReceiptValidationError(f"production receipt requires {field}")
-    if receipt.get("validator_evidence_commit") != receipt["reflection_commit"]:
+    reflection_commit = receipt.get("reflection_commit")
+    if mitigated or reflection_commit:
+        if receipt.get("validator_evidence_commit") != reflection_commit:
+            raise ProductionReceiptValidationError(
+                "production receipt requires validator_evidence_commit=reflection_commit"
+            )
+    elif receipt.get("validator_evidence_commit") != receipt["outcome_commit"]:
         raise ProductionReceiptValidationError(
-            "production receipt requires validator_evidence_commit=reflection_commit"
+            "production receipt requires validator_evidence_commit=outcome_commit when no reflection was recorded"
         )
     detector_clear = _string_keyed_objects(receipt.get("detector_clear"))
     if not detector_clear or any(
@@ -160,11 +206,6 @@ def validate_production_receipt(receipt: dict[str, Any], *, allow_test_lifecycle
     if receipt.get("detector_review_required_at"):
         raise ProductionReceiptValidationError(
             "production receipt health cleared only after detector review; the responder did not restore it"
-        )
-    if receipt.get("recovery_attribution") == "external":
-        raise ProductionReceiptValidationError(
-            "production receipt has recovery_attribution=external: the responder's own repair backs none of its "
-            "root causes, so it did not restore health"
         )
     verification = _string_keyed_objects(receipt.get("independent_verification"))
     if not verification or any(evidence.get("passed") is not True for evidence in verification):

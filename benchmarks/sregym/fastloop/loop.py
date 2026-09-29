@@ -61,6 +61,9 @@ class AgentOutcome:
     match_reasons: tuple[str, ...] = ()
     reflection_attempts: int | None = None
     reflection_skipped_reason: str | None = None
+    #: How the strict receipt says the incident closed (``sdo_mitigated``, ``external_recovery`` or
+    #: ``cleared_without_sdo_action``); ``None`` when no receipt validated. Only ``sdo_mitigated`` is SDO's own fix.
+    sdo_resolution: str | None = None
     reflection_seconds: float | None = None
     baseline_gate_seconds: float | None = None
     #: One-time setup paid inside this incident (lifecycle and controller install), excluded from resolution.
@@ -238,6 +241,7 @@ def _outcome_fields(outcome: AgentOutcome) -> dict[str, Any]:
         "match_reasons": list(outcome.match_reasons),
         "reflection_attempts": outcome.reflection_attempts,
         "reflection_skipped_reason": outcome.reflection_skipped_reason,
+        "sdo_resolution": outcome.sdo_resolution,
         "reflection_seconds": outcome.reflection_seconds,
         "baseline_gate_seconds": outcome.baseline_gate_seconds,
         "setup_seconds": outcome.setup_seconds,
