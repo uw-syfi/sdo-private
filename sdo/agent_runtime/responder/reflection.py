@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from libs.agent_cli.structured import AgentProvider, StructuredTurnError, run_structured_turn, turn_usage
 from sdo.agent_runtime.responder.reflection_brief import incident_brief
+from sdo.agent_runtime.responder.reflection_outcomes import current_outcome_view, history_view
 from sdo.operational_memory import (
     DETECTOR_ID_PATTERN,
     DETECTOR_SDK_REFERENCE,
@@ -280,9 +281,17 @@ def _learning_request(
         f"Required action for this {outcome.classification.value} outcome: "
         f"{_classification_directive(outcome.classification)}\n\n"
         f"{_diagnosis_directive(outcome)}"
-        f"Current outcome:\n{outcome.model_dump_json(indent=2)}\n\n"
-        f"Outcome history:\n{json.dumps([record.model_dump(mode='json') for record in history], indent=2)}\n"
+        f"Current outcome (repeated detector evaluations collapsed into runs):\n"
+        f"{json.dumps(current_outcome_view(outcome), indent=2)}\n\n"
+        f"{_history_section(outcome, history)}"
     )
+
+
+def _history_section(outcome: OutcomeRecord, history: list[OutcomeRecord]) -> str:
+    prior = history_view(history, current_incident_id=outcome.incident_id)
+    if not prior:
+        return "Outcome history (prior incidents, compact): none\n"
+    return f"Outcome history (prior incidents, compact; raw evidence omitted):\n{json.dumps(prior, indent=2)}\n"
 
 
 def _diagnosis_directive(outcome: OutcomeRecord) -> str:

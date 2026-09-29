@@ -14,6 +14,7 @@ from sdo.agent_runtime.responder.reflection import (
     ReflectionTurn,
     SessionReflector,
 )
+from sdo.agent_runtime.responder.reflection_outcomes import current_outcome_view
 from sdo.contracts import IncidentRequest, IncidentResult
 from sdo.operational_memory import (
     BrokerClosure,
@@ -194,7 +195,7 @@ def test_first_reflection_resumes_same_session_with_broker_facts_and_bounded_val
     assert "originatingIncident" in prompt
     assert "outcome-sha" in prompt
     assert "sharp fault-specific playbook" in prompt
-    assert outcome.model_dump_json(indent=2) in prompt
+    assert json.dumps(current_outcome_view(outcome), indent=2) in prompt
 
 
 def test_reflection_retry_after_validation_failure_uses_a_short_fresh_session(tmp_path: Path) -> None:
@@ -222,7 +223,7 @@ def test_reflection_retry_after_validation_failure_uses_a_short_fresh_session(tm
     assert "rolled back" in prompt
     assert "Reflect using the same incident context" not in prompt
     # The original structured request is repeated in full.
-    assert outcome.model_dump_json(indent=2) in prompt
+    assert json.dumps(current_outcome_view(outcome), indent=2) in prompt
     assert "Required action for this success outcome" in prompt
     assert "a" * 64 in prompt
     assert "learning_decision=updated" in prompt
