@@ -45,6 +45,11 @@ type Config struct {
 	BaseURL  func(traffic.Target) string
 	Clock    traffic.Clock
 	Capacity int
+	// DialContext opens the fresh connections of link-probe workloads; by
+	// default a plain net.Dialer.
+	DialContext func(ctx context.Context, network string, address string) (net.Conn, error)
+	// LinkAddress overrides Service DNS addressing of links, for tests.
+	LinkAddress func(traffic.Link) string
 }
 
 // NewHTTPClient is the prober's default client: no keep-alives, so every
@@ -97,6 +102,7 @@ type Prober struct {
 	config Config
 	mu     sync.Mutex
 	probes map[string]*probe
+	links  map[string]*linkProbe
 	bursts map[string]traffic.Workload
 	next   uint64
 }
@@ -122,10 +128,17 @@ func New(config Config) (*Prober, error) {
 		namespace, domain := config.Namespace, config.ClusterDomain
 		config.BaseURL = func(target traffic.Target) string { return ServiceBaseURL(target, namespace, domain) }
 	}
+	if config.DialContext == nil {
+		config.DialContext = (&net.Dialer{}).DialContext
+	}
+	if config.LinkAddress == nil {
+		namespace, domain := config.Namespace, config.ClusterDomain
+		config.LinkAddress = func(link traffic.Link) string { return LinkAddress(link, namespace, domain) }
+	}
 	if err := config.Catalog.Validate(); err != nil {
 		return nil, err
 	}
-	prober := &Prober{config: config, probes: map[string]*probe{}, bursts: map[string]traffic.Workload{}}
+	prober := &Prober{config: config, probes: map[string]*probe{}, links: map[string]*linkProbe{}, bursts: map[string]traffic.Workload{}}
 	for _, workload := range config.Workloads {
 		workload = workload.WithDefaults()
 		if err := workload.Validate(); err != nil {
@@ -139,6 +152,13 @@ func New(config Config) (*Prober, error) {
 		}
 		if _, exists := prober.bursts[workload.Name]; exists {
 			return nil, fmt.Errorf("duplicate traffic workload %q", workload.Name)
+		}
+		if _, exists := prober.links[workload.Name]; exists {
+			return nil, fmt.Errorf("duplicate traffic workload %q", workload.Name)
+		}
+		if workload.Purpose == traffic.PurposeLinkProbe {
+			prober.links[workload.Name] = newLinkProbe(workload)
+			continue
 		}
 		if workload.Purpose != traffic.PurposeHealthProbe {
 			prober.bursts[workload.Name] = workload
@@ -171,6 +191,13 @@ func (p *Prober) Run(ctx context.Context) {
 			defer running.Done()
 			p.runProbe(ctx, name)
 		}(name)
+	}
+	for _, probe := range p.links {
+		running.Add(1)
+		go func(probe *linkProbe) {
+			defer running.Done()
+			p.runLinks(ctx, probe)
+		}(probe)
 	}
 	running.Wait()
 }
@@ -224,6 +251,9 @@ func (p *Prober) Windows() map[string]traffic.Window {
 			Workload: state.engine.Workload(), ObservedAt: now, Scenarios: scenarios, Skipped: state.skipped,
 		}
 	}
+	for name, probe := range p.links {
+		windows[name] = p.linkWindowLocked(probe, now)
+	}
 	return windows
 }
 
@@ -237,6 +267,14 @@ func (p *Prober) Reset() {
 			scenario.samples, scenario.qualified, scenario.invalid, scenario.lastInvalid = nil, false, 0, ""
 		}
 		state.skipped = 0
+	}
+	// Link samples go, but not which links have ever connected: that is a
+	// fact about the topology, and forgetting it would blind the detector to
+	// a link that is already broken when the observations restart.
+	for _, probe := range p.links {
+		for _, state := range probe.links {
+			state.samples = nil
+		}
 	}
 }
 

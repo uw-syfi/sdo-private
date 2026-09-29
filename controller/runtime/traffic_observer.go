@@ -209,6 +209,21 @@ func (o *TrafficObserver) Poll(ctx context.Context) bool {
 }
 
 func windowHasRecentFailure(window traffic.Window) bool {
+	for _, observed := range window.Links {
+		// A link that never connected is no signal (see LinkObservations).
+		if !observed.Qualified {
+			continue
+		}
+		samples := observed.Samples
+		if size := window.Workload.Failures; size > 0 && len(samples) > size {
+			samples = samples[len(samples)-size:]
+		}
+		for _, sample := range samples {
+			if !sample.OK {
+				return true
+			}
+		}
+	}
 	for _, observed := range window.Scenarios {
 		samples := observed.Samples
 		size := window.Workload.ScenarioSLO(observed.Scenario.ID).Window
@@ -300,8 +315,13 @@ func (o *TrafficObserver) warm() bool {
 	defer o.mu.Unlock()
 	for _, name := range o.workloads {
 		window, ok := o.windows[name]
-		if !ok || len(window.Scenarios) == 0 {
+		if !ok || len(window.Scenarios)+len(window.Links) == 0 {
 			return false
+		}
+		for _, observed := range window.Links {
+			if len(observed.Samples) == 0 {
+				return false
+			}
 		}
 		for _, observed := range window.Scenarios {
 			if len(observed.Samples) == 0 {
@@ -348,6 +368,14 @@ func (o *TrafficObserver) Summary() map[string]any {
 				"samples": len(observed.Samples), "qualified": observed.Qualified, "invalid": observed.Invalid,
 				"target": observed.Scenario.Target.Service, "depends_on": observed.Scenario.DependsOn,
 			}
+		}
+		if len(window.Links) > 0 {
+			links := make(map[string]any, len(window.Links))
+			for _, observed := range window.Links {
+				links[observed.Link.String()] = map[string]any{"samples": len(observed.Samples), "qualified": observed.Qualified}
+			}
+			summary[name] = map[string]any{"interval": window.Workload.Interval.Duration().String(), "failures": window.Workload.Failures, "links": links}
+			continue
 		}
 		summary[name] = map[string]any{
 			"rate_per_second": window.Workload.RatePerSecond, "seed": window.Workload.Seed, "scenarios": scenarios,
