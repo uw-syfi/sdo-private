@@ -133,6 +133,7 @@ class StageTimeline:
     problem_id: str
     incident_id: str | None
     inject_s: float
+    injection_request_s: float
     detect_s: float | None
     detector: str | None
     open_s: float | None
@@ -190,7 +191,11 @@ def stage_timeline(stage: str, problem_id: str, results: Path) -> StageTimeline 
     ]
     logs = sorted(results.rglob("sdo_runtime/controller_logs/*.log"))
     incident_id = receipt.get("incident_id") if isinstance(receipt.get("incident_id"), str) else None
-    finding = first_finding_after(logs, after=injected)
+    request = receipt.get("fault_gate_timings_seconds") or {}
+    request_seconds = _num(request.get("fault_injection_request")) or 0.0
+    # The harness stamps fault_injected_at when the injection request returns, so the
+    # fault (and its first finding) can predate that anchor by the request's duration.
+    finding = first_finding_after(logs, after=injected - request_seconds - 1.0)
     calls = [call for path in rollouts for call in _rollout_calls(path)]
     calls.sort(key=lambda item: item[0])
     session_start = None
@@ -214,6 +219,7 @@ def stage_timeline(stage: str, problem_id: str, results: Path) -> StageTimeline 
         problem_id=problem_id,
         incident_id=incident_id,
         inject_s=0.0,
+        injection_request_s=request_seconds,
         detect_s=rel(finding.epoch if finding else None),
         detector=f"{finding.detector_id}/{finding.rule_id}" if finding else None,
         open_s=rel(incident_open_epoch(incident_id) if incident_id else None),
