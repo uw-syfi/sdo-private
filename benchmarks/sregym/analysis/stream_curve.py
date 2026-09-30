@@ -193,8 +193,13 @@ def _sdo_row(
     )
 
 
-def codex_rows(directories: list[Path], manifest: list[dict[str, Any]], pricing: ArmPricing) -> list[Row]:
-    runs: list[CodexRun] = [run for directory in directories for run in load_codex_runs(directory)]
+def codex_rows(directories: list[str], manifest: list[dict[str, Any]], pricing: ArmPricing) -> list[Row]:
+    runs: list[CodexRun] = []
+    for spec in directories:
+        # ``DIR:N`` keeps only the first N runs of DIR (a directory that ran a discarded stream tail).
+        path, _, take = spec.partition(":")
+        loaded = load_codex_runs(Path(path))
+        runs += loaded[: int(take)] if take else loaded
     rows: list[Row] = []
     for index, run in enumerate(runs):
         meta = manifest[index]
@@ -313,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--sdo", type=Path, required=True)
-    parser.add_argument("--codex", type=Path, nargs="+", required=True)
+    parser.add_argument("--codex", nargs="+", required=True, help="experiment dirs, optionally DIR:N")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     manifest = load_manifest(args.manifest)
