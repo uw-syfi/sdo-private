@@ -343,3 +343,18 @@ def test_local_controller_builder_uses_the_same_source_repair_check() -> None:
         encoding="utf-8"
     )
     assert f'"{SOURCE_REPAIR_CHECK_COMMAND}"' in source
+
+
+def test_reflection_guidance_defaults_to_baseline_and_is_passed_to_the_broker() -> None:
+    default = _config()
+    generalize = ControllerInstallConfig(**{**_config().__dict__, "reflection_guidance": "generalize"})
+
+    assert default.reflection_guidance == "baseline"
+    for config, expected in ((default, "baseline"), (generalize, "generalize")):
+        broker = _broker_args(config)
+        assert broker[broker.index("--reflection-guidance") + 1] == expected
+
+
+def test_unknown_reflection_guidance_is_rejected() -> None:
+    with pytest.raises(ValueError, match="reflection_guidance"):
+        ControllerInstallConfig(**{**_config().__dict__, "reflection_guidance": "sibling"})

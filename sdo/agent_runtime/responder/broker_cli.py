@@ -21,6 +21,7 @@ from sdo.agent_runtime.responder import (
     prepare_codex_home,
 )
 from sdo.operational_memory import (
+    REFLECTION_GUIDANCE_MODES,
     REFLECTION_SESSION_MODES,
     BrokerClosure,
     BrokerService,
@@ -31,6 +32,7 @@ from sdo.operational_memory import (
     KubernetesJobSandboxRunner,
     LocalSandboxRunner,
     MemoryValidator,
+    ReflectionGuidance,
 )
 
 
@@ -41,6 +43,7 @@ def _production_reflector(
     reasoning_effort: str,
     timeout_seconds: int,
     responder_turn_log: Path | None = None,
+    guidance: ReflectionGuidance = "baseline",
 ) -> SessionReflector:
     backend_type = ClaudeSessionBackend if provider == "claude" else CodexSessionBackend
     return SessionReflector(
@@ -50,6 +53,7 @@ def _production_reflector(
             timeout_seconds=timeout_seconds,
         ),
         responder_turn_log=responder_turn_log,
+        guidance=guidance,
     )
 
 
@@ -97,6 +101,13 @@ def _argument_parser() -> argparse.ArgumentParser:
         "from a compact incident brief",
     )
     parser.add_argument(
+        "--reflection-guidance",
+        choices=REFLECTION_GUIDANCE_MODES,
+        default="baseline",
+        help="reflection learning guidance: per-cause (default) or generalize one incident detector and playbook "
+        "across parameter variants of the same root-cause class",
+    )
+    parser.add_argument(
         "--responder-turn-log",
         type=Path,
         help="responder per-turn usage log; a fresh reflection brief quotes the responder's shell commands from it",
@@ -138,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             reasoning_effort=args.reflection_reasoning_effort,
             timeout_seconds=args.reflection_timeout_seconds,
             responder_turn_log=args.responder_turn_log,
+            guidance=args.reflection_guidance,
         ),
         reflection_session=args.reflection_session,
     )

@@ -12,6 +12,10 @@ sdo operate REPOSITORY --namespace NAMESPACE (--goal TEXT | --goal-file PATH)
 
 Use `sdo operate --help` for descriptions and current defaults.
 
+## Reflection guidance
+
+`--reflection-guidance {baseline,generalize}` (`ControllerInstallConfig.reflection_guidance`, broker argument of the same name; SREGym `agent_config.sdo_codex.reflection_guidance`) selects the learning guidance of outcome-driven reflection. `baseline` (default) keeps per-cause learning: a sharp playbook and incident detector for each confirmed cause. `generalize` adds a generalization protocol to the reflection request: compare the confirmed signature with every existing incident detector, widen a same-root-cause-class detector so it keys on the class-level condition and reports the affected resource through `Finding.ParameterBindings`, parameterize the existing playbook with role placeholders, and create a new detector or playbook only for a different root cause, keeping a near-miss test. It also makes the structured-handoff brief (`--reflection-session fresh`) list each existing incident detector's Spec description, whether it sets parameter bindings, and a bounded excerpt of its `Detect` predicate. The flag changes only reflection prompt wording and brief content, so arms can share images. Prompt and static brief wording is kept problem-agnostic; a unit test scans it for problem-specific terms.
+
 ## SREGym experiment configuration
 
 SREGym configuration remains benchmark-specific. Parsing and resolved defaults live under `benchmarks/sregym/runner/`, with complete examples under `benchmarks/sregym/experiments/`.

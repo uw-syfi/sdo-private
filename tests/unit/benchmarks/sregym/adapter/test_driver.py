@@ -1345,6 +1345,17 @@ def test_sregym_agent_config_selects_the_reflection_session_mode(monkeypatch: py
         driver._parse_args(["--reflection-session", "transcript"])
 
 
+def test_sregym_agent_config_selects_the_reflection_guidance(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
+    assert driver._parse_args([]).reflection_guidance == "baseline"
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"reflection_guidance": "generalize"}))
+    assert driver._parse_args([]).reflection_guidance == "generalize"
+    with pytest.raises(SystemExit):
+        driver._parse_args(["--reflection-guidance", "sibling"])
+
+
 def test_receipt_reports_a_deterministically_skipped_reflection() -> None:
     import benchmarks.sregym.adapter.runtime as runtime
 

@@ -209,6 +209,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=config.get("reflection_session", "resume"),
     )
     parser.add_argument(
+        "--reflection-guidance",
+        choices=("baseline", "generalize"),
+        default=config.get("reflection_guidance", "baseline"),
+        help="reflection learning guidance: per-cause (baseline) or generalize across parameter variants",
+    )
+    parser.add_argument(
         "--persistent-controller",
         action=argparse.BooleanOptionalAction,
         default=bool(config.get("persistent_controller", False)),
@@ -543,6 +549,7 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
         repair_policy="recorded-actions",
         agent_provider=args.provider,
         reflection_session=args.reflection_session,
+        reflection_guidance=args.reflection_guidance,
         submission_api_base=_in_cluster_api_base(api_base),
         submission_relay_target_base=_relay_target_api_base(api_base),
         artifacts_dir=receipt_dir,
@@ -634,6 +641,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             repair_policy="recorded-actions",
             agent_provider=args.provider,
             reflection_session=args.reflection_session,
+            reflection_guidance=args.reflection_guidance,
             submission_api_base=_in_cluster_api_base(api_base),
             submission_relay_target_base=_relay_target_api_base(api_base),
             artifacts_dir=_receipt_directory(args.logs_dir, repository),

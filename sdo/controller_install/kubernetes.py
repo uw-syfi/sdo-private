@@ -14,7 +14,7 @@ from typing import Any, Generic, Protocol, TypeVar, overload
 
 import yaml
 
-from sdo.operational_memory import REFLECTION_SESSION_MODES, SOURCE_REPAIR_CHECK_COMMAND
+from sdo.operational_memory import REFLECTION_GUIDANCE_MODES, REFLECTION_SESSION_MODES, SOURCE_REPAIR_CHECK_COMMAND
 
 
 class ControllerInstallError(RuntimeError):
@@ -65,6 +65,8 @@ class ControllerInstallConfig:
     agent_provider: str = "codex"
     # First reflection attempt: "resume" the responder session, or "fresh" (opt-in).
     reflection_session: str = "resume"
+    # Reflection guidance: "baseline" per-cause learning, or "generalize" across parameter variants (opt-in).
+    reflection_guidance: str = "baseline"
     # Namespace for the controller, its repository PVC, state, credentials,
     # and responder/validator Jobs. ``None`` co-locates them with the
     # application; a separate namespace survives application redeploys.
@@ -82,6 +84,8 @@ class ControllerInstallConfig:
             raise ValueError("agent_provider must be 'codex' or 'claude'")
         if self.reflection_session not in REFLECTION_SESSION_MODES:
             raise ValueError(f"reflection_session must be one of {', '.join(REFLECTION_SESSION_MODES)}")
+        if self.reflection_guidance not in REFLECTION_GUIDANCE_MODES:
+            raise ValueError(f"reflection_guidance must be one of {', '.join(REFLECTION_GUIDANCE_MODES)}")
 
     @property
     def control_namespace(self) -> str:
@@ -198,6 +202,8 @@ def controller_resources(
         f"--broker-arg={config.model}",
         "--broker-arg=--reflection-session",
         f"--broker-arg={config.reflection_session}",
+        "--broker-arg=--reflection-guidance",
+        f"--broker-arg={config.reflection_guidance}",
         "--broker-arg=--responder-turn-log",
         f"--broker-arg={RESPONDER_TURN_USAGE_LOG}",
     ]

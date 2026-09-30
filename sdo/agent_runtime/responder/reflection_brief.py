@@ -11,6 +11,7 @@ character budget so the brief stays under about 8K tokens.
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING
 
 from sdo.operational_memory import MemoryRepository, MemoryRepositoryError
@@ -26,7 +27,7 @@ BRIEF_MAX_CHARS = 30_000
 _FINDINGS_BUDGET = 12_000
 _RESULT_BUDGET = 6_000
 _COMMANDS_BUDGET = 6_000
-_MEMORY_BUDGET = 5_500
+_MEMORY_BUDGET = 9_000
 _MAX_FULL_FINDINGS = 4
 _EVIDENCE_MAX_CHARS = 3_000
 _METADATA_MAX_CHARS = 1_200
@@ -36,6 +37,10 @@ _HEAD_COMMANDS = 10
 _PLAYBOOK_EXCERPT_CHARS = 700
 _MAX_PLAYBOOK_EXCERPTS = 4
 _INDEX_EXCERPT_CHARS = 1_000
+_DETECTOR_DESCRIPTION_CHARS = 500
+_DETECTOR_PREDICATE_CHARS = 1_400
+_DESCRIPTION_RE = re.compile(r'Description:\s*((?:"(?:[^"\\]|\\.)*"\s*\+?\s*)+|`[^`]*`)')
+_DETECT_FUNC_RE = re.compile(r"func\s*\([^)]*\)\s*Detect\s*\(")
 
 
 def _clip(text: str, limit: int) -> str:
@@ -242,7 +247,32 @@ def _relevant_playbooks(closure: BrokerClosure, fired_detectors: set[str], possi
     return paths
 
 
-def _memory_section(worktree: Path, closure: BrokerClosure) -> str:
+def _detector_detail(worktree: Path, package: str) -> list[str]:
+    """Spec description and a bounded excerpt of the match predicate of one incident detector."""
+
+    source = worktree / ".sdo" / "diagnostics" / package / "detector.go"
+    try:
+        text = source.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ["    (detector source unreadable)"]
+    lines = []
+    described = _DESCRIPTION_RE.search(text)
+    if described:
+        description = re.sub(r'"\s*\+\s*"', "", described.group(1)).strip()
+        lines.append(f"    description: {_clip(description, _DETECTOR_DESCRIPTION_CHARS)}")
+    else:
+        lines.append("    description: (none in Spec())")
+    lines.append(
+        "    reports parameter bindings: " + ("yes" if "ParameterBindings" in text else "no (none set by the detector)")
+    )
+    detect = _DETECT_FUNC_RE.search(text)
+    excerpt = text[detect.start() :] if detect else text
+    lines.append(f"    match predicate excerpt ({source.relative_to(worktree).as_posix()}, Detect):")
+    lines.append(_fenced(_clip(excerpt.strip(), _DETECTOR_PREDICATE_CHARS)))
+    return lines
+
+
+def _memory_section(worktree: Path, closure: BrokerClosure, *, detector_detail: bool = False) -> str:
     lines = ["## Existing operational memory (paths and short excerpts; open a file for its full text)"]
     memory = worktree / ".sdo"
     fired = {finding.detector_id for finding in closure.request.findings}
@@ -267,6 +297,8 @@ def _memory_section(worktree: Path, closure: BrokerClosure) -> str:
                 f"{detector.persistence.firing}, playbooks: {detector.possible_playbooks or []}, "
                 f"originatingIncident: {detector.originating_incident}){marker}"
             )
+            if detector_detail:
+                lines.extend(_detector_detail(worktree, detector.package))
     index = memory / "playbooks" / "README.md"
     if index.is_file():
         lines.append("Playbook index .sdo/playbooks/README.md:")
@@ -288,15 +320,21 @@ def incident_brief(
     *,
     worktree: Path,
     responder_turn_log: Path | None = None,
+    detector_detail: bool = False,
 ) -> str:
-    """Render the bounded incident brief for a fresh first reflection attempt."""
+    """Render the bounded incident brief for a fresh first reflection attempt.
+
+    ``detector_detail`` adds, for every existing incident detector, its Spec
+    description and a bounded excerpt of its match predicate, so the reader can
+    compare the confirmed signature with what each detector already matches.
+    """
 
     session_id = None if closure.result is None else closure.result.responder_session_id
     sections = [
         _findings_section(closure),
         _result_section(closure.result, closure.dispatch_error),
+        _memory_section(worktree, closure, detector_detail=detector_detail),
         _commands_section(responder_shell_commands(responder_turn_log, session_id)),
-        _memory_section(worktree, closure),
     ]
     body = _clip("\n\n".join(sections), BRIEF_MAX_CHARS)
     return (

@@ -1,6 +1,7 @@
 """Typed, validated operational-memory storage and commit brokerage."""
 
 from sdo.operational_memory.broker_service import (
+    REFLECTION_GUIDANCE_MODES,
     REFLECTION_SESSION_MODES,
     BrokerClosure,
     BrokerService,
@@ -8,6 +9,7 @@ from sdo.operational_memory.broker_service import (
     ClosureReceipt,
     ControllerRolloutExpectation,
     ControllerRolloutRecord,
+    ReflectionGuidance,
     ReflectionSessionMode,
     TopologyReview,
 )
@@ -56,6 +58,7 @@ __all__ = [
     "PLAYBOOK_INDEX_PATH",
     "PLAYBOOK_SCRIPT_SUFFIX",
     "RESPONDER_FORBIDDEN_KUBECTL_VERBS",
+    "REFLECTION_GUIDANCE_MODES",
     "REFLECTION_SESSION_MODES",
     "SOURCE_REPAIR_CHECK_COMMAND",
     "VALIDATION_PASSED_TRAILER",
@@ -77,6 +80,7 @@ __all__ = [
     "MemoryValidator",
     "OutcomeClassification",
     "OutcomeRecord",
+    "ReflectionGuidance",
     "ReflectionSessionMode",
     "SandboxResult",
     "SandboxRunner",

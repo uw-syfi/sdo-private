@@ -15,6 +15,7 @@ from sdo.operational_memory import (
     PLACEHOLDER_RE,
     PLAYBOOK_INDEX_PATH,
     PLAYBOOK_SCRIPT_SUFFIX,
+    REFLECTION_GUIDANCE_MODES,
     REFLECTION_SESSION_MODES,
     RESPONDER_FORBIDDEN_KUBECTL_VERBS,
     OutcomeClassification,
@@ -27,15 +28,20 @@ if TYPE_CHECKING:
 
     from agentshim import CommandExecutor
 
-    from sdo.operational_memory import BrokerClosure, ReflectionSessionMode
+    from sdo.operational_memory import BrokerClosure, ReflectionGuidance, ReflectionSessionMode
 
 
-def _classification_directive(classification: OutcomeClassification) -> str:
+def _classification_directive(classification: OutcomeClassification, guidance: ReflectionGuidance = "baseline") -> str:
     if classification == OutcomeClassification.FALSE_POSITIVE:
         return "tighten the over-broad detector signature and add a near-miss regression test."
     if classification == OutcomeClassification.FALSE_NEGATIVE:
         return "add or widen the missed detector signature and include the reproducing test that previously failed."
     if classification == OutcomeClassification.SUCCESS:
+        if guidance == "generalize":
+            return (
+                "Capture the confirmed signature at the level of its root-cause class, following the generalization "
+                "protocol above, and stay within what the evidence supports."
+            )
         return "Capture the confirmed signature without generalizing beyond the observed successful evidence."
     return "Do not encode the result as successful operational memory."
 
@@ -133,7 +139,7 @@ _INCIDENT_DETECTOR_RULES = (
     f"Incident detectors must fire promptly: use `persistence.firing: {INCIDENT_DETECTOR_MAX_FIRING}` in the manifest "
     f"and `Firing: {INCIDENT_DETECTOR_MAX_FIRING}` in Spec(); the validator rejects a new or changed incident "
     "detector with a larger value. Watch the resources where the fault is visible, not only the root object: when "
-    "the symptom is pod-level (FailedMount, CrashLoopBackOff, ImagePullBackOff, OOMKilled, failing probes), watch "
+    "the symptom is pod-level (a pod status, restart, or event reason), watch "
     'Pods and Events as well (`{APIVersion: "v1", Kind: "Pod"}`, `{APIVersion: "v1", Kind: "Event"}`) so '
     "the detector evaluates when the symptom appears and fires alongside the health detectors. "
 )
@@ -178,13 +184,13 @@ _SELF_CHECK_RULES = (
 
 _RESPONDER_PERMISSIONS = (
     "The responder that runs a playbook works from its own pod under the responder's RBAC in the application "
-    "namespace: it may `kubectl get`, `describe`, `logs`, and watch pods, Services, Endpoints, Events, and "
-    "ConfigMaps; create, apply, or patch ConfigMaps; patch Deployments, StatefulSets, DaemonSets, and ReplicaSets "
-    "(including `kubectl rollout restart`); delete pod; and delete NetworkPolicies. It cannot run "
+    "namespace: it may `kubectl get`, `describe`, `logs`, and watch the namespaced workload, Service, and Event "
+    "resources and configuration objects; create, apply, or patch configuration objects; patch workload "
+    "controllers (including `kubectl rollout restart`); delete pods; and delete policy objects. It cannot run "
     + ", ".join(f"`kubectl {verb}`" for verb in RESPONDER_FORBIDDEN_KUBECTL_VERBS)
     + " against the application, and the broker's validator rejects playbook steps that need them. Send "
-    "representative requests from the responder pod to the Service DNS name with python3 (the image has no curl "
-    "or wget), for example `python3 -c 'import urllib.request as u; r = u.urlopen(\"http://<SERVICE>.<NAMESPACE>"
+    "representative requests from the responder pod to the application's in-cluster Service address with python3 "
+    "(the container has no curl or wget), for example `python3 -c 'import urllib.request as u; r = u.urlopen(\"http://<SERVICE>.<NAMESPACE>"
     ".svc:<PORT>/\", timeout=10); print(r.status); print(r.read().decode())'`. "
 )
 
@@ -198,9 +204,9 @@ _PLAYBOOK_RULES = (
     "health objective needs one. "
     f"{_RESPONDER_PERMISSIONS}Put multi-step repair and verification "
     "commands in executable scripts under `.sdo/playbooks/<playbook>/scripts/` (`.sh`, parameters as positional "
-    "arguments, `set -eu`) and reference them from the README. After restoring a missing mount source (a "
-    "ConfigMap or Secret), delete the pods stuck on it or rollout-restart their workload instead of waiting for "
-    "the kubelet mount backoff. Include a `scripts/verify.sh` (and a `scripts/diagnose.sh` when the preconditions "
+    "arguments, `set -eu`) and reference them from the README. After restoring a missing dependency of "
+    "a workload, delete the pods blocked on it or rollout-restart their workload instead of waiting for "
+    "the platform's retry backoff. Include a `scripts/verify.sh` (and a `scripts/diagnose.sh` when the preconditions "
     "need their own check): when this playbook is reused before its incident detector fires, the responder runs "
     "it as its one sanity check. "
 )
@@ -239,36 +245,83 @@ def _memory_rules(*, incident_id: str, outcome_commit: str) -> str:
     )
 
 
+_GENERALIZATION_PROTOCOL = (
+    "Generalization protocol (follow it before creating or changing any detector or playbook):\n"
+    "1. Compare the confirmed signature of this incident with every existing incident detector. Use each "
+    "detector's description and match logic (the brief excerpts them when present; otherwise open its source), "
+    "not only its id.\n"
+    "2. Two incidents belong to the same root-cause class when the failure mechanism and the repair are the same "
+    "and only the identity of the affected resource, or a parameter value, differs. For a same-class incident do "
+    "not add a sibling detector or playbook. Widen the existing detector so its predicate keys on the class-level "
+    "condition rather than on observed names, numbers, or message text, and have it report the affected resource "
+    "through `Finding.ParameterBindings` (a role name mapped to that resource's `sdk.ObjectRef`). Add a matching "
+    "test case for this new instance, keep the existing matching and near-miss cases passing, and keep the "
+    "detector id, its playbook link, and its `originatingIncident` and `originatingCommit` unchanged. Parameterize "
+    "the existing playbook and its scripts with role placeholders instead of observed names, and do not create "
+    "another playbook for it.\n"
+    "3. Create a new detector and playbook only when the root cause differs from every existing one: a different "
+    "failure mechanism or a different repair. When you do, express the predicate over the class-level condition "
+    "for any resource it could apply to, report the affected resource through `Finding.ParameterBindings`, and "
+    "write the playbook against role placeholders, so the next same-class incident needs no new memory.\n"
+    "4. Widening must stay precise. The widened predicate must still not fire for a different root cause: state the "
+    "discriminating condition explicitly, and keep or add a near-miss test in which the same kind of resource is "
+    "present but the class-level condition is absent or another cause applies. If you cannot widen safely, create "
+    "a new detector instead.\n"
+    "5. Name in your summary whether you widened an existing detector, created a new one, or made no change, and "
+    "which detector.\n"
+)
+
+
 def _learning_request(
     *,
     outcome: OutcomeRecord,
     history: list[OutcomeRecord],
     outcome_commit: str,
     topology_review: TopologyReview | None,
+    guidance: ReflectionGuidance = "baseline",
 ) -> str:
     """The structured reflection request shared by first attempts and retries."""
 
+    generalize = guidance == "generalize"
+    playbook_intro = (
+        "Generalize roles with placeholders and ground structural changes in the supplied history. Keep playbooks "
+        "at the level of the root-cause class, with deterministic repair and independent verification steps. "
+        f"{_PLAYBOOK_RULES}\n{_GENERALIZATION_PROTOCOL}"
+        if generalize
+        else "Generalize roles with placeholders and ground structural changes in the supplied history. Create a "
+        "sharp fault-specific playbook for the confirmed cause, with deterministic repair and independent "
+        f"verification steps. {_PLAYBOOK_RULES}\n"
+    )
+    detector_intro = (
+        "When the confirmed cause exposes a stable low-noise Kubernetes signature that no existing incident "
+        "detector covers, add an incident detector for it and include both a matching test and a near-miss test. "
+        if generalize
+        else "When the confirmed cause exposes a stable low-noise Kubernetes "
+        "signature, add a fault-specific incident detector immediately and include both a matching test and a "
+        "near-miss test. "
+    )
+    covered = (
+        "When an existing incident detector and playbook already cover this incident, change them only to fix a "
+        "demonstrated gap or to widen them as the generalization protocol describes. "
+        if generalize
+        else "When an existing incident "
+        "detector and playbook already cover this incident, change them only to fix a demonstrated gap. "
+    )
     return (
         f"Outcome commit: {outcome_commit}\n"
         "Edit only responder-owned `.sdo/playbooks/`, "
         "`.sdo/diagnostics/detectors/incidents/` (the directory name is exactly the plural `incidents`), and "
         "the corresponding responder-owned detector entries in `.sdo/diagnostics/manifest.yaml`; "
         "never edit goal.md, health detectors, or outcomes.jsonl. "
-        "Generalize roles with placeholders and ground structural changes in the supplied history. Create a "
-        "sharp fault-specific playbook for the confirmed cause, with deterministic repair and independent "
-        "verification steps. "
-        f"{_PLAYBOOK_RULES}\n"
+        f"{playbook_intro}"
         f"{_memory_rules(incident_id=outcome.incident_id, outcome_commit=outcome_commit)}"
-        "When the confirmed cause exposes a stable low-noise Kubernetes "
-        "signature, add a fault-specific incident detector immediately and include both a matching test and a "
-        "near-miss test. "
+        f"{detector_intro}"
         f"{_INCIDENT_DETECTOR_RULES}"
         "Register a new detector with owner responder, class incident, originatingIncident set to "
         "this incident, and originatingCommit set to the authoritative outcome commit. Never change "
         "originatingIncident or originatingCommit of an existing detector, in the manifest or its Spec(): they "
-        "record the incident that first taught it, and the broker rejects any rewrite. When an existing incident "
-        "detector and playbook already cover this incident, change them only to fix a demonstrated gap. Preserve "
-        "every existing health detector and shared manifest field.\n"
+        "record the incident that first taught it, and the broker rejects any rewrite. "
+        f"{covered}Preserve every existing health detector and shared manifest field.\n"
         "Return learning_decision=updated when you edit memory. Use learning_decision=no_change only when no "
         "safe reusable signature or playbook improvement exists, leave proposed_changes empty, and provide a "
         "specific no_change_reason grounded in this incident. Never claim files were changed unless they exist "
@@ -281,7 +334,7 @@ def _learning_request(
         f"{DETECTOR_SDK_REFERENCE}\n"
         f"{_INCIDENT_DETECTOR_SKELETON}\n"
         f"Required action for this {outcome.classification.value} outcome: "
-        f"{_classification_directive(outcome.classification)}\n\n"
+        f"{_classification_directive(outcome.classification, guidance)}\n\n"
         f"Current outcome:\n{outcome.model_dump_json(indent=2)}\n\n"
         f"Outcome history:\n{json.dumps([record.model_dump(mode='json') for record in history], indent=2)}\n"
     )
@@ -306,9 +359,18 @@ class SessionReflector:
     source of its shell commands for the brief.
     """
 
-    def __init__(self, backend: StatefulResponderBackend, *, responder_turn_log: Path | None = None) -> None:
+    def __init__(
+        self,
+        backend: StatefulResponderBackend,
+        *,
+        responder_turn_log: Path | None = None,
+        guidance: ReflectionGuidance = "baseline",
+    ) -> None:
+        if guidance not in REFLECTION_GUIDANCE_MODES:
+            raise ValueError(f"unsupported reflection guidance: {guidance!r}")
         self.backend = backend
         self.responder_turn_log = responder_turn_log
+        self.guidance: ReflectionGuidance = guidance
 
     def should_reflect(self, outcome: OutcomeRecord, *, health_verified: bool, session_id: str | None) -> bool:
         return bool(
@@ -344,6 +406,7 @@ class SessionReflector:
             history=history,
             outcome_commit=outcome_commit,
             topology_review=topology_review,
+            guidance=self.guidance,
         )
         idempotency_key = f"reflection:{incident_id}:{outcome_commit}"
         if validation_feedback:
@@ -366,12 +429,18 @@ class SessionReflector:
                 raise ValueError("a fresh first reflection attempt requires the verified closure for its brief")
             # The brief replaces the responder transcript, which a resumed
             # session would re-send on every model request.
+            brief = incident_brief(
+                closure,
+                worktree=worktree,
+                responder_turn_log=self.responder_turn_log,
+                detector_detail=self.guidance == "generalize",
+            )
             prompt = (
                 "The controller has independently verified incident closure and committed its authoritative "
                 "outcome. You are reflecting in a fresh session: the responder's session transcript is not "
                 "available, so rely on the incident brief below and read the worktree's source and `.sdo/` files "
                 "as needed.\n\n"
-                f"{incident_brief(closure, worktree=worktree, responder_turn_log=self.responder_turn_log)}\n"
+                f"{brief}\n"
                 f"Reflection request:\n{request}"
             )
             return self.backend.fresh(worktree=worktree, prompt=prompt, idempotency_key=idempotency_key)

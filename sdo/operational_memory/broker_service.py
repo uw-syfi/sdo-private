@@ -43,6 +43,9 @@ class BrokerServiceError(RuntimeError):
 #: always fresh.
 ReflectionSessionMode = Literal["resume", "fresh"]
 REFLECTION_SESSION_MODES: tuple[ReflectionSessionMode, ...] = ("resume", "fresh")
+#: ``baseline`` keeps per-cause learning; ``generalize`` widens an existing incident detector across parameter variants.
+ReflectionGuidance = Literal["baseline", "generalize"]
+REFLECTION_GUIDANCE_MODES: tuple[ReflectionGuidance, ...] = ("baseline", "generalize")
 
 
 class ReflectionProposal(Protocol):
