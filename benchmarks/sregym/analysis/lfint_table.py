@@ -21,7 +21,8 @@ from typing import Any
 
 from benchmarks.sregym.analysis.incident_cost import RECEIPT_NAME, pipeline_stage_dirs
 
-EVENT_PATTERN = re.compile(r"\bEvent\b|\"Event\"|EventList|Reason\s*==|\.Reason\b|Unhealthy")
+# Same predicate as the reflection brief's "reads Event objects" flag (a Watches entry is not a read).
+EVENT_PATTERN = re.compile(r"\.(?:Events|RecentEventsFor)\(|\bcorev1\.Event\b")
 
 
 def _ts(value: str | None) -> float | None:
