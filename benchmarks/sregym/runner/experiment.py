@@ -436,7 +436,9 @@ def _resolve_tasklist_source(tasklist_ref: str, sregym_dir: Path) -> Path:
     )
 
 
-_EXTERNAL_AGENTS = {"crucible", "sdo_codex"}
+#: Agents launched from this repository's registry (``benchmarks/sregym/registry.yaml``) instead of the
+#: harness's ``agents.yaml``. ``codex`` is here only to pin its CLI version to the one the SDO images use.
+_EXTERNAL_AGENTS = {"codex", "crucible", "sdo_codex"}
 #: Namespace label the SDO installer puts on a separate controller namespace;
 #: the harness keeps namespaces with this label across problems when told to.
 PERSISTENT_CONTROLLER_NAMESPACE_LABEL = "sdo.dev/controller-namespace"

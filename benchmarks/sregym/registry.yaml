@@ -13,3 +13,11 @@ agents:
     defer_fault_injection: true
     wait_for_natural_exit: true
     container_isolation: false
+  # The stock Codex baseline, as third_party/sregym/agents.yaml defines it, plus a pinned CLI version:
+  # npm "latest" drifts (0.158.0 shipped a 404 platform package) and must match the SDO images.
+  - name: codex
+    kickoff_command: python -m clients.codex.driver
+    kickoff_workdir: .
+    kickoff_env: null
+    install_script: install-codex.sh
+    agent_version: "0.157.1"
