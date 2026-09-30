@@ -212,7 +212,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--reflection-guidance",
         choices=("baseline", "generalize", "generalize-spec"),
         default=config.get("reflection_guidance", "baseline"),
-        help="reflection learning guidance: per-cause (baseline), generalize across variants, or generalize-spec (spec-first predicates)",
+        help="reflection guidance: baseline, generalize, or generalize-spec (generalize with spec-first predicates)",
     )
     parser.add_argument(
         "--persistent-controller",
