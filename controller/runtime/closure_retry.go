@@ -121,6 +121,14 @@ func (c *Controller) closureRetryWake(next time.Time) time.Time {
 	return next
 }
 
+// PausedWake is the only wake a maintenance-paused controller needs: a rejected
+// closure keeps retrying while detector evaluation and observation are paused
+// (in-flight closure, reflection and acknowledgement continue by contract). It
+// is the zero time when no retry is waiting.
+func (c *Controller) PausedWake() time.Time {
+	return c.closureRetryWake(time.Time{})
+}
+
 // recordClosureRejectionLocked counts a failed closure attempt and either
 // schedules the next attempt or marks the closure permanently failed. It
 // returns the failure when this attempt spent the retry budget. Callers hold

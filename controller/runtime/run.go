@@ -385,6 +385,11 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			delay = 2 * time.Second
 		case applied.Paused:
 			delay = time.Hour
+			if wake := controller.PausedWake(); !wake.IsZero() {
+				// A rejected closure still retries while paused; sleeping through it would block the
+				// drain that precedes the resume forever.
+				delay = time.Until(wake)
+			}
 		default:
 			delay = time.Until(controller.NextWake())
 		}
@@ -531,6 +536,12 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 				continue
 			}
 			if applied.Paused {
+				if err := executePendingEffects(runCtx, controller); err != nil {
+					if runCtx.Err() != nil {
+						return nil
+					}
+					return err
+				}
 				continue
 			}
 			if err := controller.Step(runCtx, time.Now().UTC(), nil); err != nil {
