@@ -138,7 +138,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default="gpt-6-luna")
     parser.add_argument("--timeout", type=int, default=900)
     args = parser.parse_args(argv)
-    result = replay(args.workspace, args.incident_suffix, args.guidance, args.out, model=args.model, timeout=args.timeout)
+    result = replay(
+        args.workspace, args.incident_suffix, args.guidance, args.out, model=args.model, timeout=args.timeout
+    )
     json.dump(result, sys.stdout, indent=2)
     return 0
 

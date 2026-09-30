@@ -21,7 +21,9 @@ def _count(workspace: Path, pattern: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     pipeline = Path((argv or sys.argv[1:])[0])
     dirs = {index: path for index, _name, path in pipeline_stage_dirs(pipeline)}
-    print("idx problem solved ttd_s ttm_s resp_in resp_out refl_in refl_out refl_attempts warm det_count(next stage seed)")
+    print(
+        "idx problem solved ttd_s ttm_s resp_in resp_out refl_in refl_out refl_attempts warm det_count(next stage seed)"
+    )
     for stage in load_sdo_pipeline(pipeline):
         workspace = dirs[stage.index] / "application_workspace" / ".sdo"
         nxt = dirs.get(stage.index + 1)
