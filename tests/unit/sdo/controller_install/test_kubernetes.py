@@ -358,3 +358,31 @@ def test_reflection_guidance_defaults_to_baseline_and_is_passed_to_the_broker() 
 def test_unknown_reflection_guidance_is_rejected() -> None:
     with pytest.raises(ValueError, match="reflection_guidance"):
         ControllerInstallConfig(**{**_config().__dict__, "reflection_guidance": "sibling"})
+
+
+def _controller_args(config: ControllerInstallConfig) -> list[str]:
+    controller = next(resource for resource in controller_resources(config) if resource["kind"] == "Job")
+    return controller["spec"]["template"]["spec"]["containers"][0]["args"]
+
+
+def test_late_findings_is_off_by_default_and_leaves_the_controller_args_unchanged() -> None:
+    default = _config()
+    off = ControllerInstallConfig(**{**_config().__dict__, "late_findings": "off"})
+
+    assert default.late_findings == "off"
+    assert _controller_args(off) == _controller_args(default)
+    assert "--late-findings" not in _broker_args(default)
+    assert not any(arg.startswith("--responder-env=SDO_LATE_FINDINGS") for arg in _controller_args(default))
+
+
+def test_pull_mode_reaches_the_broker_and_the_responder_environment() -> None:
+    pull = ControllerInstallConfig(**{**_config().__dict__, "late_findings": "pull"})
+
+    broker = _broker_args(pull)
+    assert broker[broker.index("--late-findings") + 1] == "pull"
+    assert "--responder-env=SDO_LATE_FINDINGS=pull" in _controller_args(pull)
+
+
+def test_unknown_late_findings_mode_is_rejected() -> None:
+    with pytest.raises(ValueError, match="late_findings"):
+        ControllerInstallConfig(**{**_config().__dict__, "late_findings": "push"})

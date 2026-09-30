@@ -172,6 +172,7 @@ def _sdo_agent(args: argparse.Namespace, environment: FastloopEnvironment, resul
         agent_provider=args.provider,
         reflection_session=args.reflection_session,
         reflection_guidance=args.reflection_guidance,
+        late_findings=args.late_findings,
         controller_namespace=control_namespace_for(environment.namespace),
     )
     settings = SdoAgentSettings(
@@ -445,6 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--provider", choices=("codex", "claude"), default="codex", help="SDO agent provider")
     run.add_argument("--reflection-session", choices=("resume", "fresh"), default="resume")
     run.add_argument("--reflection-guidance", choices=("baseline", "generalize"), default="baseline")
+    run.add_argument("--late-findings", choices=("off", "pull"), default="off")
     run.add_argument("--reasoning-effort", default=None, help="Codex baseline reasoning effort (default: Codex's)")
     run.add_argument("--timeout", type=int, default=3600, help="per-incident agent timeout in seconds")
     run.add_argument(
