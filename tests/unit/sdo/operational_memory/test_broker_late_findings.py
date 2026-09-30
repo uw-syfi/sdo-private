@@ -86,6 +86,30 @@ def test_pull_mode_records_the_consumed_late_playbook(tmp_path: Path) -> None:
     )
 
 
+def test_pull_mode_reads_the_configured_pull_log_outside_the_repository(tmp_path: Path) -> None:
+    # In the cluster the repository is a subdirectory of the volume while the stream sits at the volume root.
+    target = _target(tmp_path)
+    log = tmp_path / "volume" / ".sdo-runtime" / "telemetry" / PULL_LOG_FILENAME
+    service = _service(
+        target,
+        tmp_path / "worktrees",
+        AcceptRepairValidator(),
+        reflector=SessionReflector(NoChangeSessionBackend()),
+        late_findings="pull",
+        late_findings_log=log,
+    )
+    workspace = service.prepare_incident(_INCIDENT)
+    _pull(log.parents[2], count=1, playbooks=[_APPLIED])
+
+    service.process_closure(_closure(workspace.path, workspace.base_commit))
+
+    ledger = service._required_ledger(_INCIDENT)
+    assert ledger.closure is not None
+    assert ledger.closure.late_findings_pull is not None
+    assert ledger.closure.late_findings_pull.pull_count == 1
+    assert ledger.closure.late_findings_pull.applied_late_playbooks == [_APPLIED]
+
+
 def test_pull_mode_without_a_pull_records_not_pulled(tmp_path: Path) -> None:
     target = _target(tmp_path)
     service = _service(

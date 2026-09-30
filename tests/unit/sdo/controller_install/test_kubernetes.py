@@ -382,6 +382,9 @@ def test_pull_mode_reaches_the_broker_and_the_responder_environment() -> None:
     broker = _broker_args(pull)
     assert broker[broker.index("--late-findings") + 1] == "pull"
     assert "--responder-env=SDO_LATE_FINDINGS=pull" in _controller_args(pull)
+    # The responder appends its receipts at the volume root, not inside the application repository.
+    log = broker[broker.index("--late-findings-log") + 1]
+    assert log == "/workspace/.sdo-runtime/telemetry/late-findings-pulls.jsonl"
 
 
 def test_unknown_late_findings_mode_is_rejected() -> None:

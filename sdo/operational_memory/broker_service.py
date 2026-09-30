@@ -253,6 +253,7 @@ class BrokerService:
         max_reflection_attempts: int = 3,
         reflection_session: ReflectionSessionMode = "resume",
         late_findings: LateFindingsMode = "off",
+        late_findings_log: Path | None = None,
     ) -> None:
         if repair_policy not in ("commit", "recorded-actions"):
             raise ValueError(f"unsupported repair policy: {repair_policy!r}")
@@ -263,6 +264,7 @@ class BrokerService:
         if late_findings not in LATE_FINDINGS_MODES:
             raise ValueError(f"unsupported late-findings mode: {late_findings!r}")
         self.late_findings: LateFindingsMode = late_findings
+        self.late_findings_log = late_findings_log
         self.target_repository = target_repository.resolve()
         self.worktrees = WorktreeManager(self.target_repository, worktree_root)
         self.broker = broker or CommitBroker(self.target_repository)
@@ -940,7 +942,7 @@ class BrokerService:
             return closure
         applied = [] if closure.result is None else [playbook.path for playbook in closure.result.applied_playbooks]
         summary = summarize_pulls(
-            self.target_repository / ".sdo-runtime" / "telemetry" / PULL_LOG_FILENAME,
+            self.late_findings_log or self.target_repository / ".sdo-runtime" / "telemetry" / PULL_LOG_FILENAME,
             closure.request.incident_id,
             applied_playbooks=applied,
         )

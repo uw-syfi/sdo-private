@@ -116,6 +116,12 @@ def _argument_parser() -> argparse.ArgumentParser:
         help="record whether the responder pulled findings that activated after dispatch (off by default)",
     )
     parser.add_argument(
+        "--late-findings-log",
+        type=Path,
+        default=None,
+        help="pull receipt file the responder appends to (default: <repository>/.sdo-runtime/telemetry)",
+    )
+    parser.add_argument(
         "--responder-turn-log",
         type=Path,
         help="responder per-turn usage log; a fresh reflection brief quotes the responder's shell commands from it",
@@ -161,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         reflection_session=args.reflection_session,
         late_findings=args.late_findings,
+        late_findings_log=args.late_findings_log,
     )
     try:
         payload = json.load(sys.stdin)

@@ -227,6 +227,8 @@ def controller_resources(
                 f"--responder-env=SDO_LATE_FINDINGS={config.late_findings}",
                 "--broker-arg=--late-findings",
                 f"--broker-arg={config.late_findings}",
+                "--broker-arg=--late-findings-log",
+                f"--broker-arg={RUNTIME_TELEMETRY_ROOT}/late-findings-pulls.jsonl",
             ]
         )
     controller_args.extend(extra_controller_args or [])
