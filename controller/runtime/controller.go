@@ -90,6 +90,18 @@ type Controller struct {
 	closureResults             chan closureCompletion
 	acknowledgmentResults      chan acknowledgmentCompletion
 
+	// firingSink receives detector firing telemetry; nil disables it.
+	firingSink FiringSink
+	// evaluationIteration counts evaluation passes that took a snapshot. It is
+	// durable so telemetry iterations keep increasing across restarts.
+	evaluationIteration int
+	// evaluationAt is the time of the evaluation pass in progress.
+	evaluationAt time.Time
+	// timeline summarizes each finding's firing history since the last incident
+	// closure was cut.
+	timeline      []DetectorTimelineEntry
+	stateRestored bool
+
 	OnError          func(error)
 	OnResult         func(IncidentResult)
 	OnEvaluation     func([]sdk.Finding)
@@ -191,6 +203,10 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 	}
 
 	sampleFindings := make([]sdk.Finding, 0)
+	c.mu.Lock()
+	c.evaluationIteration++
+	c.evaluationAt = now.UTC()
+	c.mu.Unlock()
 	for _, detector := range detectors {
 		spec := detector.Spec()
 		findings, detectErr := detector.Detect(ctx, snapshot)
@@ -242,6 +258,7 @@ func (c *Controller) StepEvents(ctx context.Context, now time.Time, events []sdk
 				c.batcher.AddAtWithDebounce(finding, now, batchSpec.Batching.Debounce)
 			}
 		}
+		c.recordFiring(spec, now, validFindings, changes)
 	}
 	sort.Slice(sampleFindings, func(left int, right int) bool {
 		return sampleFindings[left].Fingerprint < sampleFindings[right].Fingerprint
@@ -308,6 +325,7 @@ func (c *Controller) attachBeforeLaunch(findings []sdk.Finding) bool {
 	)
 	request.DetectorHistory = compactDetectorHistory(c.history)
 	c.incidentFindingKeys = findingKeys(request.Findings)
+	c.noteBatchedLocked(request.IncidentID, findings)
 	return true
 }
 
@@ -368,6 +386,8 @@ func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 		c.dispatchState = "workspace_pending"
 	}
 	c.incidentFindingKeys = findingKeys(batch)
+	c.noteBatchedLocked(request.IncidentID, batch)
+	c.pruneTimelineLocked(batch)
 	c.mu.Unlock()
 	return nil
 }
@@ -575,6 +595,11 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 		DetectedAt:             c.incidentDetectedAt, DispatchedAt: c.incidentDispatchedAt,
 		ResponderCompletedAt: c.responderCompletedAt, VerifiedAt: verifiedAt,
 	}
+	closure.DetectorTimeline = cloneTimeline(c.timeline)
+	sortTimeline(closure.DetectorTimeline)
+	closure.IncidentDetectorFiredBeforeDispatch, closure.IncidentDetectorFiredAfterDispatch,
+		closure.NoIncidentDetectorFired = timelineSummary(closure.DetectorTimeline)
+	c.timeline = nil
 	c.pendingClosure = cloneIncidentClosure(&closure)
 	c.closureState = "pending"
 	c.closureReceipt = nil
@@ -708,6 +733,8 @@ func (c *Controller) ExportState() RuntimeState {
 		ClosureReceipt:             cloneClosureReceipt(c.closureReceipt),
 		ClosureFailure:             cloneClosureFailure(c.closureFailure),
 		LastAcknowledgedIncidentID: c.lastAcknowledgedIncidentID,
+		EvaluationIteration:        c.evaluationIteration,
+		DetectorTimeline:           cloneTimeline(c.timeline),
 	}
 }
 
@@ -746,6 +773,8 @@ func (c *Controller) RestoreState(state RuntimeState) error {
 	c.closureReceipt = cloneClosureReceipt(state.ClosureReceipt)
 	c.closureFailure = cloneClosureFailure(state.ClosureFailure)
 	c.lastAcknowledgedIncidentID = state.LastAcknowledgedIncidentID
+	c.evaluationIteration = state.EvaluationIteration
+	c.timeline = cloneTimeline(state.DetectorTimeline)
 	return nil
 }
 
@@ -811,6 +840,7 @@ func (c *Controller) AttachStateStore(ctx context.Context, store StateStore) err
 	c.stateStore = store
 	c.stateRevision = revision
 	c.mu.Lock()
+	c.stateRestored = revision != ""
 	c.durable = nil
 	if revision != "" {
 		c.durable = &state

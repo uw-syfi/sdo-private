@@ -66,6 +66,39 @@ class DetectorEvaluation(ContractModel):
     error: str | None = None
 
 
+DispatchRelation = Literal["before_dispatch", "after_dispatch", "no_incident"]
+
+
+class DetectorTimelineEntry(ContractModel):
+    """One finding's firing history within an incident window, from the controller's firing telemetry.
+
+    ``before_dispatch`` means the finding was part of the batch the responder
+    received; ``after_dispatch`` means it activated while the responder was in
+    flight; ``no_incident`` means it never joined an incident.
+    """
+
+    detector_id: str = Field(min_length=1)
+    detector_class: str = ""
+    owner: str = ""
+    rule_id: str = ""
+    fingerprint: str = Field(min_length=1)
+    parameter_bindings: dict[str, ObjectRef] = Field(default_factory=dict)
+    surfaced_playbooks: list[str] = Field(default_factory=list)
+    first_activated_at: datetime
+    last_seen_at: datetime
+    cleared_at: datetime | None = None
+    relation: DispatchRelation
+    activations: int = Field(default=1, ge=1)
+
+    @model_validator(mode="after")
+    def _ordered_timestamps(self) -> DetectorTimelineEntry:
+        if self.last_seen_at < self.first_activated_at:
+            raise ValueError("last_seen_at must not precede first_activated_at")
+        if self.cleared_at is not None and self.cleared_at < self.first_activated_at:
+            raise ValueError("cleared_at must not precede first_activated_at")
+        return self
+
+
 class SurfacedPlaybook(ContractModel):
     path: str = Field(min_length=1)
     parameter_bindings: dict[str, ObjectRef] = Field(default_factory=dict)

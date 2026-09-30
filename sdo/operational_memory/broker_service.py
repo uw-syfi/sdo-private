@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 from sdo.contracts import (
     DetectorEvaluation,
     DetectorEvaluationStatus,
+    DetectorTimelineEntry,
     IncidentRequest,
     IncidentResult,
 )
@@ -115,6 +116,12 @@ class BrokerClosure(BaseModel):
     # Latest post-response evaluation of each non-health detector that raised a
     # finding; learning evidence only, never a closure gate.
     incident_detector_states: list[DetectorEvaluation] = Field(default_factory=list)
+    # Firing telemetry for this incident window; analysis evidence, never a
+    # closure gate. The booleans are derived by the controller from the timeline.
+    detector_timeline: list[DetectorTimelineEntry] = Field(default_factory=list)
+    incident_detector_fired_before_dispatch: bool = False
+    incident_detector_fired_after_dispatch: bool = False
+    no_incident_detector_fired: bool = False
     detected_at: datetime
     dispatched_at: datetime
     responder_completed_at: datetime

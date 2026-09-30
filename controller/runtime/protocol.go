@@ -140,10 +140,19 @@ type IncidentClosure struct {
 	// non-health detector that raised a finding in this incident. It is
 	// learning evidence for the broker, not a closure gate.
 	IncidentDetectorStates []DetectorEvaluation `json:"incident_detector_states,omitempty"`
-	DetectedAt             time.Time            `json:"detected_at"`
-	DispatchedAt           time.Time            `json:"dispatched_at"`
-	ResponderCompletedAt   time.Time            `json:"responder_completed_at"`
-	VerifiedAt             time.Time            `json:"verified_at"`
+	// DetectorTimeline summarizes, per finding, when each detector fired in this
+	// incident window and how that relates to dispatch. The booleans derive
+	// from it for analysis: a learned incident detector that fired before the
+	// responder was dispatched, one that fired only while it ran, or only
+	// health detectors firing.
+	DetectorTimeline                    []DetectorTimelineEntry `json:"detector_timeline,omitempty"`
+	IncidentDetectorFiredBeforeDispatch bool                    `json:"incident_detector_fired_before_dispatch"`
+	IncidentDetectorFiredAfterDispatch  bool                    `json:"incident_detector_fired_after_dispatch"`
+	NoIncidentDetectorFired             bool                    `json:"no_incident_detector_fired"`
+	DetectedAt                          time.Time               `json:"detected_at"`
+	DispatchedAt                        time.Time               `json:"dispatched_at"`
+	ResponderCompletedAt                time.Time               `json:"responder_completed_at"`
+	VerifiedAt                          time.Time               `json:"verified_at"`
 }
 
 func (request IncidentRequest) Validate() error {
