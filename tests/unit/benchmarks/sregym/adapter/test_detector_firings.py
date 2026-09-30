@@ -105,3 +105,32 @@ def test_runtime_export_places_the_firing_stream_next_to_the_receipt(
     stream = results / "detector_firings.jsonl"
     ids = [json.loads(line)["event_id"] for line in stream.read_text(encoding="utf-8").splitlines()]
     assert ids == ["old", "new"]
+
+
+def test_receipt_reports_late_findings_consumption_only_when_the_closure_has_it() -> None:
+    assert runtime._late_findings_summary({"final_detector_states": []}) == {}
+    assert runtime._late_findings_summary({"late_findings_pull": None}) == {}
+
+    summary = runtime._late_findings_summary(
+        {
+            "late_findings_pull": {
+                "pulled": True,
+                "pull_count": 2,
+                "nonempty_pull_count": 1,
+                "late_finding_detectors": ["learned"],
+                "late_playbooks": [".sdo/playbooks/x/README.md"],
+                "applied_late_playbooks": [".sdo/playbooks/x/README.md"],
+            }
+        }
+    )
+
+    assert summary["late_findings_pull"]["pull_count"] == 2
+    assert summary["late_finding_consumed"] is True
+
+
+def test_late_finding_consumed_requires_a_non_empty_pull() -> None:
+    summary = runtime._late_findings_summary({"late_findings_pull": {"pulled": True, "pull_count": 1}})
+
+    assert summary["late_finding_consumed"] is False
+    malformed = runtime._late_findings_summary({"late_findings_pull": {"pull_count": "many"}})
+    assert "late_findings_pull_error" in malformed

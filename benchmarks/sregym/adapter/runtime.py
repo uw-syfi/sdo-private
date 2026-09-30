@@ -36,7 +36,7 @@ from sdo.controller_install import (
 from sdo.controller_install import (
     controller_resources as production_controller_resources,
 )
-from sdo.operational_memory import ControllerRolloutRecord, DetectorTimelineEntry
+from sdo.operational_memory import ControllerRolloutRecord, DetectorTimelineEntry, LateFindingsPullSummary
 
 logger = logging.getLogger(__name__)
 
@@ -348,6 +348,22 @@ def _detector_firing_summary(closure: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _late_findings_summary(closure: dict[str, Any]) -> dict[str, Any]:
+    """Receipt fields for the pull-before-act evidence; empty unless the broker recorded it.
+
+    ``late_finding_consumed`` is true when at least one pull returned a finding that activated after dispatch.
+    """
+
+    raw = closure.get("late_findings_pull")
+    if raw is None:
+        return {}
+    try:
+        summary = LateFindingsPullSummary.model_validate(raw).model_dump(mode="json")
+    except ValidationError as exc:
+        return {"late_findings_pull_error": str(exc)}
+    return {"late_findings_pull": summary, "late_finding_consumed": summary["nonempty_pull_count"] > 0}
+
+
 CONTROLLER_LOGS_DIRNAME = "controller_logs"
 _CONTROLLER_JOB_SELECTOR = "job-name=sdo-controller-run"
 
@@ -536,6 +552,7 @@ def _production_receipt(
         "detector_clear": detector_clear,
         "incident_detector_states": closure.get("incident_detector_states", []),
         **_detector_firing_summary(closure),
+        **_late_findings_summary(closure),
         "independent_verification": result.get("verification_evidence", []),
         "usage": result.get("usage", {}),
         "reflection_usage": ledger.get("reflection_usage", {}),
