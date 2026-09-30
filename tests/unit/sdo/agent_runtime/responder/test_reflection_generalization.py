@@ -71,7 +71,9 @@ _LEAK_DENYLIST = (
 )
 
 
-def _leaks(text: str) -> list[str]:
+def _leaks(text: str, *, runtime_paths: tuple[Path, ...] = ()) -> list[str]:
+    for path in runtime_paths:  # temp directories are runtime data, not wording, and may contain digits
+        text = text.replace(str(path), "")
     text = re.sub(r"\d{4}-\d\d-\d\d[T0-9:.+\-]*", "", text)  # runtime timestamps
     pattern = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(_LEAK_DENYLIST) + r")(?![A-Za-z0-9])", re.IGNORECASE)
     return sorted({match.group(0) for match in pattern.finditer(text)})
@@ -121,12 +123,12 @@ def _static_brief(tmp_path: Path, *, detail: bool) -> str:
 
 @pytest.mark.parametrize("guidance", REFLECTION_GUIDANCE_MODES)
 def test_reflection_prompt_wording_names_no_particular_problem(tmp_path: Path, guidance: str) -> None:
-    assert _leaks(_request_text(tmp_path, guidance)) == []
+    assert _leaks(_request_text(tmp_path, guidance), runtime_paths=(tmp_path,)) == []
 
 
 @pytest.mark.parametrize("detail", [False, True])
 def test_brief_static_wording_names_no_particular_problem(tmp_path: Path, detail: bool) -> None:
-    assert _leaks(_static_brief(tmp_path, detail=detail)) == []
+    assert _leaks(_static_brief(tmp_path, detail=detail), runtime_paths=(tmp_path,)) == []
 
 
 def test_leak_scanner_flags_problem_specific_terms() -> None:
@@ -137,6 +139,13 @@ def test_leak_scanner_flags_problem_specific_terms() -> None:
         "readiness",
     ]
     assert _leaks("compare the confirmed signature with every existing incident detector") == []
+
+
+def test_leak_scanner_ignores_temporary_paths_that_contain_digits(tmp_path: Path) -> None:
+    digits = tmp_path / "pytest-1000" / "3666" / "4830"
+
+    assert _leaks(f"worktree {digits}/x", runtime_paths=(digits,)) == []
+    assert _leaks(f"worktree {digits}/x") != []
 
 
 def test_baseline_guidance_keeps_the_per_cause_learning_directives(tmp_path: Path) -> None:
