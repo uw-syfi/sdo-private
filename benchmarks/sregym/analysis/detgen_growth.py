@@ -34,7 +34,9 @@ def memory_after_each_incident(workspace: Path) -> list[tuple[str, list[str], li
     rows = []
     for incident in order:
         files = _git(workspace, "ls-tree", "-r", "--name-only", last_commit[incident]).splitlines()
-        detectors = sorted({p.split("detectors/incidents/")[1].split("/")[0] for p in files if "detectors/incidents/" in p})
+        detectors = sorted(
+            {p.split("detectors/incidents/")[1].split("/")[0] for p in files if "detectors/incidents/" in p}
+        )
         playbooks = sorted(
             {
                 p.split(".sdo/playbooks/")[1].split("/")[0]
