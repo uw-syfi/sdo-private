@@ -10,7 +10,9 @@ import tomllib
 
 from benchmarks.sregym.runner.incident_stream import (
     HOTEL_CATALOG,
+    NOVEL_COUNT,
     STREAM_LENGTH,
+    STREAM_OPENING,
     STREAM_SEED,
     FaultFamily,
     StreamIncident,
@@ -25,12 +27,23 @@ PILOT = 8
 
 
 def _stream() -> list[StreamIncident]:
-    return generate_stream(STREAM_SEED, STREAM_LENGTH)
+    return generate_stream(STREAM_SEED, STREAM_LENGTH, opening=STREAM_OPENING)
 
 
 def test_the_same_seed_gives_the_same_stream_and_another_seed_a_different_one() -> None:
     assert _stream() == _stream()
-    assert [i.problem_id for i in generate_stream(STREAM_SEED + 1, STREAM_LENGTH)] != [i.problem_id for i in _stream()]
+    assert [i.problem_id for i in generate_stream(STREAM_SEED + 1, STREAM_LENGTH, opening=STREAM_OPENING)] != [
+        i.problem_id for i in _stream()
+    ]
+
+
+def test_the_stream_starts_with_the_pinned_opening() -> None:
+    assert tuple(i.problem_id for i in _stream()[: len(STREAM_OPENING)]) == STREAM_OPENING
+
+
+def test_an_opening_outside_the_catalog_is_rejected() -> None:
+    with pytest.raises(ValueError, match="opening"):
+        generate_stream(STREAM_SEED, STREAM_LENGTH, opening=("not_a_problem",))
 
 
 def test_every_repeat_and_variant_follows_its_first_occurrence() -> None:
@@ -53,7 +66,7 @@ def test_the_stream_mixes_every_incident_type_and_its_pilot_prefix_already_does(
     kinds = [i.kind for i in _stream()]
     assert {"first", "exact", "variant", "novel"} <= set(kinds)
     assert kinds.count("first") == len(HOTEL_CATALOG.core)
-    assert kinds.count("novel") == 3
+    assert kinds.count("novel") == NOVEL_COUNT
     assert {"first", "exact", "variant"} <= {i.kind for i in _stream()[:PILOT]}
     assert "first" not in kinds[PILOT:]
 
@@ -115,7 +128,9 @@ COMMITTED = {
 @pytest.mark.parametrize("name", sorted(COMMITTED))
 def test_committed_sdo_stream_configs_match_the_generator(name: str) -> None:
     render, count = COMMITTED[name]
-    expected = render(generate_stream(STREAM_SEED, STREAM_LENGTH)[:count], name=name.removesuffix(".toml"))
+    expected = render(
+        generate_stream(STREAM_SEED, STREAM_LENGTH, opening=STREAM_OPENING)[:count], name=name.removesuffix(".toml")
+    )
     assert (EXPERIMENTS / name).read_text(encoding="utf-8") == expected
 
 
@@ -123,6 +138,9 @@ def test_committed_baseline_stream_configs_match_the_generator() -> None:
     stream = _stream()
     assert (EXPERIMENTS / "codex_luna_stream_baseline_1_8.toml").read_text(encoding="utf-8") == render_baseline_toml(
         stream[:PILOT], label="incidents 1-8"
+    )
+    assert (EXPERIMENTS / "codex_luna_stream_baseline_5_8.toml").read_text(encoding="utf-8") == render_baseline_toml(
+        stream[4:PILOT], label="incidents 5-8"
     )
     assert (EXPERIMENTS / "codex_luna_stream_baseline_9_24.toml").read_text(encoding="utf-8") == render_baseline_toml(
         stream[PILOT:], label="incidents 9-24"

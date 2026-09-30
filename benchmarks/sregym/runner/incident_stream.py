@@ -35,7 +35,7 @@ IncidentKind = Literal["first", "novel", "exact", "variant"]
 STREAM_SEED = 20260930
 STREAM_LENGTH = 24
 PILOT_LENGTH = 8
-NOVEL_COUNT = 3
+NOVEL_COUNT = 2
 #: Fraction of the incidents that are parameter variants (capped by the catalog supply).
 VARIANT_SHARE = 1 / 3
 _MAX_ATTEMPTS = 20000
@@ -110,7 +110,6 @@ HOTEL_CATALOG = Catalog(
     novel=(
         FaultFamily("wrong-dns-policy", "wrong_dns_policy_hotel_reservation", ()),
         FaultFamily("misconfig-app", "misconfig_app_hotel_res", ()),
-        FaultFamily("service-dns-resolution", f"service_dns_resolution_failure__v_{_HOTEL}_frontend", ()),
     ),
 )
 
@@ -133,21 +132,30 @@ def _fill(
     catalog: Catalog,
     core_order: list[FaultFamily],
     novel_order: list[FaultFamily],
+    opening: tuple[str, ...] = (),
 ) -> list[StreamIncident] | None:
-    """Turn a shuffled kind sequence into incidents, or None when it cannot be realised."""
+    """Turn a shuffled kind sequence into incidents, or None when it cannot be realised.
+
+    ``opening`` pins the first incidents to given problem ids; ``labels`` then covers only the rest.
+    """
 
     family_of = {p: f.name for f in (*catalog.core, *catalog.novel) for p in f.all_problem_ids}
     core_iter, novel_iter = iter(core_order), iter(novel_order)
     incidents: list[StreamIncident] = []
     seen: list[str] = []
     seen_families: set[str] = set()
-    unused_variants: dict[str, list[str]] = {}
-    for index, kind in enumerate(labels):
+    unused_variants: dict[str, list[str]] = {f.name: list(f.variants) for f in catalog.core}
+    core_names = {f.name for f in catalog.core}
+    pinned = [_pinned_kind(problem_id, family_of, core_names, seen, seen_families) for problem_id in opening]
+    for index, (problem_id, kind) in enumerate(zip(opening, pinned, strict=True)):
+        if problem_id in unused_variants.get(family_of[problem_id], []):
+            unused_variants[family_of[problem_id]].remove(problem_id)
+        incidents.append(StreamIncident(index, problem_id, kind, family_of[problem_id]))
+    for offset, kind in enumerate(labels):
+        index = len(opening) + offset
         previous = incidents[-1].problem_id if incidents else None
         if kind == "first":
-            family = next(core_iter)
-            problem_id = family.problem_id
-            unused_variants[family.name] = list(family.variants)
+            problem_id = next(core_iter).problem_id
         elif kind == "novel":
             problem_id = next(novel_iter).problem_id
         elif kind == "variant":
@@ -170,6 +178,20 @@ def _fill(
     return incidents
 
 
+def _pinned_kind(
+    problem_id: str, family_of: dict[str, str], core_names: set[str], seen: list[str], seen_families: set[str]
+) -> IncidentKind:
+    family = family_of[problem_id]
+    if family not in seen_families:
+        kind: IncidentKind = "first" if family in core_names else "novel"
+    else:
+        kind = "exact" if problem_id in seen else "variant"
+    if problem_id not in seen:
+        seen.append(problem_id)
+    seen_families.add(family)
+    return kind
+
+
 def _is_learnable(incidents: list[StreamIncident], catalog: Catalog) -> bool:
     """The pilot prefix holds every core first plus a novel, a repeat and a variant; every core fault recurs."""
 
@@ -182,23 +204,44 @@ def _is_learnable(incidents: list[StreamIncident], catalog: Catalog) -> bool:
     )
 
 
-def generate_stream(seed: int, length: int, catalog: Catalog = HOTEL_CATALOG) -> list[StreamIncident]:
-    """The incident stream for ``seed``: same seed and length, same incidents."""
+#: The first four incidents of the stream, pinned. The first attempt sampled them from the seed, then had to
+#: replace a novel fault that namespace-scoped SDO can neither observe nor repair (see the decisions log);
+#: its four completed incidents are kept as this opening so they need not be rerun.
+STREAM_OPENING = (
+    "network_policy_block",
+    "missing_configmap_hotel_reservation",
+    "readiness_probe_misconfiguration_hotel_reservation",
+    "network_policy_block",
+)
+
+
+def generate_stream(
+    seed: int, length: int, catalog: Catalog = HOTEL_CATALOG, opening: tuple[str, ...] = ()
+) -> list[StreamIncident]:
+    """The incident stream for ``seed``: same seed, length and opening give the same incidents."""
 
     variants = _variant_count(length, catalog)
     exact = length - len(catalog.core) - NOVEL_COUNT - variants
     if exact < 1 or length < PILOT_LENGTH:
         raise ValueError(f"stream length {length} is too short for {len(catalog.core)} core and {NOVEL_COUNT} novel")
+    family_of = {p: f.name for f in (*catalog.core, *catalog.novel) for p in f.all_problem_ids}
+    if any(problem_id not in family_of for problem_id in opening):
+        raise ValueError("opening names a problem that is not in the catalog")
     rng = random.Random(seed)
-    core_order = rng.sample(list(catalog.core), len(catalog.core))
-    novel_order = rng.sample(list(catalog.novel), NOVEL_COUNT)
+    opened = {family_of[p] for p in opening}
+    core_order = [f for f in rng.sample(list(catalog.core), len(catalog.core)) if f.name not in opened]
+    novel_order = [f for f in rng.sample(list(catalog.novel), NOVEL_COUNT) if f.name not in opened]
     kinds: list[IncidentKind] = (
-        ["first"] * len(catalog.core) + ["novel"] * NOVEL_COUNT + ["variant"] * variants + ["exact"] * exact
+        ["first"] * len(core_order) + ["novel"] * len(novel_order) + ["variant"] * variants + ["exact"] * exact
     )
+    pinned = _fill([], rng, catalog, [], [], opening) or []
+    for pinned_incident in pinned:
+        if pinned_incident.kind in {"variant", "exact"}:
+            kinds.remove(pinned_incident.kind)
     for _ in range(_MAX_ATTEMPTS):
         labels = list(kinds)
         rng.shuffle(labels)
-        incidents = _fill(labels, rng, catalog, core_order, novel_order)
+        incidents = _fill(labels, rng, catalog, core_order, novel_order, opening)
         if incidents is not None and _is_learnable(incidents, catalog):
             return incidents
     raise ValueError(f"no valid stream found for seed {seed} and length {length}")
@@ -350,7 +393,7 @@ def render_baseline_toml(incidents: list[StreamIncident], *, label: str = "", se
 def write_configs(directory: Path, *, seed: int = STREAM_SEED, length: int = STREAM_LENGTH) -> list[Path]:
     """Write the committed stream configs and manifest into ``directory``."""
 
-    stream = generate_stream(seed, length)
+    stream = generate_stream(seed, length, opening=STREAM_OPENING)
     pilot, rest = stream[:PILOT_LENGTH], stream[PILOT_LENGTH:]
     files = {
         "sdo_codex_luna_stream.toml": render_sdo_pipeline_toml(stream, name="sdo_codex_luna_stream", seed=seed),
@@ -358,6 +401,9 @@ def write_configs(directory: Path, *, seed: int = STREAM_SEED, length: int = STR
             pilot, name="sdo_codex_luna_stream_pilot", seed=seed
         ),
         "codex_luna_stream_baseline_1_8.toml": render_baseline_toml(pilot, label="incidents 1-8", seed=seed),
+        "codex_luna_stream_baseline_5_8.toml": render_baseline_toml(
+            stream[4:PILOT_LENGTH], label="incidents 5-8", seed=seed
+        ),
         "codex_luna_stream_baseline_9_24.toml": render_baseline_toml(rest, label="incidents 9-24", seed=seed),
         "stream_learning_curve_manifest.json": render_manifest(stream, seed),
     }

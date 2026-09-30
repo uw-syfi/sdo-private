@@ -15,10 +15,10 @@
 #    2  first    missing_configmap_hotel_reservation
 #    3  first    readiness_probe_misconfiguration_hotel_reservation
 #    4  exact    network_policy_block
-#    5  novel    service_dns_resolution_failure__v_hotel_reservation_frontend
-#    6  first    wrong_service_selector_hotel_reservation
-#    7  exact    service_dns_resolution_failure__v_hotel_reservation_frontend
-#    8  variant  readiness_probe_misconfiguration__v_hotel_reservation_reservation
+#    5  novel    misconfig_app_hotel_res
+#    6  variant  readiness_probe_misconfiguration__v_hotel_reservation_geo
+#    7  exact    missing_configmap_hotel_reservation
+#    8  first    wrong_service_selector_hotel_reservation
 
 [pipeline]
 name = "sdo-codex-luna-stream-pilot"
@@ -92,33 +92,33 @@ chain_application_workspace = true
 problems = ["network_policy_block"]
 
 [[stages]]
-name = "i05-novel-service-dns-resolution-failure--v-hotel-reservation-frontend"
+name = "i05-novel-misconfig-app-hotel-res"
 chain_kb = false
 chain_application_workspace = true
 
 [stages.runner]
-problems = ["service_dns_resolution_failure__v_hotel_reservation_frontend"]
+problems = ["misconfig_app_hotel_res"]
 
 [[stages]]
-name = "i06-first-wrong-service-selector-hotel-reservation"
+name = "i06-variant-readiness-probe-misconfiguration--v-hotel-reservation-geo"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["readiness_probe_misconfiguration__v_hotel_reservation_geo"]
+
+[[stages]]
+name = "i07-exact-missing-configmap-hotel-reservation"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["missing_configmap_hotel_reservation"]
+
+[[stages]]
+name = "i08-first-wrong-service-selector-hotel-reservation"
 chain_kb = false
 chain_application_workspace = true
 
 [stages.runner]
 problems = ["wrong_service_selector_hotel_reservation"]
-
-[[stages]]
-name = "i07-exact-service-dns-resolution-failure--v-hotel-reservation-frontend"
-chain_kb = false
-chain_application_workspace = true
-
-[stages.runner]
-problems = ["service_dns_resolution_failure__v_hotel_reservation_frontend"]
-
-[[stages]]
-name = "i08-variant-readiness-probe-misconfiguration--v-hotel-reservation-reservation"
-chain_kb = false
-chain_application_workspace = true
-
-[stages.runner]
-problems = ["readiness_probe_misconfiguration__v_hotel_reservation_reservation"]
