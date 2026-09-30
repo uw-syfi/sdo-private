@@ -215,6 +215,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="reflection guidance: baseline, generalize, or generalize-spec (generalize with spec-first predicates)",
     )
     parser.add_argument(
+        "--late-findings",
+        choices=("off", "pull"),
+        default=config.get("late_findings", "off"),
+        help="let the responder pull findings that activated after dispatch (off by default)",
+    )
+    parser.add_argument(
         "--persistent-controller",
         action=argparse.BooleanOptionalAction,
         default=bool(config.get("persistent_controller", False)),
@@ -550,6 +556,7 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
         agent_provider=args.provider,
         reflection_session=args.reflection_session,
         reflection_guidance=args.reflection_guidance,
+        late_findings=args.late_findings,
         submission_api_base=_in_cluster_api_base(api_base),
         submission_relay_target_base=_relay_target_api_base(api_base),
         artifacts_dir=receipt_dir,
@@ -642,6 +649,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             agent_provider=args.provider,
             reflection_session=args.reflection_session,
             reflection_guidance=args.reflection_guidance,
+            late_findings=args.late_findings,
             submission_api_base=_in_cluster_api_base(api_base),
             submission_relay_target_base=_relay_target_api_base(api_base),
             artifacts_dir=_receipt_directory(args.logs_dir, repository),

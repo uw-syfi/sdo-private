@@ -1529,3 +1529,14 @@ def test_persistent_mode_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> N
     assert driver._parse_args([]).persistent_controller is False
     monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"persistent_controller": True}))
     assert driver._parse_args([]).persistent_controller is True
+
+
+def test_sregym_agent_config_selects_the_late_findings_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
+    assert driver._parse_args([]).late_findings == "off"
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"late_findings": "pull"}))
+    assert driver._parse_args([]).late_findings == "pull"
+    with pytest.raises(SystemExit):
+        driver._parse_args(["--late-findings", "push"])

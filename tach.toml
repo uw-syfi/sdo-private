@@ -115,6 +115,7 @@ depends_on = [
 path = "sdo.__main__"
 depends_on = [
     "sdo.operation",
+    "sdo.operational_memory",
 ]
 
 # --- Benchmark agents (independent of production sdo) ---
