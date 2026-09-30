@@ -17,3 +17,7 @@ Branch `vic/exp/late-fire-integration` = `vic/exp/spec-first-detectors` (6058318
 - What: `sdo_codex_luna_lfint_{x,y}.toml` copied from `sdo_codex_luna_detgen_small.toml`; images `lf1`, `reflection_guidance` generalize (X) / generalize-spec (Y); order A1 A2 B1 A3; fresh handoff reflection kept.
 - Alternatives: one config with env override (rejected, guidance lives in agent_config and the snapshot should record it).
 - Seeds: a private copy of `/mnt/data/shli/detgen-runs/seeds/lifecycle-stream` per arm so neither arm can mutate the shared seed.
+
+## D4 Launch under load
+- Coordinator asked: stagger arms when load avg > 20. Load at 20:54 was 19.15 (25 / 22.6 over 5/15 min). Arm Y launched first (20:55, cluster lf-w offset 31); arm X launched at 20:59 when load had fallen to 8.3 (1-min) to spread cluster creation/image load. Load samples in /mnt/data/shli/lfint-runs/load.log.
+- Images lf1 built from merge commit 1d... (see report); full unit suite (sdo, benchmarks, controller) exit 0; Go sdk/core/runtime ok; format/check_errors clean.
