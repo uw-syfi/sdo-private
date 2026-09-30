@@ -21,6 +21,7 @@ from sdo.agent_runtime.responder import (
     prepare_codex_home,
 )
 from sdo.operational_memory import (
+    LATE_FINDINGS_MODES,
     REFLECTION_GUIDANCE_MODES,
     REFLECTION_SESSION_MODES,
     BrokerClosure,
@@ -108,6 +109,12 @@ def _argument_parser() -> argparse.ArgumentParser:
         "across parameter variants of the same root-cause class",
     )
     parser.add_argument(
+        "--late-findings",
+        choices=LATE_FINDINGS_MODES,
+        default="off",
+        help="record whether the responder pulled findings that activated after dispatch (off by default)",
+    )
+    parser.add_argument(
         "--responder-turn-log",
         type=Path,
         help="responder per-turn usage log; a fresh reflection brief quotes the responder's shell commands from it",
@@ -152,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             guidance=args.reflection_guidance,
         ),
         reflection_session=args.reflection_session,
+        late_findings=args.late_findings,
     )
     try:
         payload = json.load(sys.stdin)
