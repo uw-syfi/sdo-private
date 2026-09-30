@@ -11,8 +11,14 @@ from typing import TYPE_CHECKING
 from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_structured_turn, turn_usage
 from sdo.agent_runtime.responder.reflection import INCIDENT_REASONING_EFFORT
 from sdo.contracts import DetectorEvaluation, DetectorEvaluationStatus, Finding, IncidentRequest, IncidentResult
-from sdo.operational_memory import MemoryRepository, MemoryRepositoryError, WarmPlaybookMatch, warm_playbook_matches
-from sdo.operational_memory.late_findings import LATE_FINDINGS_COMMAND, LATE_FINDINGS_MODES
+from sdo.operational_memory import (
+    LATE_FINDINGS_COMMAND,
+    LATE_FINDINGS_MODES,
+    MemoryRepository,
+    MemoryRepositoryError,
+    WarmPlaybookMatch,
+    warm_playbook_matches,
+)
 
 if TYPE_CHECKING:
     from agentshim import CommandExecutor

@@ -33,7 +33,7 @@ def main(
     if args.command == "detector":
         return _check_detector(detector_check_runner)
     if args.command == "incident":
-        from sdo.operational_memory.late_findings import main as late_findings_main
+        from sdo.operational_memory import late_findings_main
 
         return late_findings_main(["--incident-id", args.incident_id, *_telemetry_args(args)])
     try:
