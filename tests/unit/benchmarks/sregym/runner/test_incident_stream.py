@@ -111,6 +111,7 @@ def test_the_sdo_pipeline_has_one_chained_stage_per_incident_on_one_persistent_c
     assert all(s["chain_application_workspace"] for s in stages[1:])
     assert document["defaults"]["agent_config"]["sdo_codex"]["persistent_controller"] is True
     assert document["defaults"]["require_strict_receipt"] is True
+    assert document["defaults"]["allow_failed_verdicts"] is True
 
 
 def test_the_baseline_lists_the_identical_problems_in_order() -> None:

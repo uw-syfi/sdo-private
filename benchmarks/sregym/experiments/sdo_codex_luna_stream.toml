@@ -49,6 +49,7 @@ app_filter = "hotel_reservation"
 deploy_from_source = true
 application_workspace = "persistent"
 require_strict_receipt = true
+allow_failed_verdicts = true  # a stream must continue past an incident graded as failed
 
 [defaults.env]
 judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh

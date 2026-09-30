@@ -160,6 +160,9 @@ class ExperimentConfig:
     sequence_len: int = 0
     sequence_seed: int = 42
     require_strict_receipt: bool = False
+    # A pipeline stage whose diagnosis or mitigation was graded false still counts as completed, so a
+    # long incident stream continues past failures. Ungraded rows and agent errors still fail the stage.
+    allow_failed_verdicts: bool = False
     # Agent reasoning effort, passed to SREGym as --reasoning-effort. Empty
     # leaves the agent's default. SDO's incident agents pin theirs in code
     # (sdo.agent_runtime.responder.INCIDENT_REASONING_EFFORT); a config test
@@ -283,6 +286,7 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
         sequence_len=runner.get("sequence_len", 0),
         sequence_seed=runner.get("sequence_seed", 42),
         require_strict_receipt=runner.get("require_strict_receipt", False),
+        allow_failed_verdicts=runner.get("allow_failed_verdicts", False),
         reasoning_effort=str(runner.get("reasoning_effort", "")),
         tasklist=runner.get("tasklist", ""),
         problems=runner.get("problems", []),
@@ -626,6 +630,7 @@ def _serialize_config(config: ExperimentConfig) -> str:
     lines.append(f"sequence_len = {_toml_value(config.sequence_len)}")
     lines.append(f"sequence_seed = {_toml_value(config.sequence_seed)}")
     lines.append(f"require_strict_receipt = {_toml_value(config.require_strict_receipt)}")
+    lines.append(f"allow_failed_verdicts = {_toml_value(config.allow_failed_verdicts)}")
     if config.reasoning_effort:
         lines.append(f"reasoning_effort = {_toml_value(config.reasoning_effort)}")
 
