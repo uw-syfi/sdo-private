@@ -444,7 +444,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--model", default="gpt-6-luna")
     run.add_argument("--provider", choices=("codex", "claude"), default="codex", help="SDO agent provider")
     run.add_argument("--reflection-session", choices=("resume", "fresh"), default="resume")
-    run.add_argument("--reflection-guidance", choices=("baseline", "generalize"), default="baseline")
+    run.add_argument("--reflection-guidance", choices=("baseline", "generalize", "generalize-spec"), default="baseline")
     run.add_argument("--reasoning-effort", default=None, help="Codex baseline reasoning effort (default: Codex's)")
     run.add_argument("--timeout", type=int, default=3600, help="per-incident agent timeout in seconds")
     run.add_argument(

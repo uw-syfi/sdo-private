@@ -105,7 +105,8 @@ def _argument_parser() -> argparse.ArgumentParser:
         choices=REFLECTION_GUIDANCE_MODES,
         default="baseline",
         help="reflection learning guidance: per-cause (default) or generalize one incident detector and playbook "
-        "across parameter variants of the same root-cause class",
+        "across parameter variants of the same root-cause class, or generalize-spec (generalize, with predicates "
+        "decidable from resource spec and status preferred over later-produced evidence)",
     )
     parser.add_argument(
         "--responder-turn-log",

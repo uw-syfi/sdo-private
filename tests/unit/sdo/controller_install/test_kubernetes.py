@@ -350,7 +350,8 @@ def test_reflection_guidance_defaults_to_baseline_and_is_passed_to_the_broker() 
     generalize = ControllerInstallConfig(**{**_config().__dict__, "reflection_guidance": "generalize"})
 
     assert default.reflection_guidance == "baseline"
-    for config, expected in ((default, "baseline"), (generalize, "generalize")):
+    spec = ControllerInstallConfig(**{**_config().__dict__, "reflection_guidance": "generalize-spec"})
+    for config, expected in ((default, "baseline"), (generalize, "generalize"), (spec, "generalize-spec")):
         broker = _broker_args(config)
         assert broker[broker.index("--reflection-guidance") + 1] == expected
 

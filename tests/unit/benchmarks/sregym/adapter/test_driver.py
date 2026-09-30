@@ -1352,6 +1352,8 @@ def test_sregym_agent_config_selects_the_reflection_guidance(monkeypatch: pytest
     assert driver._parse_args([]).reflection_guidance == "baseline"
     monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"reflection_guidance": "generalize"}))
     assert driver._parse_args([]).reflection_guidance == "generalize"
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"reflection_guidance": "generalize-spec"}))
+    assert driver._parse_args([]).reflection_guidance == "generalize-spec"
     with pytest.raises(SystemExit):
         driver._parse_args(["--reflection-guidance", "sibling"])
 

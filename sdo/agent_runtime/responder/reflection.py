@@ -37,7 +37,7 @@ def _classification_directive(classification: OutcomeClassification, guidance: R
     if classification == OutcomeClassification.FALSE_NEGATIVE:
         return "add or widen the missed detector signature and include the reproducing test that previously failed."
     if classification == OutcomeClassification.SUCCESS:
-        if guidance == "generalize":
+        if guidance in _GENERALIZING_GUIDANCE:
             return (
                 "Capture the confirmed signature at the level of its root-cause class, following the generalization "
                 "protocol above, and stay within what the evidence supports."
@@ -245,6 +245,8 @@ def _memory_rules(*, incident_id: str, outcome_commit: str) -> str:
     )
 
 
+_GENERALIZING_GUIDANCE = ("generalize", "generalize-spec")
+
 _GENERALIZATION_PROTOCOL = (
     "Generalization protocol (follow it before creating or changing any detector or playbook):\n"
     "1. Compare the confirmed signature of this incident with every existing incident detector. Use each "
@@ -271,6 +273,26 @@ _GENERALIZATION_PROTOCOL = (
     "which detector.\n"
 )
 
+_SPEC_FIRST_PROTOCOL = (
+    "Spec-first protocol (also follow it for every incident detector you create or widen):\n"
+    "a. Choose the evidence a predicate needs by when that evidence exists. Prefer a predicate that is decidable "
+    "from the current spec or status of the resources involved: that state exists the moment the fault exists, so "
+    "the detector fires immediately and its playbook reaches the responder at dispatch. Evidence produced later by "
+    "the platform (event objects, logs, metrics, restart counts) may only corroborate a finding or raise its "
+    "severity; never make it a precondition for firing. A detector that waits for later evidence fires after the "
+    "incident was dispatched, so its playbook is not used for that incident.\n"
+    "b. When the signature is decidable from spec or status, the detector's matching test must include a snapshot "
+    "without any event objects in which the detector fires, in addition to the near-miss test. A snapshot with "
+    "events may stay as an extra case showing corroboration.\n"
+    "c. When an existing incident detector reads event objects (the brief marks this per detector) and the "
+    "confirmed cause is decidable from spec or status, rewrite its predicate while widening it so that it fires on "
+    "spec and status alone, keep the events as corroboration, and prove it with the snapshot without events.\n"
+    "d. A spec-only predicate must stay precise: state the discriminating condition, make sure healthy resources "
+    "do not match, and cover that in the near-miss test.\n"
+    "e. If the confirmed cause is genuinely not decidable from spec or status, say so in your summary and use the "
+    "earliest available evidence, naming it.\n"
+)
+
 
 def _learning_request(
     *,
@@ -282,11 +304,12 @@ def _learning_request(
 ) -> str:
     """The structured reflection request shared by first attempts and retries."""
 
-    generalize = guidance == "generalize"
+    generalize = guidance in _GENERALIZING_GUIDANCE
+    spec_first = _SPEC_FIRST_PROTOCOL if guidance == "generalize-spec" else ""
     playbook_intro = (
         "Generalize roles with placeholders and ground structural changes in the supplied history. Keep playbooks "
         "at the level of the root-cause class, with deterministic repair and independent verification steps. "
-        f"{_PLAYBOOK_RULES}\n{_GENERALIZATION_PROTOCOL}"
+        f"{_PLAYBOOK_RULES}\n{_GENERALIZATION_PROTOCOL}{spec_first}"
         if generalize
         else "Generalize roles with placeholders and ground structural changes in the supplied history. Create a "
         "sharp fault-specific playbook for the confirmed cause, with deterministic repair and independent "
@@ -433,7 +456,8 @@ class SessionReflector:
                 closure,
                 worktree=worktree,
                 responder_turn_log=self.responder_turn_log,
-                detector_detail=self.guidance == "generalize",
+                detector_detail=self.guidance in _GENERALIZING_GUIDANCE,
+                event_dependence=self.guidance == "generalize-spec",
             )
             prompt = (
                 "The controller has independently verified incident closure and committed its authoritative "
