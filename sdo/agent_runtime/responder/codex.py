@@ -12,6 +12,7 @@ from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_
 from sdo.agent_runtime.responder.reflection import INCIDENT_REASONING_EFFORT
 from sdo.contracts import DetectorEvaluation, DetectorEvaluationStatus, Finding, IncidentRequest, IncidentResult
 from sdo.operational_memory import MemoryRepository, MemoryRepositoryError, WarmPlaybookMatch, warm_playbook_matches
+from sdo.operational_memory.late_findings import LATE_FINDINGS_COMMAND, LATE_FINDINGS_MODES
 
 if TYPE_CHECKING:
     from agentshim import CommandExecutor
@@ -385,6 +386,28 @@ def _warm_instructions(playbooks: list[WarmPlaybook], namespace: str) -> str:
     )
 
 
+LATE_FINDINGS_ENV = "SDO_LATE_FINDINGS"
+
+
+def late_findings_guidance(request: IncidentRequest, *, mode: str | None = None) -> str:
+    """Pull-before-act paragraph; empty unless the ``pull`` mode is selected (default: the environment)."""
+
+    selected = (os.getenv(LATE_FINDINGS_ENV, "") if mode is None else mode).strip() or "off"
+    if selected not in LATE_FINDINGS_MODES:
+        raise ValueError(f"late-findings mode must be one of {', '.join(LATE_FINDINGS_MODES)}: {selected!r}")
+    if selected == "off":
+        return ""
+    command = f"{LATE_FINDINGS_COMMAND} --incident-id {request.incident_id}"
+    return (
+        "Late findings: evidence for this incident can arrive after you start, and this request cannot change. "
+        f"Run `{command}` once now, and again immediately before your first change to the cluster or the "
+        "repository. It is read-only and prints compact JSON listing findings that activated after this request "
+        "was built, each with surfaced playbook paths. Treat every returned playbook as a hypothesis: read it, "
+        "confirm its preconditions against live state, adapt or reject it, and never replay its steps blindly. "
+        "An empty list means nothing more has arrived yet.\n\n"
+    )
+
+
 def _responder_prompt(request: IncidentRequest) -> str:
     extra_instructions = os.getenv("SDO_RESPONDER_EXTRA_INSTRUCTIONS", "").strip()
     additional_context = (
@@ -404,6 +427,7 @@ def _responder_prompt(request: IncidentRequest) -> str:
         f"Repair evidence mode: {request.repair_policy}. For every live mutation, return a repair action receipt "
         "with its target, timing, result, and reversibility. In recorded-actions mode, a successful live-only "
         "repair must have at least one successful receipt; repository changes are still committed when present.\n\n"
+        f"{late_findings_guidance(request)}"
         f"{additional_context}\n"
         f"{_inlined_health_objective(request)}"
         f"{_detector_evidence(request)}\n"
