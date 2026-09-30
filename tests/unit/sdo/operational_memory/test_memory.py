@@ -908,3 +908,26 @@ def test_responder_rbac_grants_none_of_the_verbs_playbooks_may_not_use() -> None
     subresources = {"exec": "pods/exec", "port-forward": "pods/portforward", "attach": "pods/attach", "cp": "pods/exec"}
     assert set(RESPONDER_FORBIDDEN_KUBECTL_VERBS) == set(subresources)
     assert not granted & set(subresources.values())
+
+
+def test_commit_broker_rejects_source_repair_with_duplicate_yaml_key(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    worktree = tmp_path / "incident"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    _git(target, "worktree", "add", "-b", "bad-manifest", str(worktree))
+    (worktree / "deploy.yaml").write_text(
+        "image: a\nimagePullPolicy: Always\nimagePullPolicy: Never\n", encoding="utf-8"
+    )
+    head = _git(target, "rev-parse", "HEAD")
+    broker = CommitBroker(
+        target,
+        validator=MemoryValidator(run_diagnostics=False),
+        proposal_validator=CommandProposalValidator([["true"]]),
+    )
+
+    with pytest.raises(MemoryValidationError, match="duplicate mapping key 'imagePullPolicy'"):
+        broker.commit_proposal(incident_worktree=worktree, incident_id="incident-dup")
+
+    assert _git(target, "rev-parse", "HEAD") == head

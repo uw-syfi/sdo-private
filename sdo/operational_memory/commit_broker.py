@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from sdo.operational_memory.manifest_guard import validate_yaml_manifests
 from sdo.operational_memory.validation import MemoryValidationError, MemoryValidator
 
 if TYPE_CHECKING:
@@ -141,6 +142,7 @@ class CommitBroker:
                     changed_paths=memory_paths,
                     baseline_root=self.target_repository,
                 )
+            validate_yaml_manifests(worktree, repair_paths)
             self.proposal_validator.validate(worktree, repair_paths)
             return self._commit_validated(
                 worktree=worktree,
