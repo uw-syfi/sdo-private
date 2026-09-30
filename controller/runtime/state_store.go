@@ -50,6 +50,8 @@ type RuntimeState struct {
 	ClosureReceipt             *ClosureReceipt         `json:"closure_receipt,omitempty"`
 	ClosureFailure             *ClosureFailure         `json:"closure_failure,omitempty"`
 	LastAcknowledgedIncidentID string                  `json:"last_acknowledged_incident_id,omitempty"`
+	EvaluationIteration        int                     `json:"evaluation_iteration,omitempty"`
+	DetectorTimeline           []DetectorTimelineEntry `json:"detector_timeline,omitempty"`
 }
 
 func (state RuntimeState) Validate() error {
@@ -64,6 +66,9 @@ func (state RuntimeState) Validate() error {
 	}
 	if state.PendingClosure != nil && state.PendingClosure.Request.IncidentID == "" {
 		return fmt.Errorf("pending incident closure is missing its incident id")
+	}
+	if len(state.DetectorTimeline) > maxTimelineEntries {
+		return fmt.Errorf("detector timeline exceeds %d entries", maxTimelineEntries)
 	}
 	if err := validateClosureFailure(state); err != nil {
 		return err
@@ -294,6 +299,7 @@ func cloneIncidentClosure(closure *IncidentClosure) *IncidentClosure {
 	copy.Result = cloneIncidentResult(closure.Result)
 	copy.FinalDetectorStates = append([]DetectorEvaluation(nil), closure.FinalDetectorStates...)
 	copy.IncidentDetectorStates = append([]DetectorEvaluation(nil), closure.IncidentDetectorStates...)
+	copy.DetectorTimeline = cloneTimeline(closure.DetectorTimeline)
 	return &copy
 }
 
