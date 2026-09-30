@@ -271,6 +271,12 @@ def by_kind(rows: list[Row]) -> list[dict[str, Any]]:
     return table
 
 
+def exclude_incidents(rows: list[Row], indices: set[int]) -> list[Row]:
+    """Drop incidents that could not be measured on one arm (e.g. the fault never manifested) from both arms."""
+
+    return [r for r in rows if r.index not in indices]
+
+
 def write_csv(path: Path, records: list[dict[str, Any]]) -> None:
     if not records:
         return
@@ -320,12 +326,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sdo", type=Path, required=True)
     parser.add_argument("--codex", nargs="+", required=True, help="experiment dirs, optionally DIR:N")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument(
+        "--exclude",
+        type=int,
+        nargs="*",
+        default=[],
+        help="0-based incident indices to drop from both arms in the aggregate tables and curves",
+    )
     args = parser.parse_args(argv)
     manifest = load_manifest(args.manifest)
     context = _pricing_context(None, [])
     pricing = context.arm("codex", "gpt-6-luna")
     rows = sdo_rows(args.sdo, manifest, pricing) + codex_rows(args.codex, manifest, pricing)
     args.out.mkdir(parents=True, exist_ok=True)
+    write_csv(args.out / "incidents_all.csv", [asdict(r) for r in rows])
+    rows = exclude_incidents(rows, set(args.exclude))
     write_csv(args.out / "incidents.csv", [asdict(r) for r in rows])
     kinds = by_kind(rows)
     write_csv(args.out / "by_kind.csv", kinds)
