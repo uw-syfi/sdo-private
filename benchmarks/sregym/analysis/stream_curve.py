@@ -72,6 +72,84 @@ class Row:
     playbooks_after: int | None = None
     fired_incident_detectors: str = ""
     foreign_detector_firings: str = ""
+    # Detector firing telemetry. None means the run predates it (unknown, not False).
+    firing_telemetry: bool | None = None
+    incident_detector_fired_before_dispatch: bool | None = None
+    incident_detector_fired_after_dispatch: bool | None = None
+    no_incident_detector_fired: bool | None = None
+    fired_detectors: str = ""
+
+
+FIRING_STREAM_NAME = "detector_firings.jsonl"
+
+
+def load_firing_stream(path: Path) -> list[dict[str, Any]]:
+    """The controller's detector firing records; a missing file or a torn line is skipped."""
+
+    if not path.is_file():
+        return []
+    records: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+_RELATION_RANK = {"before_dispatch": 0, "after_dispatch": 1, "no_incident": 2}
+
+
+def firing_columns(receipt: dict[str, Any], stream: list[dict[str, Any]]) -> dict[str, Any]:
+    """Which detectors fired for one incident, and the three derived booleans.
+
+    The receipt's closure timeline is authoritative. A receipt without one (an
+    older controller) falls back to the stream records tagged with the incident
+    id, which can show before/after dispatch but not health-only firing. With
+    neither, everything is unknown (None) rather than False.
+    """
+
+    unknown: dict[str, Any] = {
+        "firing_telemetry": None,
+        "incident_detector_fired_before_dispatch": None,
+        "incident_detector_fired_after_dispatch": None,
+        "no_incident_detector_fired": None,
+        "fired_detectors": "",
+    }
+    if receipt.get("detector_firing_available"):
+        timeline = [e for e in receipt.get("detector_timeline") or [] if isinstance(e, dict)]
+        fired = {str(e.get("detector_id")): str(e.get("relation")) for e in timeline}
+        return {
+            "firing_telemetry": True,
+            "incident_detector_fired_before_dispatch": receipt.get("incident_detector_fired_before_dispatch"),
+            "incident_detector_fired_after_dispatch": receipt.get("incident_detector_fired_after_dispatch"),
+            "no_incident_detector_fired": receipt.get("no_incident_detector_fired"),
+            "fired_detectors": ";".join(f"{name}:{relation}" for name, relation in fired.items()),
+        }
+    incident_id = receipt.get("incident_id")
+    tagged = [r for r in stream if incident_id and r.get("incident_id") == incident_id]
+    if not tagged:
+        return unknown
+    relations: dict[str, str] = {}
+    classes: dict[str, str] = {}
+    for record in tagged:
+        if record.get("event") not in ("activated", "batched"):
+            continue
+        name = str(record.get("detector_id"))
+        relation = str(record.get("dispatch_relation") or "before_dispatch")
+        classes[name] = str(record.get("detector_class"))
+        if _RELATION_RANK.get(relation, 3) < _RELATION_RANK.get(relations.get(name, ""), 3):
+            relations[name] = relation
+    incident_relations = {n: r for n, r in relations.items() if classes[n] != "health"}
+    return {
+        "firing_telemetry": True,
+        "incident_detector_fired_before_dispatch": "before_dispatch" in incident_relations.values(),
+        "incident_detector_fired_after_dispatch": "after_dispatch" in incident_relations.values(),
+        "no_incident_detector_fired": None,
+        "fired_detectors": ";".join(f"{name}:{relation}" for name, relation in relations.items()),
+    }
 
 
 def load_manifest(path: Path) -> list[dict[str, Any]]:
@@ -116,6 +194,16 @@ def _receipts(pipeline_dir: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _firing_streams(pipeline_dir: Path) -> list[list[dict[str, Any]]]:
+    """Per stage, the firing stream copied next to its strict receipt (empty when absent)."""
+
+    out: list[list[dict[str, Any]]] = []
+    for _, _, stage_dir in pipeline_stage_dirs(pipeline_dir):
+        found = sorted(stage_dir.rglob(FIRING_STREAM_NAME))
+        out.append(load_firing_stream(found[-1]) if found else [])
+    return out
+
+
 def _detector_origins(repo: Path, rev: str) -> dict[str, str | None]:
     manifest = _git_show(repo, rev, ".sdo/diagnostics/manifest.yaml") or ""
     detectors = (yaml.safe_load(manifest) or {}).get("detectors") or []
@@ -129,6 +217,7 @@ def _detector_origins(repo: Path, rev: str) -> dict[str, str | None]:
 def sdo_rows(pipeline_dir: Path, manifest: list[dict[str, Any]], pricing: ArmPricing) -> list[Row]:
     stages = load_sdo_pipeline(pipeline_dir)
     receipts = _receipts(pipeline_dir)
+    streams = _firing_streams(pipeline_dir)
     final_workspace = pipeline_stage_dirs(pipeline_dir)[-1][2] / "application_workspace"
     incident_family = {
         str(r.get("incident_id")): manifest[i]["family"] for i, r in enumerate(receipts) if r.get("incident_id")
@@ -139,7 +228,8 @@ def sdo_rows(pipeline_dir: Path, manifest: list[dict[str, Any]], pricing: ArmPri
         if stage.problem_id != meta["problem_id"]:
             raise IncidentCostError(f"stage {stage.index} ran {stage.problem_id}, manifest says {meta['problem_id']}")
         receipt = receipts[stage.index] if stage.index < len(receipts) else {}
-        rows.append(_sdo_row(stage, meta, receipt, final_workspace, incident_family, pricing))
+        stream = streams[stage.index] if stage.index < len(streams) else []
+        rows.append(_sdo_row(stage, meta, receipt, final_workspace, incident_family, pricing, stream))
     return rows
 
 
@@ -150,6 +240,7 @@ def _sdo_row(
     workspace: Path,
     incident_family: dict[str, str],
     pricing: ArmPricing,
+    stream: list[dict[str, Any]] | None = None,
 ) -> Row:
     verdict = stage.verdict
     total = stage.responder + stage.reflection
@@ -190,6 +281,7 @@ def _sdo_row(
         playbooks_after=memory[2] if memory else None,
         fired_incident_detectors=";".join(fired),
         foreign_detector_firings=";".join(foreign),
+        **firing_columns(receipt, stream or []),
     )
 
 
@@ -344,6 +436,24 @@ def main(argv: list[str] | None = None) -> int:
     write_csv(args.out / "incidents.csv", [asdict(r) for r in rows])
     kinds = by_kind(rows)
     write_csv(args.out / "by_kind.csv", kinds)
+    write_csv(
+        args.out / "detector_firing.csv",
+        [
+            {
+                "index": r.index,
+                "problem_id": r.problem_id,
+                "kind": r.kind,
+                "warm_path": r.warm_path,
+                "firing_telemetry": r.firing_telemetry,
+                "incident_detector_fired_before_dispatch": r.incident_detector_fired_before_dispatch,
+                "incident_detector_fired_after_dispatch": r.incident_detector_fired_after_dispatch,
+                "no_incident_detector_fired": r.no_incident_detector_fired,
+                "fired_detectors": r.fired_detectors,
+            }
+            for r in rows
+            if r.arm == "sdo"
+        ],
+    )
     timeline: list[dict[str, Any]] = []
     for arm in ("sdo", "codex"):
         arm_rows = [r for r in rows if r.arm == arm]

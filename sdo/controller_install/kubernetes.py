@@ -37,6 +37,11 @@ RUNTIME_USAGE_ROOT = f"{RUNTIME_STATE_ROOT}/usage"
 CONTROLLER_TURN_USAGE_LOG = f"{RUNTIME_USAGE_ROOT}/controller-turns.jsonl"
 RESPONDER_TURN_USAGE_LOG = f"{RUNTIME_USAGE_ROOT}/responder-turns.jsonl"
 TURN_USAGE_LOG_ENV = "SDO_TURN_USAGE_LOG"
+#: Detector firing telemetry (``--firing-telemetry-path``): the controller's durable
+#: JSONL record of when each detector activated, cleared or never persisted. It lives
+#: on the workspace PVC outside ``.sdo/`` and is the Go runtime's job-mode default.
+RUNTIME_TELEMETRY_ROOT = f"{RUNTIME_STATE_ROOT}/telemetry"
+DETECTOR_FIRING_STREAM = f"{RUNTIME_TELEMETRY_ROOT}/detector-firings.jsonl"
 CONTROLLER_JOB_NAME = "sdo-controller-run"
 REPOSITORY_SYNC_POD = "sdo-repository-sync"
 MAINTENANCE_CONFIGMAP = "sdo-controller-maintenance"
