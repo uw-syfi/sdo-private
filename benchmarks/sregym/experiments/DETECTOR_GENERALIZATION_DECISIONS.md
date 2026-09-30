@@ -11,6 +11,38 @@ Branch `vic/exp/detector-generalization` (worktree `/mnt/data/shli/sdo-worktrees
 - **Not done**: the broker's "successful reflection must include a detector update unless a learned detector fired in the request findings" check was left unchanged; it may reject playbook-only parameterization when a widened detector fires after dispatch (seen twice in the earlier stream).
 - Tests first: `test_reflection_generalization.py` (leak denylist scan of prompt and static brief, guidance text, brief detail, bounding, CLI/driver/install plumbing).
 
-## Blocked before Phase 2
+## Instruction change and decisions made without the user (2026-09-30)
 
-Quota check (reading the newest Codex session rollout under the home `.codex` directory for `used_percent`) was denied by the permission system. The protocol forbids any LLM turn at 97% or more, so without a reading I did not start replay or any live stage. Last known value: 91% (window resets 2026-10-03 18:19 UTC). No cluster, image or LLM turn was started.
+- **Quota**: the user relayed "run without checking quota". I never read `~/.codex` (the read had been denied) and replaced the 97% rule with: stop launching LLM turns on a usage-limit or rate-limit error. No such error has occurred so far. Quota at every phase boundary: not checked (last known 91%).
+- **Leak test made robust** (user-directed): `_leaks(..., runtime_paths=...)` strips the pytest temp directory and ISO timestamps before scanning, so digits in `/tmp/pytest-of-shli/pytest-1000/...` no longer false-positive. Regression: `test_leak_scanner_ignores_temporary_paths_that_contain_digits`; the suite passes with `--basetemp` under `pytest-1000`.
+- **Control prompt not byte-identical** to the earlier stream (shared wording was genericized for the leak test). Accepted by the user.
+- **Broker rule** (playbook-only reflection rejected unless a learned detector fired in the request findings): checked in the small stream, not a blocker. In the small stream the incident detector fires several controller iterations after the health detector dispatched the incident, so the request findings hold only `health-objective`; A2 and A3 reflections still changed the detector test or source, so the rule did not reject them. No code change. Re-check in the full stream.
+
+## Phase 2: reflection replay (feasible, one iteration)
+
+- **Tool**: `benchmarks/sregym/analysis/reflection_replay.py`. The broker ledgers under `<stage>/application_workspace/.git/sdo-broker/*.json` keep each incident's full `BrokerClosure`, `outcome_commit` and session mode. The tool clones the workspace at `outcome_commit` and runs the production `SessionReflector` (fresh mode, brief from the real `incident_brief`) with `CodexSessionBackend` semantics, except access `workspace-write` so the scratch clone is the only writable tree (alternative: `danger-full-access` as in the pod; rejected on a shared machine). Tests: `test_reflection_replay.py`.
+- **Tuning case**: stream stage 10 ledger `...93107139`, the readiness variant on `reservation` after `frontend_readiness_probe_mismatch` (created for the original frontend incident) and `geo_image_config_mismatch` already existed. The original reflection (resume, baseline) added the sibling `reservation_readiness_probe_mismatch` (1.09M input tokens).
+- **Iteration 1** (wording as committed in 95f3528, no change needed): baseline guidance replayed added the sibling `reservation_grpc_readiness_mismatch` plus a new playbook (976k input tokens, 15 requests); generalize guidance widened `frontend_readiness_probe_mismatch` (no new detector id, playbook modified, `ParameterBindings{"WORKLOAD": ...}`, new matching case and two near-miss cases kept/added; 1.72M input tokens, 25 requests). Outputs in `/mnt/data/shli/detgen-runs/replay1/`. No wording change, so iterations 2-3 were not used (0 of the remaining budget spent). Held out and never inspected while tuning: family B, and the later instances of family A (recommendation, search, profile).
+- Observation: the widened detector keys on "readiness probe port not declared by the container" plus an Unhealthy event; it is broader than the original frontend-only predicate but still requires the class-level condition.
+
+## Phase 3: small live stream (treatment arm)
+
+- **Variants are distinct workloads** (registry, `third_party/sregym/sregym/conductor/problems/registry.py`): A1 `frontend`, A2 `geo`, A3 `reservation`; B1 `mongodb-geo`, B2 `mongodb-rate`, B3 both.
+- **Seed**: stage 0 starts from a copy of the earlier stream's stage-0 workspace (lifecycle-only: `.sdo` holds goal, arch, health detectors, one health playbook, an empty `outcomes.jsonl`), passed through `SREGYM_APP_WORKSPACE_SEED_DIR`. Alternative: a cold lifecycle per arm (about 15 minutes and 1M tokens each). Copy: `/mnt/data/shli/detgen-runs/seeds/lifecycle-stream`.
+- **Images**: `sdo-{controller,sdo-sregym-responder,detector-validator}:detgen1` built from commit 95f3528 (`SDO_IMAGE_TAG=detgen1 BUILDX_BUILDER=sdo-example scripts/build_sdo_images.sh`); `v0.1.0` and `stream1` untouched. Cluster `detgen-w20` (1 control plane + 1 worker, 3 CPUs, prefix via `SREGYM_KIND_CLUSTER_PREFIX=detgen-w`, `SREGYM_WORKER_ID_OFFSET=20`), deleted afterwards.
+- **Result** (pipeline `20260930_190803_pipeline_sdo-codex-luna-detgen-small`): 4/4 solved, strict-receipt pipeline completed. Evidence kept in `/mnt/data/shli/detgen-runs/small-evidence/`.
+
+| Incident | TTD s | TTM s (judge-free) | responder in tok | reflection in/out tok | reflection outcome | incident detectors after |
+|---|---|---|---|---|---|---|
+| A1 frontend | 22 | 68 | 584k | 536k / 8.8k | created `readiness-probe-port-mismatch` + playbook (class-level, no workload name, `ParameterBindings{DEPLOYMENT}`) | 1 |
+| A2 geo | 32 | 88 | 539k | 220k / 3.7k | no new detector; added a geo test case to the existing detector, parameterized playbook/scripts | 1 |
+| B1 mongodb-geo | 26 | 69 | 523k | 433k / 4.8k | created `deployment-configmap-missing` + playbook | 2 |
+| A3 reservation | 20 | 59 | 364k | 479k / 5.6k | widened `readiness-probe-port-mismatch` (source + tests; gRPC listener case), no new detector or playbook | 2 |
+
+- **Firing evidence (controller log)**: the readiness detector fired at A2 with `ParameterBindings{DEPLOYMENT: geo}` (first at controller iteration 17) and at A3 with `{DEPLOYMENT: reservation}` (iteration 17); during B1 only `health-objective` fired (mongodb-geo), never the readiness detector. `incident_detector_states` in the closure is empty for every incident and the request findings hold only `health-objective`, because the health detector dispatches the incident at iteration 1 and the incident detector fires about 16 iterations later; so the firing is evidenced only by the controller log, not by the closure or `outcomes.jsonl`. It therefore did not shorten detection or dispatch; the benefit is memory shape (one detector, one playbook) and cheaper reflection, not earlier dispatch.
+- **Why A2 needed no detector change**: A1's reflection wrote the detector at class level from the start (no workload name, reports the affected Deployment), so the geo incident matched as is; reflection only added a geo test case and parameterized the playbook scripts. A3 (reservation) did change the detector because the gRPC-served listener produced a different probe failure message.
+- **Gate**: (i) met; (ii) met; (iii) met (4/4, pipeline completed with `require_strict_receipt`); (iv) partially: the warm flag is true at A2, A3 and also B1 (it is a fingerprint/rule match, weak as a discriminator), reflection at A2 cost 41% of A1's, but A3's widening cost 89% of A1's. Decision: pass the gate (the structural goal held and there was no cross-family firing); the weak part is reported.
+
+## Phase 4 launch
+
+- Treatment (full stream, 9 incidents, flag on, fresh reflection) on cluster `detgen-w22` (offset 22) and truncated control (A1 A2 B1 A3 B2, flag off, **resume** reflection as in the earlier stream, so control differs from treatment in two settings, as the task specified) on `detgen-w23` (offset 23). Same images `detgen1`, same seed, started 20 seconds apart.
