@@ -31,6 +31,7 @@ from benchmarks.sregym.adapter import (
     drain_pending_incident,
     pause_controller,
 )
+from benchmarks.sregym.adapter.persistent import DetectorReviewRequiredError
 from benchmarks.sregym.fastloop.fault_tracker import (
     BackgroundPoller,
     FaultTracker,
@@ -38,13 +39,14 @@ from benchmarks.sregym.fastloop.fault_tracker import (
     composite_faults,
     probes_for,
 )
+from benchmarks.sregym.fastloop.loop import AgentOutcome
 from benchmarks.sregym.fastloop.records import TokenCounts
 from benchmarks.sregym.fastloop.sdo_agent import SdoPersistentAgent
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from benchmarks.sregym.fastloop.loop import AgentOutcome, InjectionWindow
+    from benchmarks.sregym.fastloop.loop import InjectionWindow
     from benchmarks.sregym.fastloop.records import AgentName
 
 logger = logging.getLogger(__name__)
@@ -184,6 +186,7 @@ class CompositeSdoAgent(SdoPersistentAgent):
         self._composite = composite or CompositeSettings()
         self._incidents: list[dict[str, Any]] = []
         self._base_dir: Path | None = None
+        self._wedge_usage: dict[str, Any] | None = None
 
     def resolve(self, index: int, problem_id: str, inject: Callable[[], InjectionWindow]) -> AgentOutcome:
         composite = self._composite
@@ -221,8 +224,11 @@ class CompositeSdoAgent(SdoPersistentAgent):
                     controller_samples.append({"t": round(time.monotonic() - started, 1), "error": str(exc)})
                 sampler_stop.wait(STATE_SAMPLE_SECONDS)
 
+        injected: list[InjectionWindow] = []
+
         def tracked_inject() -> InjectionWindow:
             window = inject()
+            injected.append(window)
             marks["poll_start"] = time.monotonic() - started
             poller.__enter__()
             return window
@@ -231,18 +237,31 @@ class CompositeSdoAgent(SdoPersistentAgent):
         sampler.start()
         self._incidents = []
         outcomes: list[AgentOutcome] = []
-        stop_reason = "all_faults_resolved"
+        stop_reason = "error"
+        wedged = False
         try:
-            first = super().resolve(index, problem_id, tracked_inject)
+            try:
+                first = super().resolve(index, problem_id, tracked_inject)
+            except DetectorReviewRequiredError as wedge:
+                if not injected:
+                    raise
+                wedged = True
+                first = self._wedged_outcome(index, problem_id, injected[0], wedge)
+                stop_reason = "detector_review_required"
             self._base_dir = Path(str(first.artifacts_dir))
             outcomes.append(first)
             self._incidents.append(
-                {"incident_id": first.incident_id, "receipt_dir": str(first.artifacts_dir), "outcome": first}
+                {
+                    "incident_id": first.incident_id,
+                    "receipt_dir": str(first.artifacts_dir),
+                    "outcome": first,
+                    "fallback_usage": self._wedge_usage if wedged else None,
+                }
             )
             deadline = started + composite.deadline_seconds
             known = {str(first.incident_id)}
             lifecycle = self._lifecycle_inputs()
-            while True:
+            while not wedged:
                 self._drain_last(first_label=f"composite-{index:03d}")
                 if tracker.all_resolved_at() is not None or self._wait_resolved(tracker, composite):
                     stop_reason = "all_faults_resolved"
@@ -277,7 +296,11 @@ class CompositeSdoAgent(SdoPersistentAgent):
             if "poll_start" in marks:
                 poller.__exit__(None, None, None)
             try:
-                pause_controller(self._ops, control, label=f"composite-{index:03d}", clock=self._clock)
+                if stop_reason == "detector_review_required":
+                    # The controller stopped itself; nothing will acknowledge a pause.
+                    self._ops.set_maintenance(control, paused=True, generation=f"composite-{index:03d}-wedged")
+                else:
+                    pause_controller(self._ops, control, label=f"composite-{index:03d}", clock=self._clock)
             except Exception:
                 logger.exception("could not pause the controller after the composite")
             report = _fault_report(tracker, marks.get("poll_start", 0.0))
@@ -302,6 +325,41 @@ class CompositeSdoAgent(SdoPersistentAgent):
             )
             write_composite_report(self._report_dir / f"composite_{index:03d}_{problem_id}.json", report)
         return self._merge(outcomes)
+
+    def _wedged_outcome(
+        self, index: int, problem_id: str, window: InjectionWindow, wedge: DetectorReviewRequiredError
+    ) -> AgentOutcome:
+        """The controller stopped on an uncleared incident: keep what its state and PVC hold as evidence."""
+
+        from benchmarks.sregym.fastloop.sdo_agent import _last_successful_repair, _summaries, _timestamp
+
+        settings = self._settings
+        control = settings.runtime_config.control_namespace
+        assert control is not None
+        receipt_dir = settings.results_dir / f"{index:03d}_{problem_id}"
+        receipt_dir.mkdir(parents=True, exist_ok=True)
+        state = wedge.state
+        result = state.get("incident_result") if isinstance(state.get("incident_result"), dict) else {}
+        self._ops.export_controller_logs(control, receipt_dir)
+        evidence = self._ops.export_runtime_artifacts(
+            replace(settings.runtime_config, artifacts_dir=receipt_dir), receipt_dir
+        )
+        write_composite_report(
+            receipt_dir / "detector_review_state.json",
+            {"reason": wedge.reason, "runtime_state": state, "runtime_artifacts": evidence},
+        )
+        self._wedge_usage = result.get("usage") if isinstance(result.get("usage"), dict) else None
+        return AgentOutcome(
+            injection=window,
+            detected_at=_timestamp(state.get("incident_detected_at")),
+            mitigation_applied_at=_last_successful_repair(result.get("repair_actions")),
+            resolved_at=None,
+            diagnosis=_summaries(result.get("confirmed_root_causes")),
+            mitigation=_summaries(result.get("repair_actions"), successful_only=True),
+            incident_id=wedge.incident_id,
+            artifacts_dir=str(receipt_dir),
+            error=f"controller stopped for detector review: {wedge.reason}",
+        )
 
     @staticmethod
     def _wait_resolved(tracker: FaultTracker, composite: CompositeSettings) -> bool:
@@ -399,6 +457,11 @@ class CompositeSdoAgent(SdoPersistentAgent):
         receipts_seen = 0
         for item in self._incidents:
             receipt = self._receipt(Path(item["receipt_dir"]))
+            if not receipt and item.get("fallback_usage"):
+                # No strict receipt exists for an incident that never closed; its responder usage is in state.
+                usage = _add(usage, TokenCounts.from_usage(item["fallback_usage"]))
+                receipts_seen += 1
+                continue
             if not receipt:
                 continue
             receipts_seen += 1
@@ -418,7 +481,7 @@ class CompositeSdoAgent(SdoPersistentAgent):
             warm_path=warm,
             match_reasons=tuple(dict.fromkeys(reasons)),
             reflection_attempts=attempts,
-            error=error,
+            error="; ".join(filter(None, [outcome.error, error])) or None,
         )
 
 

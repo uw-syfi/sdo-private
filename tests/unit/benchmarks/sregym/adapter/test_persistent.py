@@ -13,6 +13,7 @@ from benchmarks.sregym.adapter.persistent import (
     STRICT_RECEIPT_FILENAME,
     Clock,
     ControllerPod,
+    DetectorReviewRequiredError,
     PersistentControllerError,
     PersistentState,
     StageInputs,
@@ -674,3 +675,28 @@ def test_followup_refuses_to_start_while_an_incident_is_undrained(tmp_path: Path
             timeout_seconds=5,
             clock=_clock(ops),
         )
+
+
+def test_stage_fails_fast_when_the_controller_stops_for_detector_review(tmp_path: Path) -> None:
+    ops = FakeOps()
+
+    def inject_then_wedge(control: str, generation: str, inject: Callable[[], None]) -> dict[str, float]:
+        inject()
+        ops.states[control].update(
+            {
+                "incident_open": True,
+                "responder_done": True,
+                "incident_request": {"incident_id": "incident-9"},
+                "detector_review_required": True,
+                "detector_review_reason": "health detectors did not clear within 2m0s after responder completion",
+            }
+        )
+        return {}
+
+    ops.inject_after_resume = inject_then_wedge  # type: ignore[method-assign]
+
+    with pytest.raises(DetectorReviewRequiredError, match="incident-9") as raised:
+        _run(tmp_path, ops, "s0", [])
+
+    assert raised.value.incident_id == "incident-9"
+    assert "did not clear" in raised.value.reason

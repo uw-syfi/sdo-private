@@ -81,6 +81,22 @@ class PersistentControllerError(RuntimeError):
     """Raised when a persistent controller cannot be installed, reused, or drained."""
 
 
+class DetectorReviewRequiredError(PersistentControllerError):
+    """Raised when the controller stopped an incident that its health detectors never cleared.
+
+    The controller gives up verification ``detector review required`` after the responder
+    completed but findings are still active (for example, a fault that surfaced after dispatch
+    and was not part of the responder's task). It never closes the incident, so waiting longer
+    cannot succeed.
+    """
+
+    def __init__(self, incident_id: str, reason: str, state: dict[str, Any]) -> None:
+        super().__init__(f"incident {incident_id!r} needs detector review: {reason}")
+        self.incident_id = incident_id
+        self.reason = reason
+        self.state = state
+
+
 class ClosureFailedError(PersistentControllerError):
     """Raised when the controller gave up committing an incident closure the broker kept rejecting."""
 
@@ -534,6 +550,8 @@ def collect_followup_incident(
     control = record.control_namespace
     try:
         verified = _wait_for_verified_incident(ops, control, known, timeout_seconds, clock)
+    except DetectorReviewRequiredError:
+        raise
     except PersistentControllerError:
         return None
     config = replace(inputs.runtime_config, persistent=True, wait_for_completion=False)
@@ -835,6 +853,12 @@ def _wait_for_verified_incident(
         if isinstance(acknowledged, str) and acknowledged and acknowledged not in known:
             # Reflection finished between polls; the ledger holds the closure.
             return VerifiedIncident(incident_id=acknowledged, closure=None)
+        if state.get("detector_review_required"):
+            request = state.get("incident_request")
+            incident_id = request.get("incident_id") if isinstance(request, dict) else None
+            raise DetectorReviewRequiredError(
+                str(incident_id or "unknown"), str(state.get("detector_review_reason") or ""), state
+            )
         clock.sleep(POLL_SECONDS)
     raise PersistentControllerError(f"controller in {control!r} verified no new incident within {timeout:.0f}s")
 

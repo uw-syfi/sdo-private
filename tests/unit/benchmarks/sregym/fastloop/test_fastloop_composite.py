@@ -43,6 +43,7 @@ class FakeOps:
     """One controller; incident-1 closes on injection, incident-2 appears after incident-1 is reflected."""
 
     second_incident: bool = True
+    wedge: bool = False
     fixed: set[str] = field(default_factory=set)
     pods: dict[str, ControllerPod] = field(default_factory=dict)
     states: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -107,6 +108,25 @@ class FakeOps:
     ) -> dict[str, float]:
         inject()
         self.fixed |= {"readiness:geo", "configmap:mongodb-rate"}
+        if self.wedge:
+            self.states[control_namespace].update(
+                {
+                    "incident_open": True,
+                    "responder_done": True,
+                    "incident_request": {"incident_id": "incident-1"},
+                    "detector_review_required": True,
+                    "detector_review_reason": "health detectors did not clear",
+                    "incident_detected_at": INJECTED.isoformat(),
+                    "incident_result": {
+                        "confirmed_root_causes": [{"summary": "geo and mongodb-rate"}],
+                        "repair_actions": [
+                            {"summary": "fixed two", "success": True, "completed_at": INJECTED.isoformat()}
+                        ],
+                        "usage": {"input_tokens": 500, "cached_input_tokens": 400, "output_tokens": 50},
+                    },
+                }
+            )
+            return {"controller_baseline_wait": 1.0}
         self.states[control_namespace]["pending_closure"] = _closure("incident-1", 9)
         return {"controller_baseline_wait": 1.0}
 
@@ -313,3 +333,22 @@ def test_tracked_agent_passes_single_fault_problems_through(tmp_path: Path) -> N
     outcome = agent.resolve(0, "missing_configmap_hotel_reservation", _inject)
     assert outcome.injection == _inject()
     assert list(tmp_path.iterdir()) == []
+
+
+def test_a_controller_that_stops_for_detector_review_is_reported_not_waited_on(tmp_path: Path) -> None:
+    ops = FakeOps(wedge=True)
+    agent = _agent(tmp_path, ops)
+
+    outcome = agent.resolve(0, PROBLEM, _inject)
+    outcome = agent.learn(outcome)
+
+    report = json.loads((tmp_path / "reports" / f"composite_000_{PROBLEM}.json").read_text(encoding="utf-8"))
+    assert report["stop_reason"] == "detector_review_required"
+    assert report["faults_resolved"] == 2
+    assert report["resolved_s"]["network_policy:recommendation"] is None
+    assert outcome.resolved_at is None
+    assert "geo and mongodb-rate" in outcome.diagnosis
+    assert outcome.responder_tokens == TokenCounts(input_tokens=500, cached_input_tokens=400, output_tokens=50)
+    assert outcome.error is not None
+    assert "detector review" in outcome.error
+    assert ops.maintenance[-1] == "paused"
