@@ -22,3 +22,8 @@ Analysis: `benchmarks/sregym/experiments/healthy-baseline-ab/analyze_ab.py <seq>
 - abon-a: 3 runs all 5/5, 5/5, 3/3 oracle True. The gate rejected the first C3-repeat reflection twice (14:17:58 `service-selector-mismatch`, rule `service-selector-not-in-pod-template`; 14:20:36 same detector, rule `service-selector-label-absent-from-template`; both on Service hotel-reservation/jaeger, 3 snapshots each), with the actionable message. The reflector regenerated and the third proposal (reflection attempts 3) was accepted; the final set replays clean offline (0 violations). Learned: `empty_network_policy`, `missing_required_configmap`, `service_selector_mismatch` (final accepted form).
 - aboff-a: no selector detector was created (`missing_required_configmap`, `deny_all_network_policy`); no rejection; replay 0 violations.
 
+
+### Pair b (abon-b, aboff-b; 14:29 to 15:17, load 12 to 14)
+
+- abon-b: C3 5/5; C3' 3/5 oracle False (`controller stopped for detector review: health detectors did not clear within 2m` with `user` deployment-missing and `frontend` selector health findings still active; 0.26M tokens, 0 reflection attempts; no gate rejection involved, classified as a responder/closure failure, not infra); C1 3/3. Learned: `bidirectional_network_isolation`, `missing_configmap`; no selector detector; no rejection; replay 0 violations.
+- aboff-b: all runs solved (5/5, 5/5, 3/3). Learned four detectors including a selector one, `service_deployment_selector_mismatch`; it never fired live on a healthy service and the final set replays clean offline (0 violations), so this selector detector was benign.
