@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 from benchmarks.sregym.analysis.reflection_replay import _git, _ScopedBackend, find_ledger, memory_delta
-from sdo.agent_runtime.responder.reflection import INCIDENT_REASONING_EFFORT, SessionReflector
+from sdo.agent_runtime.responder import INCIDENT_REASONING_EFFORT, SessionReflector
 from sdo.operational_memory import BrokerClosure, OutcomeRecord
 
 HEALTHY = Path("/mnt/data/shli/clc-runs/hb-live/healthy")

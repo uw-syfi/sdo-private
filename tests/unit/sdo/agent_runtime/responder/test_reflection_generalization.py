@@ -9,7 +9,7 @@ import pytest
 
 from sdo.agent_runtime.responder import reflection_brief
 from sdo.agent_runtime.responder.broker_cli import _argument_parser
-from sdo.agent_runtime.responder.reflection import SessionReflector
+from sdo.agent_runtime.responder.reflection import _RESPONDER_PERMISSIONS, SessionReflector
 from sdo.operational_memory import DETECTOR_SDK_REFERENCE, REFLECTION_GUIDANCE_MODES, BrokerClosure
 from tests.unit.sdo.agent_runtime.responder.test_reflection import (
     _REVIEW,
@@ -93,8 +93,9 @@ def _request_text(tmp_path: Path, guidance: str) -> str:
     )
     prompt = str(backend.calls[0]["prompt"])
     # Runtime data (the outcome record and its history) and the trusted SDK API reference are not prompt wording.
-    prompt = prompt.split("Current outcome:", 1)[0]
-    return prompt.replace(DETECTOR_SDK_REFERENCE, "")
+    prompt = prompt.split("Current outcome", 1)[0]
+    # The responder's RBAC description is a platform fact shared by every problem, not problem-specific wording.
+    return prompt.replace(DETECTOR_SDK_REFERENCE, "").replace(_RESPONDER_PERMISSIONS, "")
 
 
 def _static_brief(tmp_path: Path, *, detail: bool) -> str:

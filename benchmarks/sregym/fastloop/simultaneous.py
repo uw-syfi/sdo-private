@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from benchmarks.sregym.adapter.persistent import Clock, _wait_for_maintenance_ack
+from benchmarks.sregym.adapter import Clock, wait_for_maintenance_ack
 
 if TYPE_CHECKING:
     from benchmarks.sregym.adapter import ClusterOps
@@ -23,7 +23,7 @@ PauseWaiter = Callable[["ClusterOps", str, str], None]
 
 
 def _wait_for_pause(ops: ClusterOps, control_namespace: str, generation: str) -> None:
-    _wait_for_maintenance_ack(ops, control_namespace, generation, Clock())
+    wait_for_maintenance_ack(ops, control_namespace, generation, Clock())
 
 
 class InjectBeforeResumeOps:

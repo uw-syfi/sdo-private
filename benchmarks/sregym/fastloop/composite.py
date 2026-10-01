@@ -26,12 +26,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from benchmarks.sregym.adapter import (
+    DetectorReviewRequiredError,
+    PersistentControllerError,
     PersistentState,
     collect_followup_incident,
     drain_pending_incident,
     pause_controller,
 )
-from benchmarks.sregym.adapter.persistent import DetectorReviewRequiredError, PersistentControllerError
 from benchmarks.sregym.fastloop.fault_tracker import (
     BackgroundPoller,
     FaultTracker,

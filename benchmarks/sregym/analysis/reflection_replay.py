@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from libs.agent_cli.structured import run_structured_turn, turn_usage
-from sdo.agent_runtime.responder.reflection import (
+from sdo.agent_runtime.responder import (
     INCIDENT_REASONING_EFFORT,
     CodexSessionBackend,
     ReflectionTurn,

@@ -249,8 +249,10 @@ def _inputs(
     receipt_dir: Path | None = None,
     verification_timeout_seconds: float = 30,
     detection_timeout_seconds: float | None = None,
+    stop_on_detector_review: bool = True,
 ) -> StageInputs:
     return StageInputs(
+        stop_on_detector_review=stop_on_detector_review,
         detection_timeout_seconds=detection_timeout_seconds,
         stage_label=stage,
         application=application,
@@ -695,7 +697,13 @@ def test_an_incident_that_opened_keeps_the_full_verification_budget(tmp_path: Pa
 
     with pytest.raises(PersistentControllerError) as raised:
         run_persistent_stage(
-            _inputs(tmp_path, "s0", verification_timeout_seconds=60, detection_timeout_seconds=10),
+            _inputs(
+                tmp_path,
+                "s0",
+                verification_timeout_seconds=60,
+                detection_timeout_seconds=10,
+                stop_on_detector_review=False,
+            ),
             ops=ops,
             run_lifecycle=lambda: True,
             inject=lambda: None,
@@ -715,7 +723,7 @@ def test_a_timeout_behind_a_permanently_failed_closure_says_so(tmp_path: Path) -
 
 def test_an_unverified_incident_timeout_names_the_open_incident_and_why_it_is_stuck(tmp_path: Path) -> None:
     with pytest.raises(PersistentControllerError) as raised:
-        _run(tmp_path, _StuckOps(), "s0", [])
+        _run(tmp_path, _StuckOps(), "s0", [], stop_on_detector_review=False)
 
     message = str(raised.value)
     assert "verified no new incident within 30s" in message

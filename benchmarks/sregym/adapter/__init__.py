@@ -18,18 +18,24 @@ if TYPE_CHECKING:
         deployed_lifecycle,
         run_or_reuse_lifecycle,
     )
+    from benchmarks.sregym.adapter.healthy_baseline import HealthyBaselineCaptureOps, kubectl_capture_ops
     from benchmarks.sregym.adapter.persistent import (
         REJECTED_RECEIPT_FILENAME,
         STRICT_RECEIPT_FILENAME,
         Clock,
         ClusterOps,
+        DetectorReviewRequiredError,
         KubectlClusterOps,
+        PersistentControllerError,
         PersistentState,
         StageInputs,
+        collect_followup_incident,
         control_namespace_for,
         drain_pending_incident,
+        pause_controller,
         run_persistent_stage,
         teardown,
+        wait_for_maintenance_ack,
     )
     from benchmarks.sregym.adapter.runtime import RuntimeConfig, receipt_resolution
 
@@ -42,6 +48,9 @@ _EXPORTS: dict[str, str] = {
     "STRICT_RECEIPT_FILENAME": "persistent",
     "Clock": "persistent",
     "ClusterOps": "persistent",
+    "DetectorReviewRequiredError": "persistent",
+    "PersistentControllerError": "persistent",
+    "wait_for_maintenance_ack": "persistent",
     "KubectlClusterOps": "persistent",
     "PersistentState": "persistent",
     "StageInputs": "persistent",
@@ -64,7 +73,9 @@ __all__ = [
     "ClusterOps",
     "DeployedLifecycle",
     "DeployedLifecycleContext",
+    "DetectorReviewRequiredError",
     "KubectlClusterOps",
+    "PersistentControllerError",
     "PersistentState",
     "RuntimeConfig",
     "StageInputs",
@@ -79,6 +90,7 @@ __all__ = [
     "run_or_reuse_lifecycle",
     "run_persistent_stage",
     "teardown",
+    "wait_for_maintenance_ack",
 ]
 
 

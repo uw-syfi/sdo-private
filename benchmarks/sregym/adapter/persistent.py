@@ -470,7 +470,7 @@ def run_persistent_stage(
     if pause_after_verified:
         paused_generation = f"{generation}-paused"
         ops.set_maintenance(control, paused=True, generation=paused_generation)
-        _wait_for_maintenance_ack(ops, control, paused_generation, clock)
+        wait_for_maintenance_ack(ops, control, paused_generation, clock)
     paused_ready = clock.monotonic()
     ops.export_controller_logs(control, inputs.receipt_dir)
     stage_evidence: dict[str, Any] = dict(ops.export_runtime_artifacts(config, inputs.receipt_dir))
@@ -558,7 +558,7 @@ def pause_controller(ops: ClusterOps, control: str, *, label: str, clock: Clock 
     clock = clock or Clock()
     generation = f"{label}-{uuid.uuid4().hex[:8]}-paused"
     ops.set_maintenance(control, paused=True, generation=generation)
-    _wait_for_maintenance_ack(ops, control, generation, clock)
+    wait_for_maintenance_ack(ops, control, generation, clock)
 
 
 def collect_followup_incident(
@@ -992,7 +992,7 @@ def _log_records(logs: str) -> list[dict[str, Any]]:
     return records
 
 
-def _wait_for_maintenance_ack(
+def wait_for_maintenance_ack(
     ops: ClusterOps, control: str, generation: str, clock: Clock, timeout: float = MAINTENANCE_ACK_TIMEOUT_SECONDS
 ) -> None:
     deadline = clock.monotonic() + timeout
