@@ -47,6 +47,11 @@ TURN_USAGE_LOG_ENV = "SDO_TURN_USAGE_LOG"
 #: on the workspace PVC outside ``.sdo/`` and is the Go runtime's job-mode default.
 RUNTIME_TELEMETRY_ROOT = f"{RUNTIME_STATE_ROOT}/telemetry"
 DETECTOR_FIRING_STREAM = f"{RUNTIME_TELEMETRY_ROOT}/detector-firings.jsonl"
+#: Opt-in healthy-baseline gate: snapshots of the healthy application sit on the repository
+#: volume (outside the application repository, so they are never memory artifacts) and the broker
+#: stages them into the validated worktree under the relative directory while it validates.
+HEALTHY_BASELINE_SOURCE = "/workspace/.sdo-baseline/healthy"
+HEALTHY_BASELINE_DIRECTORY = ".sdo-baseline/healthy"
 CONTROLLER_JOB_NAME = "sdo-controller-run"
 REPOSITORY_SYNC_POD = "sdo-repository-sync"
 MAINTENANCE_CONFIGMAP = "sdo-controller-maintenance"
@@ -82,6 +87,9 @@ class ControllerInstallConfig:
     # Bounded follow-up responders for health findings that stay active after a response (opt-in; 0 = off).
     max_follow_ups: int = 0
     follow_up_cooldown_seconds: int = 30
+    # Reject a proposed incident detector that fires on recorded healthy-application snapshots (opt-in).
+    # The caller must record the snapshots at HEALTHY_BASELINE_SOURCE before the first incident.
+    healthy_baseline: bool = False
     # Namespace for the controller, its repository PVC, state, credentials,
     # and responder/validator Jobs. ``None`` co-locates them with the
     # application; a separate namespace survives application redeploys.
@@ -245,6 +253,15 @@ def controller_resources(
                 str(config.max_follow_ups),
                 "--follow-up-cooldown",
                 f"{config.follow_up_cooldown_seconds}s",
+            ]
+        )
+    if config.healthy_baseline:
+        controller_args.extend(
+            [
+                "--broker-arg=--healthy-baseline-source",
+                f"--broker-arg={HEALTHY_BASELINE_SOURCE}",
+                "--broker-arg=--healthy-baseline-dir",
+                f"--broker-arg={HEALTHY_BASELINE_DIRECTORY}",
             ]
         )
     controller_args.extend(extra_controller_args or [])

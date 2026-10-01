@@ -392,6 +392,26 @@ def test_unknown_late_findings_mode_is_rejected() -> None:
         ControllerInstallConfig(**{**_config().__dict__, "late_findings": "push"})
 
 
+def test_healthy_baseline_is_off_by_default_and_leaves_the_controller_args_unchanged() -> None:
+    default = _config()
+    off = ControllerInstallConfig(**{**_config().__dict__, "healthy_baseline": False})
+
+    assert default.healthy_baseline is False
+    assert _controller_args(off) == _controller_args(default)
+    assert "--healthy-baseline-dir" not in _broker_args(default)
+    assert "--healthy-baseline-source" not in _broker_args(default)
+
+
+def test_healthy_baseline_reaches_the_broker_with_a_volume_source_and_a_worktree_relative_directory() -> None:
+    gated = ControllerInstallConfig(**{**_config().__dict__, "healthy_baseline": True})
+
+    broker = _broker_args(gated)
+    # The snapshots live on the repository volume, outside the application repository ...
+    assert broker[broker.index("--healthy-baseline-source") + 1] == "/workspace/.sdo-baseline/healthy"
+    # ... and are staged into the validated worktree under this relative path only while validating.
+    assert broker[broker.index("--healthy-baseline-dir") + 1] == ".sdo-baseline/healthy"
+
+
 def _controller_job_args(config: ControllerInstallConfig) -> list[str]:
     return _controller_args(config)
 
