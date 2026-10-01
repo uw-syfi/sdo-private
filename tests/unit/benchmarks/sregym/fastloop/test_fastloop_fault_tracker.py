@@ -87,19 +87,19 @@ def test_registered_composites_declare_faults_in_injection_order() -> None:
         "configmap",
         "network_policy",
     ]
-    five = composite_faults("composite5_hotel_geo_rate_recommendation_frontend_reservation")
+    five = composite_faults("composite5_hotel_geo_rate_recommendation_frontend_user")
     assert [(fault.kind, fault.component) for fault in five] == [
         ("readiness", "geo"),
         ("configmap", "mongodb-rate"),
         ("network_policy", "recommendation"),
         ("wrong_selector", "frontend"),
-        ("resource_request", "reservation"),
+        ("resource_request", "user"),
     ]
     assert len({fault.component for fault in five}) == 5
     assert composite_faults("missing_configmap_hotel_reservation") == ()
     assert set(COMPOSITE_FAULTS) == {
         "composite3_hotel_geo_rate_recommendation",
-        "composite5_hotel_geo_rate_recommendation_frontend_reservation",
+        "composite5_hotel_geo_rate_recommendation_frontend_user",
     }
 
 
@@ -121,7 +121,7 @@ def _reader(objects: dict[tuple[str, str], dict[str, Any] | None]):
 
 
 def test_probes_report_per_fault_state_from_cluster_objects() -> None:
-    faults = composite_faults("composite5_hotel_geo_rate_recommendation_frontend_reservation")
+    faults = composite_faults("composite5_hotel_geo_rate_recommendation_frontend_user")
     blocking = {
         "spec": {"podSelector": {"matchLabels": {"io.kompose.service": "recommendation"}}, "ingress": [], "egress": []}
     }
@@ -130,7 +130,7 @@ def test_probes_report_per_fault_state_from_cluster_objects() -> None:
         ("deployment", "mongodb-rate"): _deployment(1),
         ("networkpolicy", "deny-all-recommendation"): blocking,
         ("endpoints", "frontend"): {"subsets": None},
-        ("deployment", "reservation"): _deployment(1, updated=0),
+        ("deployment", "user"): _deployment(1, updated=0),
         ("deployment", "recommendation"): _deployment(1),
     }
     probes = probes_for(faults, _reader(cluster))
@@ -139,12 +139,12 @@ def test_probes_report_per_fault_state_from_cluster_objects() -> None:
         "configmap:mongodb-rate": True,
         "network_policy:recommendation": False,
         "wrong_selector:frontend": False,
-        "resource_request:reservation": False,
+        "resource_request:user": False,
     }
     cluster[("deployment", "geo")] = _deployment(1)
     cluster[("networkpolicy", "deny-all-recommendation")] = None
     cluster[("endpoints", "frontend")] = {"subsets": [{"addresses": [{"ip": "10.0.0.1"}]}]}
-    cluster[("deployment", "reservation")] = _deployment(1)
+    cluster[("deployment", "user")] = _deployment(1)
     assert all(probe() for probe in probes.values())
 
 
