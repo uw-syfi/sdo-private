@@ -15,4 +15,10 @@ With the opt-in `--healthy-baseline` gate ON versus OFF and everything else equa
 
 ## Results
 
-(filled in as sequences finish)
+Analysis: `benchmarks/sregym/experiments/healthy-baseline-ab/analyze_ab.py <seq>...` (firing table, rejection events parsed from the cumulative controller logs, created detectors) and `replay_gate.sh <seq>...` (offline replay of each sequence's final detector set against the three healthy snapshots in `/mnt/data/shli/clc-runs/hb-live/healthy`, so a latent false-firer that never fired live is still counted). A learned detector counts as "false-firing" if it fired live on a target outside the composite's fault components, or if the final-set replay reports a healthy-snapshot violation.
+
+### Pair a (abon-a gate on, aboff-a gate off; started 13:52, done 14:29, host load 7 to 14)
+
+- abon-a: 3 runs all 5/5, 5/5, 3/3 oracle True. The gate rejected the first C3-repeat reflection twice (14:17:58 `service-selector-mismatch`, rule `service-selector-not-in-pod-template`; 14:20:36 same detector, rule `service-selector-label-absent-from-template`; both on Service hotel-reservation/jaeger, 3 snapshots each), with the actionable message. The reflector regenerated and the third proposal (reflection attempts 3) was accepted; the final set replays clean offline (0 violations). Learned: `empty_network_policy`, `missing_required_configmap`, `service_selector_mismatch` (final accepted form).
+- aboff-a: no selector detector was created (`missing_required_configmap`, `deny_all_network_policy`); no rejection; replay 0 violations.
+

@@ -38,6 +38,30 @@ def detectors_ever(ws: Path) -> dict[str, str]:
     return out
 
 
+def rejection_events(d: Path) -> list[dict]:
+    """Distinct broker rejections of reflection proposals in the cumulative controller logs of a sequence."""
+    lines: set[str] = set()
+    for log in d.glob("results/*/*/sdo_runtime/controller_logs/*.log"):
+        lines |= set(log.read_text(errors="replace").splitlines())
+    ordered = sorted(lines)
+    events = []
+    for l in ordered:
+        if "failed isolated validation and must be regenerated" not in l:
+            continue
+        ts = l.split(" ", 1)[0][:19]
+        base = [x for x in ordered if "healthy_baseline_test.go" in x and x.split(" ", 1)[0][:19] == ts]
+        det = sorted({m.group(1) for x in base for m in [re.search(r'detector "([^"]+)"', x)] if m})
+        res = sorted({m.group(1) for x in base for m in [re.search(r"on (?:Service|Deployment|Pod|ConfigMap|NetworkPolicy|Endpoints|ReplicaSet|Event) ([^:]+):", x)] if m})
+        rules = sorted({m.group(1) for x in base for m in [re.search(r'rule "([^"]+)"', x)] if m})
+        events.append(dict(at=ts, baseline=bool(base), detectors=det, rules=rules, resources=res, head=l.split("regenerated:", 1)[1][:160].strip()))
+    return events
+
+
+def replay_violations(d: Path) -> int | None:
+    p = d / "gate-replay.txt"
+    return None if not p.is_file() else len(re.findall(r"reported an active finding", p.read_text()))
+
+
 def analyse(name: str) -> dict:
     d = R / name
     ws = d / "application_workspace"
@@ -79,7 +103,7 @@ def analyse(name: str) -> dict:
             fired={k: {"on": sorted(v["on"]), "off": sorted(v["off"]), "incidents": len(v["incidents"]), "relation": sorted(v["relation"])} for k, v in det.items()},
             rejections=rej,
         ))
-    return dict(seq=name, created=created, runs=runs)
+    return dict(seq=name, created=created, runs=runs, events=rejection_events(d), replay=replay_violations(d))
 
 
 def fmt(v) -> str:
@@ -96,6 +120,12 @@ def main(names: list[str]) -> None:
             per = ", ".join(f"{k} {fmt(v)}" for k, v in r["per"].items())
             fired = "; ".join(f"{k}: on {len(v['on'])}, OFF {v['off'] or 0} (inc {v['incidents']}, {'/'.join(v['relation'])})" for k, v in r["fired"].items()) or "none"
             print(f"| {s['seq']} | {r['C']} | {r['resolved']} | {r['oracle']} | {fmt(r['all_s'])} | {fmt(r['inj_mit'])} | {r['tokens']/1e6:.2f}M | {per} | {r['reflection_attempts']} | {fired} | {len(r['rejections'])} |" + (f" {r['error']}" if r["error"] else ""))
+    print()
+    print("| seq | rejection events (time, baseline gate?, detector, rules, resources, message head) | final detector set replayed offline vs healthy snapshots: violations |")
+    print("|---|---|---|")
+    for s in results:
+        ev = "<br>".join(f"{e['at']} {'GATE' if e['baseline'] else 'other'} {e['detectors']} {e['rules']} {e['resources']} {'' if e['baseline'] else e['head']}" for e in s["events"]) or "none"
+        print(f"| {s['seq']} | {ev} | {s['replay']} |")
     print()
     print("| seq | learned incident detectors created over the sequence (name <- first commit) |")
     print("|---|---|")
