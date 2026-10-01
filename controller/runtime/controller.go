@@ -40,6 +40,15 @@ type ControllerConfig struct {
 	RepairPolicy         string
 	// ClosureRetry bounds resubmission of a closure the broker rejects.
 	ClosureRetry ClosureRetryPolicy
+	// MaxFollowUps enables bounded follow-up responders: when health findings
+	// stay active after a responder completes, up to this many further
+	// responders are dispatched for the residual findings before the incident
+	// is handed to detector review. Zero (the default) disables follow-ups.
+	MaxFollowUps int
+	// FollowUpCooldown is the wait after a responder completes before its
+	// residual findings are treated as unresolved. It is capped by
+	// VerificationTimeout.
+	FollowUpCooldown time.Duration
 }
 
 type dispatchCompletion struct {
@@ -137,6 +146,12 @@ func NewController(
 	}
 	if config.ConfirmationInterval < 0 {
 		return nil, fmt.Errorf("confirmation interval must not be negative")
+	}
+	if config.MaxFollowUps < 0 {
+		return nil, fmt.Errorf("max follow-ups must not be negative")
+	}
+	if config.FollowUpCooldown < 0 {
+		return nil, fmt.Errorf("follow-up cooldown must not be negative")
 	}
 	if config.VerificationTimeout == 0 {
 		config.VerificationTimeout = config.ResponseTimeout
@@ -414,6 +429,11 @@ func (c *Controller) NextWake() time.Time {
 	c.mu.Lock()
 	verificationDeadline := c.responderCompletedAt.Add(c.config.VerificationTimeout)
 	verificationPending := c.incidentOpen && c.responderDone && !c.detectorReviewRequired
+	if verificationPending && c.followUpsRemainLocked() {
+		if due := c.followUpDueAtLocked(); due.Before(verificationDeadline) {
+			verificationDeadline = due
+		}
+	}
 	c.mu.Unlock()
 	if verificationPending && (next.IsZero() || verificationDeadline.Before(next)) {
 		return verificationDeadline
@@ -572,6 +592,10 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 			c.mu.Unlock()
 			return
 		}
+		if c.startFollowUpLocked(now) {
+			c.mu.Unlock()
+			return
+		}
 		deadline := c.responderCompletedAt.Add(c.config.VerificationTimeout)
 		if !now.Before(deadline) {
 			c.detectorReviewRequired = true
@@ -620,6 +644,122 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 	if c.OnIncidentClosed != nil {
 		c.OnIncidentClosed(closure)
 	}
+}
+
+// followUpAttemptLocked returns how many follow-ups the open incident chain has
+// already used. The count lives in the persisted request, so a restarted
+// controller resumes with the same bound.
+func (c *Controller) followUpAttemptLocked() int {
+	if c.currentIncidentRequest == nil || c.currentIncidentRequest.FollowUp == nil {
+		return 0
+	}
+	return c.currentIncidentRequest.FollowUp.Attempt
+}
+
+func (c *Controller) followUpsRemainLocked() bool {
+	return c.config.MaxFollowUps > 0 && c.followUpAttemptLocked() < c.config.MaxFollowUps
+}
+
+func (c *Controller) followUpDueAtLocked() time.Time {
+	cooldown := c.config.FollowUpCooldown
+	if cooldown > c.config.VerificationTimeout {
+		cooldown = c.config.VerificationTimeout
+	}
+	return c.responderCompletedAt.Add(cooldown)
+}
+
+// startFollowUpLocked replaces a completed incident whose health findings are
+// still active with a follow-up request for the residual findings. It keeps
+// the incident open, so exactly one responder is in flight and one closure is
+// cut when verification finally succeeds. It reports whether it started one.
+func (c *Controller) startFollowUpLocked(now time.Time) bool {
+	if !c.followUpsRemainLocked() || now.Before(c.followUpDueAtLocked()) {
+		return false
+	}
+	// Health detectors own verification; without any, the incident's own
+	// findings are what verification waits on.
+	var residualKeys []string
+	if len(c.healthDetectorIDs) == 0 {
+		residualKeys = c.incidentFindingKeys
+	}
+	residual := c.tracker.ActiveFindings(c.healthDetectorIDs, residualKeys)
+	if len(residual) == 0 {
+		return false
+	}
+	parent := c.currentIncidentRequest
+	request := c.incidentRequest(now, residual)
+	if request.IncidentID == parent.IncidentID {
+		request.IncidentID = fmt.Sprintf("%s-f%d", request.IncidentID, c.followUpAttemptLocked()+1)
+		request.CancellationToken = "cancel-" + request.IncidentID
+	}
+	original := parent.IncidentID
+	priorSummary := ""
+	if parent.FollowUp != nil {
+		original = parent.FollowUp.OriginalIncidentID
+		priorSummary = parent.FollowUp.PriorSummary
+	}
+	request.FollowUp = &FollowUpContext{
+		OriginalIncidentID: original, ParentIncidentID: parent.IncidentID,
+		Attempt: c.followUpAttemptLocked() + 1, MaxFollowUps: c.config.MaxFollowUps,
+		PriorSummary: boundedFollowUpSummary(priorSummary, followUpSummary(parent, c.currentIncidentResult, c.dispatchError)),
+	}
+	request.RepositoryWorktree = parent.RepositoryWorktree
+	request.RepositoryBaseCommit = parent.RepositoryBaseCommit
+	c.batcher.RemoveKeys(findingKeys(residual))
+	c.currentIncidentRequest = cloneIncidentRequest(&request)
+	c.currentIncidentResult = nil
+	c.dispatchError = ""
+	c.responderDone = false
+	c.responderCompletedAt = time.Time{}
+	c.dispatchState = "pending"
+	if c.broker != nil {
+		c.dispatchState = "workspace_pending"
+	}
+	c.incidentFindingKeys = findingKeys(residual)
+	return true
+}
+
+const followUpSummaryLimit = 3000
+
+func followUpSummary(request *IncidentRequest, result *IncidentResult, dispatchError string) string {
+	var out strings.Builder
+	fmt.Fprintf(&out, "Responder for incident %s was dispatched for:", request.IncidentID)
+	for _, finding := range request.Findings {
+		fmt.Fprintf(&out, " [%s/%s %s]", finding.DetectorID, finding.RuleID, finding.Summary)
+	}
+	out.WriteString(". ")
+	switch {
+	case result == nil && dispatchError != "":
+		fmt.Fprintf(&out, "It failed: %s.", dispatchError)
+	case result == nil:
+		out.WriteString("It reported no result.")
+	default:
+		fmt.Fprintf(&out, "It finished with status %s.", result.Status)
+		for _, cause := range result.ConfirmedRootCauses {
+			fmt.Fprintf(&out, " Root cause: %s.", cause.Summary)
+		}
+		for _, change := range result.RepairChanges {
+			fmt.Fprintf(&out, " Repair: %s.", change)
+		}
+		for _, action := range result.RepairActions {
+			fmt.Fprintf(&out, " Action: %s.", action.Summary)
+		}
+		if result.Error != "" {
+			fmt.Fprintf(&out, " Error: %s.", result.Error)
+		}
+	}
+	return out.String()
+}
+
+func boundedFollowUpSummary(previous string, current string) string {
+	combined := current
+	if previous != "" {
+		combined = previous + "\n" + current
+	}
+	if len(combined) > followUpSummaryLimit {
+		combined = combined[len(combined)-followUpSummaryLimit:]
+	}
+	return combined
 }
 
 func (c *Controller) finalVerificationStates() ([]DetectorEvaluation, bool) {

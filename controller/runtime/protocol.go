@@ -67,6 +67,21 @@ type IncidentRequest struct {
 	ResponseDeadline        time.Time              `json:"response_deadline"`
 	CancellationToken       string                 `json:"cancellation_token"`
 	RepairPolicy            string                 `json:"repair_policy"`
+	// FollowUp is set only on a follow-up incident dispatched for findings that
+	// stayed active after an earlier responder completed.
+	FollowUp *FollowUpContext `json:"follow_up,omitempty"`
+}
+
+// FollowUpContext links a follow-up responder request to the incident it
+// continues. The request's Findings are the residual findings; PriorSummary
+// is a bounded, factual digest of what the earlier responders reported.
+type FollowUpContext struct {
+	OriginalIncidentID string `json:"original_incident_id"`
+	ParentIncidentID   string `json:"parent_incident_id"`
+	// Attempt is the 1-based follow-up ordinal; MaxFollowUps is the bound.
+	Attempt      int    `json:"attempt"`
+	MaxFollowUps int    `json:"max_follow_ups"`
+	PriorSummary string `json:"prior_responder_summary"`
 }
 
 type ConfirmedRootCause struct {

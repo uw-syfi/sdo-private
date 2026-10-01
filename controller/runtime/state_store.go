@@ -249,6 +249,10 @@ func cloneIncidentRequest(request *IncidentRequest) *IncidentRequest {
 	copy.Findings = append([]sdk.Finding(nil), request.Findings...)
 	copy.DetectorHistory = append([]DetectorEvaluation(nil), request.DetectorHistory...)
 	copy.SurfacedPlaybooks = append([]SurfacedPlaybook(nil), request.SurfacedPlaybooks...)
+	if request.FollowUp != nil {
+		followUp := *request.FollowUp
+		copy.FollowUp = &followUp
+	}
 	return &copy
 }
 

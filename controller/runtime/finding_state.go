@@ -182,6 +182,34 @@ func (t *FindingStateTracker) HasActiveDetector(detectorID string) bool {
 	return false
 }
 
+// ActiveFindings returns the currently active findings that belong to any of
+// the given detectors, or whose state key is listed, in deterministic order.
+func (t *FindingStateTracker) ActiveFindings(detectorIDs []string, keys []string) []sdk.Finding {
+	detectors := make(map[string]struct{}, len(detectorIDs))
+	for _, id := range detectorIDs {
+		detectors[id] = struct{}{}
+	}
+	listed := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		listed[key] = struct{}{}
+	}
+	result := make([]sdk.Finding, 0)
+	for key, state := range t.states {
+		if !state.Active {
+			continue
+		}
+		_, byDetector := detectors[state.DetectorID]
+		_, byKey := listed[key]
+		if byDetector || byKey {
+			finding := state.Finding
+			finding.Fingerprint = FindingFingerprint(finding)
+			result = append(result, finding)
+		}
+	}
+	sortFindings(result)
+	return result
+}
+
 // HasPendingDetector reports whether a detector has observed a finding that
 // has not yet reached its firing threshold.
 func (t *FindingStateTracker) HasPendingDetector(detectorID string) bool {

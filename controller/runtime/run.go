@@ -100,6 +100,16 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		2*time.Minute,
 		"maximum wait for independent health detectors to clear after a response",
 	)
+	maxFollowUps := flags.Int(
+		"max-follow-ups",
+		0,
+		"maximum follow-up responders for health findings that stay active after a response; zero disables follow-ups",
+	)
+	followUpCooldown := flags.Duration(
+		"follow-up-cooldown",
+		30*time.Second,
+		"wait after a response completes before its still-active health findings get a follow-up responder",
+	)
 	repairPolicy := flags.String("repair-policy", "commit", "repair evidence policy: commit or recorded-actions")
 	leaseName := flags.String("lease-name", "sdo-controller", "leader-election Lease name")
 	leaseDuration := flags.Duration("lease-duration", 60*time.Second, "leader-election Lease duration")
@@ -233,8 +243,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		ArchitectureSummaryPath: ".sdo/arch.md", HealthObjectivePath: ".sdo/goal.md",
 		RepositoryWorktree: resolvedRoot, ResponseTimeout: *responseTimeout,
 		VerificationTimeout: *verificationTimeout,
-		RepairPolicy:        *repairPolicy,
-		FiringThreshold:     2, ClearThreshold: 2, BatchDebounce: 500 * time.Millisecond,
+		MaxFollowUps:        *maxFollowUps, FollowUpCooldown: *followUpCooldown,
+		RepairPolicy:    *repairPolicy,
+		FiringThreshold: 2, ClearThreshold: 2, BatchDebounce: 500 * time.Millisecond,
 		ConfirmationInterval: time.Second,
 	}, detectors, kubernetesCache, dispatcher, start)
 	if err != nil {
