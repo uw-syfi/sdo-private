@@ -36,8 +36,26 @@ def _normalize(report: dict[str, Any]) -> dict[str, Any]:
     report["resolved_s"] = {name: shift(value) for name, value in report["resolved_s"].items()}
     report["first_green_s"] = {name: shift(value) for name, value in report.get("first_green_s", {}).items()}
     report["all_resolved_s"] = shift(report.get("all_resolved_s"))
+    report["timeline"] = [{**sample, "t": shift(sample["t"])} for sample in report.get("timeline", [])]
     report["origin"] = "injection_end"
     return report
+
+
+def _final_green_runs(report: dict[str, Any]) -> dict[str, float | None]:
+    """Start of each fault's final unbroken green run, with no minimum duration.
+
+    The tracker's own ``resolved_s`` needs the run to last ``stable_seconds``; an agent that fixes a
+    fault and returns within that window would otherwise count as unresolved, so tables use this.
+    """
+
+    result: dict[str, float | None] = dict.fromkeys(report["resolved_s"])
+    for sample in report.get("timeline", []):
+        for name, green in sample["states"].items():
+            if not green:
+                result[name] = None
+            elif result.get(name) is None:
+                result[name] = float(sample["t"])
+    return result
 
 
 def rows(directories: list[Path]) -> list[dict[str, Any]]:
@@ -46,6 +64,14 @@ def rows(directories: list[Path]) -> list[dict[str, Any]]:
         incidents = _load_incidents(directory)
         for report_path in sorted(directory.glob("composite_*.json")):
             report = _normalize(json.loads(report_path.read_text(encoding="utf-8")))
+            if report.get("timeline"):
+                report["resolved_s"] = _final_green_runs(report)
+                report["faults_resolved"] = sum(1 for value in report["resolved_s"].values() if value is not None)
+                report["all_resolved_s"] = (
+                    None
+                    if any(value is None for value in report["resolved_s"].values())
+                    else max(report["resolved_s"].values())
+                )
             index = int(report_path.name.split("_")[1])
             record = incidents.get(index, {})
             usage = record.get("responder_tokens") or {}

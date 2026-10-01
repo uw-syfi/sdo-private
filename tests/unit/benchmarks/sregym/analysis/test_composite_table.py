@@ -70,3 +70,31 @@ def test_reports_from_before_the_injection_end_origin_are_shifted(tmp_path: Path
 
     assert table[0]["per_fault_s"] == {"readiness:geo": 50.0}
     assert table[0]["all_resolved_s"] == 50.0
+
+
+def test_an_agent_that_returns_right_after_a_fix_still_counts_the_fault_resolved(tmp_path: Path) -> None:
+    timeline = [
+        {"t": 0.0, "states": {"a": False, "b": False}},
+        {"t": 5.0, "states": {"a": True, "b": False}},
+        {"t": 10.0, "states": {"a": True, "b": True}},
+    ]
+    (tmp_path / "composite_000_c.json").write_text(
+        json.dumps(
+            {
+                "agent": "codex",
+                "problem_id": "c",
+                "origin": "injection_end",
+                "faults_resolved": 1,
+                "faults_total": 2,
+                "all_resolved_s": None,
+                "resolved_s": {"a": 5.0, "b": None},
+                "timeline": timeline,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    table = rows([tmp_path])
+
+    assert table[0]["resolved"] == "2/2"
+    assert table[0]["all_resolved_s"] == 10.0
