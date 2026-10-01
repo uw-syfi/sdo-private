@@ -33,6 +33,11 @@ def main(
     if args.command == "detector":
         return _check_detector(detector_check_runner)
     if args.command == "incident":
+        if args.incident_command == "late-findings":
+            from sdo.operational_memory import late_findings_main
+
+            return late_findings_main(["--incident-id", args.incident_id, *_telemetry_args(args)])
+
         from sdo.agent_runtime.responder import run_incident_status_cli
 
         return run_incident_status_cli(workload=args.workload, scenarios=tuple(args.scenario), as_json=args.json)
@@ -96,7 +101,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--scenario", action="append", default=[], help="restrict the burst to this scenario; may be repeated"
     )
     status_parser.add_argument("--json", action="store_true", help="print the machine-readable status")
+    late = incident_commands.add_parser(
+        "late-findings",
+        help="print, as compact JSON, findings that activated after this incident's responder was dispatched",
+    )
+    late.add_argument("--incident-id", required=True)
+    late.add_argument("--telemetry-path", type=Path)
     return parser
+
+
+def _telemetry_args(args: argparse.Namespace) -> list[str]:
+    return [] if args.telemetry_path is None else ["--telemetry-path", str(args.telemetry_path)]
 
 
 def _check_detector(runner: SandboxRunner | None) -> int:

@@ -13,12 +13,20 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 from sdo.contracts import (
     DetectorEvaluation,
     DetectorEvaluationStatus,
+    DetectorTimelineEntry,
     IncidentRequest,
     IncidentResult,
     ObservedStateChange,
     StateChanges,
 )
 from sdo.operational_memory.commit_broker import CommitBroker, CommitBrokerError
+from sdo.operational_memory.late_findings import (
+    LATE_FINDINGS_MODES,
+    PULL_LOG_FILENAME,
+    LateFindingsMode,
+    LateFindingsPullSummary,
+    summarize_pulls,
+)
 from sdo.operational_memory.models import (
     ArtifactOwner,
     OutcomeClassification,
@@ -58,6 +66,10 @@ ReflectionSessionMode = Literal["resume", "fresh"]
 REFLECTION_SESSION_MODES: tuple[ReflectionSessionMode, ...] = ("resume", "fresh")
 #: A fresh first attempt starts from a bounded incident brief instead of re-sending the responder transcript.
 DEFAULT_REFLECTION_SESSION: ReflectionSessionMode = "fresh"
+#: ``baseline`` keeps per-cause learning; ``generalize`` widens an existing incident detector across parameter variants;
+#: ``generalize-spec`` also prefers predicates decidable from resource spec and status over later-produced evidence.
+ReflectionGuidance = Literal["baseline", "generalize", "generalize-spec"]
+REFLECTION_GUIDANCE_MODES: tuple[ReflectionGuidance, ...] = ("baseline", "generalize", "generalize-spec")
 
 
 class ReflectionProposal(Protocol):
@@ -130,6 +142,15 @@ class BrokerClosure(BaseModel):
     # verification time (N11); can name a composite's later fault the
     # dispatch-time request diff missed. None without a baseline.
     final_state_changes: StateChanges | None = None
+    # Firing telemetry for this incident window; analysis evidence, never a
+    # closure gate. The booleans are derived by the controller from the timeline.
+    detector_timeline: list[DetectorTimelineEntry] = Field(default_factory=list)
+    incident_detector_fired_before_dispatch: bool = False
+    incident_detector_fired_after_dispatch: bool = False
+    no_incident_detector_fired: bool = False
+    # Whether the responder pulled findings that activated after dispatch; set by the broker when
+    # ``--late-findings pull`` is selected, ``None`` otherwise and in closures written earlier.
+    late_findings_pull: LateFindingsPullSummary | None = None
     detected_at: datetime
     dispatched_at: datetime
     responder_completed_at: datetime
@@ -278,6 +299,8 @@ class BrokerService:
         repair_policy: Literal["commit", "recorded-actions"] = "commit",
         max_reflection_attempts: int = 3,
         reflection_session: ReflectionSessionMode = DEFAULT_REFLECTION_SESSION,
+        late_findings: LateFindingsMode = "off",
+        late_findings_log: Path | None = None,
     ) -> None:
         if repair_policy not in ("commit", "recorded-actions"):
             raise ValueError(f"unsupported repair policy: {repair_policy!r}")
@@ -285,6 +308,10 @@ class BrokerService:
             raise ValueError("max_reflection_attempts must be at least 1")
         if reflection_session not in REFLECTION_SESSION_MODES:
             raise ValueError(f"unsupported reflection session mode: {reflection_session!r}")
+        if late_findings not in LATE_FINDINGS_MODES:
+            raise ValueError(f"unsupported late-findings mode: {late_findings!r}")
+        self.late_findings: LateFindingsMode = late_findings
+        self.late_findings_log = late_findings_log
         self.target_repository = target_repository.resolve()
         self.worktrees = WorktreeManager(self.target_repository, worktree_root)
         self.broker = broker or CommitBroker(self.target_repository)
@@ -332,6 +359,7 @@ class BrokerService:
                     f"{closure.request.repair_policy!r} != {self.repair_policy!r}"
                 )
             if ledger.closure is None:
+                closure = self._with_late_findings_evidence(closure)
                 ledger.closure = closure
                 ledger.responder_session_id = None if closure.result is None else closure.result.responder_session_id
                 self._save(ledger)
@@ -996,6 +1024,19 @@ class BrokerService:
             ".sdo/playbooks",
             ".sdo/diagnostics",
         )
+
+    def _with_late_findings_evidence(self, closure: BrokerClosure) -> BrokerClosure:
+        """Attach how the responder used the late-findings pull (``--late-findings pull`` only)."""
+
+        if self.late_findings != "pull":
+            return closure
+        applied = [] if closure.result is None else [playbook.path for playbook in closure.result.applied_playbooks]
+        summary = summarize_pulls(
+            self.late_findings_log or self.target_repository / ".sdo-runtime" / "telemetry" / PULL_LOG_FILENAME,
+            closure.request.incident_id,
+            applied_playbooks=applied,
+        )
+        return closure.model_copy(update={"late_findings_pull": summary})
 
     @staticmethod
     def _validate_closure_workspace(closure: BrokerClosure, ledger: BrokerLedger) -> None:

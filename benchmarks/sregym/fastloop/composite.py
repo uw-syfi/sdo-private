@@ -1,0 +1,538 @@
+"""Composite (multi-fault) incidents for the fast loop.
+
+A composite injects several independent faults at once. Two things differ from a
+single-fault incident:
+
+* Per-fault progress is recorded by read-only probes (:mod:`fault_tracker`) while
+  the agent works, so the result says which fault was fixed when, not only whether all were.
+* SDO's controller may close an incident before every fault is fixed. The composite
+  SDO agent therefore keeps the controller running after each verified incident,
+  drains that incident's reflection, and waits for the next incident until every
+  fault is resolved, no further incident arrives, or the deadline passes.
+
+Both agents write ``composite_<index>_<problem>.json`` beside the incident records:
+fault timeline, per-fault resolution seconds since injection finished, and (SDO) the
+incident sequence with the controller-state timeline.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import threading
+import time
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from benchmarks.sregym.adapter import (
+    PersistentState,
+    collect_followup_incident,
+    drain_pending_incident,
+    pause_controller,
+)
+from benchmarks.sregym.adapter.persistent import DetectorReviewRequiredError, PersistentControllerError
+from benchmarks.sregym.fastloop.fault_tracker import (
+    BackgroundPoller,
+    FaultTracker,
+    KubectlReader,
+    composite_faults,
+    probes_for,
+)
+from benchmarks.sregym.fastloop.loop import AgentOutcome
+from benchmarks.sregym.fastloop.records import TokenCounts
+from benchmarks.sregym.fastloop.sdo_agent import SdoPersistentAgent
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from benchmarks.sregym.fastloop.loop import InjectionWindow
+    from benchmarks.sregym.fastloop.records import AgentName
+
+logger = logging.getLogger(__name__)
+
+STATE_SAMPLE_SECONDS = 10.0
+
+
+@dataclass(frozen=True)
+class CompositeSettings:
+    #: Longest the composite may run after injection before the agent is cut off.
+    deadline_seconds: float = 2400.0
+    #: Longest to wait for another incident while faults remain and none is in flight.
+    idle_seconds: float = 600.0
+    #: How long a fault must stay green to count as resolved.
+    stable_seconds: float = 20.0
+    poll_seconds: float = 5.0
+    #: Stop as soon as the controller stops itself for detector review (False: wait out the deadline).
+    stop_on_detector_review: bool = True
+
+    def __post_init__(self) -> None:
+        for name in ("deadline_seconds", "idle_seconds", "stable_seconds", "poll_seconds"):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be positive")
+
+
+def make_tracker(problem_id: str, reader: Callable[[str, str], dict[str, Any] | None], settings: CompositeSettings):
+    faults = composite_faults(problem_id)
+    if not faults:
+        return None
+    return FaultTracker(probes_for(faults, reader), stable_seconds=settings.stable_seconds)
+
+
+def write_composite_report(path: Path, report: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(report, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def _fault_report(tracker: FaultTracker, injected_offset: float) -> dict[str, Any]:
+    """Seconds are measured from the end of injection (tracker polling starts there)."""
+
+    resolution = tracker.resolution_times()
+    first = tracker.first_green()
+    last = tracker.samples[-1].states if tracker.samples else {}
+    return {
+        "faults": list(resolution),
+        "resolved_s": resolution,
+        "first_green_s": first,
+        "ever_red": tracker.ever_red(),
+        "final_green": last,
+        "faults_resolved": sum(1 for value in resolution.values() if value is not None),
+        "faults_total": len(resolution),
+        "all_resolved_s": tracker.all_resolved_at(),
+        "poll_origin_offset_s": injected_offset,
+        # Seconds are measured from the end of injection (older reports measured from agent start).
+        "origin": "injection_end",
+        "timeline": tracker.timeline(),
+    }
+
+
+class TrackedAgent:
+    """Wraps an incident agent (the Codex baselines) with per-fault resolution tracking."""
+
+    def __init__(
+        self,
+        inner: Any,
+        *,
+        reader: Callable[[str, str], dict[str, Any] | None],
+        report_dir: Path,
+        settings: CompositeSettings | None = None,
+    ) -> None:
+        self._inner = inner
+        self._reader = reader
+        self._report_dir = report_dir
+        self._settings = settings or CompositeSettings()
+
+    @property
+    def name(self) -> AgentName:
+        return self._inner.name
+
+    @property
+    def model(self) -> str:
+        return self._inner.model
+
+    def resolve(self, index: int, problem_id: str, inject: Callable[[], InjectionWindow]) -> AgentOutcome:
+        tracker = make_tracker(problem_id, self._reader, self._settings)
+        if tracker is None:
+            return self._inner.resolve(index, problem_id, inject)
+        poller = BackgroundPoller(tracker, interval_seconds=self._settings.poll_seconds)
+        started = time.monotonic()
+        state: dict[str, Any] = {}
+
+        def tracked_inject() -> InjectionWindow:
+            window = inject()
+            state["poller"] = poller.__enter__()
+            state["offset"] = time.monotonic() - started
+            return window
+
+        outcome = None
+        try:
+            outcome = self._inner.resolve(index, problem_id, tracked_inject)
+        finally:
+            if "poller" in state:
+                poller.__exit__(None, None, None)
+            report = _fault_report(tracker, state.get("offset", 0.0))
+            report.update({"agent": self.name, "problem_id": problem_id})
+            if outcome is not None:
+                report["agent_returned_after_injection_s"] = (
+                    (
+                        (outcome.resolved_at or outcome.mitigation_applied_at) - outcome.injection.finished_at
+                    ).total_seconds()
+                    if (outcome.resolved_at or outcome.mitigation_applied_at)
+                    else None
+                )
+            write_composite_report(self._report_dir / f"composite_{index:03d}_{problem_id}.json", report)
+        return outcome
+
+    def learn(self, outcome: AgentOutcome) -> AgentOutcome:
+        return self._inner.learn(outcome)
+
+    def close(self) -> None:
+        self._inner.close()
+
+
+class CompositeSdoAgent(SdoPersistentAgent):
+    """SDO's persistent controller serving a composite: several incidents, one injection."""
+
+    name: AgentName = "sdo"
+
+    def __init__(
+        self,
+        *args: Any,
+        reader: Callable[[str, str], dict[str, Any] | None],
+        report_dir: Path,
+        composite: CompositeSettings | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self._composite = composite or CompositeSettings()
+        super().__init__(
+            *args, keep_running=True, stop_on_detector_review=self._composite.stop_on_detector_review, **kwargs
+        )
+        self._reader = reader
+        self._report_dir = report_dir
+        self._incidents: list[dict[str, Any]] = []
+        self._base_dir: Path | None = None
+        self._wedge_usage: dict[str, Any] | None = None
+
+    def resolve(self, index: int, problem_id: str, inject: Callable[[], InjectionWindow]) -> AgentOutcome:
+        composite = self._composite
+        tracker = make_tracker(problem_id, self._reader, composite)
+        if tracker is None:
+            raise ValueError(f"{problem_id!r} is not a registered composite")
+        settings = self._settings
+        control = settings.runtime_config.control_namespace
+        assert control is not None
+        poller = BackgroundPoller(tracker, interval_seconds=composite.poll_seconds)
+        sampler_stop = threading.Event()
+        controller_samples: list[dict[str, Any]] = []
+        started = time.monotonic()
+        marks: dict[str, float] = {}
+
+        def sample_controller() -> None:
+            while not sampler_stop.is_set():
+                try:
+                    state = self._ops.runtime_state(control)
+                    closure = state.get("pending_closure") or {}
+                    request = state.get("incident_request") or {}
+                    controller_samples.append(
+                        {
+                            "t": round(time.monotonic() - started, 1),
+                            "incident_request": request.get("incident_id") if isinstance(request, dict) else None,
+                            "pending_closure": (closure.get("request") or {}).get("incident_id")
+                            if isinstance(closure, dict)
+                            else None,
+                            "closure_verified_at": closure.get("verified_at") if isinstance(closure, dict) else None,
+                            "last_acknowledged": state.get("last_acknowledged_incident_id"),
+                            "closure_state": state.get("closure_state"),
+                        }
+                    )
+                except Exception as exc:  # telemetry must not stop the run
+                    controller_samples.append({"t": round(time.monotonic() - started, 1), "error": str(exc)})
+                sampler_stop.wait(STATE_SAMPLE_SECONDS)
+
+        injected: list[InjectionWindow] = []
+
+        def tracked_inject() -> InjectionWindow:
+            window = inject()
+            injected.append(window)
+            marks["poll_start"] = time.monotonic() - started
+            poller.__enter__()
+            return window
+
+        sampler = threading.Thread(target=sample_controller, name="controller-state", daemon=True)
+        sampler.start()
+        self._incidents = []
+        outcomes: list[AgentOutcome] = []
+        stop_reason = "error"
+        wedged = False
+        try:
+            try:
+                first = super().resolve(index, problem_id, tracked_inject)
+            except PersistentControllerError as stage_error:
+                if not injected:
+                    raise
+                if isinstance(stage_error, DetectorReviewRequiredError):
+                    wedge = stage_error
+                    stop_reason = "detector_review_required"
+                else:
+                    state = self._ops.runtime_state(control)
+                    request = state.get("incident_request")
+                    wedge = DetectorReviewRequiredError(
+                        str(request.get("incident_id")) if isinstance(request, dict) else "none",
+                        f"no verified closure: {stage_error}",
+                        state,
+                    )
+                    stop_reason = "no_closure_within_deadline"
+                wedged = True
+                first = self._wedged_outcome(index, problem_id, injected[0], wedge)
+            self._base_dir = Path(str(first.artifacts_dir))
+            outcomes.append(first)
+            self._incidents.append(
+                {
+                    "incident_id": first.incident_id,
+                    "receipt_dir": str(first.artifacts_dir),
+                    "outcome": first,
+                    "fallback_usage": self._wedge_usage if wedged else None,
+                }
+            )
+            deadline = started + composite.deadline_seconds
+            known = {str(first.incident_id)}
+            lifecycle = self._lifecycle_inputs()
+            while not wedged:
+                self._drain_last(first_label=f"composite-{index:03d}")
+                if tracker.all_resolved_at() is not None or self._wait_resolved(tracker, composite):
+                    stop_reason = "all_faults_resolved"
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    stop_reason = "deadline"
+                    break
+                number = len(self._incidents) + 1
+                receipt_dir = (
+                    Path(str(first.artifacts_dir)).parent / f"{Path(str(first.artifacts_dir)).name}_incident{number}"
+                )
+                followup = collect_followup_incident(
+                    self.stage_inputs(f"fastloop-{index:03d}-incident{number}", receipt_dir, lifecycle.fingerprint),
+                    ops=self._ops,
+                    known=known,
+                    timeout_seconds=min(composite.idle_seconds, remaining),
+                    clock=self._clock,
+                )
+                if followup is None:
+                    stop_reason = "no_further_incident" if remaining > composite.idle_seconds else "deadline"
+                    break
+                known.add(str(followup["incident_id"]))
+                outcomes.append(self._outcome_from_resolution(first, followup, receipt_dir))
+                self._incidents.append(
+                    {"incident_id": followup["incident_id"], "receipt_dir": str(receipt_dir), "outcome": outcomes[-1]}
+                )
+        finally:
+            sampler_stop.set()
+            sampler.join(timeout=30)
+            marks["last_resolve_s"] = time.monotonic() - started
+            if "poll_start" in marks:
+                poller.__exit__(None, None, None)
+            try:
+                if stop_reason in {"detector_review_required", "no_closure_within_deadline"}:
+                    # The controller stopped itself; nothing will acknowledge a pause.
+                    self._ops.set_maintenance(control, paused=True, generation=f"composite-{index:03d}-wedged")
+                else:
+                    pause_controller(self._ops, control, label=f"composite-{index:03d}", clock=self._clock)
+            except Exception:
+                logger.exception("could not pause the controller after the composite")
+            report = _fault_report(tracker, marks.get("poll_start", 0.0))
+            report.update(
+                {
+                    "agent": "sdo",
+                    "problem_id": problem_id,
+                    "stop_reason": stop_reason,
+                    "incidents": [
+                        {
+                            "incident_id": item["incident_id"],
+                            "receipt_dir": item["receipt_dir"],
+                            "detected_at": _iso(item["outcome"].detected_at),
+                            "resolved_at": _iso(item["outcome"].resolved_at),
+                            "diagnosis": item["outcome"].diagnosis,
+                            "mitigation": item["outcome"].mitigation,
+                        }
+                        for item in self._incidents
+                    ],
+                    "controller_state_timeline": controller_samples,
+                    "controller_job": _controller_job_summary(control),
+                }
+            )
+            write_composite_report(self._report_dir / f"composite_{index:03d}_{problem_id}.json", report)
+        return self._merge(outcomes)
+
+    def _wedged_outcome(
+        self, index: int, problem_id: str, window: InjectionWindow, wedge: DetectorReviewRequiredError
+    ) -> AgentOutcome:
+        """The controller stopped on an uncleared incident: keep what its state and PVC hold as evidence."""
+
+        from benchmarks.sregym.fastloop.sdo_agent import _last_successful_repair, _summaries, _timestamp
+
+        settings = self._settings
+        control = settings.runtime_config.control_namespace
+        assert control is not None
+        receipt_dir = settings.results_dir / f"{index:03d}_{problem_id}"
+        receipt_dir.mkdir(parents=True, exist_ok=True)
+        state = wedge.state
+        result = state.get("incident_result") if isinstance(state.get("incident_result"), dict) else {}
+        self._ops.export_controller_logs(control, receipt_dir)
+        evidence = self._ops.export_runtime_artifacts(
+            replace(settings.runtime_config, artifacts_dir=receipt_dir), receipt_dir
+        )
+        write_composite_report(
+            receipt_dir / "detector_review_state.json",
+            {"reason": wedge.reason, "runtime_state": state, "runtime_artifacts": evidence},
+        )
+        self._wedge_usage = result.get("usage") if isinstance(result.get("usage"), dict) else None
+        return AgentOutcome(
+            injection=window,
+            detected_at=_timestamp(state.get("incident_detected_at")),
+            mitigation_applied_at=_last_successful_repair(result.get("repair_actions")),
+            resolved_at=None,
+            diagnosis=_summaries(result.get("confirmed_root_causes")),
+            mitigation=_summaries(result.get("repair_actions"), successful_only=True),
+            incident_id=wedge.incident_id,
+            artifacts_dir=str(receipt_dir),
+            error=f"controller stopped for detector review: {wedge.reason}",
+        )
+
+    @staticmethod
+    def _wait_resolved(tracker: FaultTracker, composite: CompositeSettings) -> bool:
+        """When every fault is green right now, give the stability window time to confirm it."""
+
+        tracker.poll()
+        if not tracker.all_green_now():
+            return False
+        time.sleep(composite.stable_seconds + 2 * composite.poll_seconds)
+        tracker.poll()
+        return tracker.all_resolved_at() is not None
+
+    def _drain_last(self, *, first_label: str) -> None:
+        settings = self._settings
+        state = PersistentState.load(settings.state_path)
+        record = state.controllers.get(settings.namespace)
+        if record is None or record.pending is None:
+            return
+        try:
+            drain_pending_incident(
+                record,
+                ops=self._ops,
+                repository=settings.repository,
+                drained_by=first_label,
+                clock=self._clock,
+            )
+        except Exception:
+            logger.exception("draining incident %s failed", record.pending.incident_id)
+        finally:
+            record.pending = None
+            state.save(settings.state_path)
+
+    def _outcome_from_resolution(
+        self, first: AgentOutcome, resolution: dict[str, Any], receipt_dir: Path
+    ) -> AgentOutcome:
+        from benchmarks.sregym.fastloop.sdo_agent import _last_successful_repair, _summaries, _timestamp
+
+        verified = _timestamp(resolution.get("verified_at"))
+        seconds = resolution.get("incident_resolution_seconds")
+        detected = None
+        if verified is not None and isinstance(seconds, (int, float)):
+            from datetime import timedelta
+
+            detected = verified - timedelta(seconds=float(seconds))
+        return replace(
+            first,
+            detected_at=detected,
+            mitigation_applied_at=_last_successful_repair(resolution.get("repair_actions")),
+            resolved_at=verified,
+            diagnosis=_summaries(resolution.get("confirmed_root_causes")),
+            mitigation=_summaries(resolution.get("repair_actions"), successful_only=True),
+            incident_id=str(resolution["incident_id"]),
+            artifacts_dir=str(receipt_dir),
+        )
+
+    def _merge(self, outcomes: list[AgentOutcome]) -> AgentOutcome:
+        first = outcomes[0]
+        last = outcomes[-1]
+        return replace(
+            first,
+            mitigation_applied_at=max(
+                (item.mitigation_applied_at for item in outcomes if item.mitigation_applied_at), default=None
+            ),
+            resolved_at=max((item.resolved_at for item in outcomes if item.resolved_at), default=None),
+            diagnosis=" || ".join(item.diagnosis for item in outcomes if item.diagnosis),
+            mitigation=" || ".join(item.mitigation for item in outcomes if item.mitigation),
+            incident_id=last.incident_id,
+            artifacts_dir=last.artifacts_dir,
+        )
+
+    def learn(self, outcome: AgentOutcome) -> AgentOutcome:
+        settings = self._settings
+        state = PersistentState.load(settings.state_path)
+        record = state.controllers.get(settings.namespace)
+        error: str | None = None
+        if record is not None and record.pending is not None:
+            try:
+                drain_pending_incident(
+                    record,
+                    ops=self._ops,
+                    repository=settings.repository,
+                    drained_by=f"fastloop-learn-{outcome.incident_id}",
+                    clock=self._clock,
+                )
+            except Exception as exc:
+                error = f"drain failed: {type(exc).__name__}: {exc}"
+            finally:
+                record.pending = None
+                state.save(settings.state_path)
+        usage = TokenCounts()
+        reflection = TokenCounts()
+        attempts = 0
+        warm = False
+        reasons: list[str] = []
+        receipts_seen = 0
+        for item in self._incidents:
+            receipt = self._receipt(Path(item["receipt_dir"]))
+            if not receipt and item.get("fallback_usage"):
+                # No strict receipt exists for an incident that never closed; its responder usage is in state.
+                usage = _add(usage, TokenCounts.from_usage(item["fallback_usage"]))
+                receipts_seen += 1
+                continue
+            if not receipt:
+                continue
+            receipts_seen += 1
+            usage = _add(usage, TokenCounts.from_usage(receipt.get("usage")))
+            reflection = _add(reflection, TokenCounts.from_usage(receipt.get("reflection_usage")))
+            attempts += receipt.get("reflection_attempts") if isinstance(receipt.get("reflection_attempts"), int) else 0
+            memory = receipt.get("memory_reuse") if isinstance(receipt.get("memory_reuse"), dict) else {}
+            warm = warm or bool(memory.get("warm_path"))
+            reasons.extend(str(reason) for reason in memory.get("match_reasons", []) or [])
+        if receipts_seen < len(self._incidents):
+            error = "; ".join(
+                filter(None, [error, f"{len(self._incidents) - receipts_seen} incident receipt(s) missing"])
+            )
+        return outcome.with_learning(
+            responder_tokens=usage,
+            reflection_tokens=reflection,
+            warm_path=warm,
+            match_reasons=tuple(dict.fromkeys(reasons)),
+            reflection_attempts=attempts,
+            error="; ".join(filter(None, [outcome.error, error])) or None,
+        )
+
+
+def _controller_job_summary(control: str) -> dict[str, Any]:
+    """How many controller pods ran and how they ended (a stopped controller is restarted by its Job)."""
+
+    from sdo.controller_install import kubectl
+
+    try:
+        completed = kubectl(
+            ["get", "pods", "--selector", "job-name=sdo-controller-run", "-o", "json"], namespace=control, check=False
+        )
+        pods = json.loads(completed.stdout).get("items", []) if completed.returncode == 0 else []
+        return {
+            "controller_pods": len(pods),
+            "phases": [pod.get("status", {}).get("phase") for pod in pods],
+        }
+    except Exception as exc:  # evidence only
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+def _add(left: TokenCounts, right: TokenCounts) -> TokenCounts:
+    return TokenCounts(
+        input_tokens=left.input_tokens + right.input_tokens,
+        cached_input_tokens=left.cached_input_tokens + right.cached_input_tokens,
+        output_tokens=left.output_tokens + right.output_tokens,
+    )
+
+
+def _iso(value: Any) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def reader_for(namespace: str, kubeconfig: Path | str) -> KubectlReader:
+    return KubectlReader(namespace=namespace, kubeconfig=kubeconfig)

@@ -70,6 +70,21 @@ type IncidentRequest struct {
 	// StateChanges is the application's configuration diff against its last
 	// healthy baseline when the incident opened; nil without a baseline.
 	StateChanges *StateChanges `json:"state_changes,omitempty"`
+	// FollowUp is set only on a follow-up incident dispatched for findings that
+	// stayed active after an earlier responder completed.
+	FollowUp *FollowUpContext `json:"follow_up,omitempty"`
+}
+
+// FollowUpContext links a follow-up responder request to the incident it
+// continues. The request's Findings are the residual findings; PriorSummary
+// is a bounded, factual digest of what the earlier responders reported.
+type FollowUpContext struct {
+	OriginalIncidentID string `json:"original_incident_id"`
+	ParentIncidentID   string `json:"parent_incident_id"`
+	// Attempt is the 1-based follow-up ordinal; MaxFollowUps is the bound.
+	Attempt      int    `json:"attempt"`
+	MaxFollowUps int    `json:"max_follow_ups"`
+	PriorSummary string `json:"prior_responder_summary"`
 }
 
 // RootCauseEvidence is one live observation supporting a root cause: a
@@ -168,6 +183,15 @@ type IncidentClosure struct {
 	// non-health detector that raised a finding in this incident. It is
 	// learning evidence for the broker, not a closure gate.
 	IncidentDetectorStates []DetectorEvaluation `json:"incident_detector_states,omitempty"`
+	// DetectorTimeline summarizes, per finding, when each detector fired in this
+	// incident window and how that relates to dispatch. The booleans derive
+	// from it for analysis: a learned incident detector that fired before the
+	// responder was dispatched, one that fired only while it ran, or only
+	// health detectors firing.
+	DetectorTimeline                    []DetectorTimelineEntry `json:"detector_timeline,omitempty"`
+	IncidentDetectorFiredBeforeDispatch bool                    `json:"incident_detector_fired_before_dispatch"`
+	IncidentDetectorFiredAfterDispatch  bool                    `json:"incident_detector_fired_after_dispatch"`
+	NoIncidentDetectorFired             bool                    `json:"no_incident_detector_fired"`
 	// FinalStateChanges is the configuration diff against the healthy
 	// baseline at verification time (N11): a composite fault's later
 	// component can land a few seconds after dispatch, while the incident is

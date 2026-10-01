@@ -300,6 +300,7 @@ def _run_stage(
         stage_error = _stage_results_error(
             stage_exp_dir,
             require_strict_receipt=exp_config.require_strict_receipt and not persistent_controller_enabled(exp_config),
+            allow_failed_verdicts=exp_config.allow_failed_verdicts,
         )
         if stage_error is not None:
             print(f"  ⚠️  Stage artifacts failed validation: {stage_error}", flush=True)
@@ -321,6 +322,28 @@ def _write_stage_failure(stage_exp_dir: Path, error: str) -> None:
 def _read_stage_failure(stage_exp_dir: Path) -> str:
     path = stage_exp_dir / _STAGE_FAILURE_FILENAME
     return path.read_text(encoding="utf-8").strip() if path.is_file() else ""
+
+
+def _csv_semantic_graded(row: dict[str, str | None], stage: str) -> bool:
+    """Whether a row carries an explicit true/false grade for ``stage`` (not blank, absent or malformed)."""
+
+    flattened = f"{stage}.success"
+    raw: object
+    if flattened in row:
+        raw = row[flattened]
+    elif stage in row and isinstance(row[stage], str):
+        try:
+            parsed: object = json.loads(str(row[stage]))
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(parsed, dict) or "success" not in parsed:
+            return False
+        raw = cast("dict[str, object]", parsed)["success"]
+    else:
+        return False
+    if isinstance(raw, bool):
+        return True
+    return isinstance(raw, str) and raw.strip().lower() in {"true", "false", "1", "0", "yes", "no"}
 
 
 def _csv_semantic_success(row: dict[str, str | None], stage: str) -> bool:
@@ -378,7 +401,9 @@ def _strict_receipt_error(receipt_path: Path) -> str | None:
     return None
 
 
-def _stage_results_error(stage_exp_dir: Path, *, require_strict_receipt: bool = False) -> str | None:
+def _stage_results_error(
+    stage_exp_dir: Path, *, require_strict_receipt: bool = False, allow_failed_verdicts: bool = False
+) -> str | None:
     """Reject benchmark-zero stages without complete, valid per-problem evidence."""
     results = sorted((stage_exp_dir / "problem_runs").glob("*/results_*.csv"))
     results.extend(sorted((stage_exp_dir / "runs").glob("*/worker_*/results/*/*/run_*/*_results.csv")))
@@ -394,7 +419,10 @@ def _stage_results_error(stage_exp_dir: Path, *, require_strict_receipt: bool = 
                 problem = row.get("problem_id") or result.parent.name
                 return f"problem {problem} recorded agent_error=true"
             for stage in ("Diagnosis", "Mitigation"):
-                if not _csv_semantic_success(row, stage):
+                accepted = (
+                    _csv_semantic_graded(row, stage) if allow_failed_verdicts else _csv_semantic_success(row, stage)
+                )
+                if not accepted:
                     problem = row.get("problem_id") or result.parent.name
                     return f"problem {problem} requires {stage}.success=true"
         if require_strict_receipt:
@@ -693,7 +721,13 @@ def run_pipeline(
                     continue  # already an agent outcome; its receipt is not expected to validate
                 # Each stage is judged by its own published receipt; a teardown
                 # failure is reported with the stages it left without one.
-                receipt_error = _stage_results_error(stage_dir, require_strict_receipt=True)
+                receipt_error = _stage_results_error(
+                    stage_dir,
+                    require_strict_receipt=True,
+                    allow_failed_verdicts=merge_stage_config(
+                        config.defaults, config.stages[index].runner_overrides
+                    ).allow_failed_verdicts,
+                )
                 if receipt_error is not None and teardown_error is not None:
                     receipt_error = f"{receipt_error} ({teardown_error})"
                 if receipt_error is not None and config.continue_on_agent_failure and teardown_error is None:

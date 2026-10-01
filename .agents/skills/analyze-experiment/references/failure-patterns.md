@@ -68,6 +68,12 @@ Check edits to human goals, architecture, health detectors, prior outcomes, or p
 
 Correlate classification, health verification, responder session ID, outcome commit, reflection commit, accepted detector paths, and controller-update rollout. A different session is expected when `reflection_session_mode=fresh` (the default) or for a validation retry (`reflection_fresh_retry_attempts`). Reflection agents are told to run `python3 -m sdo.operational_memory.memory_check --app . --actor responder` before returning; a rejection for a rule that check covers (index link, uppercase placeholder, script syntax, ownership, provenance) means the agent skipped or ignored it, so look for the command in the controller turn log's `shell_command_lines`.
 
+## Learned detector never fired
+
+**Signature:** a later variant of a fault the responder learned a detector for is solved cold: the receipt has `detector_firing_available=true` but `incident_detector_fired_before_dispatch=false`, so the stored memory went unused for detection.
+
+Distinguish by evidence: `no_incident_detector_fired=true` means only health detectors fired. A `not_persisted` record in `detector_firings.jsonl` for the learned detector means it flagged the fault but did not reach its firing threshold. `incident_detector_fired_after_dispatch=true` with `before_dispatch=false` means it fired only after the responder was already dispatched (too late to shape the request). No record at all for the detector means its predicate did not match the variant (over-specific parameters or selector; compare the record's `parameter_bindings` with the prior incident's) or the controller was not running that detector version (check the rollout and `detector_id` in the manifest). Receipts without `detector_firing_available` predate the telemetry and cannot answer this.
+
 ## Benchmark leakage
 
 **Signature:** lifecycle, detector, controller, or responder evidence contains fault labels, verdicts, submission APIs, or hidden benchmark metadata.

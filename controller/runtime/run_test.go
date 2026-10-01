@@ -179,3 +179,24 @@ func TestRunRejectsInvalidControlNamespace(t *testing.T) {
 		t.Fatalf("expected invalid control namespace error, got %v", err)
 	}
 }
+
+func TestAttachFiringTelemetryDefaultsByDispatcherMode(t *testing.T) {
+	mount := t.TempDir()
+	controller := telemetryController(t, nil, &recordingDispatcher{requests: make(chan IncidentRequest, 1)},
+		incidentDetector("cause", stateFinding("cause")))
+	if err := attachFiringTelemetry(controller, "", "local", mount); err != nil || controller.firingSink != nil {
+		t.Fatalf("local mode must not enable telemetry by default: %v", err)
+	}
+	if err := attachFiringTelemetry(controller, "off", "job", mount); err != nil || controller.firingSink != nil {
+		t.Fatalf("off must disable telemetry: %v", err)
+	}
+	if err := attachFiringTelemetry(controller, "", "job", mount); err != nil || controller.firingSink == nil {
+		t.Fatalf("job mode must enable telemetry: %v", err)
+	}
+	step(t, controller, 0)
+	step(t, controller, 1)
+	path := filepath.Join(mount, ".sdo-runtime", "telemetry", "detector-firings.jsonl")
+	if len(readStream(t, path)) == 0 {
+		t.Fatal("job-mode telemetry was not written under the repository mount")
+	}
+}

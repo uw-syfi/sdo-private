@@ -1,0 +1,34 @@
+# Memoryless stock Codex baseline on the three hand-registered composite faults
+# (ComposedFailures, third_party/sregym) followed by their constituent single faults,
+# n=1 each. Settings copied from codex_luna_sequence_baseline.toml. Results and
+# interpretation: docs/hand-composites-decisions.md.
+
+[runner]
+agent = "codex"
+model = "gpt-6-luna"
+reasoning_effort = "medium"
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+enable_summary = false
+no_inject_summary = true
+problems = [
+    "composite_readiness_geo__network_policy_recommendation",
+    "composite_configmap_mongodb_rate__wrong_selector_frontend",
+    "composite_network_policy_recommendation__configmap_mongodb_geo",
+    "readiness_probe_misconfiguration__v_hotel_reservation_geo",
+    "network_policy_block",
+    "missing_configmap_mongodb_rate_hotel_reservation",
+    "wrong_service_selector_hotel_reservation",
+    "missing_configmap_hotel_reservation",
+]
+
+[runner.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+kind_worker_nodes = 1
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+docker_builder = "sdo-example"

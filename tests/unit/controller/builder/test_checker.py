@@ -515,6 +515,10 @@ done
             str(tmp_path / "workspace" / "worktrees"),
             "--verification-timeout",
             "90s",
+            "--max-follow-ups",
+            "3",
+            "--follow-up-cooldown",
+            "45s",
             "--repair-policy",
             "recorded-actions",
         ]
@@ -533,6 +537,8 @@ done
     assert f"--app-root {app_root}" in argv
     assert f"--broker-worktree-root {tmp_path / 'workspace' / 'worktrees'}" in argv
     assert "--verification-timeout 90s" in argv
+    assert "--max-follow-ups 3" in argv
+    assert "--follow-up-cooldown 45s" in argv
     assert "--repair-policy recorded-actions" in argv
 
 
@@ -837,3 +843,215 @@ def test_check_cli_rejects_supervising_a_bounded_controller(tmp_path: Path) -> N
                 "--exit-after-closure",
             ]
         )
+
+
+_INCIDENT_SELECTOR_DETECTOR = """package selector
+
+import (
+    "context"
+    "fmt"
+    "time"
+
+    "sdo.dev/controller/sdk"
+)
+
+type Detector struct{}
+
+func New() sdk.Detector { return Detector{} }
+
+func (Detector) Spec() sdk.DetectorSpec {
+    return sdk.DetectorSpec{
+        ID: "service-selector-check", Class: sdk.DetectorClassIncident, Owner: sdk.DetectorOwnerResponder,
+        Interval: 30 * time.Second,
+        Watches: []sdk.WatchKind{{APIVersion: "v1", Kind: "Service"}, {APIVersion: "v1", Kind: "Pod"}},
+        Persistence: sdk.PersistencePolicy{Firing: 2, Clearing: 2},
+        Batching: sdk.BatchingPolicy{Severity: sdk.SeverityCritical, Debounce: 500 * time.Millisecond},
+        Playbooks: []string{},
+        OriginatingIncident: "incident-seed", OriginatingCommit: "abc123",
+    }
+}
+
+func (Detector) Detect(_ context.Context, snapshot sdk.DetectionContext) ([]sdk.Finding, error) {
+    findings := make([]sdk.Finding, 0)
+    for _, service := range snapshot.Services() {
+        if len(service.Spec.Selector) == 0 {
+            continue
+        }
+        if __CONDITION__ {
+            findings = append(findings, sdk.Finding{
+                RuleID: "service-selector-check", Status: sdk.FindingActive,
+                Severity: sdk.SeverityCritical, Summary: "Service selector problem",
+                Evidence: fmt.Sprintf("service %s/%s", service.Namespace, service.Name),
+                PrimaryResource: sdk.ObjectRefFrom("Service", "v1", &service),
+            })
+        }
+    }
+    return findings, nil
+}
+"""
+
+_HEALTHY_BASELINE_SNAPSHOT = """{
+  "namespace": "shop",
+  "services": [
+    {"metadata": {"name": "cart", "namespace": "shop"}, "spec": {"selector": {"app": "cart"}}}
+  ],
+  "pods": [
+    {"metadata": {"name": "cart-0", "namespace": "shop", "labels": {"app": "cart"}}}
+  ]
+}
+"""
+
+# Fires on every selected Service, including healthy ones.
+_NOISY_CONDITION = "true"
+# Fires only when the selector matches no pod at all.
+_QUIET_CONDITION = "len(snapshot.PodsForService(service.Namespace, service.Name)) == 0"
+
+
+def _write_incident_app(app_root: Path, *, condition: str) -> None:
+    diagnostics = app_root / ".sdo" / "diagnostics"
+    detector_dir = diagnostics / "detectors" / "incident" / "selector"
+    detector_dir.mkdir(parents=True)
+    (diagnostics / "go.mod").write_text(
+        "module app-diagnostics\n\ngo 1.24\n\nrequire sdo.dev/controller/sdk v0.0.0\n",
+        encoding="utf-8",
+    )
+    (diagnostics / "manifest.yaml").write_text(
+        """apiVersion: sdo.dev/v1alpha1
+kind: DetectorManifest
+sdkVersion: v0.1
+detectors:
+  - id: service-selector-check
+    package: ./detectors/incident/selector
+    constructor: New
+    class: incident
+    owner: responder
+    watches:
+      - apiVersion: v1
+        kind: Service
+      - apiVersion: v1
+        kind: Pod
+    interval: 30s
+    persistence:
+      firing: 2
+      clearing: 2
+    batching:
+      severity: critical
+      debounce: 500ms
+    possiblePlaybooks: []
+    originatingIncident: incident-seed
+    originatingCommit: abc123
+""",
+        encoding="utf-8",
+    )
+    (detector_dir / "detector.go").write_text(
+        _INCIDENT_SELECTOR_DETECTOR.replace("__CONDITION__", condition), encoding="utf-8"
+    )
+
+
+def _write_healthy_baseline(directory: Path) -> None:
+    directory.mkdir(parents=True)
+    (directory / "healthy.json").write_text(_HEALTHY_BASELINE_SNAPSHOT, encoding="utf-8")
+
+
+def test_build_workspace_without_healthy_baseline_generates_no_baseline_test(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    tool_root = tmp_path / "sdo"
+    _write_incident_app(app_root, condition=_NOISY_CONDITION)
+    _write_tool_root(tool_root)
+
+    config = BuildWorkspaceConfig(
+        app_root=app_root,
+        sdk_dir=tool_root / "controller" / "sdk",
+        core_dir=tool_root / "controller" / "core",
+    )
+    with BuildWorkspace.create(config) as workspace:
+        assert not (workspace.path / "generated" / "healthy_baseline_test.go").exists()
+
+
+def test_build_workspace_with_healthy_baseline_copies_fixtures_and_generates_test(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    tool_root = tmp_path / "sdo"
+    _write_incident_app(app_root, condition=_NOISY_CONDITION)
+    _write_tool_root(tool_root)
+    _write_healthy_baseline(app_root / "baseline")
+
+    config = BuildWorkspaceConfig(
+        app_root=app_root,
+        sdk_dir=tool_root / "controller" / "sdk",
+        core_dir=tool_root / "controller" / "core",
+        healthy_baseline=app_root / "baseline",
+    )
+    with BuildWorkspace.create(config) as workspace:
+        generated = (workspace.path / "generated" / "healthy_baseline_test.go").read_text(encoding="utf-8")
+        copied = workspace.path / "generated" / "testdata" / "healthy-baseline" / "healthy.json"
+        assert copied.read_text(encoding="utf-8") == _HEALTHY_BASELINE_SNAPSHOT
+
+    assert "sdktest.HealthyBaselineViolations" in generated
+    assert "sdk.DetectorClassIncident" in generated
+
+
+def test_build_workspace_rejects_missing_or_empty_healthy_baseline(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    tool_root = tmp_path / "sdo"
+    _write_incident_app(app_root, condition=_NOISY_CONDITION)
+    _write_tool_root(tool_root)
+    (tmp_path / "empty").mkdir()
+
+    for baseline in (tmp_path / "missing", tmp_path / "empty"):
+        config = BuildWorkspaceConfig(
+            app_root=app_root,
+            sdk_dir=tool_root / "controller" / "sdk",
+            core_dir=tool_root / "controller" / "core",
+            healthy_baseline=baseline,
+        )
+        with pytest.raises(ValueError, match="healthy baseline"):
+            BuildWorkspace.create(config)
+
+
+@pytest.mark.parametrize(
+    ("condition", "expected_exit"),
+    [
+        pytest.param(_NOISY_CONDITION, 1, id="fires-on-healthy-service"),
+        pytest.param(_QUIET_CONDITION, 0, id="quiet-on-healthy-service"),
+    ],
+)
+def test_check_cli_test_rejects_incident_detector_that_fires_on_healthy_baseline(
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+    condition: str,
+    expected_exit: int,
+) -> None:
+    app_root = tmp_path / "app"
+    _write_incident_app(app_root, condition=condition)
+    _write_healthy_baseline(app_root / "baseline")
+
+    exit_code = check_main(["test", "--app", str(app_root), "--healthy-baseline", "baseline"])
+
+    output = capfd.readouterr()
+    assert exit_code == expected_exit, output.out + output.err
+    if expected_exit:
+        assert "healthy baseline snapshot healthy.json" in output.out
+        assert "service-selector-check" in output.out
+        assert "Service shop/cart" in output.out
+
+
+def test_check_cli_test_without_healthy_baseline_keeps_default_behavior(
+    tmp_path: Path,
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    app_root = tmp_path / "app"
+    _write_incident_app(app_root, condition=_NOISY_CONDITION)
+
+    exit_code = check_main(["test", "--app", str(app_root)])
+
+    output = capfd.readouterr()
+    assert exit_code == 0, output.out + output.err
+    assert "healthy baseline" not in output.out
+
+
+def test_check_cli_rejects_healthy_baseline_outside_the_application(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    _write_incident_app(app_root, condition=_NOISY_CONDITION)
+    _write_healthy_baseline(tmp_path / "elsewhere")
+
+    assert check_main(["test", "--app", str(app_root), "--healthy-baseline", "../elsewhere"]) == 1

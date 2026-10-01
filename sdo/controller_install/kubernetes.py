@@ -14,7 +14,13 @@ from typing import Any, Generic, Protocol, TypeVar, overload
 
 import yaml
 
-from sdo.operational_memory import DEFAULT_REFLECTION_SESSION, REFLECTION_SESSION_MODES, SOURCE_REPAIR_CHECK_COMMAND
+from sdo.operational_memory import (
+    DEFAULT_REFLECTION_SESSION,
+    LATE_FINDINGS_MODES,
+    REFLECTION_GUIDANCE_MODES,
+    REFLECTION_SESSION_MODES,
+    SOURCE_REPAIR_CHECK_COMMAND,
+)
 
 
 class ControllerInstallError(RuntimeError):
@@ -37,6 +43,16 @@ RUNTIME_USAGE_ROOT = f"{RUNTIME_STATE_ROOT}/usage"
 CONTROLLER_TURN_USAGE_LOG = f"{RUNTIME_USAGE_ROOT}/controller-turns.jsonl"
 RESPONDER_TURN_USAGE_LOG = f"{RUNTIME_USAGE_ROOT}/responder-turns.jsonl"
 TURN_USAGE_LOG_ENV = "SDO_TURN_USAGE_LOG"
+#: Detector firing telemetry (``--firing-telemetry-path``): the controller's durable
+#: JSONL record of when each detector activated, cleared or never persisted. It lives
+#: on the workspace PVC outside ``.sdo/`` and is the Go runtime's job-mode default.
+RUNTIME_TELEMETRY_ROOT = f"{RUNTIME_STATE_ROOT}/telemetry"
+DETECTOR_FIRING_STREAM = f"{RUNTIME_TELEMETRY_ROOT}/detector-firings.jsonl"
+#: Opt-in healthy-baseline gate: snapshots of the healthy application sit on the repository
+#: volume (outside the application repository, so they are never memory artifacts) and the broker
+#: stages them into the validated worktree under the relative directory while it validates.
+HEALTHY_BASELINE_SOURCE = "/workspace/.sdo-baseline/healthy"
+HEALTHY_BASELINE_DIRECTORY = ".sdo-baseline/healthy"
 CONTROLLER_JOB_NAME = "sdo-controller-run"
 REPOSITORY_SYNC_POD = "sdo-repository-sync"
 MAINTENANCE_CONFIGMAP = "sdo-controller-maintenance"
@@ -65,6 +81,16 @@ class ControllerInstallConfig:
     agent_provider: str = "codex"
     # First reflection attempt: "resume" the responder session, or "fresh" (opt-in).
     reflection_session: str = DEFAULT_REFLECTION_SESSION
+    # Reflection guidance: "baseline" per-cause learning, or "generalize" across parameter variants (opt-in).
+    reflection_guidance: str = "baseline"
+    # Late findings: "off", or "pull" so the responder can pull findings that activated after dispatch (opt-in).
+    late_findings: str = "off"
+    # Bounded follow-up responders for health findings that stay active after a response (opt-in; 0 = off).
+    max_follow_ups: int = 0
+    follow_up_cooldown_seconds: int = 30
+    # Reject a proposed incident detector that fires on recorded healthy-application snapshots (opt-in).
+    # The caller must record the snapshots at HEALTHY_BASELINE_SOURCE before the first incident.
+    healthy_baseline: bool = False
     # Namespace for the controller, its repository PVC, state, credentials,
     # and responder/validator Jobs. ``None`` co-locates them with the
     # application; a separate namespace survives application redeploys.
@@ -82,6 +108,14 @@ class ControllerInstallConfig:
             raise ValueError("agent_provider must be 'codex' or 'claude'")
         if self.reflection_session not in REFLECTION_SESSION_MODES:
             raise ValueError(f"reflection_session must be one of {', '.join(REFLECTION_SESSION_MODES)}")
+        if self.reflection_guidance not in REFLECTION_GUIDANCE_MODES:
+            raise ValueError(f"reflection_guidance must be one of {', '.join(REFLECTION_GUIDANCE_MODES)}")
+        if self.late_findings not in LATE_FINDINGS_MODES:
+            raise ValueError(f"late_findings must be one of {', '.join(LATE_FINDINGS_MODES)}")
+        if self.max_follow_ups < 0:
+            raise ValueError("max_follow_ups must not be negative")
+        if self.follow_up_cooldown_seconds < 0:
+            raise ValueError("follow_up_cooldown_seconds must not be negative")
 
     @property
     def control_namespace(self) -> str:
@@ -201,9 +235,39 @@ def controller_resources(
         f"--broker-arg={config.model}",
         "--broker-arg=--reflection-session",
         f"--broker-arg={config.reflection_session}",
+        "--broker-arg=--reflection-guidance",
+        f"--broker-arg={config.reflection_guidance}",
         "--broker-arg=--responder-turn-log",
         f"--broker-arg={RESPONDER_TURN_USAGE_LOG}",
     ]
+    if config.late_findings != "off":
+        controller_args.extend(
+            [
+                f"--responder-env=SDO_LATE_FINDINGS={config.late_findings}",
+                "--broker-arg=--late-findings",
+                f"--broker-arg={config.late_findings}",
+                "--broker-arg=--late-findings-log",
+                f"--broker-arg={RUNTIME_TELEMETRY_ROOT}/late-findings-pulls.jsonl",
+            ]
+        )
+    if config.max_follow_ups > 0:
+        controller_args.extend(
+            [
+                "--max-follow-ups",
+                str(config.max_follow_ups),
+                "--follow-up-cooldown",
+                f"{config.follow_up_cooldown_seconds}s",
+            ]
+        )
+    if config.healthy_baseline:
+        controller_args.extend(
+            [
+                "--broker-arg=--healthy-baseline-source",
+                f"--broker-arg={HEALTHY_BASELINE_SOURCE}",
+                "--broker-arg=--healthy-baseline-dir",
+                f"--broker-arg={HEALTHY_BASELINE_DIRECTORY}",
+            ]
+        )
     controller_args.extend(extra_controller_args or [])
     if not any(arg in controller_args for arg in ("--exit-after-closure", "--duration")):
         # A long-running controller rolls out learned detectors after each closure.

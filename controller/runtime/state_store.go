@@ -48,14 +48,16 @@ type RuntimeState struct {
 	DetectorClearSince map[string]time.Time `json:"detector_clear_since,omitempty"`
 	// IncidentObservedChanges is every object seen changed while the open
 	// incident lasted, so a restart keeps first observations exact.
-	IncidentObservedChanges    []ObservedStateChange `json:"incident_observed_changes,omitempty"`
-	DispatchState              string                `json:"dispatch_state"`
-	IncidentFindingKeys        []string              `json:"incident_finding_keys"`
-	PendingClosure             *IncidentClosure      `json:"pending_closure,omitempty"`
-	ClosureState               string                `json:"closure_state,omitempty"`
-	ClosureReceipt             *ClosureReceipt       `json:"closure_receipt,omitempty"`
-	ClosureFailure             *ClosureFailure       `json:"closure_failure,omitempty"`
-	LastAcknowledgedIncidentID string                `json:"last_acknowledged_incident_id,omitempty"`
+	IncidentObservedChanges    []ObservedStateChange   `json:"incident_observed_changes,omitempty"`
+	DispatchState              string                  `json:"dispatch_state"`
+	IncidentFindingKeys        []string                `json:"incident_finding_keys"`
+	PendingClosure             *IncidentClosure        `json:"pending_closure,omitempty"`
+	ClosureState               string                  `json:"closure_state,omitempty"`
+	ClosureReceipt             *ClosureReceipt         `json:"closure_receipt,omitempty"`
+	ClosureFailure             *ClosureFailure         `json:"closure_failure,omitempty"`
+	LastAcknowledgedIncidentID string                  `json:"last_acknowledged_incident_id,omitempty"`
+	EvaluationIteration        int                     `json:"evaluation_iteration,omitempty"`
+	DetectorTimeline           []DetectorTimelineEntry `json:"detector_timeline,omitempty"`
 	// IncidentView is published for responders and never restored.
 	IncidentView *IncidentView `json:"incident_view,omitempty"`
 }
@@ -72,6 +74,9 @@ func (state RuntimeState) Validate() error {
 	}
 	if state.PendingClosure != nil && state.PendingClosure.Request.IncidentID == "" {
 		return fmt.Errorf("pending incident closure is missing its incident id")
+	}
+	if len(state.DetectorTimeline) > maxTimelineEntries {
+		return fmt.Errorf("detector timeline exceeds %d entries", maxTimelineEntries)
 	}
 	if err := validateClosureFailure(state); err != nil {
 		return err
@@ -256,6 +261,10 @@ func cloneIncidentRequest(request *IncidentRequest) *IncidentRequest {
 	copy.SurfacedPlaybooks = append(make([]SurfacedPlaybook, 0, len(request.SurfacedPlaybooks)), request.SurfacedPlaybooks...)
 	copy.RelevantOutcomes = append(make([]PriorOutcomeEvidence, 0, len(request.RelevantOutcomes)), request.RelevantOutcomes...)
 	copy.StateChanges = cloneStateChanges(request.StateChanges)
+	if request.FollowUp != nil {
+		followUp := *request.FollowUp
+		copy.FollowUp = &followUp
+	}
 	return &copy
 }
 
@@ -315,6 +324,7 @@ func cloneIncidentClosure(closure *IncidentClosure) *IncidentClosure {
 	copy.Result = cloneIncidentResult(closure.Result)
 	copy.FinalDetectorStates = cloneEvaluations(closure.FinalDetectorStates)
 	copy.IncidentDetectorStates = cloneEvaluations(closure.IncidentDetectorStates)
+	copy.DetectorTimeline = cloneTimeline(closure.DetectorTimeline)
 	copy.FinalStateChanges = cloneStateChanges(closure.FinalStateChanges)
 	if closure.ObservedStateChanges != nil {
 		copy.ObservedStateChanges = append(

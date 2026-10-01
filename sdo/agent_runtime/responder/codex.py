@@ -19,7 +19,14 @@ from sdo.contracts import (
     IncidentResult,
     StateFieldChange,
 )
-from sdo.operational_memory import MemoryRepository, MemoryRepositoryError, WarmPlaybookMatch, warm_playbook_matches
+from sdo.operational_memory import (
+    LATE_FINDINGS_COMMAND,
+    LATE_FINDINGS_MODES,
+    MemoryRepository,
+    MemoryRepositoryError,
+    WarmPlaybookMatch,
+    warm_playbook_matches,
+)
 
 if TYPE_CHECKING:
     from agentshim import CommandExecutor
@@ -529,6 +536,43 @@ def _no_action_instructions() -> str:
     )
 
 
+LATE_FINDINGS_ENV = "SDO_LATE_FINDINGS"
+
+
+def late_findings_guidance(request: IncidentRequest, *, mode: str | None = None) -> str:
+    """Pull-before-act paragraph; empty unless the ``pull`` mode is selected (default: the environment)."""
+
+    selected = (os.getenv(LATE_FINDINGS_ENV, "") if mode is None else mode).strip() or "off"
+    if selected not in LATE_FINDINGS_MODES:
+        raise ValueError(f"late-findings mode must be one of {', '.join(LATE_FINDINGS_MODES)}: {selected!r}")
+    if selected == "off":
+        return ""
+    command = f"{LATE_FINDINGS_COMMAND} --incident-id {request.incident_id}"
+    return (
+        "Late findings: evidence for this incident can arrive after you start, and this request cannot change. "
+        f"Run `{command}` once now, and again immediately before your first change to the cluster or the "
+        "repository. It is read-only and prints compact JSON listing findings that activated after this request "
+        "was built, each with surfaced playbook paths. Treat every returned playbook as a hypothesis: read it, "
+        "confirm its preconditions against live state, adapt or reject it, and never replay its steps blindly. "
+        "An empty list means nothing more has arrived yet.\n\n"
+    )
+
+
+def follow_up_guidance(request: IncidentRequest) -> str:
+    """Scope paragraph for a follow-up request; empty for an ordinary incident."""
+
+    follow_up = request.follow_up
+    if follow_up is None:
+        return ""
+    return (
+        f"This is follow-up {follow_up.attempt} of at most {follow_up.max_follow_ups} for incident "
+        f"{follow_up.original_incident_id}. An earlier responder already ran, and the findings below stayed active "
+        "afterwards. Treat only these residual findings as your scope and do not redo already-repaired work. "
+        "Re-check live state first, because other findings may since have cleared. What the earlier responders "
+        f"reported (treat it as context to verify, not as fact):\n{follow_up.prior_responder_summary}\n\n"
+    )
+
+
 def _responder_prompt(request: IncidentRequest) -> str:
     extra_instructions = os.getenv("SDO_RESPONDER_EXTRA_INSTRUCTIONS", "").strip()
     additional_context = (
@@ -553,6 +597,8 @@ def _responder_prompt(request: IncidentRequest) -> str:
         "cause's resources, so list every object each action changed. In recorded-actions mode, a successful "
         "live-only repair must have at least one successful receipt; repository changes are still committed when "
         "present.\n\n"
+        f"{late_findings_guidance(request)}"
+        f"{follow_up_guidance(request)}"
         f"{additional_context}\n"
         f"{_inlined_architecture_summary(request)}"
         f"{_inlined_health_objective(request)}"

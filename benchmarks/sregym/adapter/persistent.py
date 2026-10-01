@@ -81,6 +81,22 @@ class PersistentControllerError(RuntimeError):
     """Raised when a persistent controller cannot be installed, reused, or drained."""
 
 
+class DetectorReviewRequiredError(PersistentControllerError):
+    """Raised when the controller stopped an incident that its health detectors never cleared.
+
+    The controller gives up verification ``detector review required`` after the responder
+    completed but findings are still active (for example, a fault that surfaced after dispatch
+    and was not part of the responder's task). It never closes the incident, so waiting longer
+    cannot succeed.
+    """
+
+    def __init__(self, incident_id: str, reason: str, state: dict[str, Any]) -> None:
+        super().__init__(f"incident {incident_id!r} needs detector review: {reason}")
+        self.incident_id = incident_id
+        self.reason = reason
+        self.state = state
+
+
 class ClosureFailedError(PersistentControllerError):
     """Raised when the controller gave up committing an incident closure the broker kept rejecting."""
 
@@ -141,6 +157,8 @@ class ControllerRecord(BaseModel):
     runtime_config: dict[str, Any]
     served_stages: list[str] = Field(default_factory=list)
     pending: PendingIncident | None = None
+    #: The stage receipt of the stage that served the current problem; follow-up incidents inherit it.
+    served_stage_receipt: dict[str, Any] | None = None
 
 
 class DeferredReceipt(BaseModel):
@@ -326,6 +344,8 @@ class StageInputs:
     #: End the stage as a detection miss if no incident has opened this long
     #: after injection. None waits the whole verification budget.
     detection_timeout_seconds: float | None = None
+    #: Raise as soon as the controller stops the incident for detector review (it never closes it).
+    stop_on_detector_review: bool = True
 
     def __post_init__(self) -> None:
         if self.detection_timeout_seconds is not None and self.detection_timeout_seconds <= 0:
@@ -346,8 +366,13 @@ def run_persistent_stage(
     run_lifecycle: Callable[[], bool],
     inject: Callable[[], None],
     clock: Clock | None = None,
+    pause_after_verified: bool = True,
 ) -> dict[str, Any]:
     """Run one benchmark problem against the application's persistent controller.
+
+    ``pause_after_verified=False`` leaves the controller active after the first
+    verified incident, for compositions whose other faults the controller must
+    keep handling; the caller then pauses it (``set_maintenance``) itself.
 
     Returns the stage's resolution record. It ends at controller-verified
     recovery; the strict receipt, which needs the finished reflection, is
@@ -433,12 +458,19 @@ def run_persistent_stage(
     gate_timings = ops.inject_after_resume(control, generation, inject)
     injected = clock.monotonic()
     verified = _wait_for_verified_incident(
-        ops, control, known, inputs.verification_timeout_seconds, clock, inputs.detection_timeout_seconds
+        ops,
+        control,
+        known,
+        inputs.verification_timeout_seconds,
+        clock,
+        inputs.detection_timeout_seconds,
+        stop_on_review=inputs.stop_on_detector_review,
     )
     verified_ready = clock.monotonic()
-    paused_generation = f"{generation}-paused"
-    ops.set_maintenance(control, paused=True, generation=paused_generation)
-    _wait_for_maintenance_ack(ops, control, paused_generation, clock)
+    if pause_after_verified:
+        paused_generation = f"{generation}-paused"
+        ops.set_maintenance(control, paused=True, generation=paused_generation)
+        _wait_for_maintenance_ack(ops, control, paused_generation, clock)
     paused_ready = clock.monotonic()
     ops.export_controller_logs(control, inputs.receipt_dir)
     stage_evidence: dict[str, Any] = dict(ops.export_runtime_artifacts(config, inputs.receipt_dir))
@@ -506,6 +538,105 @@ def run_persistent_stage(
                 "responder_session_id",
                 "stage_end_runtime_artifacts",
             }
+        },
+    )
+    record.served_stages.append(inputs.stage_label)
+    record.served_stage_receipt = dict(record.pending.stage_receipt)
+    state.deferred_receipts.append(
+        DeferredReceipt(
+            incident_id=verified.incident_id, stage_label=inputs.stage_label, staging_dir=inputs.receipt_dir
+        )
+    )
+    state.save(inputs.state_path)
+    persist_resolution(resolution, inputs.receipt_dir)
+    return resolution
+
+
+def pause_controller(ops: ClusterOps, control: str, *, label: str, clock: Clock | None = None) -> None:
+    """Pause the controller and wait for its acknowledgement (used when a composition ends)."""
+
+    clock = clock or Clock()
+    generation = f"{label}-{uuid.uuid4().hex[:8]}-paused"
+    ops.set_maintenance(control, paused=True, generation=generation)
+    _wait_for_maintenance_ack(ops, control, generation, clock)
+
+
+def collect_followup_incident(
+    inputs: StageInputs,
+    *,
+    ops: ClusterOps,
+    known: set[str],
+    timeout_seconds: float,
+    clock: Clock | None = None,
+) -> dict[str, Any] | None:
+    """Wait for a further incident the running controller verifies, and register it as pending.
+
+    For compositions: the first incident's stage leaves the controller active, the caller drains
+    it, and this collects the next incident for the faults the first did not cover. Returns
+    ``None`` when no new incident is verified within ``timeout_seconds``.
+    """
+
+    clock = clock or Clock()
+    state = PersistentState.load(inputs.state_path)
+    record = state.controllers.get(inputs.namespace)
+    if record is None:
+        raise PersistentControllerError(f"no persistent controller is recorded for {inputs.namespace!r}")
+    if record.pending is not None:
+        raise PersistentControllerError(
+            f"incident {record.pending.incident_id!r} is undrained; drain it before collecting a follow-up"
+        )
+    control = record.control_namespace
+    try:
+        verified = _wait_for_verified_incident(
+            ops, control, known, timeout_seconds, clock, stop_on_review=inputs.stop_on_detector_review
+        )
+    except DetectorReviewRequiredError:
+        raise
+    except PersistentControllerError:
+        return None
+    config = replace(inputs.runtime_config, persistent=True, wait_for_completion=False)
+    ops.export_controller_logs(control, inputs.receipt_dir)
+    evidence: dict[str, Any] = dict(ops.export_runtime_artifacts(config, inputs.receipt_dir))
+    evidence["scope"] = STAGE_END_EVIDENCE_SCOPE
+    closure = verified.closure or {}
+    raw_result = closure.get("result")
+    result: dict[str, Any] = raw_result if isinstance(raw_result, dict) else {}
+    base = dict(record.served_stage_receipt) if record.served_stage_receipt else {}
+    resolution: dict[str, Any] = {
+        "schema_version": "sdo.sregym-incident-resolution/v1",
+        "incident_id": verified.incident_id,
+        "namespace": inputs.namespace,
+        "confirmed_root_causes": result.get("confirmed_root_causes", []),
+        "repair_actions": result.get("repair_actions", []),
+        "responder_session_id": result.get("responder_session_id"),
+        "followup_incident": True,
+        "stage_end_runtime_artifacts": evidence,
+    }
+    resolution.update(_resolution_timings(closure))
+    record.pending = PendingIncident(
+        incident_id=verified.incident_id,
+        stage_label=inputs.stage_label,
+        receipt_dir=inputs.receipt_dir,
+        repository=config.repository,
+        verified_at=_timestamp(closure.get("verified_at")),
+        stage_receipt={
+            **base,
+            # Setup and gate costs were paid once, by the first incident.
+            "pre_injection_costs_seconds": {},
+            **{
+                key: value
+                for key, value in resolution.items()
+                if key
+                not in {
+                    "schema_version",
+                    "confirmed_root_causes",
+                    "repair_actions",
+                    "namespace",
+                    "incident_id",
+                    "responder_session_id",
+                    "stage_end_runtime_artifacts",
+                }
+            },
         },
     )
     record.served_stages.append(inputs.stage_label)
@@ -758,6 +889,8 @@ def _wait_for_verified_incident(
     timeout: float,
     clock: Clock,
     detection_timeout: float | None = None,
+    *,
+    stop_on_review: bool = True,
 ) -> VerifiedIncident:
     """Return the first new incident the controller verified healthy, before reflection finishes.
 
@@ -788,6 +921,12 @@ def _wait_for_verified_incident(
         if isinstance(acknowledged, str) and acknowledged and acknowledged not in known:
             # Reflection finished between polls; the ledger holds the closure.
             return VerifiedIncident(incident_id=acknowledged, closure=None)
+        if stop_on_review and state.get("detector_review_required"):
+            request = state.get("incident_request")
+            incident_id = request.get("incident_id") if isinstance(request, dict) else None
+            raise DetectorReviewRequiredError(
+                str(incident_id or "unknown"), str(state.get("detector_review_reason") or ""), state
+            )
         clock.sleep(POLL_SECONDS)
     raise PersistentControllerError(
         f"controller in {control!r} verified no new incident within {timeout:.0f}s{_open_incident_summary(state)}"

@@ -393,3 +393,96 @@ def test_local_controller_builder_uses_the_same_source_repair_check() -> None:
         encoding="utf-8"
     )
     assert f'"{SOURCE_REPAIR_CHECK_COMMAND}"' in source
+
+
+def test_reflection_guidance_defaults_to_baseline_and_is_passed_to_the_broker() -> None:
+    default = _config()
+    generalize = ControllerInstallConfig(**{**_config().__dict__, "reflection_guidance": "generalize"})
+
+    assert default.reflection_guidance == "baseline"
+    spec = ControllerInstallConfig(**{**_config().__dict__, "reflection_guidance": "generalize-spec"})
+    for config, expected in ((default, "baseline"), (generalize, "generalize"), (spec, "generalize-spec")):
+        broker = _broker_args(config)
+        assert broker[broker.index("--reflection-guidance") + 1] == expected
+
+
+def test_unknown_reflection_guidance_is_rejected() -> None:
+    with pytest.raises(ValueError, match="reflection_guidance"):
+        ControllerInstallConfig(**{**_config().__dict__, "reflection_guidance": "sibling"})
+
+
+def _controller_args(config: ControllerInstallConfig) -> list[str]:
+    controller = next(resource for resource in controller_resources(config) if resource["kind"] == "Job")
+    return controller["spec"]["template"]["spec"]["containers"][0]["args"]
+
+
+def test_late_findings_is_off_by_default_and_leaves_the_controller_args_unchanged() -> None:
+    default = _config()
+    off = ControllerInstallConfig(**{**_config().__dict__, "late_findings": "off"})
+
+    assert default.late_findings == "off"
+    assert _controller_args(off) == _controller_args(default)
+    assert "--late-findings" not in _broker_args(default)
+    assert not any(arg.startswith("--responder-env=SDO_LATE_FINDINGS") for arg in _controller_args(default))
+
+
+def test_pull_mode_reaches_the_broker_and_the_responder_environment() -> None:
+    pull = ControllerInstallConfig(**{**_config().__dict__, "late_findings": "pull"})
+
+    broker = _broker_args(pull)
+    assert broker[broker.index("--late-findings") + 1] == "pull"
+    assert "--responder-env=SDO_LATE_FINDINGS=pull" in _controller_args(pull)
+    # The responder appends its receipts at the volume root, not inside the application repository.
+    log = broker[broker.index("--late-findings-log") + 1]
+    assert log == "/workspace/.sdo-runtime/telemetry/late-findings-pulls.jsonl"
+
+
+def test_unknown_late_findings_mode_is_rejected() -> None:
+    with pytest.raises(ValueError, match="late_findings"):
+        ControllerInstallConfig(**{**_config().__dict__, "late_findings": "push"})
+
+
+def test_healthy_baseline_is_off_by_default_and_leaves_the_controller_args_unchanged() -> None:
+    default = _config()
+    off = ControllerInstallConfig(**{**_config().__dict__, "healthy_baseline": False})
+
+    assert default.healthy_baseline is False
+    assert _controller_args(off) == _controller_args(default)
+    assert "--healthy-baseline-dir" not in _broker_args(default)
+    assert "--healthy-baseline-source" not in _broker_args(default)
+
+
+def test_healthy_baseline_reaches_the_broker_with_a_volume_source_and_a_worktree_relative_directory() -> None:
+    gated = ControllerInstallConfig(**{**_config().__dict__, "healthy_baseline": True})
+
+    broker = _broker_args(gated)
+    # The snapshots live on the repository volume, outside the application repository ...
+    assert broker[broker.index("--healthy-baseline-source") + 1] == "/workspace/.sdo-baseline/healthy"
+    # ... and are staged into the validated worktree under this relative path only while validating.
+    assert broker[broker.index("--healthy-baseline-dir") + 1] == ".sdo-baseline/healthy"
+
+
+def _controller_job_args(config: ControllerInstallConfig) -> list[str]:
+    return _controller_args(config)
+
+
+def test_follow_ups_are_off_by_default_and_leave_the_controller_args_unchanged() -> None:
+    default = _config()
+
+    assert default.max_follow_ups == 0
+    assert "--max-follow-ups" not in _controller_job_args(default)
+    assert "--follow-up-cooldown" not in _controller_job_args(default)
+
+
+def test_follow_ups_reach_the_controller_arguments() -> None:
+    config = ControllerInstallConfig(**{**_config().__dict__, "max_follow_ups": 3, "follow_up_cooldown_seconds": 45})
+    args = _controller_job_args(config)
+
+    assert args[args.index("--max-follow-ups") + 1] == "3"
+    assert args[args.index("--follow-up-cooldown") + 1] == "45s"
+
+
+@pytest.mark.parametrize("update", [{"max_follow_ups": -1}, {"follow_up_cooldown_seconds": -1}])
+def test_invalid_follow_up_settings_are_rejected(update: dict[str, int]) -> None:
+    with pytest.raises(ValueError, match="follow_up"):
+        ControllerInstallConfig(**{**_config().__dict__, **update})

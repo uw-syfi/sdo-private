@@ -132,6 +132,7 @@ path = "sdo.__main__"
 depends_on = [
     "sdo.agent_runtime.responder",
     "sdo.operation",
+    "sdo.operational_memory",
 ]
 
 # --- Benchmark agents (independent of production sdo) ---

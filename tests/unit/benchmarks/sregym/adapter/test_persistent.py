@@ -14,10 +14,12 @@ from benchmarks.sregym.adapter.persistent import (
     Clock,
     ControllerPod,
     DetectionMissError,
+    DetectorReviewRequiredError,
     PersistentControllerError,
     PersistentState,
     ReceiptRejectedError,
     StageInputs,
+    collect_followup_incident,
     control_namespace_for,
     drain_pending_incident,
     publish_deferred_receipts,
@@ -721,3 +723,150 @@ def test_an_unverified_incident_timeout_names_the_open_incident_and_why_it_is_st
     assert "responder status 'failed'" in message
     assert "no manifest defines ConfigMap x" in message
     assert "health detectors did not clear" in message
+
+
+def _stage_keep_running(tmp_path: Path, ops: FakeOps, stage: str = "s0") -> dict[str, Any]:
+    return run_persistent_stage(
+        _inputs(tmp_path, stage),
+        ops=ops,
+        run_lifecycle=lambda: True,
+        inject=lambda: ops.events.append(("fault", stage)),
+        clock=_clock(ops),
+        pause_after_verified=False,
+    )
+
+
+def _second_closure(ops: FakeOps, incident_id: str = "incident-2") -> None:
+    ops.states["hotel-sdo"]["pending_closure"] = {
+        "request": {"incident_id": incident_id},
+        "result": {
+            "confirmed_root_causes": [{"summary": "network policy"}],
+            "repair_actions": [{"summary": "deleted policy"}],
+        },
+        "detected_at": (DETECTED + timedelta(seconds=300)).isoformat(),
+        "dispatched_at": (DETECTED + timedelta(seconds=301)).isoformat(),
+        "responder_completed_at": (DETECTED + timedelta(seconds=330)).isoformat(),
+        "verified_at": (DETECTED + timedelta(seconds=350)).isoformat(),
+    }
+
+
+def test_stage_can_leave_the_controller_running_after_the_first_verified_incident(tmp_path: Path) -> None:
+    ops = FakeOps()
+
+    resolution = _stage_keep_running(tmp_path, ops)
+
+    assert resolution["incident_id"] == "incident-1"
+    assert ("paused", "hotel-sdo") not in ops.events
+    assert PersistentState.load(tmp_path / "sdo_persistent_controller.json").controllers["hotel"].pending is not None
+
+
+def test_followup_incident_is_collected_after_the_first_is_drained(tmp_path: Path) -> None:
+    ops = FakeOps()
+    _stage_keep_running(tmp_path, ops)
+    state_path = tmp_path / "sdo_persistent_controller.json"
+    state = PersistentState.load(state_path)
+    record = state.controllers["hotel"]
+    ops.reflectable.add("incident-1")
+    drain_pending_incident(record, ops=ops, repository=tmp_path / "s0" / "application_workspace", drained_by="t")
+    record.pending = None
+    state.save(state_path)
+    _second_closure(ops)
+
+    followup = collect_followup_incident(
+        _inputs(tmp_path, "s0-followup-1", receipt_dir=tmp_path / "s0" / "followup1"),
+        ops=ops,
+        known={"incident-1"},
+        timeout_seconds=30,
+        clock=_clock(ops),
+    )
+
+    assert followup is not None
+    assert followup["incident_id"] == "incident-2"
+    assert followup["incident_resolution_seconds"] == 50.0
+    assert followup["confirmed_root_causes"] == [{"summary": "network policy"}]
+    pending = PersistentState.load(state_path).controllers["hotel"].pending
+    assert pending is not None
+    assert pending.incident_id == "incident-2"
+    assert (tmp_path / "s0" / "followup1" / RESOLUTION_FILENAME).is_file()
+
+
+def test_followup_returns_none_when_no_new_incident_is_verified(tmp_path: Path) -> None:
+    ops = FakeOps()
+    _stage_keep_running(tmp_path, ops)
+    state_path = tmp_path / "sdo_persistent_controller.json"
+    state = PersistentState.load(state_path)
+    state.controllers["hotel"].pending = None
+    state.save(state_path)
+
+    followup = collect_followup_incident(
+        _inputs(tmp_path, "s0-followup-1", receipt_dir=tmp_path / "s0" / "followup1"),
+        ops=ops,
+        known={"incident-1"},
+        timeout_seconds=5,
+        clock=_clock(ops),
+    )
+
+    assert followup is None
+
+
+def test_followup_refuses_to_start_while_an_incident_is_undrained(tmp_path: Path) -> None:
+    ops = FakeOps()
+    _stage_keep_running(tmp_path, ops)
+
+    with pytest.raises(PersistentControllerError, match="undrained"):
+        collect_followup_incident(
+            _inputs(tmp_path, "s0-followup-1", receipt_dir=tmp_path / "s0" / "followup1"),
+            ops=ops,
+            known={"incident-1"},
+            timeout_seconds=5,
+            clock=_clock(ops),
+        )
+
+
+def test_stage_fails_fast_when_the_controller_stops_for_detector_review(tmp_path: Path) -> None:
+    ops = FakeOps()
+
+    def inject_then_wedge(control: str, generation: str, inject: Callable[[], None]) -> dict[str, float]:
+        inject()
+        ops.states[control].update(
+            {
+                "incident_open": True,
+                "responder_done": True,
+                "incident_request": {"incident_id": "incident-9"},
+                "detector_review_required": True,
+                "detector_review_reason": "health detectors did not clear within 2m0s after responder completion",
+            }
+        )
+        return {}
+
+    ops.inject_after_resume = inject_then_wedge  # type: ignore[method-assign]
+
+    with pytest.raises(DetectorReviewRequiredError, match="incident-9") as raised:
+        _run(tmp_path, ops, "s0", [])
+
+    assert raised.value.incident_id == "incident-9"
+    assert "did not clear" in raised.value.reason
+
+
+def test_stage_can_wait_out_a_detector_review_stop_when_asked_to(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    ops = FakeOps()
+
+    def inject_then_wedge(control: str, generation: str, inject: Callable[[], None]) -> dict[str, float]:
+        inject()
+        ops.states[control].update({"incident_open": True, "detector_review_required": True})
+        return {}
+
+    ops.inject_after_resume = inject_then_wedge  # type: ignore[method-assign]
+
+    with pytest.raises(PersistentControllerError, match="verified no new incident") as raised:
+        run_persistent_stage(
+            replace(_inputs(tmp_path, "s0"), stop_on_detector_review=False, verification_timeout_seconds=5),
+            ops=ops,
+            run_lifecycle=lambda: True,
+            inject=lambda: None,
+            clock=_clock(ops),
+        )
+
+    assert not isinstance(raised.value, DetectorReviewRequiredError)

@@ -99,12 +99,28 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	flags.Var(&responderEnvironment, "responder-env", "responder Job environment NAME=VALUE; may be repeated")
 	var brokerArgs repeatedFlag
 	flags.Var(&brokerArgs, "broker-arg", "incident broker argument; may be repeated")
+	telemetryPath := flags.String(
+		"firing-telemetry-path",
+		"",
+		"detector firing telemetry JSONL stream; defaults to <repository-mount-path>/.sdo-runtime/telemetry/detector-firings.jsonl "+
+			"in job mode and to disabled in local mode; \"off\" disables it",
+	)
 	duration := flags.Duration("duration", 0, "bounded controller duration; zero runs until cancellation")
 	responseTimeout := flags.Duration("response-timeout", 30*time.Minute, "incident responder timeout")
 	verificationTimeout := flags.Duration(
 		"verification-timeout",
 		2*time.Minute,
 		"maximum wait for independent health detectors to clear after a response",
+	)
+	maxFollowUps := flags.Int(
+		"max-follow-ups",
+		0,
+		"maximum follow-up responders for health findings that stay active after a response; zero disables follow-ups",
+	)
+	followUpCooldown := flags.Duration(
+		"follow-up-cooldown",
+		30*time.Second,
+		"wait after a response completes before its still-active health findings get a follow-up responder",
 	)
 	repairPolicy := flags.String("repair-policy", "commit", "repair evidence policy: commit or recorded-actions")
 	leaseName := flags.String("lease-name", "sdo-controller", "leader-election Lease name")
@@ -304,8 +320,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		ArchitectureSummaryPath: ".sdo/arch.md", HealthObjectivePath: ".sdo/goal.md",
 		RepositoryWorktree: resolvedRoot, ResponseTimeout: *responseTimeout,
 		VerificationTimeout: *verificationTimeout,
-		RepairPolicy:        *repairPolicy,
-		FiringThreshold:     2, ClearThreshold: 2, BatchDebounce: 500 * time.Millisecond,
+		MaxFollowUps:        *maxFollowUps, FollowUpCooldown: *followUpCooldown,
+		RepairPolicy:    *repairPolicy,
+		FiringThreshold: 2, ClearThreshold: 2, BatchDebounce: 500 * time.Millisecond,
 		ConfirmationInterval: time.Second,
 		// The submit gate confirms a clearing finding on 3 fresh evaluations
 		// over at least 2 s instead of waiting for the detector's interval;
@@ -348,6 +365,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	stateStore := NewConfigMapStateStore(bootstrapProvider.Client, *controlNamespace, controllerStateConfigMap)
 	if err := controller.AttachStateStore(ctx, stateStore); err != nil {
 		return fmt.Errorf("restore controller state: %w", err)
+	}
+	if err := attachFiringTelemetry(controller, *telemetryPath, *dispatcherMode, *repositoryMountPath); err != nil {
+		fmt.Fprintln(stderr, err)
 	}
 	if *exitAfterClosure && controller.LastAcknowledgedIncidentID() != "" {
 		return nil
@@ -737,6 +757,29 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			}
 		}
 	}
+}
+
+// attachFiringTelemetry connects the durable detector firing stream. Telemetry
+// is observational, so a stream that cannot be opened is reported and skipped
+// rather than stopping the controller.
+func attachFiringTelemetry(controller *Controller, path string, dispatcherMode string, mountPath string) error {
+	if path == "off" || (path == "" && dispatcherMode != "job") {
+		return nil
+	}
+	if path == "" {
+		path = filepath.Join(mountPath, ".sdo-runtime", "telemetry", "detector-firings.jsonl")
+	}
+	sink, err := NewFileFiringSink(path, DefaultFiringStreamBytes)
+	if err != nil {
+		return fmt.Errorf("detector firing telemetry disabled: %w", err)
+	}
+	if !controller.RestoredFromState() {
+		if err := sink.StartFresh(); err != nil {
+			return fmt.Errorf("detector firing telemetry disabled: %w", err)
+		}
+	}
+	controller.SetFiringSink(sink)
+	return nil
 }
 
 // detectorReviewGate ends a one-shot run when health did not clear after the

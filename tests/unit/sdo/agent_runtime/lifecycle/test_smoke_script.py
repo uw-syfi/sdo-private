@@ -18,3 +18,10 @@ def test_image_build_checks_the_benchmark_adapter_as_the_runtime_uid() -> None:
     assert "--target sregym-responder" in script
     assert "--user 65532:65532" in script
     assert "benchmarks.sregym.adapter.submission --help" in script
+
+
+def test_image_build_tag_is_overridable_without_touching_the_shared_default() -> None:
+    script = (Path(__file__).parents[5] / "scripts/build_sdo_images.sh").read_text()
+
+    assert 'tag="${SDO_IMAGE_TAG:-v0.1.0}"' in script
+    assert ":v0.1.0" not in script

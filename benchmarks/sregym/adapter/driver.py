@@ -27,8 +27,10 @@ from benchmarks.sregym.adapter.fault_gate import (
     inject_fault_after_controller_baseline,
     request_fault_injection,
 )
+from benchmarks.sregym.adapter.healthy_baseline import capture_snapshots, kubectl_capture_ops, publish_snapshots
 from benchmarks.sregym.adapter.persistent import (
     PERSISTENT_STATE_ENV,
+    ClusterOps,
     KubectlClusterOps,
     StageInputs,
     control_namespace_for,
@@ -233,6 +235,36 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=config.get("reflection_session", DEFAULT_REFLECTION_SESSION),
     )
     parser.add_argument(
+        "--reflection-guidance",
+        choices=("baseline", "generalize", "generalize-spec"),
+        default=config.get("reflection_guidance", "baseline"),
+        help="reflection guidance: baseline, generalize, or generalize-spec (generalize with spec-first predicates)",
+    )
+    parser.add_argument(
+        "--late-findings",
+        choices=("off", "pull"),
+        default=config.get("late_findings", "off"),
+        help="let the responder pull findings that activated after dispatch (off by default)",
+    )
+    parser.add_argument(
+        "--max-follow-ups",
+        type=int,
+        default=int(config.get("max_follow_ups", 0)),
+        help="follow-up responders for health findings left active after a response (0 = off)",
+    )
+    parser.add_argument(
+        "--follow-up-cooldown-seconds",
+        type=int,
+        default=int(config.get("follow_up_cooldown_seconds", 30)),
+        help="wait after a response before its still-active health findings get a follow-up responder",
+    )
+    parser.add_argument(
+        "--healthy-baseline",
+        action=argparse.BooleanOptionalAction,
+        default=bool(config.get("healthy_baseline", False)),
+        help="record the healthy namespace before fault injection; reject learned detectors that fire on it",
+    )
+    parser.add_argument(
         "--persistent-controller",
         action=argparse.BooleanOptionalAction,
         default=bool(config.get("persistent_controller", False)),
@@ -396,12 +428,31 @@ def _configure_turn_usage_log(logs_dir: str | None) -> None:
         os.environ[TURN_USAGE_LOG_ENV] = str(Path(logs_dir) / "sdo_turn_usage.jsonl")
 
 
+def _cluster_ops(args: argparse.Namespace, namespace: str) -> ClusterOps:
+    ops: ClusterOps = KubectlClusterOps()
+    if args.healthy_baseline:
+        ops = kubectl_capture_ops(ops, namespace=namespace, kubectl_runner=kubectl)  # type: ignore[assignment]
+    return ops
+
+
+def _record_healthy_baseline(namespace: str) -> Callable[[], None]:
+    """Job mode: the controller runs in the application namespace, so record and publish there."""
+
+    def record() -> None:
+        publish_snapshots(
+            capture_snapshots(namespace, kubectl_runner=kubectl), control_namespace=namespace, kubectl_runner=kubectl
+        )
+
+    return record
+
+
 class _FaultGate:
     """Inject the deferred benchmark fault once the installed controller is watching."""
 
-    def __init__(self, namespace: str, api_base: str) -> None:
+    def __init__(self, namespace: str, api_base: str, *, before_inject: Callable[[], None] | None = None) -> None:
         self._namespace = namespace
         self._api_base = api_base
+        self._before_inject = before_inject
         self._error: BaseException | None = None
         self.timings: dict[str, float] = {}
         self._thread = threading.Thread(target=self._run, name="sdo-fault-gate", daemon=True)
@@ -411,11 +462,16 @@ class _FaultGate:
         self._not_before = datetime.now(timezone.utc)
         self._thread.start()
 
+    def _inject(self) -> None:
+        if self._before_inject is not None:
+            self._before_inject()
+        request_fault_injection(self._api_base)
+
     def _run(self) -> None:
         try:
             self.timings = inject_fault_after_controller_baseline(
                 self._namespace,
-                inject=lambda: request_fault_injection(self._api_base),
+                inject=self._inject,
                 kubectl_runner=kubectl,
                 not_before=self._not_before,
             )
@@ -569,6 +625,11 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
         repair_policy="recorded-actions",
         agent_provider=args.provider,
         reflection_session=args.reflection_session,
+        reflection_guidance=args.reflection_guidance,
+        late_findings=args.late_findings,
+        healthy_baseline=args.healthy_baseline,
+        max_follow_ups=args.max_follow_ups,
+        follow_up_cooldown_seconds=args.follow_up_cooldown_seconds,
         submission_api_base=_in_cluster_api_base(api_base),
         submission_relay_target_base=_relay_target_api_base(api_base),
         artifacts_dir=receipt_dir,
@@ -593,7 +654,7 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
                 ),
                 validation_cache=validation_cache,
             ),
-            ops=KubectlClusterOps(),
+            ops=_cluster_ops(args, namespace),
             run_lifecycle=lifecycle,
             inject=lambda: request_fault_injection(api_base),
         )
@@ -648,7 +709,13 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     trusted_kubeconfig = os.getenv("SREGYM_BASE_KUBECONFIG", "").strip()
     if trusted_kubeconfig:
         os.environ["KUBECONFIG"] = trusted_kubeconfig
-    gate = _FaultGate(namespace, api_base) if fault_deferred else None
+    gate = (
+        _FaultGate(namespace, api_base, before_inject=_record_healthy_baseline(namespace))
+        if fault_deferred and args.healthy_baseline
+        else _FaultGate(namespace, api_base)
+        if fault_deferred
+        else None
+    )
     if gate is not None:
         gate.start()
     receipt = run_production_runtime(
@@ -666,6 +733,11 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             repair_policy="recorded-actions",
             agent_provider=args.provider,
             reflection_session=args.reflection_session,
+            reflection_guidance=args.reflection_guidance,
+            late_findings=args.late_findings,
+            healthy_baseline=args.healthy_baseline,
+            max_follow_ups=args.max_follow_ups,
+            follow_up_cooldown_seconds=args.follow_up_cooldown_seconds,
             submission_api_base=_in_cluster_api_base(api_base),
             submission_relay_target_base=_relay_target_api_base(api_base),
             artifacts_dir=_receipt_directory(args.logs_dir, repository),

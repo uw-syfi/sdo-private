@@ -23,6 +23,7 @@ from sdo.controller_install import (
     CLAUDE_CONFIG_PATH,
     CODEX_HOME_PATH,
     RUNTIME_STATE_ROOT,
+    RUNTIME_TELEMETRY_ROOT,
     RUNTIME_USAGE_ROOT,
     ControllerInstallConfig,
     ControllerInstallError,
@@ -35,7 +36,13 @@ from sdo.controller_install import (
 from sdo.controller_install import (
     controller_resources as production_controller_resources,
 )
-from sdo.operational_memory import BrokerClosure, ControllerRolloutRecord, verify_diagnosis
+from sdo.operational_memory import (
+    BrokerClosure,
+    ControllerRolloutRecord,
+    DetectorTimelineEntry,
+    LateFindingsPullSummary,
+    verify_diagnosis,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +54,15 @@ _EXPORTED_RUNTIME_PATHS = tuple(
     posixpath.relpath(path, RUNTIME_STATE_ROOT)
     for path in (
         RUNTIME_USAGE_ROOT,
+        RUNTIME_TELEMETRY_ROOT,
         f"{CODEX_HOME_PATH}/sessions",
         f"{CLAUDE_CONFIG_PATH}/projects",
     )
 )
 RUNTIME_ARTIFACTS_DIRNAME = "sdo_runtime"
+#: The detector firing stream copied next to the strict receipt: the rotated
+#: predecessor followed by the live file, in emission order.
+FIRING_STREAM_FILENAME = "detector_firings.jsonl"
 
 
 @dataclass(frozen=True)
@@ -296,7 +307,70 @@ def _export_runtime_artifacts(namespace: str, artifacts_dir: Path | None) -> dic
             error = extracted.stderr.decode(errors="replace").strip() or f"exit {extracted.returncode}"
             logger.warning("could not unpack SDO runtime artifacts: %s", error)
             return {"directory": None, "error": f"tar extraction failed: {error}"}
+    _materialize_firing_stream(destination / "telemetry", artifacts_dir)
     return {"directory": str(destination), "error": None}
+
+
+def _materialize_firing_stream(exported: Path, artifacts_dir: Path) -> None:
+    """Concatenate the exported firing stream (rotated file first) beside the receipt."""
+
+    parts = [exported / "detector-firings.jsonl.1", exported / "detector-firings.jsonl"]
+    present = [part for part in parts if part.is_file()]
+    if not present:
+        return
+    chunks: list[str] = []
+    for part in present:
+        text = part.read_text(encoding="utf-8")
+        chunks.append(text if text.endswith("\n") or not text else text + "\n")
+    (artifacts_dir / FIRING_STREAM_FILENAME).write_text("".join(chunks), encoding="utf-8")
+
+
+def _detector_firing_summary(closure: dict[str, Any]) -> dict[str, Any]:
+    """Receipt fields for the closure's detector firing timeline.
+
+    Closures from controllers that predate firing telemetry report it as
+    unavailable, with the derived booleans ``None`` rather than ``False``.
+    """
+
+    unavailable: dict[str, Any] = {
+        "detector_firing_available": False,
+        "detector_timeline": [],
+        "incident_detector_fired_before_dispatch": None,
+        "incident_detector_fired_after_dispatch": None,
+        "no_incident_detector_fired": None,
+    }
+    if "detector_timeline" not in closure and "incident_detector_fired_before_dispatch" not in closure:
+        return unavailable
+    try:
+        timeline = [
+            DetectorTimelineEntry.model_validate(entry).model_dump(mode="json")
+            for entry in closure.get("detector_timeline") or []
+        ]
+    except ValidationError as exc:
+        return {**unavailable, "detector_timeline_error": str(exc)}
+    return {
+        "detector_firing_available": True,
+        "detector_timeline": timeline,
+        "incident_detector_fired_before_dispatch": bool(closure.get("incident_detector_fired_before_dispatch")),
+        "incident_detector_fired_after_dispatch": bool(closure.get("incident_detector_fired_after_dispatch")),
+        "no_incident_detector_fired": bool(closure.get("no_incident_detector_fired")),
+    }
+
+
+def _late_findings_summary(closure: dict[str, Any]) -> dict[str, Any]:
+    """Receipt fields for the pull-before-act evidence; empty unless the broker recorded it.
+
+    ``late_finding_consumed`` is true when at least one pull returned a finding that activated after dispatch.
+    """
+
+    raw = closure.get("late_findings_pull")
+    if raw is None:
+        return {}
+    try:
+        summary = LateFindingsPullSummary.model_validate(raw).model_dump(mode="json")
+    except ValidationError as exc:
+        return {"late_findings_pull_error": str(exc)}
+    return {"late_findings_pull": summary, "late_finding_consumed": summary["nonempty_pull_count"] > 0}
 
 
 CONTROLLER_LOGS_DIRNAME = "controller_logs"
@@ -488,6 +562,8 @@ def _production_receipt(
         "detector_clear": detector_clear,
         "detector_review_required_at": closure.get("detector_review_required_at"),
         "incident_detector_states": closure.get("incident_detector_states", []),
+        **_detector_firing_summary(closure),
+        **_late_findings_summary(closure),
         "independent_verification": result.get("verification_evidence", []),
         "usage": result.get("usage", {}),
         "reflection_usage": ledger.get("reflection_usage", {}),

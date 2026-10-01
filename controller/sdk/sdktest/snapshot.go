@@ -13,18 +13,20 @@ import (
 )
 
 type Snapshot struct {
-	NamespaceName     string
-	ConfigMapList     []corev1.ConfigMap
-	ServiceList       []corev1.Service
-	PodList           []corev1.Pod
-	DeploymentList    []appsv1.Deployment
-	ReplicaSetList    []appsv1.ReplicaSet
-	EndpointList      []corev1.Endpoints
-	EndpointSliceList []discoveryv1.EndpointSlice
-	NetworkPolicyList []networkingv1.NetworkPolicy
-	EventList         []corev1.Event
+	// SourceName names the file a loaded snapshot came from, for messages.
+	SourceName        string                       `json:"-"`
+	NamespaceName     string                       `json:"namespace"`
+	ConfigMapList     []corev1.ConfigMap           `json:"configMaps"`
+	ServiceList       []corev1.Service             `json:"services"`
+	PodList           []corev1.Pod                 `json:"pods"`
+	DeploymentList    []appsv1.Deployment          `json:"deployments"`
+	ReplicaSetList    []appsv1.ReplicaSet          `json:"replicaSets"`
+	EndpointList      []corev1.Endpoints           `json:"endpoints"`
+	EndpointSliceList []discoveryv1.EndpointSlice  `json:"endpointSlices"`
+	NetworkPolicyList []networkingv1.NetworkPolicy `json:"networkPolicies"`
+	EventList         []corev1.Event               `json:"events"`
 	// Traffic holds synthetic-traffic observations by workload name.
-	Traffic map[string]traffic.Window
+	Traffic map[string]traffic.Window `json:"-"`
 }
 
 // TrafficWindow implements traffic.Source.

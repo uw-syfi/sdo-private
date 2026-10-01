@@ -1412,6 +1412,52 @@ def test_sregym_agent_config_selects_the_reflection_session_mode(monkeypatch: py
         driver._parse_args(["--reflection-session", "transcript"])
 
 
+def test_sregym_agent_config_selects_the_reflection_guidance(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
+    assert driver._parse_args([]).reflection_guidance == "baseline"
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"reflection_guidance": "generalize"}))
+    assert driver._parse_args([]).reflection_guidance == "generalize"
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"reflection_guidance": "generalize-spec"}))
+    assert driver._parse_args([]).reflection_guidance == "generalize-spec"
+    with pytest.raises(SystemExit):
+        driver._parse_args(["--reflection-guidance", "sibling"])
+
+
+def test_sregym_agent_config_enables_the_healthy_baseline_gate_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
+    assert driver._parse_args([]).healthy_baseline is False
+    assert driver._parse_args(["--healthy-baseline"]).healthy_baseline is True
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"healthy_baseline": True}))
+    assert driver._parse_args([]).healthy_baseline is True
+    assert driver._parse_args(["--no-healthy-baseline"]).healthy_baseline is False
+
+
+def test_fault_gate_records_the_healthy_baseline_before_requesting_injection(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    events: list[str] = []
+
+    def fake_gate(namespace: str, *, inject, **_: object) -> dict[str, float]:  # type: ignore[no-untyped-def]
+        inject()
+        return {"controller_baseline_wait": 0.0}
+
+    monkeypatch.setattr(driver, "inject_fault_after_controller_baseline", fake_gate)
+    monkeypatch.setattr(driver, "request_fault_injection", lambda api_base: events.append("inject"))
+
+    gate = driver._FaultGate("ns", "http://api", before_inject=lambda: events.append("record"))
+    gate._run()
+
+    assert events == ["record", "inject"]
+    plain = driver._FaultGate("ns", "http://api")
+    events.clear()
+    plain._run()
+    assert events == ["inject"]
+
+
 def test_receipt_reports_a_deterministically_skipped_reflection() -> None:
     import benchmarks.sregym.adapter.runtime as runtime
 
@@ -1783,3 +1829,26 @@ def test_the_receipts_diagnosis_is_recomputed_from_a_go_encoded_closure(
 
     assert [item["verdict"] for item in verification] == [verdict]
     assert _recovery_attribution(verification) == attribution
+
+
+def test_sregym_agent_config_selects_the_late_findings_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
+    assert driver._parse_args([]).late_findings == "off"
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"late_findings": "pull"}))
+    assert driver._parse_args([]).late_findings == "pull"
+    with pytest.raises(SystemExit):
+        driver._parse_args(["--late-findings", "push"])
+
+
+def test_sregym_agent_config_selects_bounded_follow_ups(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
+    assert driver._parse_args([]).max_follow_ups == 0
+    monkeypatch.setenv(
+        "SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"max_follow_ups": 3, "follow_up_cooldown_seconds": 20})
+    )
+    args = driver._parse_args([])
+    assert (args.max_follow_ups, args.follow_up_cooldown_seconds) == (3, 20)

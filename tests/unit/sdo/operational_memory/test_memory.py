@@ -874,3 +874,117 @@ def test_responder_role_still_denies_secrets_and_rbac_objects() -> None:
     assert "rbac.authorization.k8s.io" not in groups
     assert "*" not in resources
     assert all("*" not in rule["verbs"] for rule in role["rules"])
+
+
+class _StagingProbeSandbox:
+    """Records what the validated tree holds when the executable gate runs."""
+
+    def __init__(self, relative: str = ".sdo-baseline/healthy", returncode: int = 0) -> None:
+        self.relative = relative
+        self.returncode = returncode
+        self.seen: list[str] | None = None
+
+    def run(self, app_root: Path):  # type: ignore[no-untyped-def]
+        from sdo.operational_memory.sandbox import SandboxResult
+
+        directory = app_root / self.relative
+        self.seen = sorted(path.name for path in directory.iterdir()) if directory.is_dir() else None
+        return SandboxResult(returncode=self.returncode, stderr="gate says no" if self.returncode else "")
+
+
+_DIAGNOSTICS_CHANGE = [".sdo/diagnostics/detectors/incidents/missing_configmap/detector.go"]
+
+
+def _baseline_source(tmp_path: Path) -> Path:
+    source = tmp_path / "volume" / "healthy"
+    source.mkdir(parents=True)
+    (source / "healthy-0.json").write_text("{}", encoding="utf-8")
+    (source / "healthy-1.json").write_text("{}", encoding="utf-8")
+    (source / "notes.txt").write_text("ignored", encoding="utf-8")
+    return source
+
+
+def test_healthy_baseline_snapshots_are_staged_only_for_the_executable_gate_and_removed_after(tmp_path: Path) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+    _write_memory(app)
+    sandbox = _StagingProbeSandbox()
+    validator = MemoryValidator(
+        sandbox_runner=sandbox,  # type: ignore[arg-type]
+        healthy_baseline_source=_baseline_source(tmp_path),
+        healthy_baseline_dir=".sdo-baseline/healthy",
+    )
+
+    validator.validate(app, actor=ArtifactOwner.RESPONDER, changed_paths=_DIAGNOSTICS_CHANGE)
+
+    assert sandbox.seen == ["healthy-0.json", "healthy-1.json"]
+    # The staged files are untracked scratch: nothing is left in the worktree for the broker to see.
+    assert not (app / ".sdo-baseline").exists()
+
+
+def test_healthy_baseline_staging_is_removed_when_the_gate_rejects(tmp_path: Path) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+    _write_memory(app)
+    validator = MemoryValidator(
+        sandbox_runner=_StagingProbeSandbox(returncode=1),  # type: ignore[arg-type]
+        healthy_baseline_source=_baseline_source(tmp_path),
+        healthy_baseline_dir=".sdo-baseline/healthy",
+    )
+
+    with pytest.raises(MemoryValidationError, match="gate says no"):
+        validator.validate(app, actor=ArtifactOwner.RESPONDER, changed_paths=_DIAGNOSTICS_CHANGE)
+
+    assert not (app / ".sdo-baseline").exists()
+
+
+def test_healthy_baseline_is_not_staged_by_default(tmp_path: Path) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+    _write_memory(app)
+    sandbox = _StagingProbeSandbox()
+
+    MemoryValidator(sandbox_runner=sandbox).validate(  # type: ignore[arg-type]
+        app, actor=ArtifactOwner.RESPONDER, changed_paths=_DIAGNOSTICS_CHANGE
+    )
+
+    assert sandbox.seen is None
+
+
+def test_missing_or_empty_healthy_baseline_source_fails_loudly(tmp_path: Path) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+    _write_memory(app)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    for source in (tmp_path / "absent", empty):
+        validator = MemoryValidator(
+            sandbox_runner=_StagingProbeSandbox(),  # type: ignore[arg-type]
+            healthy_baseline_source=source,
+            healthy_baseline_dir=".sdo-baseline/healthy",
+        )
+        with pytest.raises(MemoryValidationError, match="healthy baseline"):
+            validator.validate(app, actor=ArtifactOwner.RESPONDER, changed_paths=_DIAGNOSTICS_CHANGE)
+
+
+def test_healthy_baseline_source_requires_a_relative_directory(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="relative"):
+        MemoryValidator(healthy_baseline_source=tmp_path, healthy_baseline_dir="/abs")
+    with pytest.raises(ValueError, match="healthy_baseline_dir"):
+        MemoryValidator(healthy_baseline_source=tmp_path, healthy_baseline_dir=None)
+
+
+def test_unchanged_diagnostics_do_not_stage_the_healthy_baseline(tmp_path: Path) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+    _write_memory(app)
+    sandbox = _StagingProbeSandbox()
+    validator = MemoryValidator(
+        sandbox_runner=sandbox,  # type: ignore[arg-type]
+        healthy_baseline_source=_baseline_source(tmp_path),
+        healthy_baseline_dir=".sdo-baseline/healthy",
+    )
+
+    validator.validate(app, actor=ArtifactOwner.RESPONDER, changed_paths=[".sdo/playbooks/missing-configmap/README.md"])
+
+    assert sandbox.seen is None

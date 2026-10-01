@@ -22,6 +22,8 @@ from sdo.agent_runtime.responder import (
 )
 from sdo.operational_memory import (
     DEFAULT_REFLECTION_SESSION,
+    LATE_FINDINGS_MODES,
+    REFLECTION_GUIDANCE_MODES,
     REFLECTION_SESSION_MODES,
     BrokerClosure,
     BrokerService,
@@ -29,9 +31,11 @@ from sdo.operational_memory import (
     ClosureReceipt,
     CommandProposalValidator,
     CommitBroker,
+    ContainerSandboxRunner,
     KubernetesJobSandboxRunner,
     LocalSandboxRunner,
     MemoryValidator,
+    ReflectionGuidance,
 )
 
 
@@ -42,6 +46,7 @@ def _production_reflector(
     reasoning_effort: str,
     timeout_seconds: int,
     responder_turn_log: Path | None = None,
+    guidance: ReflectionGuidance = "baseline",
 ) -> SessionReflector:
     backend_type = ClaudeSessionBackend if provider == "claude" else CodexSessionBackend
     return SessionReflector(
@@ -51,6 +56,7 @@ def _production_reflector(
             timeout_seconds=timeout_seconds,
         ),
         responder_turn_log=responder_turn_log,
+        guidance=guidance,
     )
 
 
@@ -61,9 +67,14 @@ def _memory_validator(
     image: str | None = None,
     repository_pvc: str | None = None,
     repository_mount_path: Path = Path("/workspace"),
+    healthy_baseline: str | None = None,
+    healthy_baseline_source: Path | None = None,
 ) -> MemoryValidator:
+    gate = {"healthy_baseline_source": healthy_baseline_source, "healthy_baseline_dir": healthy_baseline}
     if mode == "local":
-        return MemoryValidator(sandbox_runner=LocalSandboxRunner(timeout_seconds=300))
+        return MemoryValidator(
+            sandbox_runner=LocalSandboxRunner(timeout_seconds=300, healthy_baseline=healthy_baseline), **gate
+        )
     if mode == "kubernetes":
         if not namespace or not image or not repository_pvc:
             raise ValueError("Kubernetes validator mode requires namespace, image, and repository PVC")
@@ -73,9 +84,13 @@ def _memory_validator(
                 image=image,
                 repository_pvc=repository_pvc,
                 repository_mount_path=repository_mount_path,
-            )
+                healthy_baseline=healthy_baseline,
+            ),
+            **gate,
         )
-    return MemoryValidator()
+    if healthy_baseline:
+        return MemoryValidator(sandbox_runner=ContainerSandboxRunner(healthy_baseline=healthy_baseline), **gate)
+    return MemoryValidator(**gate)
 
 
 def _argument_parser() -> argparse.ArgumentParser:
@@ -98,6 +113,26 @@ def _argument_parser() -> argparse.ArgumentParser:
         "resume the responder session",
     )
     parser.add_argument(
+        "--reflection-guidance",
+        choices=REFLECTION_GUIDANCE_MODES,
+        default="baseline",
+        help="reflection learning guidance: per-cause (default) or generalize one incident detector and playbook "
+        "across parameter variants of the same root-cause class, or generalize-spec (generalize, with predicates "
+        "decidable from resource spec and status preferred over later-produced evidence)",
+    )
+    parser.add_argument(
+        "--late-findings",
+        choices=LATE_FINDINGS_MODES,
+        default="off",
+        help="record whether the responder pulled findings that activated after dispatch (off by default)",
+    )
+    parser.add_argument(
+        "--late-findings-log",
+        type=Path,
+        default=None,
+        help="pull receipt file the responder appends to (default: <repository>/.sdo-runtime/telemetry)",
+    )
+    parser.add_argument(
         "--responder-turn-log",
         type=Path,
         help="responder per-turn usage log; a fresh reflection brief quotes the responder's shell commands from it",
@@ -107,6 +142,17 @@ def _argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--validator-image")
     parser.add_argument("--validator-repository-pvc")
     parser.add_argument("--validator-repository-mount-path", type=Path, default=Path("/workspace"))
+    parser.add_argument(
+        "--healthy-baseline-dir",
+        help="opt-in: directory of recorded healthy-cluster snapshots (*.json), relative to the validated worktree; "
+        "a proposed incident detector that reports an active finding on them is rejected (default: not checked)",
+    )
+    parser.add_argument(
+        "--healthy-baseline-source",
+        type=Path,
+        help="opt-in: directory holding recorded healthy-cluster snapshots (*.json) on the repository volume; "
+        "staged into the validated worktree at --healthy-baseline-dir for the detector gate only",
+    )
     return parser
 
 
@@ -123,6 +169,8 @@ def main(argv: list[str] | None = None) -> int:
             image=args.validator_image,
             repository_pvc=args.validator_repository_pvc,
             repository_mount_path=args.validator_repository_mount_path,
+            healthy_baseline=args.healthy_baseline_dir,
+            healthy_baseline_source=args.healthy_baseline_source,
         ),
         proposal_validator=CommandProposalValidator(commands) if commands else None,
     )
@@ -139,8 +187,11 @@ def main(argv: list[str] | None = None) -> int:
             reasoning_effort=args.reflection_reasoning_effort,
             timeout_seconds=args.reflection_timeout_seconds,
             responder_turn_log=args.responder_turn_log,
+            guidance=args.reflection_guidance,
         ),
         reflection_session=args.reflection_session,
+        late_findings=args.late_findings,
+        late_findings_log=args.late_findings_log,
     )
     try:
         payload = json.load(sys.stdin)

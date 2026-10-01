@@ -1,0 +1,150 @@
+{
+  "seed": 20260930,
+  "length": 24,
+  "incidents": [
+    {
+      "index": 0,
+      "problem_id": "network_policy_block",
+      "kind": "first",
+      "family": "network-policy-block"
+    },
+    {
+      "index": 1,
+      "problem_id": "missing_configmap_hotel_reservation",
+      "kind": "first",
+      "family": "missing-configmap"
+    },
+    {
+      "index": 2,
+      "problem_id": "readiness_probe_misconfiguration_hotel_reservation",
+      "kind": "first",
+      "family": "readiness-probe"
+    },
+    {
+      "index": 3,
+      "problem_id": "network_policy_block",
+      "kind": "exact",
+      "family": "network-policy-block"
+    },
+    {
+      "index": 4,
+      "problem_id": "misconfig_app_hotel_res",
+      "kind": "novel",
+      "family": "misconfig-app"
+    },
+    {
+      "index": 5,
+      "problem_id": "readiness_probe_misconfiguration__v_hotel_reservation_geo",
+      "kind": "variant",
+      "family": "readiness-probe"
+    },
+    {
+      "index": 6,
+      "problem_id": "missing_configmap_hotel_reservation",
+      "kind": "exact",
+      "family": "missing-configmap"
+    },
+    {
+      "index": 7,
+      "problem_id": "wrong_service_selector_hotel_reservation",
+      "kind": "first",
+      "family": "wrong-service-selector"
+    },
+    {
+      "index": 8,
+      "problem_id": "readiness_probe_misconfiguration__v_hotel_reservation_geo",
+      "kind": "exact",
+      "family": "readiness-probe"
+    },
+    {
+      "index": 9,
+      "problem_id": "readiness_probe_misconfiguration__v_hotel_reservation_reservation",
+      "kind": "variant",
+      "family": "readiness-probe"
+    },
+    {
+      "index": 10,
+      "problem_id": "network_policy_block",
+      "kind": "exact",
+      "family": "network-policy-block"
+    },
+    {
+      "index": 11,
+      "problem_id": "missing_configmap_hotel_reservation",
+      "kind": "exact",
+      "family": "missing-configmap"
+    },
+    {
+      "index": 12,
+      "problem_id": "readiness_probe_misconfiguration__v_hotel_reservation_geo",
+      "kind": "exact",
+      "family": "readiness-probe"
+    },
+    {
+      "index": 13,
+      "problem_id": "readiness_probe_misconfiguration__v_hotel_reservation_recommendation",
+      "kind": "variant",
+      "family": "readiness-probe"
+    },
+    {
+      "index": 14,
+      "problem_id": "missing_configmap_mongodb_geo_rate_hotel_reservation",
+      "kind": "variant",
+      "family": "missing-configmap"
+    },
+    {
+      "index": 15,
+      "problem_id": "wrong_dns_policy_hotel_reservation",
+      "kind": "novel",
+      "family": "wrong-dns-policy"
+    },
+    {
+      "index": 16,
+      "problem_id": "readiness_probe_misconfiguration__v_hotel_reservation_search",
+      "kind": "variant",
+      "family": "readiness-probe"
+    },
+    {
+      "index": 17,
+      "problem_id": "readiness_probe_misconfiguration_hotel_reservation",
+      "kind": "exact",
+      "family": "readiness-probe"
+    },
+    {
+      "index": 18,
+      "problem_id": "network_policy_block",
+      "kind": "exact",
+      "family": "network-policy-block"
+    },
+    {
+      "index": 19,
+      "problem_id": "readiness_probe_misconfiguration__v_hotel_reservation_profile",
+      "kind": "variant",
+      "family": "readiness-probe"
+    },
+    {
+      "index": 20,
+      "problem_id": "wrong_service_selector_hotel_reservation",
+      "kind": "exact",
+      "family": "wrong-service-selector"
+    },
+    {
+      "index": 21,
+      "problem_id": "missing_configmap_mongodb_rate_hotel_reservation",
+      "kind": "variant",
+      "family": "missing-configmap"
+    },
+    {
+      "index": 22,
+      "problem_id": "readiness_probe_misconfiguration__v_hotel_reservation_search",
+      "kind": "exact",
+      "family": "readiness-probe"
+    },
+    {
+      "index": 23,
+      "problem_id": "readiness_probe_misconfiguration__v_hotel_reservation_user",
+      "kind": "variant",
+      "family": "readiness-probe"
+    }
+  ]
+}

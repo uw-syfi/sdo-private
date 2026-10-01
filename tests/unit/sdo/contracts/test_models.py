@@ -114,3 +114,21 @@ class TestUsageMetrics:
     def test_an_inconsistent_breakdown_is_rejected(self, fields: dict[str, int], match: str) -> None:
         with pytest.raises(ValueError, match=match):
             UsageMetrics(llm_calls=1, input_tokens=1_000, output_tokens=80, **fields)
+
+
+def test_incident_request_carries_optional_follow_up_context() -> None:
+    payload = json.loads((FIXTURE_DIR / "incident_request.json").read_text(encoding="utf-8"))
+    assert IncidentRequest.model_validate(payload).follow_up is None
+    payload["follow_up"] = {
+        "original_incident_id": "inc-1",
+        "parent_incident_id": "inc-2",
+        "attempt": 2,
+        "max_follow_ups": 3,
+        "prior_responder_summary": "fixed geo",
+    }
+
+    request = IncidentRequest.model_validate(payload)
+
+    assert request.follow_up is not None
+    assert request.follow_up.attempt == 2
+    assert request.model_dump(mode="json", exclude_none=True) == payload

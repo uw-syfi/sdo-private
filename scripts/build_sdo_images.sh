@@ -5,6 +5,8 @@ set -euo pipefail
 tag="${SDO_IMAGE_TAG:-v0.1.0}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# SDO_IMAGE_TAG builds under a private tag so shared v0.1.0 images stay untouched.
+tag="${SDO_IMAGE_TAG:-v0.1.0}"
 docker build \
   --load \
   --file "${repo_root}/controller/Dockerfile.validator" \
