@@ -35,6 +35,7 @@ from benchmarks.sregym.fastloop.records import AgentSummary, IncidentRecord, loa
 from benchmarks.sregym.fastloop.worker_client import SregymWorker, worker_argv
 
 if TYPE_CHECKING:
+    from benchmarks.sregym.fastloop.composite import CompositeSettings
     from benchmarks.sregym.fastloop.loop import IncidentAgent
 
 logger = logging.getLogger(__name__)
@@ -142,7 +143,24 @@ def _free_port() -> int:
         return int(probe.getsockname()[1])
 
 
-def _sdo_agent(args: argparse.Namespace, environment: FastloopEnvironment, results_dir: Path) -> IncidentAgent:
+def _composite_settings(args: argparse.Namespace) -> CompositeSettings:
+    from benchmarks.sregym.fastloop.composite import CompositeSettings
+
+    return CompositeSettings(deadline_seconds=args.composite_deadline, idle_seconds=args.composite_idle)
+
+
+def _is_composite(problems: tuple[str, ...]) -> bool:
+    from benchmarks.sregym.fastloop.fault_tracker import composite_faults
+
+    flags = {bool(composite_faults(problem)) for problem in problems}
+    if len(flags) > 1:
+        raise SystemExit("do not mix composite and single-fault problems in one run")
+    return flags == {True}
+
+
+def _sdo_agent(
+    args: argparse.Namespace, environment: FastloopEnvironment, results_dir: Path, *, composite: bool = False
+) -> IncidentAgent:
     from benchmarks.sregym.adapter import (
         KubectlClusterOps,
         RuntimeConfig,
@@ -186,11 +204,10 @@ def _sdo_agent(args: argparse.Namespace, environment: FastloopEnvironment, resul
         verification_timeout_seconds=float(args.timeout + 300),
         validation_cache=validation_cache,
     )
-    return SdoPersistentAgent(
-        settings,
-        ops=KubectlClusterOps(),
-        lifecycle_inputs=lambda: deployed_lifecycle(environment.namespace),
-        run_lifecycle=lambda context: run_or_reuse_lifecycle(
+    agent_arguments = {
+        "ops": KubectlClusterOps(),
+        "lifecycle_inputs": lambda: deployed_lifecycle(environment.namespace),
+        "run_lifecycle": lambda context: run_or_reuse_lifecycle(
             environment.workspace,
             application=environment.application,
             context=context,
@@ -198,7 +215,18 @@ def _sdo_agent(args: argparse.Namespace, environment: FastloopEnvironment, resul
             model=args.model,
             validation_cache=validation_cache,
         ),
-    )
+    }
+    if composite:
+        from benchmarks.sregym.fastloop.composite import CompositeSdoAgent, reader_for
+
+        return CompositeSdoAgent(
+            settings,
+            **agent_arguments,
+            reader=reader_for(environment.namespace, environment.kubeconfig),
+            report_dir=results_dir,
+            composite=_composite_settings(args),
+        )
+    return SdoPersistentAgent(settings, **agent_arguments)
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -219,7 +247,9 @@ def _run(args: argparse.Namespace) -> int:
         )
         driver = SregymFaultDriver(worker, namespace=environment.namespace, health_timeout_seconds=args.health_timeout)
         if args.agent == "sdo":
-            records = run_incidents(_sdo_agent(args, environment, results_dir), driver, config)
+            records = run_incidents(
+                _sdo_agent(args, environment, results_dir, composite=_is_composite(problems)), driver, config
+            )
         else:
             records = _run_codex(args, environment, results_dir, worker, driver, config)
     _print_summary(records)
@@ -269,6 +299,15 @@ def _run_codex(
                 worker.request("codex_prompt", problem_id=problem_id, api_base=api_base)["prompt"]
             ),
         )
+        if _is_composite(config.problems):
+            from benchmarks.sregym.fastloop.composite import TrackedAgent, reader_for
+
+            agent = TrackedAgent(  # type: ignore[assignment]
+                agent,
+                reader=reader_for(environment.namespace, environment.kubeconfig),
+                report_dir=results_dir,
+                settings=_composite_settings(args),
+            )
         return run_incidents(agent, driver, config)
 
 
@@ -457,6 +496,18 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--health-timeout", type=float, default=300.0, help="seconds to wait for health after recovery")
     run.add_argument("--proxy-port", type=int, default=0, help="Codex baseline API proxy port (default: free port)")
     run.add_argument("--run-id", default=None)
+    run.add_argument(
+        "--composite-deadline",
+        type=float,
+        default=2400.0,
+        help="composite problems: seconds after injection before SDO stops waiting for further incidents",
+    )
+    run.add_argument(
+        "--composite-idle",
+        type=float,
+        default=600.0,
+        help="composite problems: seconds SDO waits for another incident while faults remain",
+    )
     run.set_defaults(handler=_run)
 
     summary = commands.add_parser("summary", help="summarize incidents.jsonl files or run directories")

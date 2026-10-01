@@ -118,7 +118,9 @@ class SdoPersistentAgent:
         lifecycle_inputs: Callable[[], DeployedLifecycle],
         run_lifecycle: Callable[[DeployedLifecycleContext], bool],
         clock: Clock | None = None,
+        keep_running: bool = False,
     ) -> None:
+        self._keep_running = keep_running
         self._settings = settings
         self._ops = ops
         self._lifecycle_inputs = lifecycle_inputs
@@ -128,6 +130,21 @@ class SdoPersistentAgent:
     @property
     def model(self) -> str:
         return self._settings.runtime_config.model
+
+    def stage_inputs(self, stage_label: str, receipt_dir: Path, fingerprint: str) -> StageInputs:
+        settings = self._settings
+        return StageInputs(
+            stage_label=stage_label,
+            application=settings.application,
+            namespace=settings.namespace,
+            lifecycle_fingerprint=fingerprint,
+            runtime_config=replace(settings.runtime_config, artifacts_dir=receipt_dir),
+            receipt_dir=receipt_dir,
+            state_path=settings.state_path,
+            kubeconfig=settings.kubeconfig,
+            verification_timeout_seconds=settings.verification_timeout_seconds,
+            validation_cache=settings.validation_cache,
+        )
 
     def resolve(self, index: int, problem_id: str, inject: Callable[[], InjectionWindow]) -> AgentOutcome:
         settings = self._settings
@@ -139,22 +156,12 @@ class SdoPersistentAgent:
             windows.append(inject())
 
         resolution = run_persistent_stage(
-            StageInputs(
-                stage_label=f"fastloop-{index:03d}",
-                application=settings.application,
-                namespace=settings.namespace,
-                lifecycle_fingerprint=lifecycle.fingerprint,
-                runtime_config=replace(settings.runtime_config, artifacts_dir=receipt_dir),
-                receipt_dir=receipt_dir,
-                state_path=settings.state_path,
-                kubeconfig=settings.kubeconfig,
-                verification_timeout_seconds=settings.verification_timeout_seconds,
-                validation_cache=settings.validation_cache,
-            ),
+            self.stage_inputs(f"fastloop-{index:03d}", receipt_dir, lifecycle.fingerprint),
             ops=self._ops,
             run_lifecycle=lambda: self._run_lifecycle(lifecycle.context),
             inject=gated_inject,
             clock=self._clock,
+            pause_after_verified=not self._keep_running,
         )
         if not windows:
             raise RuntimeError("the controller verified an incident without the fault being injected")

@@ -124,6 +124,8 @@ class ControllerRecord(BaseModel):
     runtime_config: dict[str, Any]
     served_stages: list[str] = Field(default_factory=list)
     pending: PendingIncident | None = None
+    #: The stage receipt of the stage that served the current problem; follow-up incidents inherit it.
+    served_stage_receipt: dict[str, Any] | None = None
 
 
 class DeferredReceipt(BaseModel):
@@ -322,8 +324,13 @@ def run_persistent_stage(
     run_lifecycle: Callable[[], bool],
     inject: Callable[[], None],
     clock: Clock | None = None,
+    pause_after_verified: bool = True,
 ) -> dict[str, Any]:
     """Run one benchmark problem against the application's persistent controller.
+
+    ``pause_after_verified=False`` leaves the controller active after the first
+    verified incident, for compositions whose other faults the controller must
+    keep handling; the caller then pauses it (``set_maintenance``) itself.
 
     Returns the stage's resolution record. It ends at controller-verified
     recovery; the strict receipt, which needs the finished reflection, is
@@ -406,9 +413,10 @@ def run_persistent_stage(
     injected = clock.monotonic()
     verified = _wait_for_verified_incident(ops, control, known, inputs.verification_timeout_seconds, clock)
     verified_ready = clock.monotonic()
-    paused_generation = f"{generation}-paused"
-    ops.set_maintenance(control, paused=True, generation=paused_generation)
-    _wait_for_maintenance_ack(ops, control, paused_generation, clock)
+    if pause_after_verified:
+        paused_generation = f"{generation}-paused"
+        ops.set_maintenance(control, paused=True, generation=paused_generation)
+        _wait_for_maintenance_ack(ops, control, paused_generation, clock)
     paused_ready = clock.monotonic()
     ops.export_controller_logs(control, inputs.receipt_dir)
     stage_evidence: dict[str, Any] = dict(ops.export_runtime_artifacts(config, inputs.receipt_dir))
@@ -476,6 +484,101 @@ def run_persistent_stage(
                 "responder_session_id",
                 "stage_end_runtime_artifacts",
             }
+        },
+    )
+    record.served_stages.append(inputs.stage_label)
+    record.served_stage_receipt = dict(record.pending.stage_receipt)
+    state.deferred_receipts.append(
+        DeferredReceipt(
+            incident_id=verified.incident_id, stage_label=inputs.stage_label, staging_dir=inputs.receipt_dir
+        )
+    )
+    state.save(inputs.state_path)
+    persist_resolution(resolution, inputs.receipt_dir)
+    return resolution
+
+
+def pause_controller(ops: ClusterOps, control: str, *, label: str, clock: Clock | None = None) -> None:
+    """Pause the controller and wait for its acknowledgement (used when a composition ends)."""
+
+    clock = clock or Clock()
+    generation = f"{label}-{uuid.uuid4().hex[:8]}-paused"
+    ops.set_maintenance(control, paused=True, generation=generation)
+    _wait_for_maintenance_ack(ops, control, generation, clock)
+
+
+def collect_followup_incident(
+    inputs: StageInputs,
+    *,
+    ops: ClusterOps,
+    known: set[str],
+    timeout_seconds: float,
+    clock: Clock | None = None,
+) -> dict[str, Any] | None:
+    """Wait for a further incident the running controller verifies, and register it as pending.
+
+    For compositions: the first incident's stage leaves the controller active, the caller drains
+    it, and this collects the next incident for the faults the first did not cover. Returns
+    ``None`` when no new incident is verified within ``timeout_seconds``.
+    """
+
+    clock = clock or Clock()
+    state = PersistentState.load(inputs.state_path)
+    record = state.controllers.get(inputs.namespace)
+    if record is None:
+        raise PersistentControllerError(f"no persistent controller is recorded for {inputs.namespace!r}")
+    if record.pending is not None:
+        raise PersistentControllerError(
+            f"incident {record.pending.incident_id!r} is undrained; drain it before collecting a follow-up"
+        )
+    control = record.control_namespace
+    try:
+        verified = _wait_for_verified_incident(ops, control, known, timeout_seconds, clock)
+    except PersistentControllerError:
+        return None
+    config = replace(inputs.runtime_config, persistent=True, wait_for_completion=False)
+    ops.export_controller_logs(control, inputs.receipt_dir)
+    evidence: dict[str, Any] = dict(ops.export_runtime_artifacts(config, inputs.receipt_dir))
+    evidence["scope"] = STAGE_END_EVIDENCE_SCOPE
+    closure = verified.closure or {}
+    raw_result = closure.get("result")
+    result: dict[str, Any] = raw_result if isinstance(raw_result, dict) else {}
+    base = dict(record.served_stage_receipt) if record.served_stage_receipt else {}
+    resolution: dict[str, Any] = {
+        "schema_version": "sdo.sregym-incident-resolution/v1",
+        "incident_id": verified.incident_id,
+        "namespace": inputs.namespace,
+        "confirmed_root_causes": result.get("confirmed_root_causes", []),
+        "repair_actions": result.get("repair_actions", []),
+        "responder_session_id": result.get("responder_session_id"),
+        "followup_incident": True,
+        "stage_end_runtime_artifacts": evidence,
+    }
+    resolution.update(_resolution_timings(closure))
+    record.pending = PendingIncident(
+        incident_id=verified.incident_id,
+        stage_label=inputs.stage_label,
+        receipt_dir=inputs.receipt_dir,
+        repository=config.repository,
+        verified_at=_timestamp(closure.get("verified_at")),
+        stage_receipt={
+            **base,
+            # Setup and gate costs were paid once, by the first incident.
+            "pre_injection_costs_seconds": {},
+            **{
+                key: value
+                for key, value in resolution.items()
+                if key
+                not in {
+                    "schema_version",
+                    "confirmed_root_causes",
+                    "repair_actions",
+                    "namespace",
+                    "incident_id",
+                    "responder_session_id",
+                    "stage_end_runtime_artifacts",
+                }
+            },
         },
     )
     record.served_stages.append(inputs.stage_label)
