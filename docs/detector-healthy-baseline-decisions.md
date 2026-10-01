@@ -27,7 +27,9 @@ Go: `controller/sdk/sdktest/baseline_test.go` (loading, sorting, empty and malfo
 
 ## What a follow-up must wire for live runs
 
-Nothing produces the snapshots yet; the gate is inert until then.
+Done in `docs/healthy-baseline-live-decisions.md` (capture in the benchmark adapter, broker-side staging, opt-in flags). The original plan follows.
+
+Nothing produced the snapshots here; the gate was inert until then.
 1. Capture: at the all-clear health baseline (the fastloop/persistent stage already waits for it, or any quiet controller evaluation) dump the namespace's resources into `sdktest.Snapshot` JSON (a small `kubectl get ... -o json` converter, or a controller `--dump-snapshot` flag in `controller/core`, which already builds `kubernetes_snapshot`). Record several snapshots over time if flapping matters. Do it inside the benchmark adapter or install path, not `controller/runtime`.
 2. Place: the validated tree is the worktree, so copy the files into the worktree (for example `.sdo-baseline/healthy/`, untracked or git-excluded so the commit broker never treats them as owned artifacts) before validation; the broker service is the natural place.
 3. Enable: add `--broker-arg=--healthy-baseline-dir=.sdo-baseline/healthy` in the controller install (`sdo/controller_install`, the same place that passes `--validator-mode`), behind an opt-in `ControllerInstallConfig` field and SREGym `agent_config.sdo_codex` key.
