@@ -1,0 +1,72 @@
+# Pull-before-act live validation, arm ON (late_findings = "pull").
+# Seed: private copy of a lifecycle workspace plus the learned Event-reading frontend-readiness-probe-mismatch detector
+# (docs/pull-validation-decisions.md). Images: private `lf2` build. Three repeats of A1, handoff reflection kept (baseline guidance).
+# Launch: SREGYM_KIND_CLUSTER_PREFIX=lf-w SREGYM_WORKER_ID_OFFSET=<32|33> SREGYM_APP_WORKSPACE_SEED_DIR=<seed> run_sregym.sh <this file>
+
+
+[pipeline]
+name = "sdo-codex-luna-pullval-on"
+
+[defaults]
+agent = "sdo_codex"
+model = "gpt-6-luna"
+reasoning_effort = "medium"  # explicit on both arms; SDO pins its incident agents to medium
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+application_workspace = "persistent"
+require_strict_receipt = true
+allow_failed_verdicts = true  # a stream must continue past an incident graded as failed
+
+[defaults.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+kind_worker_nodes = 1  # 1 control plane + 1 worker per lane (topology measurement, 2026-09-28)
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+fast_namespace_teardown = true  # skips pod termination grace between incidents; outside every measured window
+cleanup_defer_timeout_seconds = 4200
+docker_builder = "sdo-example"
+
+[defaults.variants]
+enabled = false
+
+[defaults.agent_config.sdo_codex]
+backend = "agent-cli"
+provider = "codex"
+model = "gpt-6-luna"
+timeout_sec = 3600
+controller_image = "sdo-controller:lf2"
+responder_image = "sdo-sregym-responder:lf2"
+validator_image = "sdo-detector-validator:lf2"
+credentials_secret = "sdo-agent-credentials"
+persistent_controller = true
+reflection_session = "fresh"
+reflection_guidance = "baseline"
+late_findings = "pull"
+
+[[stages]]
+name = "i01-a1-readiness-probe-misconfiguration-hotel-reservation"
+chain_kb = false
+chain_application_workspace = false
+
+[stages.runner]
+problems = ["readiness_probe_misconfiguration_hotel_reservation"]
+
+[[stages]]
+name = "i02-a1-readiness-probe-misconfiguration-hotel-reservation"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["readiness_probe_misconfiguration_hotel_reservation"]
+
+[[stages]]
+name = "i03-a1-readiness-probe-misconfiguration-hotel-reservation"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["readiness_probe_misconfiguration_hotel_reservation"]

@@ -1,0 +1,122 @@
+# Detector generalization, full stream (treatment).
+# Order (fixed): A1 A2 B1 A3 B2 A4 B3 A5 A6. Family A = readiness probe misconfiguration on
+# different workloads; family B = missing ConfigMap on different workloads.
+# Arm: reflection_guidance = "generalize" with reflection_session = "fresh" (structured handoff).
+# Images: private `detgen1` build (control and treatment share them). Stage 0 is seeded with the
+# stream's lifecycle-only workspace through SREGYM_APP_WORKSPACE_SEED_DIR, so no incident memory exists at start.
+# Launch: SREGYM_KIND_CLUSTER_PREFIX=detgen-w SREGYM_WORKER_ID_OFFSET=<n> SREGYM_APP_WORKSPACE_SEED_DIR=<seed> run_sregym.sh <this file>
+# Settings otherwise copied from sdo_codex_luna_stream.toml.
+
+[pipeline]
+name = "sdo-codex-luna-detgen-treatment"
+
+[defaults]
+agent = "sdo_codex"
+model = "gpt-6-luna"
+reasoning_effort = "medium"  # explicit on both arms; SDO pins its incident agents to medium
+parallel = 1
+agent_timeout = 3600
+app_filter = "hotel_reservation"
+deploy_from_source = true
+application_workspace = "persistent"
+require_strict_receipt = true
+allow_failed_verdicts = true  # a stream must continue past an incident graded as failed
+
+[defaults.env]
+judge_model_id = "codex-gpt-6-luna"  # Codex CLI judge; reasoning effort defaults to xhigh
+worker_cpu_limit = "3"
+kind_worker_nodes = 1  # 1 control plane + 1 worker per lane (topology measurement, 2026-09-28)
+reuse_cluster = true
+force_recreate_cluster = false
+preserve_infrastructure = true
+fast_namespace_teardown = true  # skips pod termination grace between incidents; outside every measured window
+cleanup_defer_timeout_seconds = 4200
+docker_builder = "sdo-example"
+
+[defaults.variants]
+enabled = false
+
+[defaults.agent_config.sdo_codex]
+backend = "agent-cli"
+provider = "codex"
+model = "gpt-6-luna"
+timeout_sec = 3600
+controller_image = "sdo-controller:detgen1"
+responder_image = "sdo-sregym-responder:detgen1"
+validator_image = "sdo-detector-validator:detgen1"
+credentials_secret = "sdo-agent-credentials"
+persistent_controller = true
+reflection_session = "fresh"
+reflection_guidance = "generalize"
+
+[[stages]]
+name = "i01-a1-readiness-probe-misconfiguration-hotel-reservation"
+chain_kb = false
+chain_application_workspace = false
+
+[stages.runner]
+problems = ["readiness_probe_misconfiguration_hotel_reservation"]
+
+[[stages]]
+name = "i02-a2-readiness-probe-misconfiguration-v-hotel-reservation-geo"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["readiness_probe_misconfiguration__v_hotel_reservation_geo"]
+
+[[stages]]
+name = "i03-b1-missing-configmap-hotel-reservation"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["missing_configmap_hotel_reservation"]
+
+[[stages]]
+name = "i04-a3-readiness-probe-misconfiguration-v-hotel-reservation-reservation"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["readiness_probe_misconfiguration__v_hotel_reservation_reservation"]
+
+[[stages]]
+name = "i05-b2-missing-configmap-mongodb-rate-hotel-reservation"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["missing_configmap_mongodb_rate_hotel_reservation"]
+
+[[stages]]
+name = "i06-a4-readiness-probe-misconfiguration-v-hotel-reservation-recommendation"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["readiness_probe_misconfiguration__v_hotel_reservation_recommendation"]
+
+[[stages]]
+name = "i07-b3-missing-configmap-mongodb-geo-rate-hotel-reservation"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["missing_configmap_mongodb_geo_rate_hotel_reservation"]
+
+[[stages]]
+name = "i08-a5-readiness-probe-misconfiguration-v-hotel-reservation-search"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["readiness_probe_misconfiguration__v_hotel_reservation_search"]
+
+[[stages]]
+name = "i09-a6-readiness-probe-misconfiguration-v-hotel-reservation-profile"
+chain_kb = false
+chain_application_workspace = true
+
+[stages.runner]
+problems = ["readiness_probe_misconfiguration__v_hotel_reservation_profile"]

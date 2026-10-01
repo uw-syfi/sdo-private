@@ -1345,6 +1345,19 @@ def test_sregym_agent_config_selects_the_reflection_session_mode(monkeypatch: py
         driver._parse_args(["--reflection-session", "transcript"])
 
 
+def test_sregym_agent_config_selects_the_reflection_guidance(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
+    assert driver._parse_args([]).reflection_guidance == "baseline"
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"reflection_guidance": "generalize"}))
+    assert driver._parse_args([]).reflection_guidance == "generalize"
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"reflection_guidance": "generalize-spec"}))
+    assert driver._parse_args([]).reflection_guidance == "generalize-spec"
+    with pytest.raises(SystemExit):
+        driver._parse_args(["--reflection-guidance", "sibling"])
+
+
 def test_receipt_reports_a_deterministically_skipped_reflection() -> None:
     import benchmarks.sregym.adapter.runtime as runtime
 
@@ -1516,3 +1529,14 @@ def test_persistent_mode_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> N
     assert driver._parse_args([]).persistent_controller is False
     monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"persistent_controller": True}))
     assert driver._parse_args([]).persistent_controller is True
+
+
+def test_sregym_agent_config_selects_the_late_findings_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
+    assert driver._parse_args([]).late_findings == "off"
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"late_findings": "pull"}))
+    assert driver._parse_args([]).late_findings == "pull"
+    with pytest.raises(SystemExit):
+        driver._parse_args(["--late-findings", "push"])

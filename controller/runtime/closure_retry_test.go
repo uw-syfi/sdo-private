@@ -210,3 +210,25 @@ func TestRuntimeStateRejectsFailedClosureWithoutFailureRecord(t *testing.T) {
 		t.Fatal("closure failure for another incident was accepted")
 	}
 }
+
+func TestPausedControllerStillWakesForAPendingClosureRetry(t *testing.T) {
+	now := time.Unix(1000, 0).UTC()
+	broker := &rejectingIncidentBroker{rejections: 1}
+	controller := newClosureRetryController(t, ClosureRetryPolicy{
+		MaxAttempts: 3, InitialBackoff: time.Second, MaxBackoff: time.Minute,
+	}, broker, &now)
+
+	if wake := controller.PausedWake(); !wake.IsZero() {
+		t.Fatalf("nothing is waiting to retry, got a wake at %s", wake)
+	}
+	attemptClosure(t, controller)
+	if wake := controller.PausedWake(); !wake.Equal(now.Add(time.Second)) {
+		t.Fatalf("a paused controller does not wake for the closure retry: got %s want %s", wake, now.Add(time.Second))
+	}
+
+	now = now.Add(time.Second)
+	attemptClosure(t, controller)
+	if wake := controller.PausedWake(); !wake.IsZero() {
+		t.Fatalf("a committed closure still schedules a retry at %s", wake)
+	}
+}

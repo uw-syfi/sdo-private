@@ -20,6 +20,7 @@ from benchmarks.sregym.runner.pipeline import (
     is_pipeline_config,
     load_pipeline_config,
     merge_stage_config,
+    read_pipeline_snapshot,
     read_pipeline_state,
     reset_stages_for_rerun,
     write_pipeline_snapshot,
@@ -1432,3 +1433,62 @@ def test_persistent_mode_is_off_by_default_for_sdo_codex(tmp_path: Path) -> None
     env = config_to_env(ExperimentConfig(agent="sdo_codex"), tmp_path)
 
     assert "SREGYM_PRESERVE_NAMESPACE_LABEL" not in env
+
+
+def _write_result(tmp_path: Path, header: str, values: str) -> None:
+    result = tmp_path / "problem_runs" / "run-1" / "results_1.csv"
+    result.parent.mkdir(parents=True)
+    result.write_text(f"{header}\n{values}\n", encoding="utf-8")
+
+
+def test_stage_results_error_rejects_a_graded_failure_by_default(tmp_path: Path) -> None:
+    _write_result(tmp_path, '"Diagnosis.success","Mitigation.success","problem_id"', 'False,True,"problem"')
+
+    assert "Diagnosis.success" in (_stage_results_error(tmp_path) or "")
+
+
+def test_stage_results_error_accepts_a_graded_failure_when_failed_verdicts_are_allowed(tmp_path: Path) -> None:
+    _write_result(tmp_path, '"Diagnosis.success","Mitigation.success","problem_id"', 'False,False,"problem"')
+
+    assert _stage_results_error(tmp_path, allow_failed_verdicts=True) is None
+
+
+@pytest.mark.parametrize(
+    ("header", "values"),
+    [
+        ('"problem_id"', '"problem"'),
+        ('"Diagnosis.success","Mitigation.success","problem_id"', ',,"problem"'),
+        ('"Diagnosis.success","Mitigation.success","problem_id"', 'maybe,True,"problem"'),
+        ('"Diagnosis.success","Mitigation.success","agent_error","problem_id"', 'True,True,True,"problem"'),
+    ],
+)
+def test_allowing_failed_verdicts_still_rejects_ungraded_or_errored_rows(
+    tmp_path: Path, header: str, values: str
+) -> None:
+    _write_result(tmp_path, header, values)
+
+    assert _stage_results_error(tmp_path, allow_failed_verdicts=True) is not None
+
+
+def test_allow_failed_verdicts_survives_the_pipeline_config_and_snapshot(tmp_path: Path) -> None:
+    config_path = tmp_path / "p.toml"
+    config_path.write_text(
+        '[pipeline]\nname = "p"\n[defaults]\nallow_failed_verdicts = true\n[[stages]]\nname = "a"\n',
+        encoding="utf-8",
+    )
+    config = load_pipeline_config(config_path)
+    assert merge_stage_config(config.defaults, {}).allow_failed_verdicts is True
+
+    write_pipeline_snapshot(config, tmp_path)
+    restored = read_pipeline_snapshot(tmp_path)
+    assert merge_stage_config(restored.defaults, {}).allow_failed_verdicts is True
+    assert (
+        merge_stage_config(load_pipeline_config(_pipeline_without_flag(tmp_path)).defaults, {}).allow_failed_verdicts
+        is False
+    )
+
+
+def _pipeline_without_flag(tmp_path: Path) -> Path:
+    path = tmp_path / "plain.toml"
+    path.write_text('[pipeline]\nname = "p"\n[defaults]\n[[stages]]\nname = "a"\n', encoding="utf-8")
+    return path

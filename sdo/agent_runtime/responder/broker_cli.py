@@ -21,6 +21,8 @@ from sdo.agent_runtime.responder import (
     prepare_codex_home,
 )
 from sdo.operational_memory import (
+    LATE_FINDINGS_MODES,
+    REFLECTION_GUIDANCE_MODES,
     REFLECTION_SESSION_MODES,
     BrokerClosure,
     BrokerService,
@@ -31,6 +33,7 @@ from sdo.operational_memory import (
     KubernetesJobSandboxRunner,
     LocalSandboxRunner,
     MemoryValidator,
+    ReflectionGuidance,
 )
 
 
@@ -41,6 +44,7 @@ def _production_reflector(
     reasoning_effort: str,
     timeout_seconds: int,
     responder_turn_log: Path | None = None,
+    guidance: ReflectionGuidance = "baseline",
 ) -> SessionReflector:
     backend_type = ClaudeSessionBackend if provider == "claude" else CodexSessionBackend
     return SessionReflector(
@@ -50,6 +54,7 @@ def _production_reflector(
             timeout_seconds=timeout_seconds,
         ),
         responder_turn_log=responder_turn_log,
+        guidance=guidance,
     )
 
 
@@ -97,6 +102,26 @@ def _argument_parser() -> argparse.ArgumentParser:
         "from a compact incident brief",
     )
     parser.add_argument(
+        "--reflection-guidance",
+        choices=REFLECTION_GUIDANCE_MODES,
+        default="baseline",
+        help="reflection learning guidance: per-cause (default) or generalize one incident detector and playbook "
+        "across parameter variants of the same root-cause class, or generalize-spec (generalize, with predicates "
+        "decidable from resource spec and status preferred over later-produced evidence)",
+    )
+    parser.add_argument(
+        "--late-findings",
+        choices=LATE_FINDINGS_MODES,
+        default="off",
+        help="record whether the responder pulled findings that activated after dispatch (off by default)",
+    )
+    parser.add_argument(
+        "--late-findings-log",
+        type=Path,
+        default=None,
+        help="pull receipt file the responder appends to (default: <repository>/.sdo-runtime/telemetry)",
+    )
+    parser.add_argument(
         "--responder-turn-log",
         type=Path,
         help="responder per-turn usage log; a fresh reflection brief quotes the responder's shell commands from it",
@@ -138,8 +163,11 @@ def main(argv: list[str] | None = None) -> int:
             reasoning_effort=args.reflection_reasoning_effort,
             timeout_seconds=args.reflection_timeout_seconds,
             responder_turn_log=args.responder_turn_log,
+            guidance=args.reflection_guidance,
         ),
         reflection_session=args.reflection_session,
+        late_findings=args.late_findings,
+        late_findings_log=args.late_findings_log,
     )
     try:
         payload = json.load(sys.stdin)

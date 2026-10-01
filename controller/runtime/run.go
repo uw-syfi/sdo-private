@@ -87,6 +87,12 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	flags.Var(&responderEnvironment, "responder-env", "responder Job environment NAME=VALUE; may be repeated")
 	var brokerArgs repeatedFlag
 	flags.Var(&brokerArgs, "broker-arg", "incident broker argument; may be repeated")
+	telemetryPath := flags.String(
+		"firing-telemetry-path",
+		"",
+		"detector firing telemetry JSONL stream; defaults to <repository-mount-path>/.sdo-runtime/telemetry/detector-firings.jsonl "+
+			"in job mode and to disabled in local mode; \"off\" disables it",
+	)
 	duration := flags.Duration("duration", 0, "bounded controller duration; zero runs until cancellation")
 	responseTimeout := flags.Duration("response-timeout", 30*time.Minute, "incident responder timeout")
 	verificationTimeout := flags.Duration(
@@ -257,6 +263,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if err := controller.AttachStateStore(ctx, stateStore); err != nil {
 		return fmt.Errorf("restore controller state: %w", err)
 	}
+	if err := attachFiringTelemetry(controller, *telemetryPath, *dispatcherMode, *repositoryMountPath); err != nil {
+		fmt.Fprintln(stderr, err)
+	}
 	if *exitAfterClosure && controller.LastAcknowledgedIncidentID() != "" {
 		return nil
 	}
@@ -385,6 +394,11 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			delay = 2 * time.Second
 		case applied.Paused:
 			delay = time.Hour
+			if wake := controller.PausedWake(); !wake.IsZero() {
+				// A rejected closure still retries while paused; sleeping through it would block the
+				// drain that precedes the resume forever.
+				delay = time.Until(wake)
+			}
 		default:
 			delay = time.Until(controller.NextWake())
 		}
@@ -531,6 +545,12 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 				continue
 			}
 			if applied.Paused {
+				if err := executePendingEffects(runCtx, controller); err != nil {
+					if runCtx.Err() != nil {
+						return nil
+					}
+					return err
+				}
 				continue
 			}
 			if err := controller.Step(runCtx, time.Now().UTC(), nil); err != nil {
@@ -553,6 +573,29 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 			}
 		}
 	}
+}
+
+// attachFiringTelemetry connects the durable detector firing stream. Telemetry
+// is observational, so a stream that cannot be opened is reported and skipped
+// rather than stopping the controller.
+func attachFiringTelemetry(controller *Controller, path string, dispatcherMode string, mountPath string) error {
+	if path == "off" || (path == "" && dispatcherMode != "job") {
+		return nil
+	}
+	if path == "" {
+		path = filepath.Join(mountPath, ".sdo-runtime", "telemetry", "detector-firings.jsonl")
+	}
+	sink, err := NewFileFiringSink(path, DefaultFiringStreamBytes)
+	if err != nil {
+		return fmt.Errorf("detector firing telemetry disabled: %w", err)
+	}
+	if !controller.RestoredFromState() {
+		if err := sink.StartFresh(); err != nil {
+			return fmt.Errorf("detector firing telemetry disabled: %w", err)
+		}
+	}
+	controller.SetFiringSink(sink)
+	return nil
 }
 
 func detectorReviewError(controller *Controller) error {

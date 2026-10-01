@@ -289,10 +289,10 @@ def test_reflection_requires_executable_playbooks_that_trust_the_incident_detect
     assert "copy-pasteable verification commands" in prompt
     assert "representative request" in prompt
     assert ".sdo/playbooks/<playbook>/scripts/" in prompt
-    # Restored mount sources must not wait on the kubelet backoff.
-    assert "ConfigMap or Secret" in prompt
+    # A restored dependency must not wait on the platform's retry backoff.
+    assert "missing dependency" in prompt
     assert "rollout-restart" in prompt
-    assert "kubelet" in prompt
+    assert "retry backoff" in prompt
     # The incident detector already establishes the playbook's preconditions.
     assert "do not prescribe re-diagnosis" in prompt
 
@@ -306,8 +306,7 @@ def test_reflection_asks_for_prompt_incident_detectors_on_the_visible_symptom(tm
     assert "Firing: 2" not in prompt
     # Watch where the fault is visible, not only the root object.
     assert "Pods and Events" in prompt
-    assert "FailedMount" in prompt
-    assert "CrashLoopBackOff" in prompt
+    assert "a pod status, restart, or event reason" in prompt
     assert '{APIVersion: "v1", Kind: "Event"}' in prompt
     # The warm path runs a verify or diagnose script when the detector has not fired yet.
     assert "scripts/verify.sh" in prompt

@@ -32,6 +32,10 @@ def main(
     args = parser.parse_args(argv)
     if args.command == "detector":
         return _check_detector(detector_check_runner)
+    if args.command == "incident":
+        from sdo.operational_memory import late_findings_main
+
+        return late_findings_main(["--incident-id", args.incident_id, *_telemetry_args(args)])
     try:
         config = _operation_config(args)
         operation_runner(config)
@@ -80,7 +84,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "check",
         help="compile and test this checkout using the locked-down validator",
     )
+    incident_parser = subparsers.add_parser(
+        "incident",
+        help="read-only views for the responder of the current incident",
+    )
+    incident_commands = incident_parser.add_subparsers(dest="incident_command", required=True)
+    late = incident_commands.add_parser(
+        "late-findings",
+        help="print, as compact JSON, findings that activated after this incident's responder was dispatched",
+    )
+    late.add_argument("--incident-id", required=True)
+    late.add_argument("--telemetry-path", type=Path)
     return parser
+
+
+def _telemetry_args(args: argparse.Namespace) -> list[str]:
+    return [] if args.telemetry_path is None else ["--telemetry-path", str(args.telemetry_path)]
 
 
 def _check_detector(runner: SandboxRunner | None) -> int:
