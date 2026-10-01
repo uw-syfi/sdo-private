@@ -72,3 +72,43 @@ Incident-detector / playbook count after each incident (playbooks equal detector
 - Tokens (input, k): responder sum 3.9M treatment vs 3.2M control; reflection sum 3.76M vs 4.60M; combined 7.7M vs 7.8M, no difference beyond noise.
 - Near-duplicate score of final incident-detector source (names, numbers, strings normalized): control readiness detectors pairwise 0.52-0.66 similarity across three siblings (not near-identical after normalization, because the repeated predicate shapes differ), treatment has a single readiness detector.
 - B3 (both configmap targets) triggered a deterministic no-op reflection in both arms (no reflection turn).
+
+## Phase 5: ablation arm (baseline guidance + fresh reflection), 2026-09-30/10-01
+
+Purpose: separate the two settings confounded in Phase 4 (treatment = generalize + fresh, control = baseline + resume). Arm: `reflection_guidance = "baseline"`, `reflection_session = "fresh"`; `sdo_codex_luna_detgen_ablation.toml` is `control_full` with only the reflection session changed. Same images `detgen1`, same seed, same 9-incident order, Codex gpt-6-luna for agent and judge (judge time not in TTD/TTM), new 1+1 cluster `detgen-w24` (offset 24, deleted at the end), host load 15-19 at launch. No raw/memoryless Codex baseline was rerun (nothing changed there). No usage or rate-limit error occurred. Pipeline `20260930_223227_pipeline_sdo-codex-luna-detgen-ablation`; evidence (controller logs per stage) in `/mnt/data/shli/detgen-runs/ablation-evidence/`.
+
+**Disclosed manual step (B3 deploy failure, a responder source-repair hazard of the persistent workspace)**: stage 6 (B3) failed all 3 deploy attempts ("Not all pods ready within 600 s"; no result CSV) and the pipeline aborted at 23:45. Cause, reproduced on the idle cluster: the B2 responder's source repair committed `kubernetes/rate/mongo-rate-script.yaml` with doubled backslash line continuations (`\\` instead of `\`; the geo script is correct). `mongodb-rate` then runs `mongo ... \\` as `failed to load: \`, the admin user never gets `readWrite` on `rate-db`, and `rate` crash-loops (CrashLoopBackOff observed on the worker). Not a quota, infra or flag problem. Unexplained: A4 (stage 5) deployed from the same file and was solved; not investigated further. Recovery as in the Phase 4 A5 case: copied stage 5's `application_workspace` (clean tree, `c72a33c`, lifecycle provenance present) to `lifecycle_seed_stage6`, one manual commit by `detgen-operator` (`5be0d39`) restoring the single backslash on the two lines, then `run_sregym.sh <pipeline dir> --stage 6` (old stage 6 kept as `stage_6_...20261001_000253`; stages 0-5 not rerun). The failed first attempt is "not manifested: deploy failed", never a time (about 35 minutes wall clock). `.sdo/` memory was not edited. The controller was reinstalled for the resume (new controller log `dhxm2` from stage 6 on).
+
+Results: all 9 incidents solved (strict-receipt pipeline completed).
+
+Incident-detector / playbook counts after each incident (`detgen_growth.py`, health detector/playbook excluded; playbooks equal detectors in every cell):
+
+| After | A1 | A2 | B1 | A3 | B2 | A4 | B3 | A5 | A6 |
+|---|---|---|---|---|---|---|---|---|---|
+| Treatment (generalize, fresh) | 1 | 1 | 2 | 2 | 2 | 2 | 2 | 2 | 2 |
+| Ablation (baseline, fresh) | 1 | 2 | 3 | 4 | 5 | 6 | 6 | 7 | 8 |
+| Control (baseline, resume) | 1 | 1 | 2 | 2 | 2 | 3 | 3 | 3 | 4 |
+
+Ablation final memory: six per-workload readiness detectors (frontend, geo, reservation, recommendation, search, profile) plus `missing_workload_configmap` and `mongodb_rate_missing_init_configmap`; each readiness incident but B3 produced a new workload-named detector (fresh reflection, no gap in A2 to A6 except B3's no-op reflection and a reuse at A4 B2).
+
+Per incident (ablation): TTD s / judge-free TTM s / responder in tok / reflection in tok:
+
+| | A1 | A2 | B1 | A3 | B2 | A4 | B3 | A5 | A6 |
+|---|---|---|---|---|---|---|---|---|---|
+| TTD | 14 | 14 | 36 | 22 | 19 | 30 | 11 | 31 | 19 |
+| TTM | 96 | 34 | 86 | 46 | 35 | 55 | 25 | 94 | 57 |
+| resp in (k) | 447 | 302 | 661 | 533 | 361 | 356 | 187 | 469 | 427 |
+| refl in (k) | 328 | 255 | 410 | 340 | 378 | 544 | 0 | 443 | 445 |
+
+TTM medians: ablation 55 s, control 57 s, treatment 64 s. Tokens (input): responder 3.74M, reflection 3.14M, combined 6.89M (treatment 7.7M, control 7.8M). B3 again had a deterministic no-op reflection (0 tokens).
+
+Firing (controller logs): the B-family detectors fired only on the mongodb incidents (`missing-workload-configmap` on `mongodb-rate` at B2 and on `mongodb-geo`/`mongodb-rate` at B3; `mongodb-rate-missing-init-configmap` on `mongodb-rate` at B3). No readiness detector fired at any incident (each is named for its workload, so none matched a different workload), and no B detector fired during A5/A6, so no cross-family firing and no cross-workload reuse inside family A. Caveat: the controller log is cumulative per controller instance and only records firings after the health detector's dispatch.
+
+### 3-way comparison and takeaways
+
+- **Meaning**: with fresh (handoff) reflection and baseline guidance the memory grew by one detector per new workload variant (8 detectors, 8 playbooks after 9 incidents), faster than the resume control (4) and far faster than the treatment (2). So fresh reflection alone does not produce the treatment's compactness (it was worse than resume); the generalize guidance and brief carry the effect. The resume session's shared context apparently made reflection partly reuse earlier detectors (it reused the class-level detector for 3 of 5 readiness variants); fresh reflection without the detector brief and protocol had no incentive to reuse.
+- **Confidence**: moderate for "guidance, not session mode, drives compactness" (a 2/4/8 monotone ordering with the same seed, images and order); low for any statement about the size of the session effect (n=1 per arm, concurrent hosts at load 10-33, the ablation ran at 15-30, and the control differs in being resume).
+- **No operational cost difference**: all arms solved 9/9; judge-free TTM medians 55/57/64 s are within noise; combined tokens 6.9M/7.8M/7.7M. The benefit shown is memory shape, not speed.
+- **Implication**: adopt the generalize guidance (and its detector brief) for reflection; the fresh-session handoff by itself is not a substitute and, if used without the guidance, inflates memory. A detector that is tied to one workload name does not give earlier detection for later siblings.
+- **Next step**: repeat treatment and ablation with a second seed or a different fault family (e.g. network or scheduling variants) to bound variance, and run the generalize guidance with resume reflection (the missing 2x2 cell) to complete the factorial.
+- **Caveats**: n=1 per arm; the three arms were not run at equal host load; the control's first controller log was overwritten (earlier note); the ablation had one manual source-manifest recovery at B3 (disclosed above) and the B3 reflection is a no-op in all arms; near-duplicate score was not recomputed for the ablation.
