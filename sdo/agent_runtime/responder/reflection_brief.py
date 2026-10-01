@@ -247,7 +247,10 @@ def _relevant_playbooks(closure: BrokerClosure, fired_detectors: set[str], possi
     return paths
 
 
-def _detector_detail(worktree: Path, package: str) -> list[str]:
+_EVENT_READ_RE = re.compile(r"\.(?:Events|RecentEventsFor)\(|\bcorev1\.Event\b")
+
+
+def _detector_detail(worktree: Path, package: str, *, event_dependence: bool = False) -> list[str]:
     """Spec description and a bounded excerpt of the match predicate of one incident detector."""
 
     source = worktree / ".sdo" / "diagnostics" / package / "detector.go"
@@ -265,6 +268,12 @@ def _detector_detail(worktree: Path, package: str) -> list[str]:
     lines.append(
         "    reports parameter bindings: " + ("yes" if "ParameterBindings" in text else "no (none set by the detector)")
     )
+    if event_dependence:
+        reads_events = _EVENT_READ_RE.search(text) is not None
+        lines.append(
+            "    reads Event objects: "
+            + ("yes (event evidence may not exist when the fault is introduced)" if reads_events else "no")
+        )
     detect = _DETECT_FUNC_RE.search(text)
     excerpt = text[detect.start() :] if detect else text
     lines.append(f"    match predicate excerpt ({source.relative_to(worktree).as_posix()}, Detect):")
@@ -272,7 +281,9 @@ def _detector_detail(worktree: Path, package: str) -> list[str]:
     return lines
 
 
-def _memory_section(worktree: Path, closure: BrokerClosure, *, detector_detail: bool = False) -> str:
+def _memory_section(
+    worktree: Path, closure: BrokerClosure, *, detector_detail: bool = False, event_dependence: bool = False
+) -> str:
     lines = ["## Existing operational memory (paths and short excerpts; open a file for its full text)"]
     memory = worktree / ".sdo"
     fired = {finding.detector_id for finding in closure.request.findings}
@@ -298,7 +309,7 @@ def _memory_section(worktree: Path, closure: BrokerClosure, *, detector_detail: 
                 f"originatingIncident: {detector.originating_incident}){marker}"
             )
             if detector_detail:
-                lines.extend(_detector_detail(worktree, detector.package))
+                lines.extend(_detector_detail(worktree, detector.package, event_dependence=event_dependence))
     index = memory / "playbooks" / "README.md"
     if index.is_file():
         lines.append("Playbook index .sdo/playbooks/README.md:")
@@ -321,19 +332,22 @@ def incident_brief(
     worktree: Path,
     responder_turn_log: Path | None = None,
     detector_detail: bool = False,
+    event_dependence: bool = False,
 ) -> str:
     """Render the bounded incident brief for a fresh first reflection attempt.
 
     ``detector_detail`` adds, for every existing incident detector, its Spec
     description and a bounded excerpt of its match predicate, so the reader can
     compare the confirmed signature with what each detector already matches.
+    ``event_dependence`` (with ``detector_detail``) also states whether the detector
+    source reads Event objects, which may not exist when a fault is introduced.
     """
 
     session_id = None if closure.result is None else closure.result.responder_session_id
     sections = [
         _findings_section(closure),
         _result_section(closure.result, closure.dispatch_error),
-        _memory_section(worktree, closure, detector_detail=detector_detail),
+        _memory_section(worktree, closure, detector_detail=detector_detail, event_dependence=event_dependence),
         _commands_section(responder_shell_commands(responder_turn_log, session_id)),
     ]
     body = _clip("\n\n".join(sections), BRIEF_MAX_CHARS)

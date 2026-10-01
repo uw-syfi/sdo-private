@@ -14,7 +14,12 @@ from typing import Any, Generic, Protocol, TypeVar, overload
 
 import yaml
 
-from sdo.operational_memory import REFLECTION_GUIDANCE_MODES, REFLECTION_SESSION_MODES, SOURCE_REPAIR_CHECK_COMMAND
+from sdo.operational_memory import (
+    LATE_FINDINGS_MODES,
+    REFLECTION_GUIDANCE_MODES,
+    REFLECTION_SESSION_MODES,
+    SOURCE_REPAIR_CHECK_COMMAND,
+)
 
 
 class ControllerInstallError(RuntimeError):
@@ -37,6 +42,11 @@ RUNTIME_USAGE_ROOT = f"{RUNTIME_STATE_ROOT}/usage"
 CONTROLLER_TURN_USAGE_LOG = f"{RUNTIME_USAGE_ROOT}/controller-turns.jsonl"
 RESPONDER_TURN_USAGE_LOG = f"{RUNTIME_USAGE_ROOT}/responder-turns.jsonl"
 TURN_USAGE_LOG_ENV = "SDO_TURN_USAGE_LOG"
+#: Detector firing telemetry (``--firing-telemetry-path``): the controller's durable
+#: JSONL record of when each detector activated, cleared or never persisted. It lives
+#: on the workspace PVC outside ``.sdo/`` and is the Go runtime's job-mode default.
+RUNTIME_TELEMETRY_ROOT = f"{RUNTIME_STATE_ROOT}/telemetry"
+DETECTOR_FIRING_STREAM = f"{RUNTIME_TELEMETRY_ROOT}/detector-firings.jsonl"
 CONTROLLER_JOB_NAME = "sdo-controller-run"
 REPOSITORY_SYNC_POD = "sdo-repository-sync"
 MAINTENANCE_CONFIGMAP = "sdo-controller-maintenance"
@@ -67,6 +77,8 @@ class ControllerInstallConfig:
     reflection_session: str = "resume"
     # Reflection guidance: "baseline" per-cause learning, or "generalize" across parameter variants (opt-in).
     reflection_guidance: str = "baseline"
+    # Late findings: "off", or "pull" so the responder can pull findings that activated after dispatch (opt-in).
+    late_findings: str = "off"
     # Namespace for the controller, its repository PVC, state, credentials,
     # and responder/validator Jobs. ``None`` co-locates them with the
     # application; a separate namespace survives application redeploys.
@@ -86,6 +98,8 @@ class ControllerInstallConfig:
             raise ValueError(f"reflection_session must be one of {', '.join(REFLECTION_SESSION_MODES)}")
         if self.reflection_guidance not in REFLECTION_GUIDANCE_MODES:
             raise ValueError(f"reflection_guidance must be one of {', '.join(REFLECTION_GUIDANCE_MODES)}")
+        if self.late_findings not in LATE_FINDINGS_MODES:
+            raise ValueError(f"late_findings must be one of {', '.join(LATE_FINDINGS_MODES)}")
 
     @property
     def control_namespace(self) -> str:
@@ -207,6 +221,16 @@ def controller_resources(
         "--broker-arg=--responder-turn-log",
         f"--broker-arg={RESPONDER_TURN_USAGE_LOG}",
     ]
+    if config.late_findings != "off":
+        controller_args.extend(
+            [
+                f"--responder-env=SDO_LATE_FINDINGS={config.late_findings}",
+                "--broker-arg=--late-findings",
+                f"--broker-arg={config.late_findings}",
+                "--broker-arg=--late-findings-log",
+                f"--broker-arg={RUNTIME_TELEMETRY_ROOT}/late-findings-pulls.jsonl",
+            ]
+        )
     controller_args.extend(extra_controller_args or [])
     if not any(arg in controller_args for arg in ("--exit-after-closure", "--duration")):
         # A long-running controller rolls out learned detectors after each closure.

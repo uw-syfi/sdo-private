@@ -170,6 +170,76 @@ def test_generalize_guidance_widens_an_existing_detector_instead_of_adding_a_sib
     assert "sharp fault-specific playbook" not in prompt
 
 
+def test_spec_first_guidance_is_a_superset_of_generalize(tmp_path: Path) -> None:
+    generalize = _request_text(tmp_path, "generalize")
+    spec = _request_text(tmp_path, "generalize-spec")
+
+    assert "Generalization protocol" in spec
+    assert "do not add a sibling detector or playbook" in spec
+    assert "Spec-first protocol" in spec
+    assert "Spec-first protocol" not in generalize
+    for phrase in (
+        "current spec or status",
+        "without any event objects",
+        "only corroborate",
+        "not decidable",
+        "earliest available evidence",
+    ):
+        assert phrase in spec
+        assert phrase not in generalize
+
+
+def test_spec_first_guidance_does_not_change_the_other_modes(tmp_path: Path) -> None:
+    for guidance in ("baseline", "generalize"):
+        assert "Spec-first protocol" not in _request_text(tmp_path, guidance)
+
+
+def test_spec_first_brief_reports_whether_each_detector_reads_events(tmp_path: Path) -> None:
+    event_reader = _DESCRIBED_DETECTOR.replace("snap.Deployments()", "snap.Events()")
+    worktree = _memory_worktree(tmp_path)
+    detector = worktree / ".sdo/diagnostics/detectors/incidents/missing_configmap/detector.go"
+
+    detector.write_text(event_reader, encoding="utf-8")
+    brief = reflection_brief.incident_brief(
+        _fresh_closure(worktree), worktree=worktree, detector_detail=True, event_dependence=True
+    )
+    assert "reads Event objects: yes" in brief
+
+    detector.write_text(_DESCRIBED_DETECTOR, encoding="utf-8")
+    brief = reflection_brief.incident_brief(
+        _fresh_closure(worktree), worktree=worktree, detector_detail=True, event_dependence=True
+    )
+    assert "reads Event objects: no" in brief
+    plain = reflection_brief.incident_brief(_fresh_closure(worktree), worktree=worktree, detector_detail=True)
+    assert "reads Event objects" not in plain
+
+
+def test_fresh_spec_first_reflection_receives_the_event_flag(tmp_path: Path) -> None:
+    worktree = _memory_worktree(tmp_path)
+    (worktree / ".sdo/diagnostics/detectors/incidents/missing_configmap/detector.go").write_text(
+        _DESCRIBED_DETECTOR, encoding="utf-8"
+    )
+    outcome = _outcome()
+    seen = {}
+    for guidance in ("generalize", "generalize-spec"):
+        backend = _CapturingBackend()
+        SessionReflector(backend, guidance=guidance).resume(  # type: ignore[arg-type]
+            session_id="s",
+            incident_id="inc-1",
+            worktree=worktree,
+            outcome=outcome,
+            history=[outcome],
+            outcome_commit="outcome-sha",
+            topology_review=_REVIEW,
+            session_mode="fresh",
+            closure=_fresh_closure(worktree),
+        )
+        seen[guidance] = str(backend.calls[0]["prompt"])
+
+    assert "reads Event objects: no" in seen["generalize-spec"]
+    assert "reads Event objects" not in seen["generalize"]
+
+
 def test_unknown_guidance_is_rejected() -> None:
     with pytest.raises(ValueError, match="guidance"):
         SessionReflector(_CapturingBackend(), guidance="sibling")  # type: ignore[arg-type]
@@ -271,6 +341,8 @@ def test_broker_cli_selects_the_reflection_guidance() -> None:
 
     assert parser.parse_args(base).reflection_guidance == "baseline"
     assert parser.parse_args([*base, "--reflection-guidance", "generalize"]).reflection_guidance == "generalize"
+    spec = parser.parse_args([*base, "--reflection-guidance", "generalize-spec"])
+    assert spec.reflection_guidance == "generalize-spec"
     with pytest.raises(SystemExit):
         parser.parse_args([*base, "--reflection-guidance", "sibling"])
 

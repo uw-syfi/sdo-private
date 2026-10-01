@@ -9,6 +9,7 @@ from sdo.operational_memory.broker_service import (
     ClosureReceipt,
     ControllerRolloutExpectation,
     ControllerRolloutRecord,
+    DetectorTimelineEntry,
     ReflectionGuidance,
     ReflectionSessionMode,
     TopologyReview,
@@ -21,6 +22,13 @@ from sdo.operational_memory.commit_broker import (
     CommitBroker,
 )
 from sdo.operational_memory.detector_sdk import DETECTOR_SDK_REFERENCE
+from sdo.operational_memory.late_findings import (
+    LATE_FINDINGS_COMMAND,
+    LATE_FINDINGS_MODES,
+    LateFindingsMode,
+    LateFindingsPullSummary,
+)
+from sdo.operational_memory.late_findings import main as late_findings_main
 from sdo.operational_memory.models import (
     DETECTOR_ID_PATTERN,
     FAULT_CLASS_PATTERN,
@@ -54,6 +62,8 @@ __all__ = [
     "DETECTOR_SDK_REFERENCE",
     "FAULT_CLASS_PATTERN",
     "INCIDENT_DETECTOR_MAX_FIRING",
+    "LATE_FINDINGS_COMMAND",
+    "LATE_FINDINGS_MODES",
     "PLACEHOLDER_RE",
     "PLAYBOOK_INDEX_PATH",
     "PLAYBOOK_SCRIPT_SUFFIX",
@@ -71,8 +81,12 @@ __all__ = [
     "CommitBroker",
     "ContainerSandboxRunner",
     "ControllerRolloutRecord",
+    "DetectorTimelineEntry",
     "ControllerRolloutExpectation",
     "KubernetesJobSandboxRunner",
+    "LateFindingsMode",
+    "LateFindingsPullSummary",
+    "late_findings_main",
     "LocalSandboxRunner",
     "MemoryRepository",
     "MemoryRepositoryError",

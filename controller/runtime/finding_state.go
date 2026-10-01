@@ -12,11 +12,31 @@ type FindingState struct {
 	FiringCount int         `json:"firing_count"`
 	ClearCount  int         `json:"clear_count"`
 	Active      bool        `json:"active"`
+	// Activations, Clears, and NotPersisted count this finding's completed
+	// transitions. They make a telemetry event id a pure function of durable
+	// state, so a replay after a crash reproduces the ids it already emitted.
+	Activations  int `json:"activations,omitempty"`
+	Clears       int `json:"clears,omitempty"`
+	NotPersisted int `json:"not_persisted,omitempty"`
+}
+
+// FindingTransition is one firing-state change produced by Observe.
+type FindingTransition struct {
+	Event       FiringEvent
+	DetectorID  string
+	Finding     sdk.Finding
+	FiringCount int
+	ClearCount  int
+	// Sequence is the 1-based ordinal of this transition kind for the finding.
+	Sequence int
 }
 
 type FindingChanges struct {
 	Activated []sdk.Finding
 	Cleared   []string
+	// Transitions lists activations, clears, and findings that vanished before
+	// reaching their firing threshold, in deterministic order.
+	Transitions []FindingTransition
 }
 
 type FindingStateTracker struct {
@@ -62,6 +82,7 @@ func (t *FindingStateTracker) Observe(detectorID string, findings []sdk.Finding)
 	}
 
 	changes := FindingChanges{}
+	activated := make(map[string]FindingTransition)
 	for fingerprint, finding := range seen {
 		key := FindingStateKey(detectorID, fingerprint)
 		state, exists := t.states[key]
@@ -74,10 +95,16 @@ func (t *FindingStateTracker) Observe(detectorID string, findings []sdk.Finding)
 		state.FiringCount++
 		if !state.Active && state.FiringCount >= policy.Firing {
 			state.Active = true
+			state.Activations++
 			changes.Activated = append(changes.Activated, finding)
+			activated[fingerprint] = FindingTransition{
+				Event: FiringActivated, DetectorID: detectorID, Finding: finding,
+				FiringCount: state.FiringCount, Sequence: state.Activations,
+			}
 		}
 	}
 
+	var cleared, notPersisted []FindingTransition
 	for key, state := range t.states {
 		if state.DetectorID != detectorID {
 			continue
@@ -85,12 +112,25 @@ func (t *FindingStateTracker) Observe(detectorID string, findings []sdk.Finding)
 		if _, ok := seen[FindingFingerprint(state.Finding)]; ok {
 			continue
 		}
+		droppedFiring := state.FiringCount
 		state.FiringCount = 0
 		if !state.Active {
+			if droppedFiring > 0 {
+				state.NotPersisted++
+				notPersisted = append(notPersisted, FindingTransition{
+					Event: FiringNotPersisted, DetectorID: detectorID, Finding: state.Finding,
+					FiringCount: droppedFiring, Sequence: state.NotPersisted,
+				})
+			}
 			continue
 		}
 		state.ClearCount++
 		if state.ClearCount >= policy.Clearing {
+			state.Clears++
+			cleared = append(cleared, FindingTransition{
+				Event: FiringCleared, DetectorID: detectorID, Finding: state.Finding,
+				ClearCount: state.ClearCount, Sequence: state.Clears,
+			})
 			state.Active = false
 			state.ClearCount = 0
 			changes.Cleared = append(changes.Cleared, key)
@@ -100,6 +140,18 @@ func (t *FindingStateTracker) Observe(detectorID string, findings []sdk.Finding)
 		return changes.Activated[left].Fingerprint < changes.Activated[right].Fingerprint
 	})
 	sort.Strings(changes.Cleared)
+	for _, finding := range changes.Activated {
+		changes.Transitions = append(changes.Transitions, activated[finding.Fingerprint])
+	}
+	byFingerprint := func(list []FindingTransition) {
+		sort.Slice(list, func(left int, right int) bool {
+			return FindingFingerprint(list[left].Finding) < FindingFingerprint(list[right].Finding)
+		})
+	}
+	byFingerprint(cleared)
+	byFingerprint(notPersisted)
+	changes.Transitions = append(changes.Transitions, cleared...)
+	changes.Transitions = append(changes.Transitions, notPersisted...)
 	return changes
 }
 
