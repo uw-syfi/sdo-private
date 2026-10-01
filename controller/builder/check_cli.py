@@ -61,6 +61,7 @@ def _build_parser() -> argparse.ArgumentParser:
     test = subparsers.add_parser("test", help="validate, generate a temp workspace, and run go test/go build")
     _add_common_args(test)
     test.add_argument("--keep-workdir", action="store_true", help=argparse.SUPPRESS)
+    _add_healthy_baseline_arg(test)
 
     draft_test = subparsers.add_parser(
         "draft-test",
@@ -68,6 +69,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_common_args(draft_test)
     draft_test.add_argument("--detector-id", action="append", required=True)
+    _add_healthy_baseline_arg(draft_test)
 
     run_once = subparsers.add_parser("run-once", help="build and run detectors once against a Kubernetes namespace")
     _add_common_args(run_once)
@@ -169,6 +171,27 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_healthy_baseline_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--healthy-baseline",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="directory of recorded healthy-cluster snapshots (*.json), relative to the application root; "
+        "when set, every incident detector must stay quiet on them (default: not checked)",
+    )
+
+
+def _healthy_baseline(args: argparse.Namespace, app_root: Path) -> Path | None:
+    value: Path | None = args.healthy_baseline
+    if value is None:
+        return None
+    resolved = (app_root / value).resolve()
+    if not resolved.is_relative_to(app_root):
+        raise ValueError(f"--healthy-baseline must stay inside the application root: {value}")
+    return resolved
+
+
 def _check(args: argparse.Namespace) -> int:
     app_root = _app_root(args)
     tool_paths = find_tool_paths()
@@ -196,6 +219,7 @@ def _test(args: argparse.Namespace) -> int:
             core_dir=tool_paths.core_dir,
             runtime_dir=tool_paths.runtime_dir,
             keep=args.keep_workdir,
+            healthy_baseline=_healthy_baseline(args, app_root),
         )
     ) as workspace:
         for command in [["mod", "tidy"], ["test", "./..."], ["build", "-buildvcs=false", "./cmd/controller"]]:
@@ -218,6 +242,7 @@ def _draft_test(args: argparse.Namespace) -> int:
             core_dir=tool_paths.core_dir,
             runtime_dir=tool_paths.runtime_dir,
             detector_ids=tuple(args.detector_id),
+            healthy_baseline=_healthy_baseline(args, app_root),
         )
     ) as workspace:
         packages = ["./" + detector.package.removeprefix("./") for detector in workspace.manifest.detectors]

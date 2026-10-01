@@ -29,6 +29,8 @@ class BuildWorkspaceConfig:
     runtime_dir: Path | None = None
     keep: bool = False
     detector_ids: tuple[str, ...] = ()
+    #: Directory of recorded healthy-cluster snapshots (``*.json``); opt-in, see docs/feature-flags.md.
+    healthy_baseline: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,7 @@ class BuildWorkspace:
         else:
             excluded_packages = set()
         _reject_symlinks(diagnostics_dir)
+        healthy_baseline = _validated_healthy_baseline(config.healthy_baseline)
 
         temp_dir: tempfile.TemporaryDirectory[str] | None = None
         if config.keep:
@@ -78,6 +81,8 @@ class BuildWorkspace:
         )
         _write_generated_registration(workspace_path, module_path=module_path, manifest=manifest)
         _write_generated_externalname_invariant(workspace_path / "generated", _source_service_names(app_root))
+        if healthy_baseline is not None:
+            _write_generated_healthy_baseline(workspace_path / "generated", healthy_baseline)
         _write_generated_main(workspace_path, module_path=module_path)
 
         return cls(
@@ -326,6 +331,58 @@ func TestHealthDetectorsExemptExternalNameServicesFromEndpointChecks(t *testing.
 """
     )
     (generated_dir / "externalname_invariants_test.go").write_text(source, encoding="utf-8")
+
+
+def _validated_healthy_baseline(directory: Path | None) -> Path | None:
+    if directory is None:
+        return None
+    resolved = directory.resolve()
+    if not resolved.is_dir():
+        raise ValueError(f"healthy baseline is not a directory: {directory}")
+    if any(path.is_symlink() for path in resolved.rglob("*")):
+        raise ValueError(f"healthy baseline must not contain symlinks: {directory}")
+    if not sorted(resolved.glob("*.json")):
+        raise ValueError(f"healthy baseline has no *.json snapshot files: {directory}")
+    return resolved
+
+
+def _write_generated_healthy_baseline(generated_dir: Path, baseline: Path) -> None:
+    """Replay every incident detector on recorded snapshots of the healthy application.
+
+    A learned incident detector that reports an active finding on a quiet
+    baseline would open an incident before any fault exists, so the broker
+    rejects it. Health detectors are exempt: the health judge owns them.
+    """
+
+    fixtures = generated_dir / "testdata" / "healthy-baseline"
+    fixtures.mkdir(parents=True, exist_ok=True)
+    for path in sorted(baseline.glob("*.json")):
+        shutil.copyfile(path, fixtures / path.name)
+    source = """package generated
+
+import (
+	"testing"
+
+	"sdo.dev/controller/sdk"
+	"sdo.dev/controller/sdk/sdktest"
+)
+
+func TestIncidentDetectorsStayQuietOnHealthyBaseline(t *testing.T) {
+	snapshots, err := sdktest.LoadSnapshots("testdata/healthy-baseline")
+	if err != nil {
+		t.Fatalf("healthy baseline: %v", err)
+	}
+	for _, detector := range All() {
+		if detector.Spec().Class != sdk.DetectorClassIncident {
+			continue
+		}
+		for _, violation := range sdktest.HealthyBaselineViolations(detector, snapshots) {
+			t.Error(violation)
+		}
+	}
+}
+"""
+    (generated_dir / "healthy_baseline_test.go").write_text(source, encoding="utf-8")
 
 
 def _write_generated_main(workspace_path: Path, *, module_path: str) -> None:
