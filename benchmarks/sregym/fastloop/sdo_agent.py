@@ -119,8 +119,10 @@ class SdoPersistentAgent:
         run_lifecycle: Callable[[DeployedLifecycleContext], bool],
         clock: Clock | None = None,
         keep_running: bool = False,
+        stop_on_detector_review: bool = True,
     ) -> None:
         self._keep_running = keep_running
+        self._stop_on_detector_review = stop_on_detector_review
         self._settings = settings
         self._ops = ops
         self._lifecycle_inputs = lifecycle_inputs
@@ -144,6 +146,7 @@ class SdoPersistentAgent:
             kubeconfig=settings.kubeconfig,
             verification_timeout_seconds=settings.verification_timeout_seconds,
             validation_cache=settings.validation_cache,
+            stop_on_detector_review=self._stop_on_detector_review,
         )
 
     def resolve(self, index: int, problem_id: str, inject: Callable[[], InjectionWindow]) -> AgentOutcome:

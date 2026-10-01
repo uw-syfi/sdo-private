@@ -324,6 +324,8 @@ class StageInputs:
     verification_timeout_seconds: float = 3900.0
     # Opt-in shared lifecycle validation verdicts; run_lifecycle consults it.
     validation_cache: LifecycleValidationCache | None = None
+    #: Raise as soon as the controller stops the incident for detector review (it never closes it).
+    stop_on_detector_review: bool = True
 
 
 @dataclass(frozen=True)
@@ -427,7 +429,9 @@ def run_persistent_stage(
     ops.set_maintenance(control, paused=False, generation=generation)
     gate_timings = ops.inject_after_resume(control, generation, inject)
     injected = clock.monotonic()
-    verified = _wait_for_verified_incident(ops, control, known, inputs.verification_timeout_seconds, clock)
+    verified = _wait_for_verified_incident(
+        ops, control, known, inputs.verification_timeout_seconds, clock, stop_on_review=inputs.stop_on_detector_review
+    )
     verified_ready = clock.monotonic()
     if pause_after_verified:
         paused_generation = f"{generation}-paused"
@@ -549,7 +553,9 @@ def collect_followup_incident(
         )
     control = record.control_namespace
     try:
-        verified = _wait_for_verified_incident(ops, control, known, timeout_seconds, clock)
+        verified = _wait_for_verified_incident(
+            ops, control, known, timeout_seconds, clock, stop_on_review=inputs.stop_on_detector_review
+        )
     except DetectorReviewRequiredError:
         raise
     except PersistentControllerError:
@@ -835,7 +841,7 @@ def _wait_for_controller_pod(ops: ClusterOps, control: str, clock: Clock, timeou
 
 
 def _wait_for_verified_incident(
-    ops: ClusterOps, control: str, known: set[str], timeout: float, clock: Clock
+    ops: ClusterOps, control: str, known: set[str], timeout: float, clock: Clock, *, stop_on_review: bool = True
 ) -> VerifiedIncident:
     """Return the first new incident the controller verified healthy, before reflection finishes."""
 
@@ -853,7 +859,7 @@ def _wait_for_verified_incident(
         if isinstance(acknowledged, str) and acknowledged and acknowledged not in known:
             # Reflection finished between polls; the ledger holds the closure.
             return VerifiedIncident(incident_id=acknowledged, closure=None)
-        if state.get("detector_review_required"):
+        if stop_on_review and state.get("detector_review_required"):
             request = state.get("incident_request")
             incident_id = request.get("incident_id") if isinstance(request, dict) else None
             raise DetectorReviewRequiredError(

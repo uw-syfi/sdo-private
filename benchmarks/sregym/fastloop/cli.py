@@ -146,7 +146,11 @@ def _free_port() -> int:
 def _composite_settings(args: argparse.Namespace) -> CompositeSettings:
     from benchmarks.sregym.fastloop.composite import CompositeSettings
 
-    return CompositeSettings(deadline_seconds=args.composite_deadline, idle_seconds=args.composite_idle)
+    return CompositeSettings(
+        deadline_seconds=args.composite_deadline,
+        idle_seconds=args.composite_idle,
+        stop_on_detector_review=not args.no_stop_on_review,
+    )
 
 
 def _is_composite(problems: tuple[str, ...]) -> bool:
@@ -201,7 +205,7 @@ def _sdo_agent(
         state_path=environment.state_path,
         results_dir=results_dir,
         kubeconfig=str(environment.kubeconfig),
-        verification_timeout_seconds=float(args.timeout + 300),
+        verification_timeout_seconds=float(args.composite_deadline if composite else args.timeout + 300),
         validation_cache=validation_cache,
     )
     agent_arguments = {
@@ -501,6 +505,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=2400.0,
         help="composite problems: seconds after injection before SDO stops waiting for further incidents",
+    )
+    run.add_argument(
+        "--no-stop-on-review",
+        action="store_true",
+        help="composite problems: keep waiting (until the deadline) after the controller stops for detector review",
     )
     run.add_argument(
         "--composite-idle",

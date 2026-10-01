@@ -31,7 +31,7 @@ from benchmarks.sregym.adapter import (
     drain_pending_incident,
     pause_controller,
 )
-from benchmarks.sregym.adapter.persistent import DetectorReviewRequiredError
+from benchmarks.sregym.adapter.persistent import DetectorReviewRequiredError, PersistentControllerError
 from benchmarks.sregym.fastloop.fault_tracker import (
     BackgroundPoller,
     FaultTracker,
@@ -63,6 +63,8 @@ class CompositeSettings:
     #: How long a fault must stay green to count as resolved.
     stable_seconds: float = 20.0
     poll_seconds: float = 5.0
+    #: Stop as soon as the controller stops itself for detector review (False: wait out the deadline).
+    stop_on_detector_review: bool = True
 
     def __post_init__(self) -> None:
         for name in ("deadline_seconds", "idle_seconds", "stable_seconds", "poll_seconds"):
@@ -183,10 +185,12 @@ class CompositeSdoAgent(SdoPersistentAgent):
         composite: CompositeSettings | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(*args, keep_running=True, **kwargs)
+        self._composite = composite or CompositeSettings()
+        super().__init__(
+            *args, keep_running=True, stop_on_detector_review=self._composite.stop_on_detector_review, **kwargs
+        )
         self._reader = reader
         self._report_dir = report_dir
-        self._composite = composite or CompositeSettings()
         self._incidents: list[dict[str, Any]] = []
         self._base_dir: Path | None = None
         self._wedge_usage: dict[str, Any] | None = None
@@ -245,12 +249,23 @@ class CompositeSdoAgent(SdoPersistentAgent):
         try:
             try:
                 first = super().resolve(index, problem_id, tracked_inject)
-            except DetectorReviewRequiredError as wedge:
+            except PersistentControllerError as stage_error:
                 if not injected:
                     raise
+                if isinstance(stage_error, DetectorReviewRequiredError):
+                    wedge = stage_error
+                    stop_reason = "detector_review_required"
+                else:
+                    state = self._ops.runtime_state(control)
+                    request = state.get("incident_request")
+                    wedge = DetectorReviewRequiredError(
+                        str(request.get("incident_id")) if isinstance(request, dict) else "none",
+                        f"no verified closure: {stage_error}",
+                        state,
+                    )
+                    stop_reason = "no_closure_within_deadline"
                 wedged = True
                 first = self._wedged_outcome(index, problem_id, injected[0], wedge)
-                stop_reason = "detector_review_required"
             self._base_dir = Path(str(first.artifacts_dir))
             outcomes.append(first)
             self._incidents.append(
@@ -299,7 +314,7 @@ class CompositeSdoAgent(SdoPersistentAgent):
             if "poll_start" in marks:
                 poller.__exit__(None, None, None)
             try:
-                if stop_reason == "detector_review_required":
+                if stop_reason in {"detector_review_required", "no_closure_within_deadline"}:
                     # The controller stopped itself; nothing will acknowledge a pause.
                     self._ops.set_maintenance(control, paused=True, generation=f"composite-{index:03d}-wedged")
                 else:
@@ -324,6 +339,7 @@ class CompositeSdoAgent(SdoPersistentAgent):
                         for item in self._incidents
                     ],
                     "controller_state_timeline": controller_samples,
+                    "controller_job": _controller_job_summary(control),
                 }
             )
             write_composite_report(self._report_dir / f"composite_{index:03d}_{problem_id}.json", report)
@@ -486,6 +502,24 @@ class CompositeSdoAgent(SdoPersistentAgent):
             reflection_attempts=attempts,
             error="; ".join(filter(None, [outcome.error, error])) or None,
         )
+
+
+def _controller_job_summary(control: str) -> dict[str, Any]:
+    """How many controller pods ran and how they ended (a stopped controller is restarted by its Job)."""
+
+    from sdo.controller_install import kubectl
+
+    try:
+        completed = kubectl(
+            ["get", "pods", "--selector", "job-name=sdo-controller-run", "-o", "json"], namespace=control, check=False
+        )
+        pods = json.loads(completed.stdout).get("items", []) if completed.returncode == 0 else []
+        return {
+            "controller_pods": len(pods),
+            "phases": [pod.get("status", {}).get("phase") for pod in pods],
+        }
+    except Exception as exc:  # evidence only
+        return {"error": f"{type(exc).__name__}: {exc}"}
 
 
 def _add(left: TokenCounts, right: TokenCounts) -> TokenCounts:

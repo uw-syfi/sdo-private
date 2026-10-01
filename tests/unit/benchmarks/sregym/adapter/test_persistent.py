@@ -700,3 +700,27 @@ def test_stage_fails_fast_when_the_controller_stops_for_detector_review(tmp_path
 
     assert raised.value.incident_id == "incident-9"
     assert "did not clear" in raised.value.reason
+
+
+def test_stage_can_wait_out_a_detector_review_stop_when_asked_to(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    ops = FakeOps()
+
+    def inject_then_wedge(control: str, generation: str, inject: Callable[[], None]) -> dict[str, float]:
+        inject()
+        ops.states[control].update({"incident_open": True, "detector_review_required": True})
+        return {}
+
+    ops.inject_after_resume = inject_then_wedge  # type: ignore[method-assign]
+
+    with pytest.raises(PersistentControllerError, match="verified no new incident") as raised:
+        run_persistent_stage(
+            replace(_inputs(tmp_path, "s0"), stop_on_detector_review=False, verification_timeout_seconds=5),
+            ops=ops,
+            run_lifecycle=lambda: True,
+            inject=lambda: None,
+            clock=_clock(ops),
+        )
+
+    assert not isinstance(raised.value, DetectorReviewRequiredError)
