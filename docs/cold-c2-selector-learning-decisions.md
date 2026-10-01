@@ -1,6 +1,6 @@
 # Cold-C2 control and selector learning: decisions and results
 
-Status: 2026-10-01, in progress (this file is updated as sequences finish). Branch `vic/exp/cold-c2-selector-learning` (from `vic/exp/simultaneous-composites`). Predecessor: `docs/simultaneous-composites-decisions.md`.
+Status: 2026-10-01, complete. All sequences finished; clusters cl-w90 to cl-w117 deleted. Branch `vic/exp/cold-c2-selector-learning` (from `vic/exp/simultaneous-composites`). Predecessor: `docs/simultaneous-composites-decisions.md`.
 
 ## Questions
 
@@ -26,18 +26,20 @@ In the first C3 the responder repaired `wrong_selector:frontend` by adding `curr
 - Attempt 1 (`seq_sim3.sh`, sequences `sel2-*`): commit a revert of `kubernetes/` to the baseline snapshot before each redeploy. This did not work: the harness commit never appeared in the workspace history (the operational repository is controller-managed and the commit was not kept), so the label stayed. sel2-a and sel2-c are therefore effectively more no-reset replicates.
 - Attempt 2 (`seq_sim4.sh`, sequences `sel3-*`): after `up --redeploy` and before the run, remove the label from the live frontend Deployment (JSON patch, wait for rollout), leaving source and `.sdo` memory as the agent left them. This restores a live app in which the selector fault is real again while memory persists. The patch is logged in each sequence's `seq.log` ("removed frontend pod label before C2").
 
-## Results (pending sequences are appended below)
+## Results
 
-<!-- RESULTS -->
-### Experiment 1: cold C2 versus C2 after C1
+Scripts: `benchmarks/sregym/experiments/cold-c2-selector-learning/` (`seq_sim2.sh` plain, `seq_sim3.sh` manifest-reset attempt, `seq_sim4.sh` live label reset, `seq_sim5.sh` seeded selector memory, `aggregate_sim2.py`, `report2.py`). Raw runs: `/mnt/data/shli/clc-runs/{cc2,sel,sel2,sel3,selw}-*`. In the `sel*` rows the first row is C3, the second the repeat C3', the third C1.
 
-Per run (all rows below; `never red` lists faults that were never red in the probe, `-` means every fault was red):
+### Per run
+
+Columns: `never red` = faults never red in the probe (`-` = all were red); learned detectors = incident detectors that fired after the composite's injection start, xN = distinct fingerprints, with the relation to dispatch (`before/pre` = before the first dispatch).
 
 | seq | composite | solved | oracle | last-fault s | inj->mit s | tokens | per-fault s | never red | learned detectors fired after injection start (xN fingerprints, relation) | note |
 |---|---|---|---|---|---|---|---|---|---|---|
 | cc2-a | C2 (cold) | 3/3 | True | 193 | 237 | 2.04M | mongodb-geo 130, recommendation 73, profile 193 | - | none |  |
 | cc2-b | C2 (cold) | 3/3 | True | 135 | 209 | 1.95M | mongodb-geo 135, recommendation 78, profile 78 | - | none |  |
 | cc2-c | C2 (cold) | 3/3 | True | 131 | 177 | 1.86M | mongodb-geo 131, recommendation 73, profile 73 | - | none |  |
+| cc2-d | C2 (cold) | 3/3 | True | 983 | 443 | 2.90M | mongodb-geo 952, recommendation 983, profile 952 | - | none |  |
 | sel-a | C3 | 5/5 | True | 139 | 159 | 1.75M | mongodb-rate 101, recommendation 58, geo 64, user 64, frontend 139 | - | none |  |
 | sel-a | C3' (repeat) | 5/5 | True | 48 | 74 | 0.76M | mongodb-rate 48, recommendation 48, geo 48, user 48, frontend 0 | frontend | deny-all-application-network-policyx1(before/pre) |  |
 | sel-a | C1 (after C3,C3') | 3/3 | True | 364 | 261 | 1.16M | mongodb-rate 128, recommendation 107, geo 364 | - | deny-all-application-network-policyx1(before/pre) |  |
@@ -55,39 +57,55 @@ Per run (all rows below; `never red` lists faults that were never red in the pro
 | sel2-c | C1 (after C3,C3') | 3/3 | True | 99 | 109 | 0.31M | mongodb-rate 93, recommendation 93, geo 99 | - | deny-all-network-policyx1(before/pre), missing-configmapx1(before/pre) |  |
 | sel3-a | C3 | 5/5 | False | 557 | None | 0.20M | mongodb-rate 355, recommendation 557, geo 551, user 102, frontend 557 | - | none |  |
 | sel3-a | C3' (repeat) | 5/5 | True | 517 | 518 | 1.27M | mongodb-rate 517, recommendation 280, geo 425, user 332, frontend 102 | - | none |  |
+| sel3-a | C1 (after C3,C3') | 3/3 | True | 1282 | 304 | 4.21M | mongodb-rate 1244, recommendation 1282, geo 862 | - | none |  |
+| sel3-b | C3 | 5/5 | True | 1311 | 1134 | 3.52M | mongodb-rate 118, recommendation 525, geo 1311, user 896, frontend 146 | - | none |  |
+| sel3-b | C3' (repeat) | 4/5 | False | None | 357 | 1.04M | mongodb-rate 291, recommendation 648, user 730, frontend 314 | - | service-selector-ready-pod-mismatchx4(before/pre) |  |
+| sel3-b | C1 (after C3,C3') | 3/3 | True | 94 | 132 | 1.68M | mongodb-rate 94, recommendation 68, geo 68 | - | service-selector-ready-pod-mismatchx6(before/pre) |  |
+| sel3-c | C3 | 5/5 | False | 1766 | 279 | 3.51M | mongodb-rate 1447, recommendation 1766, geo 1537, user 608, frontend 247 | - | none |  |
+| sel3-c | C3' (repeat) | 5/5 | False | 119 | 135 | 1.17M | mongodb-rate 119, recommendation 90, geo 85, user 85, frontend 85 | - | none |  |
+| sel3-c | C1 (after C3,C3') | 2/3 | False | None | 61 | 0.21M | mongodb-rate 47, geo 47 | - | missing-required-configmapx1(before/pre) |  |
+| selw-a | C3 | 5/5 | True | 878 | 833 | 0.90M | mongodb-rate 803, recommendation 878, geo 850, user 430, frontend 365 | - | deny-all-network-policyx1(before/pre), missing-configmapx1(before/pre), service-selector-mismatchx1(before/pre) |  |
+| selw-b | C3 | 5/5 | True | 112 | 140 | 0.45M | mongodb-rate 59, recommendation 53, geo 112, user 112, frontend 64 | - | deny-all-network-policyx1(before/pre), missing-configmapx1(before/pre), service-selector-mismatchx1(before/pre) |  |
+| selw-c | C3 | 5/5 | True | 69 | 95 | 0.57M | mongodb-rate 69, recommendation 64, geo 58, user 58, frontend 69 | - | deny-all-network-policyx1(before/pre), missing-configmapx1(before/pre), service-selector-mismatchx1(before/pre) |  |
 
-Cold C2 (composite3b first, memory 0/1) versus the stored warm C2 (after C1, `sim-a..d`):
+Sequence kinds: `cc2-*` cold C2; `sel-*`, `sel2-*` C3, C3, C1 without any reset (repeat selector fault is a no-op); `sel3-*` same with the live frontend label removed before the repeat (selector fault real); `selw-*` a single C3 started from a seed containing the memory (including a selector detector) that `sel2-c` learned after its first C3, with baseline manifests (selector fault real).
 
-| metric | cold C2 (cc2-a, b, c; d pending) | warm C2 after C1 (sim-a..d) |
+### Experiment 1: cold C2 versus warm C2
+
+| metric | cold C2 (cc2-a, b, c, d) | warm C2 after C1 (sim-a..d, stored) |
 |---|---|---|
-| tokens | 2.04M, 1.95M, 1.86M (mean 1.95M) | 0.66M, 0.55M, 0.72M, 0.54M (mean 0.62M) |
-| inj->mit s | 237, 209, 177 (median 209) | n/a, 104, 161, 79 (median 104) |
-| last-fault s | 193, 135, 131 (median 135) | 109, 73, 152, 62 (median 91) |
-| solved / oracle | 3/3, 3/3 | 4/4 / 4/4 |
-| learned detectors before dispatch | none (nothing learned yet) | geo-free ConfigMap and netpol detectors fired before dispatch in 3 of 4 (see the simultaneous doc) |
+| tokens | 2.04M, 1.95M, 1.86M, 2.90M (median 2.0M) | 0.66M, 0.55M, 0.72M, 0.54M (median 0.61M) |
+| inj->mit s | 237, 209, 177, 443 (median 223) | n/a, 104, 161, 79 (median 104) |
+| last-fault s | 193, 135, 131, 983 (median 164) | 109, 73, 152, 62 (median 91) |
+| solved / oracle | 4/4, 4/4 | 4/4, 4/4 |
 
-The cold C2 token cost (1.9 to 2.0M) matches the cold C1 simultaneous runs (1.36 to 3.19M, median about 1.96M) and is about 3x the warm C2; every cold C2 is above every warm C2 (no overlap). Speed: inj->mit is about 2x slower cold (209 versus 104 s median; ranges 177 to 237 versus 79 to 161), last-fault about 1.5x slower, but the ranges overlap on last-fault and warm C2 had a 161 s outlier, so speed is suggestive only.
+Same flags confirmed (design check above). cc2-d is a slow outlier (983 s last-fault versus 443 s inj->mit; the cluster had etcd i/o timeouts and a controller restart during the run; kept, not infra-excluded because it resolved). Excluding it the cold medians are 2.0M, 209 s, 135 s. Cold C2 tokens (median 2.0M) match cold C1 in the simultaneous runs (median about 1.96M); warm C2 is about 3.3x cheaper, and the token ranges do not overlap (cold min 1.86M versus warm max 0.72M). Time: cold is about 2x slower by inj->mit and 1.5x by last-fault, with overlapping last-fault ranges (cold 131 to 193 versus warm 62 to 152).
 
 ### Experiment 2: selector learning
 
-Sequences C3, C3' (repeat), C1. Valid no-reset sequences: sel-a, sel-b, sel-c, sel2-a, sel2-c (the repeat's `wrong_selector` was a no-op, see the design problem). Label-reset sequences: sel3-a (done), sel3-b and sel3-c (running). Infrastructure failures are kept as `*-infra*` directories and are not in the table.
+Selector detector creation after the first C3 reflection: sim-a, sim-b, sel2-c, sel3-b yes (4 of 12 first-C3 reflections pooling sim-a..d, sel-a..c, sel2-a, sel2-c, sel3-a..c); the others learned only network-policy, ConfigMap or unrelated detectors (sel3-a learned nothing: its first responder produced no diagnosis, oracle false). Quality of the four detectors:
 
-- Selector detector created after the first C3 reflection: sel2-c only (`service_selector_mismatch`, plus `empty_network_policy` and `missing_configmap`). sel-a, sel-b, sel-c, sel2-a and sel3-a created none (they learned network-policy and ConfigMap detectors, sel-c also `persistent_wrk2_load`; sel3-a learned nothing because its first responder produced no diagnosis). Pooled with the earlier sim-a to sim-d, a selector detector was created in 3 of 9 first-C3 reflections (sim-a, sim-b, sel2-c).
-- Did the selector detector fire before dispatch on the repeat? In sel2-c, no: the repeat's selector fault was a no-op, and the detector did not fire (no healthy-service false fire either). That is uninformative about firing on a real fault. sel3 (label reset) is the valid test and only counts if the detector exists.
-- False fires of later detectors on healthy services: none in the sel-a, sel-b, sel-c, sel2-a, sel2-c repeat and C1 runs (each learned incident detector fired on one fingerprint, the injected fault, before dispatch). The sim-a C4 failure mode (selector detector firing on four healthy services after rollout) did not recur.
-- Per-fault times for the first C3 (cold, 5 faults): wrong_selector 139, 149, 219, 107, 177 s (sel-a, b, c, sel2-a, sel2-c); repeat: 0 s (no-op), so no valid speed comparison; the other four faults resolved in 43 to 112 s on the repeat except sel-c (below).
-- Classification of runs: sel-b C1 (composite3 after the repeats): probes resolved at 874 s, oracle false, responder tokens 0, receipt missing, learned configmap detector fired before dispatch; anomalous (no responder token record, 672 s inj->mit); treated as a failed run, possible infra (load/Codex) but not proven. sel-c repeat: 1077 s last fault, 2.33M tokens, controller load (host load 20 to 45 then); slow-run outlier, learned detectors fired before dispatch but did not shorten it. sel3-a C1 (first C3): oracle false, responder 0.20M tokens, empty diagnosis, probes green at 557 s; anomalous cold run, kept in the table, nothing learned. Infra failures excluded: sel-c (first attempt), cc2-c (first), cc2-d (twice), sel2-b, sel3-b, sel3-c (first attempts): kind/etcd i/o timeouts, Calico apply failure, ControllerInstallError.
+| sequence | detector | fired on the real frontend fault | false fires on healthy services |
+|---|---|---|---|
+| sim-a | `service-selector-missing-pod-label` | never had the chance (no repeat) | 4 jaeger services, stale incident, failed C4 |
+| sim-b | same | no chance | about 20 services in C4, run still succeeded |
+| sel3-b (label reset, valid repeat) | `service_selector_ready_pod_mismatch` | NO, not on frontend in the repeat | jaeger, jaeger-agent, jaeger-collector, jaeger-query in the repeat; the same four plus geo and mongodb-rate in C1 (no selector fault) |
+| sel2-c (no reset) | `service_selector_mismatch` | fault was a no-op | none in the repeat or C1 |
 
-## Takeaways (draft; final after all sequences)
+So answering the question as asked: when reflection creates a selector detector it usually does not help. In the only valid repeat that had one (sel3-b), it did not fire on the real fault, false-fired on four healthy jaeger services, and the repeat was not faster for `wrong_selector` (146 s first, 314 s repeat) and failed the oracle (4/5 faults with a flapping geo probe; classification: learned-detector false positive plus load, not proven causal). The correct detector from sel2-c, seeded into fresh memory with baseline manifests (`selw-a/b/c`, 3 of 3), fired before dispatch on frontend each time with no false fires on healthy services (fingerprint `frontend`; also the ConfigMap and network-policy detectors). Per-fault `wrong_selector:frontend` s: seeded 365 (selw-a, host etcd degraded, controller restarted), 64, 69 versus first C3 cold 139, 149, 219, 107, 177, 146, 247, 557 (sel-a, b, c, sel2-a, sel2-c, sel3-b, sel3-c, sel3-a anomalous) and sim 294, 144, 76, 249 (cold medians about 165 s). Seeded all-faults-resolved was 878, 112, 69 s versus cold C3 118 to 285 s excluding outliers. Same-sequence repeats without a seeded detector (sel3-a 102 s, sel3-c 85 s) were also fast, so repeat speed is not attributable to the detector.
 
-1. Meaning: the C2 token saving is a memory effect, not a property of composite3b. Cold C2 costs about the same as cold C1 (about 1.9M) and the warm C2 costs about 0.6M (3x less, no overlap, n=3 vs 4). Confidence: medium (n=3 cold, direction consistent, magnitude large, but one benchmark composite and one model). Implication: learned detectors and playbooks from an earlier composite cut the second composite's responder cost; the simultaneous arm's earlier "cost effect" claim stands. Next step: a cold-C1 control against C1-after-C2 would confirm symmetry; none required.
-2. Meaning: speed is also better warm, but weakly: inj->mit 104 versus 209 s median, ranges overlapping on last-fault. Confidence: low to medium. Implication: do not report a speed learning curve from n<=4 per cell; report the token effect. Next step: n>=8 if a speed claim is wanted.
-3. Meaning: the selector repeat was confounded by a persistent source fix; the experiment as specified (C3, C3, C1) cannot show selector learning unless the live app is reset. Confidence: high (direct evidence: ever_red false and t=0.3 s in five repeats, label present in source). Implication: any repeat-of-a-fault design must reset application source or live state, not only keep `.sdo`. Next step: see sel3 results below.
-4. Meaning: selector detectors are created rarely (3 of 9 first-C3 reflections), so even a valid repeat protocol has low power for detector firing. Confidence: medium. Implication: to test firing, seed a known selector detector or run more first-C3 reflections. Next step: seed the sel2-c detector into a fresh memory and run C3 with the label reset (cheap).
+Runs classified (excluding infra reruns): learned-detector false positive: sel3-b C3' and C1 (jaeger), sim-a C4 (earlier). Anomalous or failed: sel-b C1 (874 s, 0 responder tokens, receipt missing, oracle false), sel3-a first C3 (responder 0.20M tokens, empty diagnosis, oracle false, probes green at 557 s), sel3-c first C3 (oracle false despite 5/5 probes, 1766 s) and sel3-c C1 (2/3, `no_further_incident`, network-policy fault never repaired, oracle false), sel-c repeat (1077 s). Infra, excluded and rerun on fresh clusters: sel-c, cc2-c, cc2-d (twice), sel2-b, sel3-b, sel3-c, selw-b, selw-c (three times) for kind create or openebs/Calico failures, ControllerInstallError, etcd i/o timeouts; evidence in the `*-infra*` directories.
+
+## Takeaways
+
+1. Cold C2 versus warm C2: the C2 cost saving is a memory effect. Meaning: cold C2 costs about 2.0M tokens, the same as cold C1, while C2 after C1 costs about 0.6M (3.3x lower, no range overlap, n=4 vs 4); inj->mit is about 2x faster warm (104 versus 223 s median) but last-fault ranges overlap. Confidence: medium for tokens (consistent in 4 of 4, large effect, one composite and model), low for speed. Implication: report the token effect and not a speed learning curve. Next step: if a speed claim is wanted, n>=8 per cell on a quiet host.
+2. The selector repeat as specified is invalid; fix and re-measure. Meaning: the first C3 responder's source fix (frontend pod label) persists through `up --redeploy`, making the repeated selector fault a no-op in 5 of 5 unreset repeats; a manifest-revert commit did not persist (controller-managed repo); removing the label from the live Deployment restores a real fault. Confidence: high (ever_red false, label in source). Implication: any repeat-of-a-fault experiment must reset application state, not just keep `.sdo`. Next step: make the harness reset the application source or live label itself.
+3. Reflection-created selector detectors are rare (4 of 12) and in 3 of the 4 are harmful. Meaning: in the valid repeat the learned detector did not fire on the real fault and false-fired on healthy jaeger services (the same pattern as sim-a C4); the one correct detector fires before dispatch when present. Confidence: medium (one valid unseeded repeat, three seeded). Implication: learned incident detectors need a healthy-baseline quiet check and a replay against the originating fault before rollout; with a good detector, firing before dispatch works. Next step: add baseline-quiet and originating-fault replay validation to the detector validator.
+4. No evidence that a pre-dispatch selector detector speeds `wrong_selector`: seeded 64 to 69 s (and one degraded 365 s) versus cold 76 to 294 s, but unseeded repeats were also 85 to 102 s. Confidence: low (n=3 seeded, large variance, host load). Next step: compare seeded versus unseeded repeat on the same host in alternation.
 
 ## Caveats
 
-- n=3 (cold C2; d pending), five no-reset and (pending) three label-reset selector sequences; host load 8 to 45 shared with another user; several sequences hit infra failures and were rerun on new clusters (cl-w100 and above), so concurrency and load differ between waves.
-- Tokens are responder plus reflection tokens; cold rows exclude judge time. The warm C2 baseline is the stored `sim-a..d`, not rerun, from a different day.
-- `inj->mit` is n/a where no closure receipt was recorded.
-- The label-reset patch alters live state only; source keeps the agent's earlier fix.
+- n=4 cold C2, 3 valid label-reset repeats (one of which created a detector), 3 seeded runs; five unreset repeat sequences are confounded by design. Host load 6 to 45 (another user's jobs); etcd timeouts in the kind clusters caused controller restarts and many reruns (clusters cl-w100 and above), so timing noise is large. Rerun sequences are different waves and concurrency levels.
+- The seeded runs reuse the `.sdo` of sel2-c at the commit after its first C3 reflection with `kubernetes/` reset to the baseline snapshot; that memory also contains that sequence's ConfigMap and network-policy detectors, which fired too.
+- Warm C2 baseline is the stored `sim-a..d`, not rerun (different day). Tokens are responder plus reflection tokens; judge time is excluded. `inj->mit` is n/a where no closure receipt was recorded.
+- The live label patch changes live state only; the previous responder's source change remains.
