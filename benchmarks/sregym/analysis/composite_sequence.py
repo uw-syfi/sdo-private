@@ -1,0 +1,89 @@
+"""Per-composite learning-curve table for a persistent-controller sequence.
+
+For every run directory (one composite each) it reports, per fault, whether a learned (incident-class)
+detector activated for the fault's component before the first dispatch, and how much operational
+memory (incident detectors, playbooks) existed in the application workspace after each memory commit.
+
+    uv run python -m benchmarks.sregym.analysis.composite_sequence <results-dir>...
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+from benchmarks.sregym.fastloop.fault_tracker import composite_faults
+
+NETWORK_POLICY_PREFIX = "deny-all-"
+
+
+def _targets(firing: dict[str, Any]) -> set[str]:
+    names = {part for part in str(firing.get("fingerprint", "")).split("/") if part}
+    for binding in (firing.get("parameter_bindings") or {}).values():
+        if isinstance(binding, dict) and binding.get("name"):
+            names.add(str(binding["name"]))
+    return {name.removeprefix(NETWORK_POLICY_PREFIX) for name in names}
+
+
+def first_activations(firings: list[dict[str, Any]], component: str) -> dict[str, dict[str, Any]]:
+    """The first activation of a health and of a learned (non-health) detector for ``component``."""
+
+    result: dict[str, dict[str, Any]] = {}
+    for firing in firings:
+        if firing.get("event") not in {"activated", "batched"} or component not in _targets(firing):
+            continue
+        kind = "health" if firing.get("detector_class") == "health" else "learned"
+        result.setdefault(kind, firing)
+    return result
+
+
+def learned_before_dispatch(firings: list[dict[str, Any]], component: str) -> bool:
+    learned = first_activations(firings, component).get("learned")
+    return learned is not None and learned.get("dispatch_relation") in {"before_dispatch", "no_incident"}
+
+
+def memory_counts(workspace: Path, revision: str = "HEAD") -> dict[str, int]:
+    listing = subprocess.run(
+        ["git", "-C", str(workspace), "ls-tree", "-r", "--name-only", revision, ".sdo"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    incident_detectors = {p.split("/")[4] for p in listing if p.startswith(".sdo/diagnostics/detectors/incidents/")}
+    playbooks = {p.split("/")[2] for p in listing if p.startswith(".sdo/playbooks/") and p.count("/") >= 3}
+    return {"incident_detectors": len(incident_detectors), "playbooks": len(playbooks)}
+
+
+def load_firings(directory: Path) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for path in sorted(directory.glob("*/detector_firings.jsonl")):
+        out += [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return out
+
+
+def main(argv: list[str]) -> int:
+    for arg in argv:
+        directory = Path(arg)
+        reports = sorted(directory.glob("composite_*.json"))
+        if not reports:
+            continue
+        problem = json.loads(reports[0].read_text(encoding="utf-8"))["problem_id"]
+        firings = load_firings(directory)
+        parts = []
+        for fault in composite_faults(problem):
+            found = first_activations(firings, fault.component)
+            learned = found.get("learned")
+            if learned is None:
+                state = "no"
+            else:
+                state = "before_dispatch" if learned_before_dispatch(firings, fault.component) else "after_dispatch"
+            parts.append(f"{fault.name}: learned={state} health={'yes' if 'health' in found else 'no'}")
+        print(f"{directory.name}\t{problem}\t" + "; ".join(parts))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
