@@ -1,6 +1,6 @@
 # Composite stream (10 composites, all fixes on): decisions and results
 
-Status: 2026-10-01, in progress. Branch `vic/exp/composite-stream` (from `vic/exp/healthy-baseline-ab`), worktree `/mnt/data/shli/sdo-worktrees/composite-stream`. Predecessors: `docs/healthy-baseline-ab-decisions.md`, `docs/cold-c2-selector-learning-decisions.md`, `docs/simultaneous-composites-decisions.md`, `docs/composite-learning-curve-decisions.md`, `docs/nfault-composites-decisions.md` (these live in sibling worktrees).
+Status: 2026-10-01, in progress (sequences cstream-a and cstream-b done; cstream-c, d, e and the Codex runs on C4/C5 running). Branch `vic/exp/composite-stream` (from `vic/exp/healthy-baseline-ab`), worktree `/mnt/data/shli/sdo-worktrees/composite-stream`. Predecessors: `docs/healthy-baseline-ab-decisions.md`, `docs/cold-c2-selector-learning-decisions.md`, `docs/simultaneous-composites-decisions.md`, `docs/composite-learning-curve-decisions.md`, `docs/nfault-composites-decisions.md` (these live in sibling worktrees).
 
 ## Questions
 
@@ -17,6 +17,69 @@ Status: 2026-10-01, in progress. Branch `vic/exp/composite-stream` (from `vic/ex
 - Raw runs: `/mnt/data/shli/clc-runs/cstream-*` (SDO) and `cstream-codex*`.
 - The submodule commit adding C4/C5 (`03b1df58`) lives in a private copy of the submodule git dir (`/mnt/data/shli/sdo-worktrees/.composite-stream-sregym-gitdir`, branch `vic/exp/composite-stream`); no remotes changed.
 
-## Results
+## Results, sequences cstream-a and cstream-b (n=2 so far; c, d, e to be appended)
 
-(to be filled per finished sequence)
+Both sequences ran concurrently on clusters cl-w150/cl-w151, host load 6 to 17, no infra failures, no reruns. Tokens are responder plus reflection. `last-fault s` = injection end to the last fault's final green probe; `inj->mit s` = controller's injection-to-last-repair (judge time never included). "learned detectors before dispatch" lists the fault components for which a learned (non-health) incident detector activated before the first dispatch of that composite. "off-target" = a learned detector fired on a target outside the composite's fault components (the false-firing check). Memory = incident detectors / playbook directories in `.sdo` at the end of the composite. `follow-ups` = extra incidents beyond the first. Raw table: `/mnt/data/shli/clc-runs/cstream-ab-table.md`, aggregate `cstream-agg.json`, script `analyze_stream.py`.
+
+| seq | pos | C | solved | oracle | last-fault s | inj->mit s | tokens | follow-ups | learned detectors before dispatch (fault components) | learned fired off-target | gate rejections | memory inc.det/playbooks after | inert | stop/err |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| cstream-a | 1 | C1 | 3/3 | True | 57 | 93 | 0.94M | 0 | none | none | 0 (+0 other) | 2/3 | - | all_faults_resolved  |
+| cstream-a | 2 | C2 | 3/3 | True | 68 | 81 | 0.30M | 0 | mongodb-geo, recommendation | none | 0 (+0 other) | 2/3 | - | all_faults_resolved  |
+| cstream-a | 3 | C3 | 5/5 | True | 380 | 407 | 0.84M | 0 | mongodb-rate, recommendation | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-a | 4 | C1 | 3/3 | True | 68 | 80 | 0.33M | 0 | mongodb-rate, recommendation | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-a | 5 | C4 | 3/3 | True | 151 | 164 | 0.48M | 0 | mongodb-geo, user | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-a | 6 | C2 | 3/3 | True | 94 | 108 | 0.50M | 0 | mongodb-geo, recommendation | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-a | 7 | C3 | 5/5 | True | 96 | 125 | 0.46M | 0 | frontend, mongodb-rate, recommendation | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-a | 8 | C5 | 4/4 | True | 100 | 120 | 0.47M | 0 | frontend, mongodb-rate, recommendation | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-a | 9 | C1 | 3/3 | True | 57 | 88 | 0.39M | 0 | mongodb-rate, recommendation | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-a | 10 | C4 | 3/3 | True | 73 | 95 | 1.72M | 0 | mongodb-geo, user | none | 0 (+0 other) | 4/5 | - | all_faults_resolved  |
+| cstream-b | 1 | C1 | 3/3 | True | 136 | 308 | 2.51M | 0 | none | none | 0 (+0 other) | 1/2 | - | all_faults_resolved  |
+| cstream-b | 2 | C2 | 3/3 | True | 171 | 209 | 1.97M | 0 | mongodb-geo | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-b | 3 | C3 | 5/5 | True | 161 | 211 | 1.32M | 0 | geo, mongodb-rate, recommendation | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-b | 4 | C1 | 3/3 | True | 78 | 84 | 0.52M | 0 | geo, mongodb-rate, recommendation | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-b | 5 | C4 | 3/3 | True | 99 | 110 | 0.34M | 0 | mongodb-geo, rate, user | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-b | 6 | C2 | 3/3 | True | 68 | 56 | 0.30M | 0 | mongodb-geo, profile, recommendation | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-b | 7 | C3 | 5/5 | True | 176 | 230 | 0.94M | 0 | geo, mongodb-rate, recommendation | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-b | 8 | C5 | 4/4 | True | 100 | 85 | 0.52M | 0 | mongodb-rate, profile, recommendation | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-b | 9 | C1 | 3/3 | True | 78 | 94 | 0.49M | 0 | geo, mongodb-rate, recommendation | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+| cstream-b | 10 | C4 | 3/3 | True | 73 | 130 | 1.16M | 0 | mongodb-geo, rate, user | none | 0 (+0 other) | 3/4 | - | all_faults_resolved  |
+
+| pos | composite | n | all solved (probes) | oracle True | median tokens | median inj->mit s | median last-fault s | median follow-ups | median memory det/pb after |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | C1 | 2 | 2/2 | 2/2 | 1.73M | 201 | 96 | 0.0 | 1.5/2.5 |
+| 2 | C2 | 2 | 2/2 | 2/2 | 1.13M | 145 | 120 | 0.0 | 2.5/3.5 |
+| 3 | C3 | 2 | 2/2 | 2/2 | 1.08M | 309 | 270 | 0.0 | 3.0/4.0 |
+| 4 | C1 | 2 | 2/2 | 2/2 | 0.43M | 82 | 73 | 0.0 | 3.0/4.0 |
+| 5 | C4 | 2 | 2/2 | 2/2 | 0.41M | 137 | 125 | 0.0 | 3.0/4.0 |
+| 6 | C2 | 2 | 2/2 | 2/2 | 0.40M | 82 | 81 | 0.0 | 3.0/4.0 |
+| 7 | C3 | 2 | 2/2 | 2/2 | 0.70M | 178 | 136 | 0.0 | 3.0/4.0 |
+| 8 | C5 | 2 | 2/2 | 2/2 | 0.50M | 102 | 100 | 0.0 | 3.0/4.0 |
+| 9 | C1 | 2 | 2/2 | 2/2 | 0.44M | 91 | 68 | 0.0 | 3.0/4.0 |
+| 10 | C4 | 2 | 2/2 | 2/2 | 1.44M | 112 | 73 | 0.0 | 3.5/4.5 |
+
+| seq | cumulative tokens (M) after pos 1..N | cumulative inj->mit min |
+|---|---|---|
+| cstream-a | 0.9 1.2 2.1 2.4 2.9 3.4 3.8 4.3 4.7 6.4 | 2 3 10 11 14 16 18 20 21 23 |
+| cstream-b | 2.5 4.5 5.8 6.3 6.7 7.0 7.9 8.4 8.9 10.1 | 5 9 12 14 15 16 20 22 23 25 |
+
+| composite | first occurrence tokens (median) | repeat tokens (median) | first inj->mit | repeat inj->mit |
+|---|---|---|---|---|
+| C1 | 1.73M (n=2) | 0.44M (n=4) | 201 | 86 |
+| C2 | 1.13M (n=2) | 0.40M (n=2) | 145 | 82 |
+| C3 | 1.08M (n=2) | 0.70M (n=2) | 309 | 178 |
+| C4 | 0.41M (n=2) | 1.44M (n=2) | 137 | 112 |
+| C5 | 0.50M (n=2) | -M (n=0) | 102 | - |
+
+Headline for these two sequences: 20 of 20 composites resolved by probes and by the official oracle (C1..C5, positions 1..10 in both), 0 follow-up incidents, 0 off-target (false-firing) learned detectors, 0 gate rejections, 0 inert injections (`ever_red` true for every fault).
+
+### Cost along the stream (per-position medians, n=2)
+
+- Tokens: 1.73M (pos 1, cold C1), 1.13M, 1.08M, then 0.43M at pos 4 and 0.40 to 0.50M at positions 5, 6, 8, 9; positions 3, 7 (C3, 5 faults) 1.08M then 0.70M; position 10 (C4 repeat) is 1.44M, driven by cstream-a's 1.72M (cstream-a created a 4th incident detector / 5th playbook at that composite, so that run paid for a reflection that produced new memory; cstream-b's pos 10 is 1.16M).
+- inj->mit s: 201, 145, 309, 82, 137, 82, 178, 102, 91, 112. Pos 1 to 3 (cold or new family) median 201 s; positions 4 to 10 median about 102 s.
+- Grouped by first occurrence versus repeat of each composite (median over the two sequences): C1 1.73M / 201 s first, 0.44M / 86 s repeat (n=4 repeats); C2 1.13M / 145 s versus 0.40M / 82 s; C3 1.08M / 309 s versus 0.70M / 178 s; C4 first 0.41M / 137 s versus repeat 1.44M / 112 s (the first C4 at pos 5 already benefits from memory learned on C1 to C3, and the repeat at pos 10 contains the one costly reflection); C5 (new at pos 8) 0.50M / 102 s.
+- Cumulative tokens: cstream-a 0.9, 1.2, 2.1, 2.4, 2.9, 3.4, 3.8, 4.3, 4.7, 6.4M; cstream-b 2.5, 4.5, 5.8, 6.3, 6.7, 7.0, 7.9, 8.4, 8.9, 10.1M. Mean cost of the first three composites is about 1.4M each, of the last seven about 0.6M each (including the pos 10 outlier).
+
+### Memory growth
+
+Incident detectors / playbooks after the composite: cstream-a 2/3, 2/3, 3/4, 3/4, 3/4, 3/4, 3/4, 3/4, 3/4, 4/5; cstream-b 1/2, 3/4, 3/4 and flat at 3/4 through position 10. Memory saturates at 3 detectors (ConfigMap, network policy, and a readiness or selector one) after the first three composites and stays flat for seven more composites in b and six in a, with one late addition in a (position 10). Learned detectors for the ConfigMap and network-policy faults fire before dispatch from position 2 on in both sequences; after C3, learned selector (a) or readiness-port (b) detectors also appear in the "before dispatch" set.
+
