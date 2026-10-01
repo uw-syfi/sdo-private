@@ -144,15 +144,18 @@ for r in sorted(p for n in SEQS for p in (R).glob(f"{n}/results/{n}-C*")):
     c = json.loads(comp[0].read_text())
     inc = json.loads((r / "incidents.jsonl").read_text().splitlines()[0])
     fs = load_firings(r, since=inc["injection_started_at"])
-    pre = {"health": set(), "learned": set()}
+    fired_before = {"health": set(), "learned": set()}
     anyl = set()
-    for f in fs:
-        k = "health" if f.get("detector_class") == "health" else "learned"
-        if f["event"] in ("activated", "batched") and f.get("dispatch_relation") in ("before_dispatch", "no_incident"):
-            pre[k].add(f["fingerprint"])
-        if k == "learned" and f["event"] in ("activated", "batched"):
-            anyl.add(f["detector_id"])
+    for firing in fs:
+        k = "health" if firing.get("detector_class") == "health" else "learned"
+        if firing["event"] in ("activated", "batched") and firing.get("dispatch_relation") in (
+            "before_dispatch",
+            "no_incident",
+        ):
+            fired_before[k].add(firing["fingerprint"])
+        if k == "learned" and firing["event"] in ("activated", "batched"):
+            anyl.add(firing["detector_id"])
     m = inc.get("injection_to_mitigation_seconds")
     print(
-        f"| {r.parent.parent.name} | {r.name.split('-')[-1]} | {m and round(m)} | {len(c['incidents']) - 1} | {c['stop_reason']} | {len(pre['health'])}/{len(pre['learned'])} | {len(anyl)} |"
+        f"| {r.parent.parent.name} | {r.name.split('-')[-1]} | {m and round(m)} | {len(c['incidents']) - 1} | {c['stop_reason']} | {len(fired_before['health'])}/{len(fired_before['learned'])} | {len(anyl)} |"
     )

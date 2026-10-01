@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from benchmarks.sregym.analysis.reflection_replay import _git, _ScopedBackend, find_ledger, memory_delta
 from sdo.agent_runtime.responder import INCIDENT_REASONING_EFFORT, SessionReflector
@@ -115,7 +116,7 @@ def main() -> int:
             closure=closure,
         )
         delta = memory_delta(clone)
-        rec = dict(
+        rec: dict[str, Any] = dict(
             attempt=attempt,
             learning_decision=turn.learning_decision,
             new_detectors=delta["new_detectors"],

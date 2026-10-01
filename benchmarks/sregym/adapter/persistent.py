@@ -922,8 +922,8 @@ def _wait_for_verified_incident(
             # Reflection finished between polls; the ledger holds the closure.
             return VerifiedIncident(incident_id=acknowledged, closure=None)
         if stop_on_review and state.get("detector_review_required"):
-            request = state.get("incident_request")
-            incident_id = request.get("incident_id") if isinstance(request, dict) else None
+            incident_request = state.get("incident_request")
+            incident_id = incident_request.get("incident_id") if isinstance(incident_request, dict) else None
             raise DetectorReviewRequiredError(
                 str(incident_id or "unknown"), str(state.get("detector_review_reason") or ""), state
             )

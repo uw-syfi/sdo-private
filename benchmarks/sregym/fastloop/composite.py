@@ -147,7 +147,7 @@ class TrackedAgent:
             state["offset"] = time.monotonic() - started
             return window
 
-        outcome = None
+        outcome: AgentOutcome | None = None
         try:
             outcome = self._inner.resolve(index, problem_id, tracked_inject)
         finally:
@@ -156,14 +156,12 @@ class TrackedAgent:
             report = _fault_report(tracker, state.get("offset", 0.0))
             report.update({"agent": self.name, "problem_id": problem_id})
             if outcome is not None:
+                returned_at = outcome.resolved_at or outcome.mitigation_applied_at
                 report["agent_returned_after_injection_s"] = (
-                    (
-                        (outcome.resolved_at or outcome.mitigation_applied_at) - outcome.injection.finished_at
-                    ).total_seconds()
-                    if (outcome.resolved_at or outcome.mitigation_applied_at)
-                    else None
+                    (returned_at - outcome.injection.finished_at).total_seconds() if returned_at else None
                 )
             write_composite_report(self._report_dir / f"composite_{index:03d}_{problem_id}.json", report)
+        assert outcome is not None  # resolve() raising skips this return
         return outcome
 
     def learn(self, outcome: AgentOutcome) -> AgentOutcome:
@@ -359,7 +357,8 @@ class CompositeSdoAgent(SdoPersistentAgent):
         receipt_dir = settings.results_dir / f"{index:03d}_{problem_id}"
         receipt_dir.mkdir(parents=True, exist_ok=True)
         state = wedge.state
-        result = state.get("incident_result") if isinstance(state.get("incident_result"), dict) else {}
+        raw_result = state.get("incident_result")
+        result: dict[str, Any] = raw_result if isinstance(raw_result, dict) else {}
         self._ops.export_controller_logs(control, receipt_dir)
         evidence = self._ops.export_runtime_artifacts(
             replace(settings.runtime_config, artifacts_dir=receipt_dir), receipt_dir
@@ -487,8 +486,10 @@ class CompositeSdoAgent(SdoPersistentAgent):
             receipts_seen += 1
             usage = _add(usage, TokenCounts.from_usage(receipt.get("usage")))
             reflection = _add(reflection, TokenCounts.from_usage(receipt.get("reflection_usage")))
-            attempts += receipt.get("reflection_attempts") if isinstance(receipt.get("reflection_attempts"), int) else 0
-            memory = receipt.get("memory_reuse") if isinstance(receipt.get("memory_reuse"), dict) else {}
+            raw_attempts = receipt.get("reflection_attempts")
+            attempts += raw_attempts if isinstance(raw_attempts, int) else 0
+            raw_memory = receipt.get("memory_reuse")
+            memory: dict[str, Any] = raw_memory if isinstance(raw_memory, dict) else {}
             warm = warm or bool(memory.get("warm_path"))
             reasons.extend(str(reason) for reason in memory.get("match_reasons", []) or [])
         if receipts_seen < len(self._incidents):

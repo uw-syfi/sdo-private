@@ -146,7 +146,9 @@ def _fill(
     seen_families: set[str] = set()
     unused_variants: dict[str, list[str]] = {f.name: list(f.variants) for f in catalog.core}
     core_names = {f.name for f in catalog.core}
-    pinned = [_pinned_kind(problem_id, family_of, core_names, seen, seen_families) for problem_id in opening]
+    pinned: list[IncidentKind] = [
+        _pinned_kind(problem_id, family_of, core_names, seen, seen_families) for problem_id in opening
+    ]
     for index, (problem_id, kind) in enumerate(zip(opening, pinned, strict=True)):
         if problem_id in unused_variants.get(family_of[problem_id], []):
             unused_variants[family_of[problem_id]].remove(problem_id)
@@ -176,6 +178,10 @@ def _fill(
             seen.append(problem_id)
         seen_families.add(family_of[problem_id])
     return incidents
+
+
+def _repeat(kind: IncidentKind, count: int) -> list[IncidentKind]:
+    return [kind] * count
 
 
 def _pinned_kind(
@@ -231,9 +237,12 @@ def generate_stream(
     opened = {family_of[p] for p in opening}
     core_order = [f for f in rng.sample(list(catalog.core), len(catalog.core)) if f.name not in opened]
     novel_order = [f for f in rng.sample(list(catalog.novel), NOVEL_COUNT) if f.name not in opened]
-    kinds: list[IncidentKind] = (
-        ["first"] * len(core_order) + ["novel"] * len(novel_order) + ["variant"] * variants + ["exact"] * exact
-    )
+    kinds: list[IncidentKind] = [
+        *_repeat("first", len(core_order)),
+        *_repeat("novel", len(novel_order)),
+        *_repeat("variant", variants),
+        *_repeat("exact", exact),
+    ]
     pinned = _fill([], rng, catalog, [], [], opening) or []
     for pinned_incident in pinned:
         if pinned_incident.kind in {"variant", "exact"}:
@@ -408,7 +417,7 @@ def write_configs(directory: Path, *, seed: int = STREAM_SEED, length: int = STR
         "codex_luna_stream_baseline_9_24.toml": render_baseline_toml(rest, label="incidents 9-24", seed=seed),
         "stream_learning_curve_manifest.json": render_manifest(stream, seed),
     }
-    written = []
+    written: list[Path] = []
     for name, text in files.items():
         path = directory / name
         path.write_text(text, encoding="utf-8")
