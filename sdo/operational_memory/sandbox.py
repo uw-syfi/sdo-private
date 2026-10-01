@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from sdo.operational_memory.models import ValidatorNetworkPolicyCanary
@@ -36,6 +36,17 @@ class SandboxRunner(Protocol):
 
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+def _healthy_baseline_argument(healthy_baseline: str | None) -> str | None:
+    """Validate the opt-in healthy-baseline directory, relative to the validated tree."""
+
+    if healthy_baseline is None:
+        return None
+    path = PurePosixPath(healthy_baseline)
+    if not healthy_baseline or path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"healthy baseline must be a relative path inside the validated tree: {healthy_baseline!r}")
+    return path.as_posix()
 
 
 _CONTAINER_CLEANUP_WATCHDOG = r"""
@@ -79,8 +90,10 @@ class ContainerSandboxRunner:
         memory_limit: str = "3g",
         detector_ids: tuple[str, ...] = (),
         authoring_check: bool = False,
+        healthy_baseline: str | None = None,
         command_runner: CommandRunner | None = None,
     ) -> None:
+        self.healthy_baseline = _healthy_baseline_argument(healthy_baseline)
         self.image = image
         self.runtime = runtime or shutil.which("docker") or shutil.which("podman") or "docker"
         self.timeout_seconds = timeout_seconds
@@ -97,7 +110,8 @@ class ContainerSandboxRunner:
         image_id = self._resolved_image()
         if image_id is None:
             return None
-        return f"container-sandbox/v1:{image_id}:controller.builder.check_cli-test/v1"
+        gate = "-healthy-baseline" if self.healthy_baseline else ""
+        return f"container-sandbox/v1:{image_id}:controller.builder.check_cli-test{gate}/v1"
 
     def _resolved_image(self) -> str | None:
         if self._resolved_image_id is not None:
@@ -171,6 +185,8 @@ class ContainerSandboxRunner:
         ]
         for detector_id in self.detector_ids:
             command.extend(["--detector-id", detector_id])
+        if self.healthy_baseline:
+            command.extend(["--healthy-baseline", self.healthy_baseline])
         try:
             if self.command_runner is None:
                 completed = self._run_managed_container(command, container_name)
@@ -290,8 +306,10 @@ class KubernetesJobSandboxRunner:
         repository_mount_path: Path = Path("/workspace"),
         timeout_seconds: int = 600,
         poll_interval_seconds: float = 1,
+        healthy_baseline: str | None = None,
         command_runner: CommandRunner = subprocess.run,
     ) -> None:
+        self.healthy_baseline = _healthy_baseline_argument(healthy_baseline)
         if not namespace or not image or not repository_pvc:
             raise ValueError("validator namespace, image, and repository PVC are required")
         if timeout_seconds <= 0 or poll_interval_seconds < 0:
@@ -593,7 +611,12 @@ class KubernetesJobSandboxRunner:
                                 "image": self.image,
                                 "imagePullPolicy": "IfNotPresent",
                                 "command": ["python", "-m", "controller.builder.check_cli"],
-                                "args": ["test", "--app", "/workspace"],
+                                "args": [
+                                    "test",
+                                    "--app",
+                                    "/workspace",
+                                    *(["--healthy-baseline", self.healthy_baseline] if self.healthy_baseline else []),
+                                ],
                                 "workingDir": "/workspace",
                                 "terminationMessagePolicy": "FallbackToLogsOnError",
                                 "env": [
@@ -742,7 +765,14 @@ raise SystemExit(4)
 class LocalSandboxRunner:
     """Explicit development-only runner; production uses ContainerSandboxRunner."""
 
-    def __init__(self, *, timeout_seconds: int = 120, command_runner: CommandRunner = subprocess.run) -> None:
+    def __init__(
+        self,
+        *,
+        timeout_seconds: int = 120,
+        healthy_baseline: str | None = None,
+        command_runner: CommandRunner = subprocess.run,
+    ) -> None:
+        self.healthy_baseline = _healthy_baseline_argument(healthy_baseline)
         self.timeout_seconds = timeout_seconds
         self.command_runner = command_runner
 
@@ -762,7 +792,15 @@ class LocalSandboxRunner:
                     environment[name] = value
             try:
                 completed = self.command_runner(
-                    [sys.executable, "-m", "controller.builder.check_cli", "test", "--app", str(app_root.resolve())],
+                    [
+                        sys.executable,
+                        "-m",
+                        "controller.builder.check_cli",
+                        "test",
+                        "--app",
+                        str(app_root.resolve()),
+                        *(["--healthy-baseline", self.healthy_baseline] if self.healthy_baseline else []),
+                    ],
                     check=False,
                     capture_output=True,
                     text=True,

@@ -1219,3 +1219,22 @@ def test_broker_cli_reflection_session_defaults_to_resume() -> None:
     assert parser.parse_args([*required, "--reflection-session", "fresh"]).reflection_session == "fresh"
     with pytest.raises(SystemExit):
         parser.parse_args([*required, "--reflection-session", "transcript"])
+
+
+def test_broker_validator_healthy_baseline_is_opt_in() -> None:
+    from sdo.agent_runtime.responder.broker_cli import _argument_parser
+
+    default = _memory_validator("local")
+    enabled = _memory_validator("local", healthy_baseline=".sdo-baseline/healthy")
+    kubernetes = _memory_validator(
+        "kubernetes", namespace="n", image="i", repository_pvc="p", healthy_baseline=".sdo-baseline/healthy"
+    )
+    parsed = _argument_parser().parse_args(
+        ["--repository", "r", "--worktree-root", "w", "--healthy-baseline-dir", ".sdo-baseline/healthy"]
+    )
+
+    assert default.sandbox_runner.healthy_baseline is None  # type: ignore[attr-defined]
+    assert enabled.sandbox_runner.healthy_baseline == ".sdo-baseline/healthy"  # type: ignore[attr-defined]
+    assert kubernetes.sandbox_runner.healthy_baseline == ".sdo-baseline/healthy"  # type: ignore[attr-defined]
+    assert _argument_parser().parse_args(["--repository", "r", "--worktree-root", "w"]).healthy_baseline_dir is None
+    assert parsed.healthy_baseline_dir == ".sdo-baseline/healthy"

@@ -30,6 +30,7 @@ from sdo.operational_memory import (
     ClosureReceipt,
     CommandProposalValidator,
     CommitBroker,
+    ContainerSandboxRunner,
     KubernetesJobSandboxRunner,
     LocalSandboxRunner,
     MemoryValidator,
@@ -65,9 +66,12 @@ def _memory_validator(
     image: str | None = None,
     repository_pvc: str | None = None,
     repository_mount_path: Path = Path("/workspace"),
+    healthy_baseline: str | None = None,
 ) -> MemoryValidator:
     if mode == "local":
-        return MemoryValidator(sandbox_runner=LocalSandboxRunner(timeout_seconds=300))
+        return MemoryValidator(
+            sandbox_runner=LocalSandboxRunner(timeout_seconds=300, healthy_baseline=healthy_baseline)
+        )
     if mode == "kubernetes":
         if not namespace or not image or not repository_pvc:
             raise ValueError("Kubernetes validator mode requires namespace, image, and repository PVC")
@@ -77,8 +81,11 @@ def _memory_validator(
                 image=image,
                 repository_pvc=repository_pvc,
                 repository_mount_path=repository_mount_path,
+                healthy_baseline=healthy_baseline,
             )
         )
+    if healthy_baseline:
+        return MemoryValidator(sandbox_runner=ContainerSandboxRunner(healthy_baseline=healthy_baseline))
     return MemoryValidator()
 
 
@@ -131,6 +138,11 @@ def _argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--validator-image")
     parser.add_argument("--validator-repository-pvc")
     parser.add_argument("--validator-repository-mount-path", type=Path, default=Path("/workspace"))
+    parser.add_argument(
+        "--healthy-baseline-dir",
+        help="opt-in: directory of recorded healthy-cluster snapshots (*.json), relative to the validated worktree; "
+        "a proposed incident detector that reports an active finding on them is rejected (default: not checked)",
+    )
     return parser
 
 
@@ -147,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             image=args.validator_image,
             repository_pvc=args.validator_repository_pvc,
             repository_mount_path=args.validator_repository_mount_path,
+            healthy_baseline=args.healthy_baseline_dir,
         ),
         proposal_validator=CommandProposalValidator(commands) if commands else None,
     )

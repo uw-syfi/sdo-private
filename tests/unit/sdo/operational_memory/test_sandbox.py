@@ -217,3 +217,67 @@ def test_container_sandbox_default_timeout_allows_cold_offline_go_build(tmp_path
 
     assert captured["timeout"] == 600
     assert result.returncode == 0
+
+
+def _capture_command(captured: list[str]) -> object:
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured.extend(command)
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    return fake_run
+
+
+def test_sandboxes_do_not_pass_a_healthy_baseline_by_default(tmp_path: Path) -> None:
+    from sdo.operational_memory.sandbox import KubernetesJobSandboxRunner, LocalSandboxRunner
+
+    container: list[str] = []
+    ContainerSandboxRunner(command_runner=_capture_command(container)).run(tmp_path)  # type: ignore[arg-type]
+    local: list[str] = []
+    LocalSandboxRunner(command_runner=_capture_command(local)).run(tmp_path)  # type: ignore[arg-type]
+    job = KubernetesJobSandboxRunner(namespace="n", image="i", repository_pvc="p")._job("run", "sub")
+
+    assert "--healthy-baseline" not in container
+    assert "--healthy-baseline" not in local
+    assert "--healthy-baseline" not in str(job)
+
+
+def test_sandboxes_pass_the_opt_in_healthy_baseline_relative_to_the_validated_tree(tmp_path: Path) -> None:
+    from sdo.operational_memory.sandbox import KubernetesJobSandboxRunner, LocalSandboxRunner
+
+    container: list[str] = []
+    container_runner = ContainerSandboxRunner(
+        command_runner=_capture_command(container),  # type: ignore[arg-type]
+        healthy_baseline=".sdo-baseline/healthy",
+    )
+    container_runner.run(tmp_path)
+    local: list[str] = []
+    LocalSandboxRunner(
+        command_runner=_capture_command(local),  # type: ignore[arg-type]
+        healthy_baseline=".sdo-baseline/healthy",
+    ).run(tmp_path)
+    job = KubernetesJobSandboxRunner(
+        namespace="n", image="i", repository_pvc="p", healthy_baseline=".sdo-baseline/healthy"
+    )._job("run", "sub")
+
+    for command in (container, local):
+        assert command[command.index("--healthy-baseline") + 1] == ".sdo-baseline/healthy"
+    args = job["spec"]["template"]["spec"]["containers"][0]["args"]  # type: ignore[index]
+    assert args[-2:] == ["--healthy-baseline", ".sdo-baseline/healthy"]
+
+
+@pytest.mark.parametrize("path", ["/abs/baseline", "../outside", "", "a/../../b"])
+def test_sandboxes_reject_a_healthy_baseline_outside_the_validated_tree(path: str) -> None:
+    with pytest.raises(ValueError, match="healthy baseline"):
+        ContainerSandboxRunner(healthy_baseline=path)
+
+
+def test_container_validation_identity_distinguishes_the_healthy_baseline_gate() -> None:
+    def runner_for(baseline: str | None) -> ContainerSandboxRunner:
+        runner = ContainerSandboxRunner(healthy_baseline=baseline)
+        runner._resolved_image_id = "sha256:abc"
+        return runner
+
+    assert (
+        runner_for(None).validation_identity() == "container-sandbox/v1:sha256:abc:controller.builder.check_cli-test/v1"
+    )
+    assert runner_for("b").validation_identity() != runner_for(None).validation_identity()
