@@ -104,9 +104,21 @@ Wall time per incident includes reflection (0.4 to 0.9 min of it) and is not use
 ## Caveats
 
 - n=2 per arm and per composite position, stochastic agents, one host with load 7 to 26 (shared with other users' kind clusters), concurrent lanes. No LLM judge; fast loop, not the SREGym conductor.
-- pf-c: its C1 failed with `ControllerInstallError` (service account `default` not found in `hotel-reservation-sdo` during cluster start-up under load), so pf-c C2 ran cold and is not part of the C1 versus C4 comparison. Its rows are appended below.
+- pf-c: its C1 failed with `ControllerInstallError` (service account `default` not found in `hotel-reservation-sdo` during cluster start-up under load), so pf-c C2 ran cold and is not part of the C1 versus C4 comparison. Its rows follow in the addendum.
 - pf-b C4: faults were resolved (probes and official oracle green) but the broker rejected the closure ("a confirmed repair without source changes requires at least one successful recorded repair action", 8 attempts), so the incident receipt is missing and tokens read 0; that closure produced no memory commit. This is a separate broker bug candidate for recorded-actions closure of a re-fixed composite.
 - Official oracle disagreed with probes in pf-a C3 (geo readiness, probe replaced by TCP) and po-b C4 (network-policy oracle); both are counted as resolved by probes and unresolved by the oracle in the tables.
 - Wall times include reflection and controller drain; only inj->mit and per-fault probe times are comparable across arms.
 - pf-c and the `up`/redeploy path had two infrastructure retries (etcd timeout on cluster creation, a `wrk2-job` deletion timeout); neither affected a recorded measurement.
 - Submodule commit for C2 exists on the local submodule branch `vic/exp/composite-learning-curve` only (the submodule remote is a local path).
+
+## Addendum: pf-c (pull + follow-up, C1 failed to install, so C2 started cold)
+
+Same columns as the main table.
+
+| seq | C | probe-resolved | official oracle | last-fault s | inj->mit s | tokens | per-fault resolution s | learned detector vs dispatch | incident detectors / playbooks after |
+|---|---|---|---|---|---|---|---|---|---|
+| pf-c | C2 | 3/3 | True | 169 | 240 | 1.92M | mongodb-geo 131, recommendation 100, profile 169 | profile none, mongodb-geo none, recommendation none | 1/2 |
+| pf-c | C3 | 5/5 | True | 103 | 131 | 1.24M | mongodb-rate 103, recommendation 70, geo 70, user 54, frontend 70 | geo none, mongodb-rate after, recommendation none, frontend none, user none | 1/2 |
+| pf-c | C4 | 3/3 | True | 63 | 78 | 1.31M | mongodb-rate 52, recommendation 63, geo 63 | geo none, mongodb-rate after, recommendation none | 2/3 |
+
+pf-c resolved 3/3, 5/5, 3/3 (oracle green in all). With memory starting only at C2, C4 (63 s last fault, 78 s inj->mit) was again faster than its first 3-fault composite (C2: 169 s, 240 s), a third pf sequence consistent with the pf-a/pf-b direction, but C2 and C4 are different composites, so this is not a clean repeat comparison. Including pf-c, pull + follow-up has resolved 11/11 composites by probes (5/5 on the 5-fault composite in all three sequences) and the aggregate conclusions above are unchanged; learned detectors again fired after dispatch or not at all. The clusters `cl-w70` to `cl-w75` were deleted after the runs.
