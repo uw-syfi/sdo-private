@@ -93,7 +93,7 @@ def main() -> int:
         if touched:
             rec["verdict"] = verdict(clone)
         attempts.append(rec)
-        (out / "diff-%d.patch" % attempt).write_text(_git(clone, "diff", "HEAD") + _git(clone, "ls-files", "--others", "--exclude-standard"))
+        (out / f"diff-{attempt}.patch").write_text(_git(clone, "diff", "HEAD") + _git(clone, "ls-files", "--others", "--exclude-standard"))
         v = rec.get("verdict")
         if not v or not v["gate_rejected"] or attempt == a.max_retries:
             break

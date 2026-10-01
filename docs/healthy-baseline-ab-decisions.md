@@ -34,3 +34,4 @@ Analysis: `benchmarks/sregym/experiments/healthy-baseline-ab/analyze_ab.py <seq>
 - aboff-c: C3 5/5 but oracle False (finished 799 s, 3.55M tokens), C3' 5/5 True, C1 3/3 True. Learned `required_configmap_missing`, `network_policy_direction_isolation`, `readiness_probe_port_mismatch`; no selector detector; no rejection; replay 0 violations.
 - Scheduling change: pairs run as a 2-slot queue (`run_queue.sh`) so a failed infra rerun does not push a third concurrent sequence. Per the orchestrator the live A/B is capped at pairs a to d (pair d = aboff-d and abon-d; no pair e unless c/d are all infra).
 - Added a cheap targeted replay (`gate_replay.py`, see below) because a harmful selector detector appeared in 1 of 4 finished live sequences.
+- abon-c3 (rerun, valid): C3 5/5 True, C3' 5/5 True, C1 3/3 True. Learned `required_configmap_missing`, `deny_all_network_policy`; no selector detector; no rejection; replay 0 violations. Counts as the on-arm member of pair c.
