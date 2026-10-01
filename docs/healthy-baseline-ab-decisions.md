@@ -27,3 +27,10 @@ Analysis: `benchmarks/sregym/experiments/healthy-baseline-ab/analyze_ab.py <seq>
 
 - abon-b: C3 5/5; C3' 3/5 oracle False (`controller stopped for detector review: health detectors did not clear within 2m` with `user` deployment-missing and `frontend` selector health findings still active; 0.26M tokens, 0 reflection attempts; no gate rejection involved, classified as a responder/closure failure, not infra); C1 3/3. Learned: `bidirectional_network_isolation`, `missing_configmap`; no selector detector; no rejection; replay 0 violations.
 - aboff-b: all runs solved (5/5, 5/5, 3/3). Learned four detectors including a selector one, `service_deployment_selector_mismatch`; it never fired live on a healthy service and the final set replays clean offline (0 violations), so this selector detector was benign.
+
+### Pair c (aboff-c, abon-c; 15:17 onward; infra trouble on the on arm)
+
+- Infra, excluded and rerun: abon-c (`up` failed after 600 s, hotel-reservation pods not Ready, `kube-controller-manager` crashlooping on cl-w134); abon-c2 (`up` failed, etcd i/o timeouts `127.0.0.1:2379`, mongodb pods Pending on cl-w140, host load 8 to 11); abon-c3 (cl-w141) is the third attempt and is running. Two kind-create failures in a row on the on arm only look like host disk/etcd pressure (the off sequences created clusters fine, but also took 15 min to `up`), not a gate effect: the failure is before any gate code runs (cluster deploy).
+- aboff-c: C3 5/5 but oracle False (finished 799 s, 3.55M tokens), C3' 5/5 True, C1 3/3 True. Learned `required_configmap_missing`, `network_policy_direction_isolation`, `readiness_probe_port_mismatch`; no selector detector; no rejection; replay 0 violations.
+- Scheduling change: pairs run as a 2-slot queue (`run_queue.sh`) so a failed infra rerun does not push a third concurrent sequence. Per the orchestrator the live A/B is capped at pairs a to d (pair d = aboff-d and abon-d; no pair e unless c/d are all infra).
+- Added a cheap targeted replay (`gate_replay.py`, see below) because a harmful selector detector appeared in 1 of 4 finished live sequences.
