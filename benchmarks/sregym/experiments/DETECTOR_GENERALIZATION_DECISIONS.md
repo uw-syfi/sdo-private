@@ -89,7 +89,7 @@ Incident-detector / playbook counts after each incident (`detgen_growth.py`, hea
 | Ablation (baseline, fresh) | 1 | 2 | 3 | 4 | 5 | 6 | 6 | 7 | 8 |
 | Control (baseline, resume) | 1 | 1 | 2 | 2 | 2 | 3 | 3 | 3 | 4 |
 
-Ablation final memory: six per-workload readiness detectors (frontend, geo, reservation, recommendation, search, profile) plus `missing_workload_configmap` and `mongodb_rate_missing_init_configmap`; each readiness incident but B3 produced a new workload-named detector (fresh reflection, no gap in A2 to A6 except B3's no-op reflection and a reuse at A4 B2).
+Ablation final memory: six per-workload readiness detectors (frontend, geo, reservation, recommendation, search, profile) plus `missing_workload_configmap` and `mongodb_rate_missing_init_configmap`; every incident except B3 (no-op reflection) added a new detector and playbook named for its own workload; B2 got its own `mongodb_rate_missing_init_configmap` rather than reusing `missing_workload_configmap`.
 
 Per incident (ablation): TTD s / judge-free TTM s / responder in tok / reflection in tok:
 
