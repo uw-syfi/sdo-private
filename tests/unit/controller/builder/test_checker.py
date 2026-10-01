@@ -515,6 +515,10 @@ done
             str(tmp_path / "workspace" / "worktrees"),
             "--verification-timeout",
             "90s",
+            "--max-follow-ups",
+            "3",
+            "--follow-up-cooldown",
+            "45s",
             "--repair-policy",
             "recorded-actions",
         ]
@@ -533,6 +537,8 @@ done
     assert f"--app-root {app_root}" in argv
     assert f"--broker-worktree-root {tmp_path / 'workspace' / 'worktrees'}" in argv
     assert "--verification-timeout 90s" in argv
+    assert "--max-follow-ups 3" in argv
+    assert "--follow-up-cooldown 45s" in argv
     assert "--repair-policy recorded-actions" in argv
 
 

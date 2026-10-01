@@ -140,6 +140,13 @@ def _build_parser() -> argparse.ArgumentParser:
     controller.add_argument("--broker-arg", action="append", default=[])
     controller.add_argument("--response-timeout", default="30m")
     controller.add_argument("--verification-timeout", default="2m")
+    controller.add_argument(
+        "--max-follow-ups",
+        type=int,
+        default=0,
+        help="follow-up responders for health findings that stay active after a response; zero disables",
+    )
+    controller.add_argument("--follow-up-cooldown", default="30s")
     controller.add_argument("--repair-policy", choices=("commit", "recorded-actions"), default="commit")
     controller.add_argument("--duration", default="")
     controller.add_argument("--lease-name", default="sdo-controller")
@@ -450,6 +457,10 @@ def _controller_once(args: argparse.Namespace) -> int:
                 args.response_timeout,
                 "--verification-timeout",
                 args.verification_timeout,
+                "--max-follow-ups",
+                str(args.max_follow_ups),
+                "--follow-up-cooldown",
+                args.follow_up_cooldown,
                 "--repair-policy",
                 args.repair_policy,
                 "--lease-name",
