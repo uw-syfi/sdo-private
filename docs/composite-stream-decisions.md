@@ -83,3 +83,27 @@ Headline for these two sequences: 20 of 20 composites resolved by probes and by 
 
 Incident detectors / playbooks after the composite: cstream-a 2/3, 2/3, 3/4, 3/4, 3/4, 3/4, 3/4, 3/4, 3/4, 4/5; cstream-b 1/2, 3/4, 3/4 and flat at 3/4 through position 10. Memory saturates at 3 detectors (ConfigMap, network policy, and a readiness or selector one) after the first three composites and stays flat for seven more composites in b and six in a, with one late addition in a (position 10). Learned detectors for the ConfigMap and network-policy faults fire before dispatch from position 2 on in both sequences; after C3, learned selector (a) or readiness-port (b) detectors also appear in the "before dispatch" set.
 
+
+## Resolution versus Codex + verify
+
+| composite | SDO all-on (so far) | Codex + verify (stored, not rerun) | Codex + verify (new, this experiment) |
+|---|---|---|---|
+| C1 (3 faults) | 6/6 probes, 6/6 oracle (3 positions x 2 sequences) | 0/4 | - |
+| C2 (3 faults) | 4/4, 4/4 | 0/2 | - |
+| C3 (5 faults) | 4/4, 4/4 | 0/4 | - |
+| C4 (3 faults, new) | 4/4, 4/4 | - | running (n=2) |
+| C5 (4 faults, new) | 2/2, 2/2 | - | running (n=2) |
+
+Stored Codex never repaired the network-policy fault (20 of 20 earlier Codex runs). Codex token cost was 0.3 to 0.9M per run versus SDO's 0.3 to 2.5M (SDO's later positions are in the same range as Codex).
+
+## Takeaways (preliminary, after n=2 sequences)
+
+1. All fixes on resolve a long persistent stream: 20 of 20 composites (0 follow-ups needed, 0 gate rejections, 0 false-firing learned detectors). Meaning: with pull-before-act and simultaneous injection the first responder already gets every finding, and the healthy-baseline gate did not get in the way. Confidence: medium (n=2 sequences, 20 composites, one model, fast loop with probe grading). Implication: resolution rate is not the differentiator inside SDO any more; it is the Codex gap (0 of 10 on the shared composites). Next step: n>=3 and the Codex runs on C4/C5.
+2. A cost learning curve exists in tokens, not clearly in time. Meaning: the first three composites cost about 1.4M tokens each and later positions 0.4 to 0.7M (about 3x), matching the cold-versus-warm C2 result; inj->mit drops from about 200 s (pos 1 to 3) to about 100 s afterwards but is noisy (pos 7 C3 178 s, pos 10 112 s). Confidence: medium for tokens, low for time (n=2, per-position ranges overlap). Implication: report the token curve with the saturation point (about position 3 to 4), and treat speed as unproven. Next step: wait for n=3 to 5 medians.
+3. Memory growth is compact. Meaning: 3 detectors / 4 playbooks by position 3 and flat through position 10 in both sequences (one late increment to 4/5 in a). Confidence: medium. Implication: no sign of detector sprawl or accumulating false-firers over ten composites. Next step: a longer stream (20+) with new families to see whether saturation breaks.
+
+## Caveats
+
+- n=2 sequences at this point; concurrent sequences on one shared host (load 6 to 17); no LLM judge; probe-graded with the official oracle on the end state; images nf5.
+- Position medians mix different composites by design (the stream is fixed), so per-position comparisons are confounded by composite size (C3 has 5 faults, C5 4); the first-versus-repeat table controls for that but with n=2.
+- Source fixes by earlier responders persist through `up --redeploy`; only the frontend label is reset live. No inert injection was recorded in a or b.
