@@ -1540,3 +1540,15 @@ def test_sregym_agent_config_selects_the_late_findings_mode(monkeypatch: pytest.
     assert driver._parse_args([]).late_findings == "pull"
     with pytest.raises(SystemExit):
         driver._parse_args(["--late-findings", "push"])
+
+
+def test_sregym_agent_config_selects_bounded_follow_ups(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
+    assert driver._parse_args([]).max_follow_ups == 0
+    monkeypatch.setenv(
+        "SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"max_follow_ups": 3, "follow_up_cooldown_seconds": 20})
+    )
+    args = driver._parse_args([])
+    assert (args.max_follow_ups, args.follow_up_cooldown_seconds) == (3, 20)

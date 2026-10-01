@@ -221,6 +221,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="let the responder pull findings that activated after dispatch (off by default)",
     )
     parser.add_argument(
+        "--max-follow-ups",
+        type=int,
+        default=int(config.get("max_follow_ups", 0)),
+        help="follow-up responders for health findings left active after a response (0 = off)",
+    )
+    parser.add_argument(
+        "--follow-up-cooldown-seconds",
+        type=int,
+        default=int(config.get("follow_up_cooldown_seconds", 30)),
+        help="wait after a response before its still-active health findings get a follow-up responder",
+    )
+    parser.add_argument(
         "--persistent-controller",
         action=argparse.BooleanOptionalAction,
         default=bool(config.get("persistent_controller", False)),
@@ -557,6 +569,8 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
         reflection_session=args.reflection_session,
         reflection_guidance=args.reflection_guidance,
         late_findings=args.late_findings,
+        max_follow_ups=args.max_follow_ups,
+        follow_up_cooldown_seconds=args.follow_up_cooldown_seconds,
         submission_api_base=_in_cluster_api_base(api_base),
         submission_relay_target_base=_relay_target_api_base(api_base),
         artifacts_dir=receipt_dir,
@@ -650,6 +664,8 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             reflection_session=args.reflection_session,
             reflection_guidance=args.reflection_guidance,
             late_findings=args.late_findings,
+            max_follow_ups=args.max_follow_ups,
+            follow_up_cooldown_seconds=args.follow_up_cooldown_seconds,
             submission_api_base=_in_cluster_api_base(api_base),
             submission_relay_target_base=_relay_target_api_base(api_base),
             artifacts_dir=_receipt_directory(args.logs_dir, repository),

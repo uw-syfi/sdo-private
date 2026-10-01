@@ -114,6 +114,16 @@ class PriorOutcomeEvidence(ContractModel):
     exact_source_match: bool
 
 
+class FollowUpContext(ContractModel):
+    """Links a follow-up request, whose findings are residual, to the incident it continues."""
+
+    original_incident_id: str = Field(min_length=1)
+    parent_incident_id: str = Field(min_length=1)
+    attempt: int = Field(ge=1)
+    max_follow_ups: int = Field(ge=1)
+    prior_responder_summary: str = ""
+
+
 class IncidentRequest(ContractModel):
     schema_version: Literal["sdo.dev/v1alpha1"] = SCHEMA_VERSION
     application: str = Field(min_length=1)
@@ -132,6 +142,7 @@ class IncidentRequest(ContractModel):
     response_deadline: datetime
     cancellation_token: str = Field(min_length=1)
     repair_policy: Literal["commit", "recorded-actions"] = "commit"
+    follow_up: FollowUpContext | None = None
 
 
 class ConfirmedRootCause(ContractModel):

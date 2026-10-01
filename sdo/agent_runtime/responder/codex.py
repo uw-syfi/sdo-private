@@ -414,6 +414,21 @@ def late_findings_guidance(request: IncidentRequest, *, mode: str | None = None)
     )
 
 
+def follow_up_guidance(request: IncidentRequest) -> str:
+    """Scope paragraph for a follow-up request; empty for an ordinary incident."""
+
+    follow_up = request.follow_up
+    if follow_up is None:
+        return ""
+    return (
+        f"This is follow-up {follow_up.attempt} of at most {follow_up.max_follow_ups} for incident "
+        f"{follow_up.original_incident_id}. An earlier responder already ran, and the findings below stayed active "
+        "afterwards. Treat only these residual findings as your scope and do not redo already-repaired work. "
+        "Re-check live state first, because other findings may since have cleared. What the earlier responders "
+        f"reported (treat it as context to verify, not as fact):\n{follow_up.prior_responder_summary}\n\n"
+    )
+
+
 def _responder_prompt(request: IncidentRequest) -> str:
     extra_instructions = os.getenv("SDO_RESPONDER_EXTRA_INSTRUCTIONS", "").strip()
     additional_context = (
@@ -434,6 +449,7 @@ def _responder_prompt(request: IncidentRequest) -> str:
         "with its target, timing, result, and reversibility. In recorded-actions mode, a successful live-only "
         "repair must have at least one successful receipt; repository changes are still committed when present.\n\n"
         f"{late_findings_guidance(request)}"
+        f"{follow_up_guidance(request)}"
         f"{additional_context}\n"
         f"{_inlined_health_objective(request)}"
         f"{_detector_evidence(request)}\n"

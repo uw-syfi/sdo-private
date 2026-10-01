@@ -390,3 +390,29 @@ def test_pull_mode_reaches_the_broker_and_the_responder_environment() -> None:
 def test_unknown_late_findings_mode_is_rejected() -> None:
     with pytest.raises(ValueError, match="late_findings"):
         ControllerInstallConfig(**{**_config().__dict__, "late_findings": "push"})
+
+
+def _controller_job_args(config: ControllerInstallConfig) -> list[str]:
+    return _controller_args(config)
+
+
+def test_follow_ups_are_off_by_default_and_leave_the_controller_args_unchanged() -> None:
+    default = _config()
+
+    assert default.max_follow_ups == 0
+    assert "--max-follow-ups" not in _controller_job_args(default)
+    assert "--follow-up-cooldown" not in _controller_job_args(default)
+
+
+def test_follow_ups_reach_the_controller_arguments() -> None:
+    config = ControllerInstallConfig(**{**_config().__dict__, "max_follow_ups": 3, "follow_up_cooldown_seconds": 45})
+    args = _controller_job_args(config)
+
+    assert args[args.index("--max-follow-ups") + 1] == "3"
+    assert args[args.index("--follow-up-cooldown") + 1] == "45s"
+
+
+@pytest.mark.parametrize("update", [{"max_follow_ups": -1}, {"follow_up_cooldown_seconds": -1}])
+def test_invalid_follow_up_settings_are_rejected(update: dict[str, int]) -> None:
+    with pytest.raises(ValueError, match="follow_up"):
+        ControllerInstallConfig(**{**_config().__dict__, **update})

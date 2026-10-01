@@ -79,6 +79,9 @@ class ControllerInstallConfig:
     reflection_guidance: str = "baseline"
     # Late findings: "off", or "pull" so the responder can pull findings that activated after dispatch (opt-in).
     late_findings: str = "off"
+    # Bounded follow-up responders for health findings that stay active after a response (opt-in; 0 = off).
+    max_follow_ups: int = 0
+    follow_up_cooldown_seconds: int = 30
     # Namespace for the controller, its repository PVC, state, credentials,
     # and responder/validator Jobs. ``None`` co-locates them with the
     # application; a separate namespace survives application redeploys.
@@ -100,6 +103,10 @@ class ControllerInstallConfig:
             raise ValueError(f"reflection_guidance must be one of {', '.join(REFLECTION_GUIDANCE_MODES)}")
         if self.late_findings not in LATE_FINDINGS_MODES:
             raise ValueError(f"late_findings must be one of {', '.join(LATE_FINDINGS_MODES)}")
+        if self.max_follow_ups < 0:
+            raise ValueError("max_follow_ups must not be negative")
+        if self.follow_up_cooldown_seconds < 0:
+            raise ValueError("follow_up_cooldown_seconds must not be negative")
 
     @property
     def control_namespace(self) -> str:
@@ -229,6 +236,15 @@ def controller_resources(
                 f"--broker-arg={config.late_findings}",
                 "--broker-arg=--late-findings-log",
                 f"--broker-arg={RUNTIME_TELEMETRY_ROOT}/late-findings-pulls.jsonl",
+            ]
+        )
+    if config.max_follow_ups > 0:
+        controller_args.extend(
+            [
+                "--max-follow-ups",
+                str(config.max_follow_ups),
+                "--follow-up-cooldown",
+                f"{config.follow_up_cooldown_seconds}s",
             ]
         )
     controller_args.extend(extra_controller_args or [])
