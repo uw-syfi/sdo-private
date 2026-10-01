@@ -93,6 +93,7 @@ def analyse(name: str) -> list[dict]:
         idx = int(r.name.rsplit("-C", 1)[1])
         out.append(dict(
             seq=name, pos=idx, C=SHORT.get(row["problem"], row["problem"]), resolved=row["resolved"], oracle=row["oracle_success"],
+            resp_tokens=(inc.get('responder_tokens') or {}).get('total_tokens') or 0, refl_tokens=(inc.get('reflection_tokens') or {}).get('total_tokens') or 0,
             all_s=row["all_resolved_s"], inj_mit=inc.get("injection_to_mitigation_seconds"), tokens=row["tokens"],
             followups=max(0, len(comp.get("incidents", [])) - 1), stop=row["stop_reason"], inert=row["inert_faults"],
             learned_before=sorted(learned_before), learned_fired=sorted(learned_any), offtarget=sorted(offtarget),
@@ -114,20 +115,20 @@ def med(vals):
 def main(names: list[str]) -> None:
     allruns = [r for n in names if (R / n).exists() for r in analyse(n)]
     json.dump(allruns, open(R / "cstream-agg.json", "w"), indent=1)
-    print("| seq | pos | C | solved | oracle | last-fault s | inj->mit s | tokens | follow-ups | learned detectors before dispatch (fault components) | learned fired off-target | gate rejections | memory inc.det/playbooks after | inert | stop/err |")
+    print("| seq | pos | C | solved | oracle | last-fault s | inj->mit s | tokens (resp+refl) | follow-ups | learned detectors before dispatch (fault components) | learned fired off-target | gate rejections | memory inc.det/playbooks after | inert | stop/err |")
     print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for a in allruns:
         mem = f"{a['mem']['incident_detectors']}/{a['mem']['playbooks']}" if a["mem"] else "-"
-        print(f"| {a['seq']} | {a['pos']} | {a['C']} | {a['resolved']} | {a['oracle']} | {fmt(a['all_s'])} | {fmt(a['inj_mit'])} | {a['tokens']/1e6:.2f}M | {a['followups']} | {', '.join(a['learned_before']) or 'none'} | {', '.join(a['offtarget']) or 'none'} | {a['gate_rejections']} (+{a['other_rejections']} other) | {mem} | {', '.join(a['inert']) or '-'} | {a['stop'] or ''} {a['error'] or ''} |")
+        print(f"| {a['seq']} | {a['pos']} | {a['C']} | {a['resolved']} | {a['oracle']} | {fmt(a['all_s'])} | {fmt(a['inj_mit'])} | {a['tokens']/1e6:.2f}M ({a['resp_tokens']/1e6:.2f}+{a['refl_tokens']/1e6:.2f}) | {a['followups']} | {', '.join(a['learned_before']) or 'none'} | {', '.join(a['offtarget']) or 'none'} | {a['gate_rejections']} (+{a['other_rejections']} other) | {mem} | {', '.join(a['inert']) or '-'} | {a['stop'] or ''} {a['error'] or ''} |")
     print()
-    print("| pos | composite | n | all solved (probes) | oracle True | median tokens | median inj->mit s | median last-fault s | median follow-ups | median memory det/pb after |")
-    print("|---|---|---|---|---|---|---|---|---|---|")
+    print("| pos | composite | n | all solved (probes) | oracle True | median tokens | median responder tokens | median reflection tokens | median inj->mit s | median last-fault s | median follow-ups | median memory det/pb after |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|")
     for pos in sorted({a["pos"] for a in allruns}):
         g = [a for a in allruns if a["pos"] == pos]
         solved = sum(1 for a in g if a["resolved"].split("/")[0] == a["resolved"].split("/")[1])
         orc = sum(1 for a in g if a["oracle"] is True)
         md = med([a["mem"]["incident_detectors"] for a in g if a["mem"]]); mp = med([a["mem"]["playbooks"] for a in g if a["mem"]])
-        print(f"| {pos} | {'/'.join(sorted({a['C'] for a in g}))} | {len(g)} | {solved}/{len(g)} | {orc}/{len(g)} | {fmt(med([a['tokens'] for a in g]), 1e6, 2)}M | {fmt(med([a['inj_mit'] for a in g]))} | {fmt(med([a['all_s'] for a in g]))} | {fmt(med([a['followups'] for a in g]), 1, 1)} | {fmt(md, 1, 1)}/{fmt(mp, 1, 1)} |")
+        print(f"| {pos} | {'/'.join(sorted({a['C'] for a in g}))} | {len(g)} | {solved}/{len(g)} | {orc}/{len(g)} | {fmt(med([a['tokens'] for a in g]), 1e6, 2)}M | {fmt(med([a['resp_tokens'] for a in g]), 1e6, 2)}M | {fmt(med([a['refl_tokens'] for a in g]), 1e6, 2)}M | {fmt(med([a['inj_mit'] for a in g]))} | {fmt(med([a['all_s'] for a in g]))} | {fmt(med([a['followups'] for a in g]), 1, 1)} | {fmt(md, 1, 1)}/{fmt(mp, 1, 1)} |")
     print()
     print("| seq | cumulative tokens (M) after pos 1..N | cumulative inj->mit min |")
     print("|---|---|---|")
