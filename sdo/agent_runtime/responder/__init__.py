@@ -16,6 +16,7 @@ from sdo.agent_runtime.responder.reflection import (
     CodexSessionBackend,
     ReflectionTurn,
     SessionReflector,
+    reflection_output_schema,
 )
 from sdo.agent_runtime.responder.reflection_outcomes import current_outcome_view, history_view
 
@@ -35,5 +36,6 @@ __all__ = [
     "live_incident_status",
     "prepare_claude_home",
     "prepare_codex_home",
+    "reflection_output_schema",
     "run_incident_status_cli",
 ]
