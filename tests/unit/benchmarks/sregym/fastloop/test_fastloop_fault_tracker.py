@@ -170,3 +170,20 @@ def test_unknown_fault_kind_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="no probe"):
         probes_for((FaultSpec("mystery", "x"),), _reader({}))
+
+
+def test_restart_makes_now_time_zero_and_drops_earlier_samples() -> None:
+    clock = _Clock()
+    tracker = _tracker({"a": [False, True, True, True]}, clock, stable=10.0)
+    _run(tracker, clock, 1)
+    tracker.restart()
+    clock.now += 5.0
+    _run(tracker, clock, 3)
+    assert tracker.resolution_times() == {"a": 5.0}
+
+
+def test_ever_red_flags_a_fault_whose_injection_had_no_effect() -> None:
+    clock = _Clock()
+    tracker = _tracker({"a": [True, True, True], "b": [True, False, True]}, clock, stable=1.0)
+    _run(tracker, clock, 3)
+    assert tracker.ever_red() == {"a": False, "b": True}

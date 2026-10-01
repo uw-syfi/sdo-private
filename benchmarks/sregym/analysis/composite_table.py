@@ -22,12 +22,30 @@ def _load_incidents(directory: Path) -> dict[int, dict[str, Any]]:
     return {int(record["index"]): record for record in records}
 
 
+def _normalize(report: dict[str, Any]) -> dict[str, Any]:
+    """Reports written before the tracker restarted at injection end measured from agent start."""
+
+    if report.get("origin") == "injection_end":
+        return report
+    offset = float(report.get("poll_origin_offset_s") or 0.0)
+
+    def shift(value: Any) -> Any:
+        return None if value is None else max(0.0, float(value) - offset)
+
+    report = dict(report)
+    report["resolved_s"] = {name: shift(value) for name, value in report["resolved_s"].items()}
+    report["first_green_s"] = {name: shift(value) for name, value in report.get("first_green_s", {}).items()}
+    report["all_resolved_s"] = shift(report.get("all_resolved_s"))
+    report["origin"] = "injection_end"
+    return report
+
+
 def rows(directories: list[Path]) -> list[dict[str, Any]]:
     table: list[dict[str, Any]] = []
     for directory in directories:
         incidents = _load_incidents(directory)
         for report_path in sorted(directory.glob("composite_*.json")):
-            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report = _normalize(json.loads(report_path.read_text(encoding="utf-8")))
             index = int(report_path.name.split("_")[1])
             record = incidents.get(index, {})
             usage = record.get("responder_tokens") or {}
@@ -42,6 +60,7 @@ def rows(directories: list[Path]) -> list[dict[str, Any]]:
                     "resolved": f"{report['faults_resolved']}/{report['faults_total']}",
                     "all_resolved_s": report.get("all_resolved_s"),
                     "per_fault_s": report.get("resolved_s"),
+                    "inert_faults": [name for name, red in (report.get("ever_red") or {}).items() if not red],
                     "oracle_accuracy": oracle.get("accuracy"),
                     "oracle_success": (record.get("oracle") or {}).get("success"),
                     "stop_reason": report.get("stop_reason"),
@@ -87,6 +106,7 @@ def format_table(table: list[dict[str, Any]]) -> str:
                 str(row["incidents"] or "-"),
                 str(row["tokens"]),
                 per_fault,
+                ",".join(name.split(":")[0] for name in row["inert_faults"]) or "-",
             ]
         )
     widths = [max(len(line[column]) for line in lines) for column in range(len(header))]

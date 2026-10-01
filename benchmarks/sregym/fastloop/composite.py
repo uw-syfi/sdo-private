@@ -94,11 +94,14 @@ def _fault_report(tracker: FaultTracker, injected_offset: float) -> dict[str, An
         "faults": list(resolution),
         "resolved_s": resolution,
         "first_green_s": first,
+        "ever_red": tracker.ever_red(),
         "final_green": last,
         "faults_resolved": sum(1 for value in resolution.values() if value is not None),
         "faults_total": len(resolution),
         "all_resolved_s": tracker.all_resolved_at(),
         "poll_origin_offset_s": injected_offset,
+        # Seconds are measured from the end of injection (older reports measured from agent start).
+        "origin": "injection_end",
         "timeline": tracker.timeline(),
     }
 

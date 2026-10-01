@@ -48,3 +48,25 @@ def test_table_joins_the_composite_report_with_the_incident_record(tmp_path: Pat
     text = format_table(table)
     assert "readiness:40" in text
     assert "network_policy:-" in text
+
+
+def test_reports_from_before_the_injection_end_origin_are_shifted(tmp_path: Path) -> None:
+    (tmp_path / "composite_000_c.json").write_text(
+        json.dumps(
+            {
+                "agent": "sdo",
+                "problem_id": "c",
+                "faults_resolved": 1,
+                "faults_total": 1,
+                "all_resolved_s": 400.0,
+                "poll_origin_offset_s": 350.0,
+                "resolved_s": {"readiness:geo": 400.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    table = rows([tmp_path])
+
+    assert table[0]["per_fault_s"] == {"readiness:geo": 50.0}
+    assert table[0]["all_resolved_s"] == 50.0

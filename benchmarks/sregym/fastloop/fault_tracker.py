@@ -139,6 +139,13 @@ class FaultTracker:
         self._lock = threading.Lock()
         self.samples: list[Sample] = []
 
+    def restart(self) -> None:
+        """Make now time zero (the end of injection) and drop earlier samples."""
+
+        with self._lock:
+            self._origin = self._clock()
+            self.samples = []
+
     def poll(self) -> Sample:
         states: dict[str, bool] = {}
         errors: dict[str, str] = {}
@@ -156,6 +163,13 @@ class FaultTracker:
     def all_green_now(self) -> bool:
         with self._lock:
             return bool(self.samples) and all(self.samples[-1].states.values())
+
+    def ever_red(self) -> dict[str, bool]:
+        """False for a fault whose probe was never red: the injection had no effect on the live app."""
+
+        with self._lock:
+            samples = list(self.samples)
+        return {name: any(not sample.states[name] for sample in samples) for name in self._probes}
 
     def first_green(self) -> dict[str, float | None]:
         with self._lock:
@@ -232,6 +246,7 @@ class BackgroundPoller:
             self._stop.wait(self._interval)
 
     def __enter__(self) -> BackgroundPoller:
+        self._tracker.restart()
         self._thread.start()
         return self
 
