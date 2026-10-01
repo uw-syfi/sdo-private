@@ -52,6 +52,7 @@ func LoadSnapshots(dir string) ([]Snapshot, error) {
 func HealthyBaselineViolations(detector sdk.Detector, snapshots []Snapshot) []string {
 	spec := detector.Spec()
 	violations := make([]string, 0)
+	seen := map[string]bool{}
 	for _, snapshot := range snapshots {
 		findings, err := detector.Detect(context.Background(), snapshot)
 		if err != nil {
@@ -61,12 +62,16 @@ func HealthyBaselineViolations(detector sdk.Detector, snapshots []Snapshot) []st
 			if finding.Status != sdk.FindingActive {
 				continue
 			}
-			violations = append(violations, fmt.Sprintf(
+			message := fmt.Sprintf(
 				"detector %q reported an active finding on healthy baseline snapshot %s (namespace %q): rule %q on %s %s/%s: %s; %s",
 				spec.ID, snapshot.SourceName, snapshot.Namespace(), finding.RuleID, finding.PrimaryResource.Kind,
 				finding.PrimaryResource.Namespace, finding.PrimaryResource.Name,
 				strings.TrimSpace(finding.Summary), healthyBaselineRemedy,
-			))
+			)
+			if !seen[message] {
+				seen[message] = true
+				violations = append(violations, message)
+			}
 		}
 	}
 	return violations

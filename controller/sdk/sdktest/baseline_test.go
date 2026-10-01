@@ -113,3 +113,32 @@ func (resolvedDetector) Spec() sdk.DetectorSpec {
 func (resolvedDetector) Detect(context.Context, sdk.DetectionContext) ([]sdk.Finding, error) {
 	return []sdk.Finding{{RuleID: "r", Status: sdk.FindingResolved}}, nil
 }
+
+type repeatingDetector struct{}
+
+func (repeatingDetector) Spec() sdk.DetectorSpec {
+	return sdk.DetectorSpec{ID: "repeating", Class: sdk.DetectorClassIncident}
+}
+
+func (repeatingDetector) Detect(context.Context, sdk.DetectionContext) ([]sdk.Finding, error) {
+	finding := sdk.Finding{
+		RuleID: "r", Status: sdk.FindingActive, Summary: "same",
+		PrimaryResource: sdk.ObjectRef{Kind: "Service", Namespace: "shop", Name: "cart"},
+	}
+	return []sdk.Finding{finding, finding, finding}, nil
+}
+
+func TestHealthyBaselineViolationsReportsTheSameFindingOncePerSnapshot(t *testing.T) {
+	snapshots, err := LoadSnapshots(writeBaseline(t, map[string]string{
+		"a.json": healthyServiceSnapshot,
+		"b.json": healthyServiceSnapshot,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A detector that emits one finding per matching Deployment would otherwise repeat the
+	// message dozens of times and bury the remedy the reflector needs to read.
+	if got := HealthyBaselineViolations(repeatingDetector{}, snapshots); len(got) != 2 {
+		t.Fatalf("violations = %d, want one per snapshot: %v", len(got), got)
+	}
+}
