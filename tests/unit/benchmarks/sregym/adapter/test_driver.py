@@ -1358,6 +1358,39 @@ def test_sregym_agent_config_selects_the_reflection_guidance(monkeypatch: pytest
         driver._parse_args(["--reflection-guidance", "sibling"])
 
 
+def test_sregym_agent_config_enables_the_healthy_baseline_gate_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    monkeypatch.delenv("SREGYM_EXPERIMENT_AGENT_CONFIG", raising=False)
+    assert driver._parse_args([]).healthy_baseline is False
+    assert driver._parse_args(["--healthy-baseline"]).healthy_baseline is True
+    monkeypatch.setenv("SREGYM_EXPERIMENT_AGENT_CONFIG", json.dumps({"healthy_baseline": True}))
+    assert driver._parse_args([]).healthy_baseline is True
+    assert driver._parse_args(["--no-healthy-baseline"]).healthy_baseline is False
+
+
+def test_fault_gate_records_the_healthy_baseline_before_requesting_injection(monkeypatch: pytest.MonkeyPatch) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    events: list[str] = []
+
+    def fake_gate(namespace: str, *, inject, **_: object) -> dict[str, float]:  # type: ignore[no-untyped-def]
+        inject()
+        return {"controller_baseline_wait": 0.0}
+
+    monkeypatch.setattr(driver, "inject_fault_after_controller_baseline", fake_gate)
+    monkeypatch.setattr(driver, "request_fault_injection", lambda api_base: events.append("inject"))
+
+    gate = driver._FaultGate("ns", "http://api", before_inject=lambda: events.append("record"))
+    gate._run()
+
+    assert events == ["record", "inject"]
+    plain = driver._FaultGate("ns", "http://api")
+    events.clear()
+    plain._run()
+    assert events == ["inject"]
+
+
 def test_receipt_reports_a_deterministically_skipped_reflection() -> None:
     import benchmarks.sregym.adapter.runtime as runtime
 

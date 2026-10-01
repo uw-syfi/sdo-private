@@ -35,6 +35,7 @@ from benchmarks.sregym.fastloop.records import AgentSummary, IncidentRecord, loa
 from benchmarks.sregym.fastloop.worker_client import SregymWorker, worker_argv
 
 if TYPE_CHECKING:
+    from benchmarks.sregym.adapter import ClusterOps
     from benchmarks.sregym.fastloop.composite import CompositeSettings
     from benchmarks.sregym.fastloop.loop import IncidentAgent
 
@@ -162,12 +163,26 @@ def _is_composite(problems: tuple[str, ...]) -> bool:
     return flags == {True}
 
 
+def _cluster_ops(args: argparse.Namespace, namespace: str) -> ClusterOps:
+    """Cluster operations for the SDO agent, with the opt-in harness wrappers applied."""
+
+    from benchmarks.sregym.adapter import KubectlClusterOps, kubectl_capture_ops
+    from sdo.controller_install import kubectl
+
+    ops: ClusterOps = KubectlClusterOps()
+    if args.inject_before_resume:
+        from benchmarks.sregym.fastloop.simultaneous import InjectBeforeResumeOps
+
+        ops = InjectBeforeResumeOps(ops)  # type: ignore[assignment]
+    if args.healthy_baseline:
+        ops = kubectl_capture_ops(ops, namespace=namespace, kubectl_runner=kubectl)  # type: ignore[assignment]
+    return ops
+
+
 def _sdo_agent(
     args: argparse.Namespace, environment: FastloopEnvironment, results_dir: Path, *, composite: bool = False
 ) -> IncidentAgent:
     from benchmarks.sregym.adapter import (
-        ClusterOps,
-        KubectlClusterOps,
         RuntimeConfig,
         control_namespace_for,
         deployed_lifecycle,
@@ -198,6 +213,7 @@ def _sdo_agent(
         late_findings=args.late_findings,
         max_follow_ups=args.max_follow_ups,
         follow_up_cooldown_seconds=args.follow_up_cooldown_seconds,
+        healthy_baseline=args.healthy_baseline,
         controller_namespace=control_namespace_for(environment.namespace),
     )
     settings = SdoAgentSettings(
@@ -211,11 +227,7 @@ def _sdo_agent(
         verification_timeout_seconds=float(args.composite_deadline if composite else args.timeout + 300),
         validation_cache=validation_cache,
     )
-    ops: ClusterOps = KubectlClusterOps()
-    if args.inject_before_resume:
-        from benchmarks.sregym.fastloop.simultaneous import InjectBeforeResumeOps
-
-        ops = InjectBeforeResumeOps(ops)  # type: ignore[assignment]
+    ops = _cluster_ops(args, environment.namespace)
     agent_arguments = {
         "ops": ops,
         "lifecycle_inputs": lambda: deployed_lifecycle(environment.namespace),
@@ -498,6 +510,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--reflection-session", choices=("resume", "fresh"), default="resume")
     run.add_argument("--reflection-guidance", choices=("baseline", "generalize", "generalize-spec"), default="baseline")
     run.add_argument("--late-findings", choices=("off", "pull"), default="off")
+    run.add_argument(
+        "--healthy-baseline",
+        action="store_true",
+        help="record the healthy namespace before each injection and reject learned incident detectors that fire on it",
+    )
     run.add_argument(
         "--inject-before-resume",
         action="store_true",

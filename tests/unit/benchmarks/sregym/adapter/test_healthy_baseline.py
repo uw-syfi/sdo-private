@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -15,6 +15,9 @@ from benchmarks.sregym.adapter.healthy_baseline import (
     publish_snapshots,
     snapshot_document,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _item(kind: str, name: str, **extra: object) -> dict[str, object]:
@@ -123,7 +126,8 @@ def test_publish_writes_the_snapshots_inside_the_controller_pod_and_replaces_old
         assert namespace == "ctl"
         # Run the exec'd command locally, against tmp_path instead of the volume.
         script_index = args.index("-c", args.index("python3")) if "python3" in args else -1
-        assert script_index > 0 and args[:3] == ["exec", "-i", "job/sdo-controller-run"]
+        assert script_index > 0
+        assert args[:3] == ["exec", "-i", "job/sdo-controller-run"]
         command = [sys.executable, "-c", args[script_index + 1], str(target)]
         return subprocess.run(command, input=input_text, text=True, capture_output=True, check=False)
 

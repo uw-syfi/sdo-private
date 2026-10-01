@@ -61,3 +61,20 @@ def test_cli_flag_is_opt_in() -> None:
     base = ["run", "--run-dir", "x", "--agent", "sdo"]
     assert parser.parse_args(base).inject_before_resume is False
     assert parser.parse_args([*base, "--inject-before-resume"]).inject_before_resume is True
+
+
+def test_healthy_baseline_cli_flag_is_opt_in_and_reaches_the_runtime_config() -> None:
+    from benchmarks.sregym.fastloop.cli import _cluster_ops
+
+    parser = build_parser()
+    base = ["run", "--run-dir", "x", "--agent", "sdo"]
+    off = parser.parse_args(base)
+    on = parser.parse_args([*base, "--healthy-baseline"])
+
+    assert off.healthy_baseline is False
+    assert on.healthy_baseline is True
+    assert type(_cluster_ops(off, "app")).__name__ == "KubectlClusterOps"
+    assert type(_cluster_ops(on, "app")).__name__ == "HealthyBaselineCaptureOps"
+    both = parser.parse_args([*base, "--healthy-baseline", "--inject-before-resume"])
+    assert type(_cluster_ops(both, "app")).__name__ == "HealthyBaselineCaptureOps"
+    assert type(_cluster_ops(both, "app")._inner).__name__ == "InjectBeforeResumeOps"  # type: ignore[attr-defined]

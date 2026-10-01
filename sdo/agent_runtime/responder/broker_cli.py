@@ -67,10 +67,12 @@ def _memory_validator(
     repository_pvc: str | None = None,
     repository_mount_path: Path = Path("/workspace"),
     healthy_baseline: str | None = None,
+    healthy_baseline_source: Path | None = None,
 ) -> MemoryValidator:
+    gate = {"healthy_baseline_source": healthy_baseline_source, "healthy_baseline_dir": healthy_baseline}
     if mode == "local":
         return MemoryValidator(
-            sandbox_runner=LocalSandboxRunner(timeout_seconds=300, healthy_baseline=healthy_baseline)
+            sandbox_runner=LocalSandboxRunner(timeout_seconds=300, healthy_baseline=healthy_baseline), **gate
         )
     if mode == "kubernetes":
         if not namespace or not image or not repository_pvc:
@@ -82,11 +84,12 @@ def _memory_validator(
                 repository_pvc=repository_pvc,
                 repository_mount_path=repository_mount_path,
                 healthy_baseline=healthy_baseline,
-            )
+            ),
+            **gate,
         )
     if healthy_baseline:
-        return MemoryValidator(sandbox_runner=ContainerSandboxRunner(healthy_baseline=healthy_baseline))
-    return MemoryValidator()
+        return MemoryValidator(sandbox_runner=ContainerSandboxRunner(healthy_baseline=healthy_baseline), **gate)
+    return MemoryValidator(**gate)
 
 
 def _argument_parser() -> argparse.ArgumentParser:
@@ -143,6 +146,12 @@ def _argument_parser() -> argparse.ArgumentParser:
         help="opt-in: directory of recorded healthy-cluster snapshots (*.json), relative to the validated worktree; "
         "a proposed incident detector that reports an active finding on them is rejected (default: not checked)",
     )
+    parser.add_argument(
+        "--healthy-baseline-source",
+        type=Path,
+        help="opt-in: directory holding recorded healthy-cluster snapshots (*.json) on the repository volume; "
+        "staged into the validated worktree at --healthy-baseline-dir for the detector gate only",
+    )
     return parser
 
 
@@ -160,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
             repository_pvc=args.validator_repository_pvc,
             repository_mount_path=args.validator_repository_mount_path,
             healthy_baseline=args.healthy_baseline_dir,
+            healthy_baseline_source=args.healthy_baseline_source,
         ),
         proposal_validator=CommandProposalValidator(commands) if commands else None,
     )

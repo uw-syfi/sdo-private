@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from sdo.operational_memory.models import INCIDENT_DETECTOR_MAX_FIRING, ArtifactOwner, ValidatorNetworkPolicyCanary
 from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
-from sdo.operational_memory.sandbox import ContainerSandboxRunner
+from sdo.operational_memory.sandbox import ContainerSandboxRunner, healthy_baseline_argument
 
 if TYPE_CHECKING:
     from sdo.operational_memory.sandbox import SandboxRunner
@@ -35,9 +36,24 @@ class MemoryValidationError(ValueError):
 
 
 class MemoryValidator:
-    def __init__(self, *, run_diagnostics: bool = True, sandbox_runner: SandboxRunner | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        run_diagnostics: bool = True,
+        sandbox_runner: SandboxRunner | None = None,
+        healthy_baseline_source: Path | None = None,
+        healthy_baseline_dir: str | None = None,
+    ) -> None:
         self.run_diagnostics = run_diagnostics
         self.sandbox_runner = sandbox_runner or ContainerSandboxRunner()
+        # Opt-in: copy recorded healthy-cluster snapshots from this directory into the validated tree
+        # at ``healthy_baseline_dir`` for the executable gate only (the sandbox runner passes the flag).
+        self.healthy_baseline_source = healthy_baseline_source
+        if healthy_baseline_source is not None and healthy_baseline_dir is None:
+            raise ValueError("healthy_baseline_dir is required with healthy_baseline_source")
+        self.healthy_baseline_dir = (
+            healthy_baseline_argument(healthy_baseline_dir) if healthy_baseline_source is not None else None
+        )
 
     def validate(
         self,
@@ -388,11 +404,41 @@ class MemoryValidator:
             raise MemoryValidationError("outcomes.jsonl must be a non-empty append-only update")
 
     def _run_diagnostic_checks(self, app_root: Path) -> tuple[ValidatorNetworkPolicyCanary, ...]:
-        completed = self.sandbox_runner.run(app_root)
+        staged = self._stage_healthy_baseline(app_root)
+        try:
+            completed = self.sandbox_runner.run(app_root)
+        finally:
+            if staged is not None:
+                shutil.rmtree(staged, ignore_errors=True)
+                # Drop the scratch parent too when staging created it (e.g. ``.sdo-baseline``).
+                for parent in staged.parents:
+                    if parent == app_root.resolve():
+                        break
+                    try:
+                        parent.rmdir()
+                    except OSError:
+                        break
         if completed.returncode != 0:
             details = completed.stderr.strip() or completed.stdout.strip() or "diagnostic checks failed"
             raise MemoryValidationError(details)
         return completed.network_policy_canaries
+
+    def _stage_healthy_baseline(self, app_root: Path) -> Path | None:
+        """Copy the recorded healthy snapshots into the tree the sandbox validates, or None when not gated."""
+
+        if self.healthy_baseline_source is None or self.healthy_baseline_dir is None:
+            return None
+        snapshots = sorted(self.healthy_baseline_source.glob("*.json")) if self.healthy_baseline_source.is_dir() else []
+        if not snapshots:
+            raise MemoryValidationError(
+                f"healthy baseline gate is enabled but {self.healthy_baseline_source} holds no *.json snapshots; "
+                "the harness must record the healthy application before the first incident"
+            )
+        target = app_root.resolve() / self.healthy_baseline_dir
+        target.mkdir(parents=True, exist_ok=True)
+        for snapshot in snapshots:
+            shutil.copyfile(snapshot, target / snapshot.name)
+        return target
 
 
 def _spec_provenance(package: Path) -> dict[str, str]:

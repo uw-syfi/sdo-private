@@ -52,6 +52,8 @@ _EXPORTS: dict[str, str] = {
     "run_persistent_stage": "persistent",
     "teardown": "persistent",
     "RuntimeConfig": "runtime",
+    "HealthyBaselineCaptureOps": "healthy_baseline",
+    "kubectl_capture_ops": "healthy_baseline",
 }
 
 __all__ = [
@@ -65,6 +67,8 @@ __all__ = [
     "PersistentState",
     "RuntimeConfig",
     "StageInputs",
+    "HealthyBaselineCaptureOps",
+    "kubectl_capture_ops",
     "control_namespace_for",
     "deployed_lifecycle",
     "collect_followup_incident",

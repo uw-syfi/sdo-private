@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
+    import subprocess
+
     from benchmarks.sregym.adapter import ClusterOps
 
 # Where the controller pod's broker reads the snapshots (the repository volume root, not the repository).
@@ -103,11 +104,15 @@ def capture_snapshots(
         completed = kubectl_runner(["get", _RESOURCES, "-o", "json"], namespace=namespace, check=False)
         if completed.returncode != 0:
             details = completed.stderr.strip() or completed.stdout.strip()
-            raise HealthyBaselineCaptureError(f"cannot list namespace {namespace!r} for the healthy baseline: {details}")
+            raise HealthyBaselineCaptureError(
+                f"cannot list namespace {namespace!r} for the healthy baseline: {details}"
+            )
         try:
             listing = json.loads(completed.stdout)
         except json.JSONDecodeError as exc:
-            raise HealthyBaselineCaptureError(f"kubectl returned invalid JSON for namespace {namespace!r}: {exc}") from exc
+            raise HealthyBaselineCaptureError(
+                f"kubectl returned invalid JSON for namespace {namespace!r}: {exc}"
+            ) from exc
         snapshots[f"healthy-{index}.json"] = snapshot_document(namespace, listing)
     return snapshots
 
@@ -173,7 +178,9 @@ class HealthyBaselineCaptureOps:
         return timings
 
 
-def kubectl_capture_ops(inner: ClusterOps, *, namespace: str, kubectl_runner: KubectlRunner) -> HealthyBaselineCaptureOps:
+def kubectl_capture_ops(
+    inner: ClusterOps, *, namespace: str, kubectl_runner: KubectlRunner
+) -> HealthyBaselineCaptureOps:
     """Production wiring: capture with kubectl, publish into the controller pod."""
 
     return HealthyBaselineCaptureOps(

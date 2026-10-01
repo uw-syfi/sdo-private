@@ -38,7 +38,7 @@ class SandboxRunner(Protocol):
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
-def _healthy_baseline_argument(healthy_baseline: str | None) -> str | None:
+def healthy_baseline_argument(healthy_baseline: str | None) -> str | None:
     """Validate the opt-in healthy-baseline directory, relative to the validated tree."""
 
     if healthy_baseline is None:
@@ -93,7 +93,7 @@ class ContainerSandboxRunner:
         healthy_baseline: str | None = None,
         command_runner: CommandRunner | None = None,
     ) -> None:
-        self.healthy_baseline = _healthy_baseline_argument(healthy_baseline)
+        self.healthy_baseline = healthy_baseline_argument(healthy_baseline)
         self.image = image
         self.runtime = runtime or shutil.which("docker") or shutil.which("podman") or "docker"
         self.timeout_seconds = timeout_seconds
@@ -309,7 +309,7 @@ class KubernetesJobSandboxRunner:
         healthy_baseline: str | None = None,
         command_runner: CommandRunner = subprocess.run,
     ) -> None:
-        self.healthy_baseline = _healthy_baseline_argument(healthy_baseline)
+        self.healthy_baseline = healthy_baseline_argument(healthy_baseline)
         if not namespace or not image or not repository_pvc:
             raise ValueError("validator namespace, image, and repository PVC are required")
         if timeout_seconds <= 0 or poll_interval_seconds < 0:
@@ -772,7 +772,7 @@ class LocalSandboxRunner:
         healthy_baseline: str | None = None,
         command_runner: CommandRunner = subprocess.run,
     ) -> None:
-        self.healthy_baseline = _healthy_baseline_argument(healthy_baseline)
+        self.healthy_baseline = healthy_baseline_argument(healthy_baseline)
         self.timeout_seconds = timeout_seconds
         self.command_runner = command_runner
 
