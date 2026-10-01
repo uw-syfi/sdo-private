@@ -87,6 +87,7 @@ def format_table(table: list[dict[str, Any]]) -> str:
         "incidents",
         "tokens",
         "per-fault resolution (s)",
+        "inert",
     ]
     lines = [header]
     for row in table:
