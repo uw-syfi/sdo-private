@@ -106,6 +106,8 @@ def test_registered_composites_declare_faults_in_injection_order() -> None:
     assert set(COMPOSITE_FAULTS) == {
         "composite3_hotel_geo_rate_recommendation",
         "composite3b_hotel_profile_mongodb_geo_recommendation",
+        "composite3c_hotel_rate_mongodb_geo_user",
+        "composite4_hotel_profile_rate_recommendation_frontend",
         "composite5_hotel_geo_rate_recommendation_frontend_user",
     }
 

@@ -49,6 +49,17 @@ COMPOSITE_FAULTS: dict[str, tuple[FaultSpec, ...]] = {
         FaultSpec("configmap", "mongodb-geo"),
         FaultSpec("network_policy", "recommendation"),
     ),
+    "composite3c_hotel_rate_mongodb_geo_user": (
+        FaultSpec("readiness", "rate"),
+        FaultSpec("configmap", "mongodb-geo"),
+        FaultSpec("network_policy", "user"),
+    ),
+    "composite4_hotel_profile_rate_recommendation_frontend": (
+        FaultSpec("readiness", "profile"),
+        FaultSpec("configmap", "mongodb-rate"),
+        FaultSpec("network_policy", "recommendation"),
+        FaultSpec("wrong_selector", "frontend"),
+    ),
     "composite5_hotel_geo_rate_recommendation_frontend_user": (
         FaultSpec("readiness", "geo"),
         FaultSpec("configmap", "mongodb-rate"),
