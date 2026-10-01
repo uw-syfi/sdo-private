@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from benchmarks.sregym.analysis.composite_sequence import first_activations, learned_before_dispatch
+import json
+from typing import TYPE_CHECKING
+
+from benchmarks.sregym.analysis.composite_sequence import first_activations, learned_before_dispatch, load_firings
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _firing(detector_class: str, fingerprint: str, relation: str, event: str = "activated") -> dict[str, object]:
@@ -28,3 +34,15 @@ def test_learned_detector_before_dispatch_is_distinguished_from_health() -> None
 def test_cleared_events_do_not_count_as_activation() -> None:
     firings = [_firing("incident", "x/geo", "before_dispatch", event="cleared")]
     assert first_activations(firings, "geo") == {}
+
+
+def test_load_firings_keeps_only_the_composites_own_firings(tmp_path: Path) -> None:
+    # The controller's firing log is cumulative across a persistent sequence.
+    run = tmp_path / "000_problem"
+    run.mkdir()
+    old = {"event": "activated", "recorded_at": "2026-10-01T07:00:00.5Z", "fingerprint": "old"}
+    new = {"event": "activated", "recorded_at": "2026-10-01T07:10:00.5Z", "fingerprint": "new"}
+    (run / "detector_firings.jsonl").write_text(json.dumps(old) + "\n" + json.dumps(new) + "\n", encoding="utf-8")
+
+    assert [f["fingerprint"] for f in load_firings(tmp_path)] == ["old", "new"]
+    assert [f["fingerprint"] for f in load_firings(tmp_path, since="2026-10-01T07:05:00Z")] == ["new"]

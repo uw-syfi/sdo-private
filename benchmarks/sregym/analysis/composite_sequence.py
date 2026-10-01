@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -57,11 +58,28 @@ def memory_counts(workspace: Path, revision: str = "HEAD") -> dict[str, int]:
     return {"incident_detectors": len(incident_detectors), "playbooks": len(playbooks)}
 
 
-def load_firings(directory: Path) -> list[dict[str, Any]]:
+def load_firings(directory: Path, since: str | None = None) -> list[dict[str, Any]]:
+    """Firings of one composite. The controller log is cumulative across a persistent sequence, so
+    pass ``since`` (the composite's injection start) to drop earlier composites' firings."""
+
     out: list[dict[str, Any]] = []
     for path in sorted(directory.glob("*/detector_firings.jsonl")):
         out += [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if since is not None:
+        cutoff = _instant(since)
+        out = [f for f in out if _instant(str(f.get("recorded_at", "1970-01-01T00:00:00Z"))) >= cutoff]
     return out
+
+
+def _instant(value: str) -> float:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+
+
+def _injection_start(directory: Path) -> str | None:
+    path = directory / "incidents.jsonl"
+    if not path.is_file():
+        return None
+    return str(json.loads(path.read_text(encoding="utf-8").splitlines()[0]).get("injection_started_at") or "") or None
 
 
 def main(argv: list[str]) -> int:
@@ -71,7 +89,7 @@ def main(argv: list[str]) -> int:
         if not reports:
             continue
         problem = json.loads(reports[0].read_text(encoding="utf-8"))["problem_id"]
-        firings = load_firings(directory)
+        firings = load_firings(directory, since=_injection_start(directory))
         parts = []
         for fault in composite_faults(problem):
             found = first_activations(firings, fault.component)
