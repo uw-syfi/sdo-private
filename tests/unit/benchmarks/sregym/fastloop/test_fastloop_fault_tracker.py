@@ -96,9 +96,16 @@ def test_registered_composites_declare_faults_in_injection_order() -> None:
         ("resource_request", "user"),
     ]
     assert len({fault.component for fault in five}) == 5
+    variant = composite_faults("composite3b_hotel_profile_mongodb_geo_recommendation")
+    assert [(fault.kind, fault.component) for fault in variant] == [
+        ("readiness", "profile"),
+        ("configmap", "mongodb-geo"),
+        ("network_policy", "recommendation"),
+    ]
     assert composite_faults("missing_configmap_hotel_reservation") == ()
     assert set(COMPOSITE_FAULTS) == {
         "composite3_hotel_geo_rate_recommendation",
+        "composite3b_hotel_profile_mongodb_geo_recommendation",
         "composite5_hotel_geo_rate_recommendation_frontend_user",
     }
 
