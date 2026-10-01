@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from benchmarks.sregym.fastloop.cli import build_parser
+from benchmarks.sregym.fastloop.simultaneous import InjectBeforeResumeOps
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+class _Inner:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+
+    def set_maintenance(self, control_namespace: str, *, paused: bool, generation: str) -> None:
+        self.events.append(f"{'pause' if paused else 'resume'}:{generation}")
+
+    def inject_after_resume(
+        self, control_namespace: str, generation: str, inject: Callable[[], None]
+    ) -> dict[str, float]:
+        self.events.append("inner-gate")
+        inject()
+        return {}
+
+    def controller_pod(self, control_namespace: str) -> str:
+        return "pod"
+
+
+def _ops(events: list[str]) -> InjectBeforeResumeOps:
+    def ack(ops: object, control: str, generation: str) -> None:
+        events.append(f"ack:{generation}")
+
+    return InjectBeforeResumeOps(_Inner(events), wait_for_pause=ack)  # type: ignore[arg-type]
+
+
+def test_faults_are_injected_while_the_controller_is_paused_and_it_resumes_afterwards() -> None:
+    events: list[str] = []
+    ops = _ops(events)
+
+    ops.set_maintenance("ctl", paused=False, generation="g1")
+    assert events == []  # the resume is deferred until the faults are in
+    timings = ops.inject_after_resume("ctl", "g1", lambda: events.append("inject"))
+
+    assert events == ["pause:g1-presim", "ack:g1-presim", "inject", "resume:g1"]
+    assert timings["injection_before_resume"] == 1.0
+
+
+def test_pausing_and_other_calls_pass_through() -> None:
+    events: list[str] = []
+    ops = _ops(events)
+
+    ops.set_maintenance("ctl", paused=True, generation="g2")
+
+    assert events == ["pause:g2"]
+    assert ops.controller_pod("ctl") == "pod"
+
+
+def test_cli_flag_is_opt_in() -> None:
+    parser = build_parser()
+    base = ["run", "--run-dir", "x", "--agent", "sdo"]
+    assert parser.parse_args(base).inject_before_resume is False
+    assert parser.parse_args([*base, "--inject-before-resume"]).inject_before_resume is True

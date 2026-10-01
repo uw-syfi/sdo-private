@@ -166,6 +166,7 @@ def _sdo_agent(
     args: argparse.Namespace, environment: FastloopEnvironment, results_dir: Path, *, composite: bool = False
 ) -> IncidentAgent:
     from benchmarks.sregym.adapter import (
+        ClusterOps,
         KubectlClusterOps,
         RuntimeConfig,
         control_namespace_for,
@@ -210,8 +211,13 @@ def _sdo_agent(
         verification_timeout_seconds=float(args.composite_deadline if composite else args.timeout + 300),
         validation_cache=validation_cache,
     )
+    ops: ClusterOps = KubectlClusterOps()
+    if args.inject_before_resume:
+        from benchmarks.sregym.fastloop.simultaneous import InjectBeforeResumeOps
+
+        ops = InjectBeforeResumeOps(ops)  # type: ignore[assignment]
     agent_arguments = {
-        "ops": KubectlClusterOps(),
+        "ops": ops,
         "lifecycle_inputs": lambda: deployed_lifecycle(environment.namespace),
         "run_lifecycle": lambda context: run_or_reuse_lifecycle(
             environment.workspace,
@@ -492,6 +498,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--reflection-session", choices=("resume", "fresh"), default="resume")
     run.add_argument("--reflection-guidance", choices=("baseline", "generalize", "generalize-spec"), default="baseline")
     run.add_argument("--late-findings", choices=("off", "pull"), default="off")
+    run.add_argument(
+        "--inject-before-resume",
+        action="store_true",
+        help="composite SDO runs: inject every fault while the controller is paused, then resume it (simultaneous)",
+    )
     run.add_argument("--max-follow-ups", type=int, default=0, help="follow-up responders for residual health findings")
     run.add_argument("--follow-up-cooldown-seconds", type=int, default=30)
     run.add_argument("--reasoning-effort", default=None, help="Codex baseline reasoning effort (default: Codex's)")
