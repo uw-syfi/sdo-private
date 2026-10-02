@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import contextlib
+import functools
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -10,7 +13,7 @@ import sys
 import tempfile
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -78,6 +81,91 @@ for _attempt in range(20):
 
 
 DEFAULT_VALIDATOR_IMAGE = "sdo-detector-validator:v0.1.0"
+VALIDATOR_IMAGE_ENV = "SDO_VALIDATOR_IMAGE"
+
+_SDK_ROOT = Path(__file__).resolve().parents[2] / "controller" / "sdk"
+_UNKNOWN_FIELD = re.compile(r'unknown field "([^"]+)"')
+
+
+class StaleValidatorImageError(RuntimeError):
+    """The validator image's SDK is older than the checkout's: a validation verdict from it is not trustworthy."""
+
+
+@contextlib.contextmanager
+def validator_image_environment(image: str | None) -> Iterator[None]:
+    """Export the validator image for host-side children (the judge's ``sdo detector check``) for one scope.
+
+    ``None`` leaves the environment untouched, so an operator's own ``SDO_VALIDATOR_IMAGE`` still applies.
+    """
+
+    if image is None:
+        yield
+        return
+    if not image.strip():
+        raise ValueError("validator image must not be empty")
+    previous = os.environ.get(VALIDATOR_IMAGE_ENV)
+    os.environ[VALIDATOR_IMAGE_ENV] = image.strip()
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(VALIDATOR_IMAGE_ENV, None)
+        else:
+            os.environ[VALIDATOR_IMAGE_ENV] = previous
+
+
+def _image_tag(image: str) -> tuple[str, str] | None:
+    """Split ``[registry/]name:tag`` into ``(name, tag)``; digests and untagged references cannot be compared."""
+
+    if "@" in image:
+        return None
+    name, separator, tag = image.rpartition(":")
+    if not separator or "/" in tag or not name or not tag:
+        return None
+    return name.rsplit("/", 1)[-1], tag
+
+
+def require_matching_image_tags(*, controller_image: str, validator_image: str) -> None:
+    """Fail when the controller and validator are built-in SDO images on different tags.
+
+    Both are built from one checkout under one tag. A controller on a private tag next to a validator on a shared
+    one validates detectors with an SDK that is not the one the controller runs.
+    """
+
+    controller = _image_tag(controller_image)
+    validator = _image_tag(validator_image)
+    if controller is None or validator is None:
+        return
+    if controller[0] != "sdo-controller" or validator[0] != "sdo-detector-validator":
+        return
+    if controller[1] != validator[1]:
+        raise ValueError(
+            f"controller image {controller_image!r} and validator image {validator_image!r} are on different tags; "
+            "build and pass both from the same SDO_IMAGE_TAG"
+        )
+
+
+@functools.cache
+def _checkout_sdk_defines_json_field(name: str) -> bool:
+    if not _SDK_ROOT.is_dir():
+        return False
+    needle = re.compile(r'json:"' + re.escape(name) + r'[,"]')
+    return any(needle.search(path.read_text(encoding="utf-8", errors="ignore")) for path in _SDK_ROOT.rglob("*.go"))
+
+
+def _raise_if_stale_validator(image: str, result: SandboxResult) -> None:
+    """A rejected field that this checkout's SDK defines means the validator image is stale, not the detector wrong."""
+
+    if result.returncode == 0:
+        return
+    for field in _UNKNOWN_FIELD.findall(f"{result.stdout}\n{result.stderr}"):
+        if _checkout_sdk_defines_json_field(field):
+            raise StaleValidatorImageError(
+                f'validator image {image!r} rejected the field "{field}" as unknown, but this checkout\'s SDK defines '
+                "it: the image was built from older SDK source. Rebuild it from this checkout "
+                f"(SDO_IMAGE_TAG=<tag> scripts/build_sdo_images.sh) and pass it as the validator image or via "
+                f"{VALIDATOR_IMAGE_ENV}; do not drop the field from the workload."
+            )
 
 
 class ContainerSandboxRunner:
@@ -98,7 +186,7 @@ class ContainerSandboxRunner:
     ) -> None:
         # SDO_VALIDATOR_IMAGE selects a private validator tag for host-side lifecycle validation, so a
         # run on a privately tagged build never validates against a stale shared tag.
-        self.image = image or os.environ.get("SDO_VALIDATOR_IMAGE", "").strip() or DEFAULT_VALIDATOR_IMAGE
+        self.image = image or os.environ.get(VALIDATOR_IMAGE_ENV, "").strip() or DEFAULT_VALIDATOR_IMAGE
         self.healthy_baseline = healthy_baseline_argument(healthy_baseline)
         self.runtime = runtime or shutil.which("docker") or shutil.which("podman") or "docker"
         self.timeout_seconds = timeout_seconds
@@ -211,11 +299,13 @@ class ContainerSandboxRunner:
                 stderr=_timeout_text(exc.stderr) or "detector sandbox timed out",
                 timed_out=True,
             )
-        return SandboxResult(
+        result = SandboxResult(
             returncode=completed.returncode,
             stdout=completed.stdout,
             stderr=completed.stderr,
         )
+        _raise_if_stale_validator(self.image, result)
+        return result
 
     def _run_managed_container(
         self,
