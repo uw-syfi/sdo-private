@@ -1814,6 +1814,45 @@ def test_receipt_diagnosis_uses_every_controller_fact_and_withholds_credit_from_
     assert _recovery_attribution([]) is None
 
 
+def test_receipt_credits_a_repair_whose_reported_clock_trails_health_clearing_inside_the_session() -> None:
+    """Phase A cold NetworkPolicy run: the delete preceded health clearing, the receipt's clock did not.
+
+    The receipt recomputes the verdict from the closure, so the controller's dispatch and
+    completion times must reach the verification (bounded skew correction).
+    """
+
+    fixtures = Path(__file__).resolve().parents[4] / "fixtures" / "sdo" / "contracts"
+    request = json.loads((fixtures / "incident_request_state_changes.json").read_text(encoding="utf-8"))
+    result = json.loads((fixtures / "incident_result.json").read_text(encoding="utf-8"))
+    request["incident_id"] = result["incident_id"]
+    policy = {"kind": "NetworkPolicy", "name": "deny-all"}
+    result["repair_actions"][0]["resources"] = [policy]
+    result["repair_actions"][0]["target"] = "NetworkPolicy/deny-all"
+    result["repair_actions"][0]["started_at"] = "2026-07-09T18:12:08Z"
+    result["repair_actions"][0]["completed_at"] = "2026-07-09T18:12:09Z"
+    result["confirmed_root_causes"][0]["resources"] = [policy]
+    result["confirmed_root_causes"][0]["evidence"] = [
+        {"kind": "state-change", "source": "NetworkPolicy/deny-all", "observation": "deny-all added"}
+    ]
+    closure = {
+        "request": request,
+        "result": result,
+        "final_detector_states": result["final_detector_states"],
+        "final_state_changes": {**request["state_changes"], "changes": []},
+        "health_cleared_at": "2026-07-09T18:12:00Z",
+        "detected_at": "2026-07-09T18:00:31Z",
+        "dispatched_at": "2026-07-09T18:01:00Z",
+        "responder_completed_at": "2026-07-09T18:13:05Z",
+        "verified_at": "2026-07-09T18:13:10Z",
+    }
+
+    verification = _diagnosis_verification(closure)
+
+    assert [item["verdict"] for item in verification] == ["confirmed"]
+    assert verification[0]["repair"]["clock_skew_corrected"] == [result["repair_actions"][0]["action_id"]]
+    assert _recovery_attribution(verification) == "responder"
+
+
 @pytest.mark.parametrize(
     ("fixture", "verdict", "attribution"),
     [("closure_repaired.json", "confirmed", "responder"), ("closure_own_edit.json", "contradicted", "responder")],

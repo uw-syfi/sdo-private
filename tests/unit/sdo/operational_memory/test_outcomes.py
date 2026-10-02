@@ -303,3 +303,36 @@ def test_a_cause_citing_the_responders_own_edit_is_contradicted_in_the_outcome()
     outcome = derive_outcome(facts)
 
     assert [verification.verdict for verification in outcome.diagnosis_verification] == [DiagnosisVerdict.CONTRADICTED]
+
+
+def test_a_repair_with_a_slightly_late_reported_clock_is_still_an_sdo_success_and_learnable() -> None:
+    """The phase A cold NetworkPolicy run: the delete preceded health clearing, the receipt's clock did not.
+
+    The controller's dispatch/completion times and the closing diff anchor the bounded skew
+    correction, so the outcome is SUCCESS (reflection may learn) instead of EXTERNAL_RECOVERY.
+    """
+
+    facts = _attribution_facts(_blaming("NetworkPolicy", "deny-all"), repaired=("NetworkPolicy/deny-all",))
+    assert facts.result is not None
+    assert facts.health_cleared_at is not None
+    late = facts.result.repair_actions[0].model_copy(
+        update={
+            "started_at": facts.health_cleared_at + timedelta(seconds=8, milliseconds=500),
+            "completed_at": facts.health_cleared_at + timedelta(seconds=9),
+        }
+    )
+    facts = facts.model_copy(
+        update={
+            "result": facts.result.model_copy(update={"repair_actions": [late]}),
+            "responder_completed_at": facts.health_cleared_at + timedelta(seconds=20),
+            "verified_at": facts.health_cleared_at + timedelta(seconds=30),
+        }
+    )
+
+    outcome = derive_outcome(facts)
+
+    assert outcome.classification == OutcomeClassification.SUCCESS
+    [verification] = outcome.diagnosis_verification
+    assert verification.verdict == DiagnosisVerdict.CONFIRMED
+    assert verification.repair is not None
+    assert verification.repair.clock_skew_corrected == ["repair-0"]
