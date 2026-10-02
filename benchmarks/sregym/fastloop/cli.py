@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from benchmarks.sregym.adapter import ClusterOps
     from benchmarks.sregym.fastloop.composite import CompositeSettings
     from benchmarks.sregym.fastloop.loop import IncidentAgent
+    from sdo.agent_runtime.lifecycle import LifecycleSeedCache, LifecycleValidationCache
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,35 @@ def _cluster_ops(args: argparse.Namespace, namespace: str) -> ClusterOps:
     return ops
 
 
+def _shared_cache_root() -> Path:
+    base = os.environ.get("XDG_CACHE_HOME", "").strip()
+    return (Path(base) if base else Path.home() / ".cache") / "sdo"
+
+
+def _validation_cache(args: argparse.Namespace) -> LifecycleValidationCache | None:
+    """Detector validation verdicts, shared across runs: the key is the validator image and the diagnostics digest."""
+
+    from sdo.agent_runtime.lifecycle import LifecycleValidationCache
+
+    if args.no_validation_cache:
+        return None
+    return LifecycleValidationCache.from_env() or LifecycleValidationCache(
+        _shared_cache_root() / "lifecycle-validation"
+    )
+
+
+def _seed_cache(args: argparse.Namespace) -> LifecycleSeedCache | None:
+    """Cold lifecycle handoffs, shared across runs; ``--cold-lifecycle`` measures a cold one instead."""
+
+    from sdo.agent_runtime.lifecycle import LifecycleSeedCache
+
+    if args.cold_lifecycle:
+        return None
+    if args.lifecycle_seed_cache_dir is not None:
+        return LifecycleSeedCache(args.lifecycle_seed_cache_dir.resolve())
+    return LifecycleSeedCache.from_env() or LifecycleSeedCache(_shared_cache_root() / "lifecycle-seeds")
+
+
 def _sdo_agent(
     args: argparse.Namespace, environment: FastloopEnvironment, results_dir: Path, *, composite: bool = False
 ) -> IncidentAgent:
@@ -202,11 +232,9 @@ def _sdo_agent(
         run_or_reuse_lifecycle,
     )
     from benchmarks.sregym.fastloop.sdo_agent import SdoAgentSettings, SdoPersistentAgent
-    from sdo.agent_runtime.lifecycle import LifecycleValidationCache
 
-    validation_cache = (
-        None if args.no_validation_cache else LifecycleValidationCache(environment.run_dir / "validation-cache")
-    )
+    validation_cache = _validation_cache(args)
+    seed_cache = _seed_cache(args)
 
     runtime_config = RuntimeConfig(
         repository=environment.workspace,
@@ -240,6 +268,7 @@ def _sdo_agent(
         kubeconfig=str(environment.kubeconfig),
         verification_timeout_seconds=float(args.composite_deadline if composite else args.timeout + 300),
         validation_cache=validation_cache,
+        detection_timeout_seconds=args.detection_timeout,
     )
     ops = _cluster_ops(args, environment.namespace)
     agent_arguments = {
@@ -253,6 +282,7 @@ def _sdo_agent(
             model=args.model,
             validator_image=environment.images.validator,
             validation_cache=validation_cache,
+            seed_cache=seed_cache,
         ),
     }
     if composite:
@@ -553,7 +583,27 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--no-validation-cache",
         action="store_true",
-        help="revalidate the lifecycle detectors instead of sharing verdicts in <run-dir>/validation-cache",
+        help="revalidate the lifecycle detectors instead of sharing verdicts (default dir: "
+        "$SDO_LIFECYCLE_VALIDATION_CACHE_DIR or ~/.cache/sdo/lifecycle-validation)",
+    )
+    run.add_argument(
+        "--cold-lifecycle",
+        action="store_true",
+        help="author the lifecycle from scratch instead of restoring a cached cold lifecycle of the same source; "
+        "use it when the lifecycle itself is measured",
+    )
+    run.add_argument(
+        "--lifecycle-seed-cache-dir",
+        type=Path,
+        default=None,
+        help="cold lifecycle cache (default: $SDO_LIFECYCLE_SEED_CACHE_DIR or ~/.cache/sdo/lifecycle-seeds)",
+    )
+    run.add_argument(
+        "--detection-timeout",
+        type=float,
+        default=None,
+        help="SDO runs: end an incident as undetected when nothing opens one this many seconds after injection "
+        "(default: wait the whole per-incident timeout)",
     )
     run.add_argument("--health-timeout", type=float, default=300.0, help="seconds to wait for health after recovery")
     run.add_argument("--proxy-port", type=int, default=0, help="Codex baseline API proxy port (default: free port)")
