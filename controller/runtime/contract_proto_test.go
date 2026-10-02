@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	contractsv1alpha1 "sdo.dev/controller/contracts/gen/sdo/contracts/v1alpha1"
+	contractsv1alpha1 "sdo.dev/controller/contracts/gen/sdodev/contracts/v1alpha1"
 	"sdo.dev/controller/sdk"
 )
 

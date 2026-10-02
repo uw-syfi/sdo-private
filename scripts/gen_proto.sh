@@ -32,4 +32,15 @@ buf lint
 echo "==> buf generate"
 buf generate
 
+# Vendor the classic google.protobuf gencode of the buf.validate options our
+# messages carry, so the generated Python modules are importable under the
+# codebase's classic protobuf runtime (see buf.gen.validate.yaml). buf.gen.yaml
+# uses clean:true, so this must run after `buf generate`.
+echo "==> vendor buf.validate python gencode"
+VALIDATE_TMP="$(mktemp -d)"
+trap 'rm -rf "${VALIDATE_TMP}"' EXIT
+buf generate --include-imports --template buf.gen.validate.yaml -o "${VALIDATE_TMP}" buf.build/bufbuild/protovalidate
+rm -rf sdo/contracts/_gen/buf
+cp -r "${VALIDATE_TMP}/_gen_validate/buf" sdo/contracts/_gen/buf
+
 echo "Proto code regenerated."

@@ -1,0 +1,15 @@
+version: v2
+# Helper template used only by scripts/gen_proto.sh to vendor the CLASSIC
+# (google.protobuf) Python gencode of buf.validate into sdo/contracts/_gen/buf.
+# The protovalidate==2.0 wheel ships only the newer protobuf-py runtime form
+# (validate_pb), which the rest of the codebase's classic google.protobuf
+# runtime cannot load, so the proto field options our messages carry would
+# otherwise have no importable `from buf.validate import validate_pb2`. Pinned
+# to v33.4 to match the protobuf==6.33.4 runtime, like buf.gen.yaml.
+managed:
+  enabled: true
+plugins:
+  - remote: buf.build/protocolbuffers/python:v33.4
+    out: _gen_validate
+  - remote: buf.build/protocolbuffers/pyi:v33.4
+    out: _gen_validate

@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+// Detector firing telemetry: the schema of one line of the controller's
+// append-only detector-firings.jsonl stream (Go emitter in
+// controller/runtime/firing_telemetry.go, Python readers in the analysis
+// path). The file stays newline-delimited JSON — only the record schema is
+// proto-governed. Operational telemetry, not operational memory: it never
+// enters .sdo/ and carries no benchmark verdicts.
+package sdodev.contracts.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "sdodev/contracts/v1alpha1/common.proto";
+
+option go_package = "sdo.dev/controller/contracts/gen/sdodev/contracts/v1alpha1;contractsv1alpha1";
+
+// FiringRecord is one line of the detector firing stream. Mirrors the Go
+// runtime.FiringRecord struct.
+message FiringRecord {
+  string schema_version = 1 [(buf.validate.field).string.const = "sdo.detector-firing/v1"];
+  string event_id = 2 [(buf.validate.field).string.min_len = 1];
+  string event = 3 [(buf.validate.field).string = {in: ["activated", "cleared", "not_persisted", "batched"]}];
+  google.protobuf.Timestamp recorded_at = 4 [(buf.validate.field).required = true];
+  int32 evaluation_iteration = 5 [(buf.validate.field).int32.gte = 0];
+  string application = 6;
+  string namespace = 7;
+  string detector_id = 8 [(buf.validate.field).string.min_len = 1];
+  string detector_class = 9;
+  string owner = 10;
+  string rule_id = 11;
+  string fingerprint = 12;
+  string severity = 13;
+  map<string, ObjectRef> parameter_bindings = 14;
+  repeated string surfaced_playbooks = 15;
+  int32 firing_count = 16 [(buf.validate.field).int32.gte = 0];
+  int32 firing_threshold = 17 [(buf.validate.field).int32.gte = 0];
+  int32 clear_count = 18 [(buf.validate.field).int32.gte = 0];
+  int32 clear_threshold = 19 [(buf.validate.field).int32.gte = 0];
+  string incident_id = 20;
+  string dispatch_relation = 21 [(buf.validate.field).string = {
+    in: ["before_dispatch", "after_dispatch", "no_incident"]
+  }];
+}

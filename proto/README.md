@@ -8,13 +8,19 @@ rationale and the per-seam plan.
 ## Layout
 
 ```
-proto/sdo/contracts/v1alpha1/   # versioned contract messages
+proto/sdodev/contracts/v1alpha1/   # versioned contract messages
 ```
+
+The proto package is `sdodev.contracts.v1alpha1` (not `sdo.contracts...`) so the
+generated Python root does not shadow this repo's real top-level `sdo` package;
+`sdo/contracts/proto.py` puts `sdo/contracts/_gen` on `sys.path` and re-exports
+the messages under a stable import path.
 
 Generated code is written to:
 
 - Go:     `controller/contracts/gen/`  (module `sdo.dev/controller/contracts`)
-- Python: `sdo/contracts/_gen/`
+- Python: `sdo/contracts/_gen/` (includes a vendored classic-runtime
+  `buf/validate/validate_pb2.py`; see below)
 
 Generated files are committed so builds and tests do not require the toolchain at
 compile time; CI regenerates and asserts no diff.
@@ -52,6 +58,16 @@ dependency-bump ripple mid-migration.
 
 - These messages are serialized as **protojson**, never binary, on the wire.
 - Semantic invariants (ordered timestamps, token arithmetic, unique IDs) are expressed
-  with **protovalidate** (CEL), so validation is single-source too.
+  with **protovalidate** (CEL), so validation is single-source too. The CEL is checked
+  on the Go side with `buf.build/go/protovalidate` (see
+  `controller/runtime/contract_conformance_test.go`). The one piece CEL cannot do —
+  the `UsageMetrics` cache-read alias *normalization* (a mutation) — stays a thin
+  hand step at the seam, noted in `messages.proto`.
+- The Python gencode imports `buf.validate` for those field options. `protovalidate`
+  on PyPI (v2+) ships only the newer `protobuf-py` runtime form, incompatible with the
+  classic `google.protobuf` runtime this repo uses, so `scripts/gen_proto.sh` vendors
+  the classic `buf/validate/validate_pb2.py` into `sdo/contracts/_gen/buf`
+  (via `buf.gen.validate.yaml`). Python validation (needed only at the Stage 2b
+  responder-edge conversion) will add a classic-compatible validator then.
 - Do **not** add gRPC services here — SDO keeps its file/PVC/git/HTTP transports.
 - `.sdo/` git memory, detector Go source, and JSONL log formats are out of scope.

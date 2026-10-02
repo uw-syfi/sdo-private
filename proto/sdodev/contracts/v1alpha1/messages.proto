@@ -1,0 +1,325 @@
+syntax = "proto3";
+
+// The controller<->responder message tree: the incident request the controller
+// dispatches, the result the responder returns, the view the controller
+// publishes while an incident is open, and the closure the broker records.
+// These mirror sdo/contracts/models.py (Pydantic) and the hand-written Go
+// structs in controller/runtime; proto is the single schema source and the
+// conformance tests make any drift between the three a build failure.
+//
+// Wire convention (docs/seam-contracts-decisions.md): protojson, snake_case
+// field names, enums carried as their lowercase domain strings (constrained by
+// protovalidate, not proto enums, so the existing .sdo/outcomes.jsonl records
+// and strict receipts stay readable). Semantic invariants are expressed in
+// protovalidate CEL where possible; the UsageMetrics cache-read alias
+// *normalization* is a mutation CEL cannot perform and stays a thin hand step
+// at the seam (see sdo/contracts/proto.py).
+package sdodev.contracts.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "sdodev/contracts/v1alpha1/common.proto";
+
+option go_package = "sdo.dev/controller/contracts/gen/sdodev/contracts/v1alpha1;contractsv1alpha1";
+
+// Finding is one detector observation. Mirrors sdk.Finding and
+// sdo.contracts.models.Finding.
+message Finding {
+  string detector_id = 1 [(buf.validate.field).string.min_len = 1];
+  string rule_id = 2 [(buf.validate.field).string.min_len = 1];
+  string status = 3 [(buf.validate.field).string = {in: ["active", "resolved"]}];
+  string severity = 4 [(buf.validate.field).string = {in: ["info", "warn", "critical"]}];
+  string summary = 5 [(buf.validate.field).string.min_len = 1];
+  string evidence = 6 [(buf.validate.field).string.min_len = 1];
+  ObjectRef primary_resource = 7 [(buf.validate.field).required = true];
+  repeated ObjectRef related_resources = 8;
+  repeated string playbooks = 9;
+  map<string, ObjectRef> parameter_bindings = 10;
+  string fingerprint = 11;
+  google.protobuf.Struct metadata = 12;
+}
+
+// DetectorEvaluation is one detector's status at a point in time.
+message DetectorEvaluation {
+  string detector_id = 1 [(buf.validate.field).string.min_len = 1];
+  google.protobuf.Timestamp evaluated_at = 2 [(buf.validate.field).required = true];
+  string status = 3 [(buf.validate.field).string = {in: ["firing", "clear", "error"]}];
+  repeated string fingerprints = 4;
+  optional string error = 5;
+}
+
+message SurfacedPlaybook {
+  string path = 1 [(buf.validate.field).string.min_len = 1];
+  map<string, ObjectRef> parameter_bindings = 2;
+}
+
+message PriorOutcomeEvidence {
+  string incident_id = 1 [(buf.validate.field).string.min_len = 1];
+  string match_reason = 2 [(buf.validate.field).string = {
+    in: ["exact-fingerprint", "learned-detector-origin", "detector-rule-resource-kind"]
+  }];
+  repeated string root_cause_summaries = 3;
+  repeated string repair_action_summaries = 4;
+  repeated string applied_playbooks = 5;
+  string source_commit = 6 [(buf.validate.field).string.min_len = 1];
+  bool exact_source_match = 7;
+}
+
+message StateFieldChange {
+  string field = 1 [(buf.validate.field).string.min_len = 1];
+  optional string before = 2;
+  optional string after = 3;
+}
+
+message StateChange {
+  string kind = 1 [(buf.validate.field).string.min_len = 1];
+  string name = 2 [(buf.validate.field).string.min_len = 1];
+  string change = 3 [(buf.validate.field).string = {in: ["added", "removed", "modified"]}];
+  repeated StateFieldChange fields = 4;
+}
+
+message StateChanges {
+  google.protobuf.Timestamp baseline_at = 1 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp observed_at = 2 [(buf.validate.field).required = true];
+  repeated StateChange changes = 3;
+  optional int32 omitted = 4 [(buf.validate.field).int32.gte = 0];
+  repeated string unobserved_kinds = 5;
+}
+
+message ObservedStateChange {
+  string kind = 1 [(buf.validate.field).string.min_len = 1];
+  string name = 2 [(buf.validate.field).string.min_len = 1];
+  google.protobuf.Timestamp first_observed_at = 3 [(buf.validate.field).required = true];
+}
+
+message FollowUpContext {
+  string original_incident_id = 1 [(buf.validate.field).string.min_len = 1];
+  string parent_incident_id = 2 [(buf.validate.field).string.min_len = 1];
+  int32 attempt = 3 [(buf.validate.field).int32.gte = 1];
+  int32 max_follow_ups = 4 [(buf.validate.field).int32.gte = 1];
+  string prior_responder_summary = 5;
+}
+
+// IncidentRequest is the snapshot the controller dispatches to the responder.
+message IncidentRequest {
+  string schema_version = 1 [(buf.validate.field).string.const = "sdo.dev/v1alpha1"];
+  string application = 2 [(buf.validate.field).string.min_len = 1];
+  string namespace = 3 [(buf.validate.field).string.min_len = 1];
+  string incident_id = 4 [(buf.validate.field).string.min_len = 1];
+  repeated Finding findings = 5 [(buf.validate.field).repeated.min_items = 1];
+  repeated DetectorEvaluation detector_history = 6 [(buf.validate.field).repeated.min_items = 1];
+  repeated SurfacedPlaybook surfaced_playbooks = 7;
+  repeated PriorOutcomeEvidence relevant_outcomes = 8 [(buf.validate.field).repeated.max_items = 3];
+  string source_commit = 9 [(buf.validate.field).string.min_len = 1];
+  string deployed_commit = 10 [(buf.validate.field).string.min_len = 1];
+  string architecture_summary_path = 11 [(buf.validate.field).string.min_len = 1];
+  string health_objective_path = 12 [(buf.validate.field).string.min_len = 1];
+  string repository_worktree = 13 [(buf.validate.field).string.min_len = 1];
+  string repository_base_commit = 14 [(buf.validate.field).string.min_len = 1];
+  google.protobuf.Timestamp response_deadline = 15 [(buf.validate.field).required = true];
+  string cancellation_token = 16 [(buf.validate.field).string.min_len = 1];
+  string repair_policy = 17 [(buf.validate.field).string = {in: ["commit", "recorded-actions"]}];
+  StateChanges state_changes = 18;
+  FollowUpContext follow_up = 19;
+}
+
+message RootCauseEvidence {
+  string kind = 1 [(buf.validate.field).string = {
+    in: ["detector-finding", "synthetic-traffic", "state-change", "live-observation"]
+  }];
+  string source = 2 [(buf.validate.field).string.min_len = 1];
+  string observation = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+message ConfirmedRootCause {
+  string summary = 1 [(buf.validate.field).string.min_len = 1];
+  repeated ObjectRef resources = 2 [(buf.validate.field).repeated.min_items = 1];
+  repeated RootCauseEvidence evidence = 3;
+  repeated string explained_detectors = 4;
+  repeated string static_context = 5;
+}
+
+message AppliedPlaybook {
+  string path = 1 [(buf.validate.field).string.min_len = 1];
+  map<string, ObjectRef> parameter_bindings = 2;
+  repeated string scripts = 3;
+}
+
+message VerificationEvidence {
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  bool passed = 2;
+  string details = 3 [(buf.validate.field).string.min_len = 1];
+  google.protobuf.Timestamp observed_at = 4 [(buf.validate.field).required = true];
+}
+
+// UsageMetrics is agentshim's normalized token accounting for one turn. The
+// CEL below mirrors sdo.contracts.models.UsageMetrics.validate_cached_input;
+// the cache-read alias *normalization* (set cached_input_tokens := cache_read
+// when it is zero) is a mutation CEL cannot do and stays a thin hand step.
+message UsageMetrics {
+  option (buf.validate.message).cel = {
+    id: "usage.reasoning_le_output"
+    message: "reasoning_output_tokens must not exceed output_tokens"
+    expression: "this.reasoning_output_tokens <= this.output_tokens"
+  };
+  option (buf.validate.message).cel = {
+    id: "usage.cache_write_1h_le_cache_write"
+    message: "cache_write_1h_input_tokens must not exceed cache_write_input_tokens"
+    expression: "!has(this.cache_write_1h_input_tokens) || this.cache_write_1h_input_tokens <= this.cache_write_input_tokens"
+  };
+  option (buf.validate.message).cel = {
+    id: "usage.cached_le_input_when_no_read"
+    message: "cached_input_tokens must not exceed input_tokens"
+    expression: "has(this.cache_read_input_tokens) || this.cached_input_tokens <= this.input_tokens"
+  };
+  option (buf.validate.message).cel = {
+    id: "usage.cache_write_le_cached_when_no_read"
+    message: "cache_write_input_tokens must not exceed cached_input_tokens"
+    expression: "has(this.cache_read_input_tokens) || this.cache_write_input_tokens <= this.cached_input_tokens"
+  };
+  option (buf.validate.message).cel = {
+    id: "usage.cached_aliases_read"
+    message: "cached_input_tokens is an alias of cache_read_input_tokens and must equal it (or be zero pre-normalization)"
+    expression: "!has(this.cache_read_input_tokens) || this.cached_input_tokens == 0 || this.cached_input_tokens == this.cache_read_input_tokens"
+  };
+  option (buf.validate.message).cel = {
+    id: "usage.read_plus_write_le_input"
+    message: "cache reads plus cache writes must not exceed input_tokens"
+    expression: "!has(this.cache_read_input_tokens) || this.cache_read_input_tokens + this.cache_write_input_tokens <= this.input_tokens"
+  };
+  option (buf.validate.message).cel = {
+    id: "usage.uncached_is_input_minus_read_and_write"
+    message: "uncached_input_tokens must equal input minus cache reads and writes"
+    expression:
+      "!has(this.cache_read_input_tokens) || !has(this.uncached_input_tokens) || "
+      "this.uncached_input_tokens == this.input_tokens - this.cache_read_input_tokens - this.cache_write_input_tokens"
+  };
+
+  int64 llm_calls = 1 [(buf.validate.field).int64.gte = 0];
+  int64 input_tokens = 2 [(buf.validate.field).int64.gte = 0];
+  int64 output_tokens = 3 [(buf.validate.field).int64.gte = 0];
+  int64 cached_input_tokens = 4 [(buf.validate.field).int64.gte = 0];
+  optional int64 cache_read_input_tokens = 5 [(buf.validate.field).int64.gte = 0];
+  int64 cache_write_input_tokens = 6 [(buf.validate.field).int64.gte = 0];
+  optional int64 cache_write_1h_input_tokens = 7 [(buf.validate.field).int64.gte = 0];
+  optional int64 uncached_input_tokens = 8 [(buf.validate.field).int64.gte = 0];
+  int64 reasoning_output_tokens = 9 [(buf.validate.field).int64.gte = 0];
+  optional int64 model_requests = 10 [(buf.validate.field).int64.gte = 0];
+  optional double total_cost_usd = 11 [(buf.validate.field).double.gte = 0];
+}
+
+message TimingMetrics {
+  option (buf.validate.message).cel = {
+    id: "timing.ordered"
+    message: "completed_at must not be before started_at"
+    expression: "this.completed_at >= this.started_at"
+  };
+  google.protobuf.Timestamp started_at = 1 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp completed_at = 2 [(buf.validate.field).required = true];
+}
+
+message RepairActionReceipt {
+  option (buf.validate.message).cel = {
+    id: "repair_action.ordered"
+    message: "completed_at must not be before started_at"
+    expression: "this.completed_at >= this.started_at"
+  };
+  string action_id = 1 [(buf.validate.field).string.min_len = 1];
+  string kind = 2 [(buf.validate.field).string.min_len = 1];
+  string target = 3 [(buf.validate.field).string.min_len = 1];
+  repeated ObjectRef resources = 4;
+  string summary = 5 [(buf.validate.field).string.min_len = 1];
+  string details = 6 [(buf.validate.field).string.min_len = 1];
+  google.protobuf.Timestamp started_at = 7 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp completed_at = 8 [(buf.validate.field).required = true];
+  bool success = 9;
+  bool reversible = 10;
+}
+
+// IncidentResult is what the responder returns. The CEL mirrors
+// sdo.contracts.models.IncidentResult.validate_repair_action_ids.
+message IncidentResult {
+  option (buf.validate.message).cel = {
+    id: "result.unique_repair_action_ids"
+    message: "repair action IDs must be unique"
+    expression: "this.repair_actions.all(a, this.repair_actions.filter(b, b.action_id == a.action_id).size() == 1)"
+  };
+  string schema_version = 1 [(buf.validate.field).string.const = "sdo.dev/v1alpha1"];
+  string incident_id = 2 [(buf.validate.field).string.min_len = 1];
+  string status = 3 [(buf.validate.field).string = {in: ["completed", "failed", "cancelled"]}];
+  repeated ConfirmedRootCause confirmed_root_causes = 4;
+  repeated AppliedPlaybook applied_playbooks = 5;
+  repeated string repair_changes = 6;
+  repeated RepairActionReceipt repair_actions = 7;
+  repeated DetectorEvaluation final_detector_states = 8;
+  repeated string proposed_memory_changes = 9;
+  repeated VerificationEvidence verification_evidence = 10;
+  UsageMetrics usage = 11 [(buf.validate.field).required = true];
+  TimingMetrics timing = 12 [(buf.validate.field).required = true];
+  optional string responder_session_id = 13;
+  optional string error = 14;
+}
+
+// IncidentView is the open incident as the controller's state ConfigMap
+// publishes it.
+message IncidentView {
+  string incident_id = 1 [(buf.validate.field).string.min_len = 1];
+  google.protobuf.Timestamp observed_at = 2 [(buf.validate.field).required = true];
+  repeated string blocking_detectors = 3;
+  repeated Finding blocking_findings = 4;
+  repeated Finding clearing_findings = 5;
+  StateChanges state_changes = 6;
+}
+
+// DetectorTimelineEntry summarizes one finding's firing history within an
+// incident window; carried in the incident closure. Mirrors
+// sdo.contracts.models.DetectorTimelineEntry and the Go runtime struct.
+message DetectorTimelineEntry {
+  option (buf.validate.message).cel = {
+    id: "timeline.last_seen_after_first"
+    message: "last_seen_at must not precede first_activated_at"
+    expression: "this.last_seen_at >= this.first_activated_at"
+  };
+  option (buf.validate.message).cel = {
+    id: "timeline.cleared_after_first"
+    message: "cleared_at must not precede first_activated_at"
+    expression: "!has(this.cleared_at) || this.cleared_at >= this.first_activated_at"
+  };
+  string detector_id = 1 [(buf.validate.field).string.min_len = 1];
+  string detector_class = 2;
+  string owner = 3;
+  string rule_id = 4;
+  string fingerprint = 5 [(buf.validate.field).string.min_len = 1];
+  map<string, ObjectRef> parameter_bindings = 6;
+  repeated string surfaced_playbooks = 7;
+  google.protobuf.Timestamp first_activated_at = 8 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp last_seen_at = 9 [(buf.validate.field).required = true];
+  optional google.protobuf.Timestamp cleared_at = 10;
+  string relation = 11 [(buf.validate.field).string = {in: ["before_dispatch", "after_dispatch", "no_incident"]}];
+  int32 activations = 12 [(buf.validate.field).int32.gte = 1];
+}
+
+// IncidentClosure is the record the controller hands the broker when an
+// incident ends. Mirrors the Go runtime.IncidentClosure struct.
+message IncidentClosure {
+  IncidentRequest request = 1 [(buf.validate.field).required = true];
+  IncidentResult result = 2;
+  optional string dispatch_error = 3;
+  repeated DetectorEvaluation final_detector_states = 4;
+  repeated DetectorEvaluation incident_detector_states = 5;
+  repeated DetectorTimelineEntry detector_timeline = 6;
+  bool incident_detector_fired_before_dispatch = 7;
+  bool incident_detector_fired_after_dispatch = 8;
+  bool no_incident_detector_fired = 9;
+  StateChanges final_state_changes = 10;
+  google.protobuf.Timestamp detected_at = 11 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp dispatched_at = 12 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp responder_completed_at = 13 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp verified_at = 14 [(buf.validate.field).required = true];
+  optional google.protobuf.Timestamp health_cleared_at = 15;
+  repeated ObservedStateChange observed_state_changes = 16;
+  optional google.protobuf.Timestamp detector_review_required_at = 17;
+  optional string detector_review_reason = 18;
+  repeated string cleaned_helpers = 19;
+}

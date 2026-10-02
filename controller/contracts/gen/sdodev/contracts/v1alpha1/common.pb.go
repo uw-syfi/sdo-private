@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        (unknown)
-// source: sdo/contracts/v1alpha1/common.proto
+// source: sdodev/contracts/v1alpha1/common.proto
 
 // Package sdo.contracts.v1alpha1 is the single source of truth for the
 // structured contracts that cross the SDO controller<->responder and
@@ -41,7 +41,7 @@ type ObjectRef struct {
 
 func (x *ObjectRef) Reset() {
 	*x = ObjectRef{}
-	mi := &file_sdo_contracts_v1alpha1_common_proto_msgTypes[0]
+	mi := &file_sdodev_contracts_v1alpha1_common_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -53,7 +53,7 @@ func (x *ObjectRef) String() string {
 func (*ObjectRef) ProtoMessage() {}
 
 func (x *ObjectRef) ProtoReflect() protoreflect.Message {
-	mi := &file_sdo_contracts_v1alpha1_common_proto_msgTypes[0]
+	mi := &file_sdodev_contracts_v1alpha1_common_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -66,7 +66,7 @@ func (x *ObjectRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectRef.ProtoReflect.Descriptor instead.
 func (*ObjectRef) Descriptor() ([]byte, []int) {
-	return file_sdo_contracts_v1alpha1_common_proto_rawDescGZIP(), []int{0}
+	return file_sdodev_contracts_v1alpha1_common_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *ObjectRef) GetApiVersion() string {
@@ -97,36 +97,36 @@ func (x *ObjectRef) GetName() string {
 	return ""
 }
 
-var File_sdo_contracts_v1alpha1_common_proto protoreflect.FileDescriptor
+var File_sdodev_contracts_v1alpha1_common_proto protoreflect.FileDescriptor
 
-const file_sdo_contracts_v1alpha1_common_proto_rawDesc = "" +
+const file_sdodev_contracts_v1alpha1_common_proto_rawDesc = "" +
 	"\n" +
-	"#sdo/contracts/v1alpha1/common.proto\x12\x16sdo.contracts.v1alpha1\"r\n" +
+	"&sdodev/contracts/v1alpha1/common.proto\x12\x19sdodev.contracts.v1alpha1\"r\n" +
 	"\tObjectRef\x12\x1f\n" +
 	"\vapi_version\x18\x01 \x01(\tR\n" +
 	"apiVersion\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x1c\n" +
 	"\tnamespace\x18\x03 \x01(\tR\tnamespace\x12\x12\n" +
-	"\x04name\x18\x04 \x01(\tR\x04nameB\xee\x01\n" +
-	"\x1acom.sdo.contracts.v1alpha1B\vCommonProtoP\x01ZIsdo.dev/controller/contracts/gen/sdo/contracts/v1alpha1;contractsv1alpha1\xa2\x02\x03SCX\xaa\x02\x16Sdo.Contracts.V1alpha1\xca\x02\x16Sdo\\Contracts\\V1alpha1\xe2\x02\"Sdo\\Contracts\\V1alpha1\\GPBMetadata\xea\x02\x18Sdo::Contracts::V1alpha1b\x06proto3"
+	"\x04name\x18\x04 \x01(\tR\x04nameB\x80\x02\n" +
+	"\x1dcom.sdodev.contracts.v1alpha1B\vCommonProtoP\x01ZLsdo.dev/controller/contracts/gen/sdodev/contracts/v1alpha1;contractsv1alpha1\xa2\x02\x03SCX\xaa\x02\x19Sdodev.Contracts.V1alpha1\xca\x02\x19Sdodev\\Contracts\\V1alpha1\xe2\x02%Sdodev\\Contracts\\V1alpha1\\GPBMetadata\xea\x02\x1bSdodev::Contracts::V1alpha1b\x06proto3"
 
 var (
-	file_sdo_contracts_v1alpha1_common_proto_rawDescOnce sync.Once
-	file_sdo_contracts_v1alpha1_common_proto_rawDescData []byte
+	file_sdodev_contracts_v1alpha1_common_proto_rawDescOnce sync.Once
+	file_sdodev_contracts_v1alpha1_common_proto_rawDescData []byte
 )
 
-func file_sdo_contracts_v1alpha1_common_proto_rawDescGZIP() []byte {
-	file_sdo_contracts_v1alpha1_common_proto_rawDescOnce.Do(func() {
-		file_sdo_contracts_v1alpha1_common_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_sdo_contracts_v1alpha1_common_proto_rawDesc), len(file_sdo_contracts_v1alpha1_common_proto_rawDesc)))
+func file_sdodev_contracts_v1alpha1_common_proto_rawDescGZIP() []byte {
+	file_sdodev_contracts_v1alpha1_common_proto_rawDescOnce.Do(func() {
+		file_sdodev_contracts_v1alpha1_common_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_sdodev_contracts_v1alpha1_common_proto_rawDesc), len(file_sdodev_contracts_v1alpha1_common_proto_rawDesc)))
 	})
-	return file_sdo_contracts_v1alpha1_common_proto_rawDescData
+	return file_sdodev_contracts_v1alpha1_common_proto_rawDescData
 }
 
-var file_sdo_contracts_v1alpha1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
-var file_sdo_contracts_v1alpha1_common_proto_goTypes = []any{
-	(*ObjectRef)(nil), // 0: sdo.contracts.v1alpha1.ObjectRef
+var file_sdodev_contracts_v1alpha1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_sdodev_contracts_v1alpha1_common_proto_goTypes = []any{
+	(*ObjectRef)(nil), // 0: sdodev.contracts.v1alpha1.ObjectRef
 }
-var file_sdo_contracts_v1alpha1_common_proto_depIdxs = []int32{
+var file_sdodev_contracts_v1alpha1_common_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
 	0, // [0:0] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -134,26 +134,26 @@ var file_sdo_contracts_v1alpha1_common_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_sdo_contracts_v1alpha1_common_proto_init() }
-func file_sdo_contracts_v1alpha1_common_proto_init() {
-	if File_sdo_contracts_v1alpha1_common_proto != nil {
+func init() { file_sdodev_contracts_v1alpha1_common_proto_init() }
+func file_sdodev_contracts_v1alpha1_common_proto_init() {
+	if File_sdodev_contracts_v1alpha1_common_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sdo_contracts_v1alpha1_common_proto_rawDesc), len(file_sdo_contracts_v1alpha1_common_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sdodev_contracts_v1alpha1_common_proto_rawDesc), len(file_sdodev_contracts_v1alpha1_common_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_sdo_contracts_v1alpha1_common_proto_goTypes,
-		DependencyIndexes: file_sdo_contracts_v1alpha1_common_proto_depIdxs,
-		MessageInfos:      file_sdo_contracts_v1alpha1_common_proto_msgTypes,
+		GoTypes:           file_sdodev_contracts_v1alpha1_common_proto_goTypes,
+		DependencyIndexes: file_sdodev_contracts_v1alpha1_common_proto_depIdxs,
+		MessageInfos:      file_sdodev_contracts_v1alpha1_common_proto_msgTypes,
 	}.Build()
-	File_sdo_contracts_v1alpha1_common_proto = out.File
-	file_sdo_contracts_v1alpha1_common_proto_goTypes = nil
-	file_sdo_contracts_v1alpha1_common_proto_depIdxs = nil
+	File_sdodev_contracts_v1alpha1_common_proto = out.File
+	file_sdodev_contracts_v1alpha1_common_proto_goTypes = nil
+	file_sdodev_contracts_v1alpha1_common_proto_depIdxs = nil
 }
