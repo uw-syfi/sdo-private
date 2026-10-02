@@ -24,6 +24,8 @@ import os
 import socket
 import subprocess
 import sys
+import time
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -36,8 +38,11 @@ from benchmarks.sregym.fastloop.worker_client import SregymWorker, worker_argv
 from sdo.operational_memory import DEFAULT_REFLECTION_SESSION
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from benchmarks.sregym.adapter import ClusterOps
     from benchmarks.sregym.fastloop.composite import CompositeSettings
+    from benchmarks.sregym.fastloop.hostguard import LoadWait
     from benchmarks.sregym.fastloop.loop import IncidentAgent
     from sdo.agent_runtime.lifecycle import LifecycleSeedCache, LifecycleValidationCache
 
@@ -89,11 +94,38 @@ def up_worker_environment(args: argparse.Namespace, *, workspace: Path) -> dict[
     return worker_env
 
 
+def _hold_for_calm_load(
+    args: argparse.Namespace, run_dir: Path, *, wait: Callable[..., LoadWait] | None = None
+) -> LoadWait | None:
+    """Hold cluster creation until the host load has been calm, and record what the host was doing.
+
+    A host that never calms down is reported and the run goes on, flagged as load-contaminated.
+    """
+
+    from benchmarks.sregym.fastloop.hostguard import LoadPolicy, wait_for_calm_load
+
+    if args.no_load_governor:
+        return None
+    policy = LoadPolicy(max_load=args.max_load, calm_seconds=args.calm_seconds, max_wait_seconds=args.max_load_wait)
+    result = (wait or wait_for_calm_load)(policy, lambda: os.getloadavg()[0], time.sleep, time.monotonic)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "host-load.json").write_text(json.dumps(asdict(result)), encoding="utf-8")
+    if not result.calm:
+        logger.warning(
+            "host load stayed above %.0f for %.0fs (peak %.0f): this run is load-contaminated",
+            policy.max_load,
+            result.waited_seconds,
+            result.peak_load,
+        )
+    return result
+
+
 def _up(args: argparse.Namespace) -> int:
     if args.kind_worker_nodes < 0:
         raise SystemExit("--kind-worker-nodes must not be negative")
     run_dir = args.run_dir.resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
+    _hold_for_calm_load(args, run_dir)
     workspace = run_dir / "application_workspace"
     if not workspace.exists():
         if args.seed is None:
@@ -544,6 +576,10 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("--validator-image", default=Images().validator)
     up.add_argument("--sregym-dir", type=Path, default=DEFAULT_SREGYM_DIR)
     up.add_argument("--redeploy", action="store_true", help="redeploy even if the application is healthy")
+    up.add_argument("--no-load-governor", action="store_true", help="do not wait for a calm host load first")
+    up.add_argument("--max-load", type=float, default=20.0, help="1-minute load the host must stay under first")
+    up.add_argument("--calm-seconds", type=float, default=120.0, help="how long the load must stay under --max-load")
+    up.add_argument("--max-load-wait", type=float, default=1200.0, help="longest wait for a calm host, in seconds")
     up.add_argument(
         "--no-sandbox",
         action="store_true",

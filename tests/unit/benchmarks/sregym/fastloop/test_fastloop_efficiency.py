@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -123,3 +124,51 @@ def test_the_sdo_agent_gets_the_seed_cache_and_the_detection_timeout(
     cli._sdo_agent(_args(tmp_path, "--cold-lifecycle"), environment, tmp_path / "results")
     captured["run_lifecycle"](object())  # type: ignore[operator]
     assert lifecycle_calls[0]["seed_cache"] is None
+
+
+def _up_args(*extra: str):
+    return build_parser().parse_args(["up", "--run-dir", "/x", *extra])
+
+
+def test_up_holds_for_calm_host_load_by_default_and_records_it(tmp_path: Path) -> None:
+    from benchmarks.sregym.fastloop.hostguard import LoadPolicy, LoadWait
+
+    policies: list[LoadPolicy] = []
+
+    def fake_wait(policy: LoadPolicy, *_clock: object) -> LoadWait:
+        policies.append(policy)
+        return LoadWait(calm=True, waited_seconds=42.0, final_load=9.0, peak_load=31.0)
+
+    result = cli._hold_for_calm_load(_up_args(), tmp_path, wait=fake_wait)
+
+    assert result is not None
+    assert policies[0].max_load == 20.0
+    recorded = json.loads((tmp_path / "host-load.json").read_text(encoding="utf-8"))
+    assert recorded["peak_load"] == 31.0
+    assert recorded["calm"] is True
+
+
+def test_up_proceeds_but_flags_the_run_when_the_host_never_calms_down(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    from benchmarks.sregym.fastloop.hostguard import LoadWait
+
+    def fake_wait(*_args: object) -> LoadWait:
+        return LoadWait(calm=False, waited_seconds=1800.0, final_load=44.0, peak_load=66.0)
+
+    with caplog.at_level("WARNING"):
+        result = cli._hold_for_calm_load(_up_args(), tmp_path, wait=fake_wait)
+
+    assert result is not None
+    assert result.calm is False
+    assert "load-contaminated" in caplog.text
+    assert json.loads((tmp_path / "host-load.json").read_text(encoding="utf-8"))["calm"] is False
+
+
+def test_the_load_governor_can_be_turned_off_or_tuned(tmp_path: Path) -> None:
+    def fail_wait(*_args: object):
+        raise AssertionError("must not wait")
+
+    assert cli._hold_for_calm_load(_up_args("--no-load-governor"), tmp_path, wait=fail_wait) is None
+    parsed = _up_args("--max-load", "12", "--calm-seconds", "30", "--max-load-wait", "600")
+    assert (parsed.max_load, parsed.calm_seconds, parsed.max_load_wait) == (12.0, 30.0, 600.0)
