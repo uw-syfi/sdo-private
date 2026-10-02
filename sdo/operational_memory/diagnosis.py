@@ -40,6 +40,7 @@ the health detectors alone decide.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
@@ -50,12 +51,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from sdo.contracts import DetectorEvaluationStatus, FindingStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
     from datetime import datetime
 
     from sdo.contracts import (
         ConfirmedRootCause,
         DetectorEvaluation,
+        DetectorTimelineEntry,
         IncidentRequest,
         IncidentResult,
         ObjectRef,
@@ -101,6 +103,10 @@ class DetectorFlip(BaseModel):
 
     detector_id: str
     fired_at_dispatch: bool
+    #: True when the controller's timeline shows the detector activated while the
+    #: responder was in flight, no later than health clearing or the responder's
+    #: completion. Old records default to False.
+    fired_after_dispatch: bool = False
     #: None when no post-response evaluation of the detector exists.
     cleared_after_fix: bool | None = None
     flipped: bool
@@ -157,6 +163,7 @@ def verify_diagnosis(
     observed_state_changes: Iterable[ObservedStateChange] | None = None,
     dispatched_at: datetime | None = None,
     responder_completed_at: datetime | None = None,
+    detector_timeline: Iterable[DetectorTimelineEntry] = (),
 ) -> list[RootCauseVerification]:
     """Verify each confirmed root cause of ``result`` against controller facts.
 
@@ -189,6 +196,17 @@ def verify_diagnosis(
     the mutation, so the report can lag the controller's record). It never
     backs a fault still present, an object outside the dispatch diff, or an
     action reported outside the session. Without them the strict rule holds.
+
+    ``detector_timeline`` is the controller's record of every finding's firing
+    in the incident window. A composite's faults land seconds apart, so a
+    learned detector can activate after dispatch and the responder legitimately
+    cites it (pull-before-act). Timeline entries related ``after_dispatch``
+    that activated no later than the earlier of health clearing and the
+    responder's completion count as fired, so a cause citing them is not
+    contradicted, and a late detector that cleared counts as flipped. A
+    finding that never joined the incident, or that activated after the
+    responder was done, still does not. Without the timeline only the
+    dispatch-time snapshot counts.
     """
 
     if result is None:
@@ -203,6 +221,7 @@ def verify_diagnosis(
         for finding in request.findings
         if finding.rule_id.startswith(SCENARIO_RULE_PREFIX)
     }
+    late = _LateFindings.of(detector_timeline, _late_bound(health_cleared_at, responder_completed_at))
     changed = _StateChangeEvidence.of(
         request.state_changes, final_state_changes, observed_state_changes, result.repair_actions
     )
@@ -213,7 +232,7 @@ def verify_diagnosis(
         None if dispatched_at is None or responder_completed_at is None else (dispatched_at, responder_completed_at)
     )
     repairs = _Repairs.of(result.repair_actions, request.state_changes, final_state_changes, health_cleared_at, session)
-    return [_verify(cause, fired, scenarios, changed, latest, repairs) for cause in result.confirmed_root_causes]
+    return [_verify(cause, fired, scenarios, late, changed, latest, repairs) for cause in result.confirmed_root_causes]
 
 
 def recovered_by_responder(verifications: Iterable[RootCauseVerification]) -> bool | None:
@@ -296,10 +315,69 @@ def _labels(state_changes: StateChanges | None) -> list[str]:
     return [] if state_changes is None else [f"{change.kind}/{change.name}" for change in state_changes.changes]
 
 
+#: Separators between the several sources one cited evidence item may name.
+_SOURCE_SEPARATOR = re.compile(r"\s*[;,]\s*")
+
+
+def _source_parts(source: str) -> list[str]:
+    """The individual sources a cited item names; models join several with ``,`` or ``;``."""
+
+    return [part for part in _SOURCE_SEPARATOR.split(source.strip()) if part] or [source]
+
+
+def _late_bound(health_cleared_at: datetime | None, responder_completed_at: datetime | None) -> datetime | None:
+    """The latest activation that can have informed the diagnosis: the earlier known of the two facts."""
+
+    known = [moment for moment in (health_cleared_at, responder_completed_at) if moment is not None]
+    return min(known) if known else None
+
+
+@dataclass(frozen=True)
+class _LateFindings:
+    """Findings that activated while the responder was in flight, from the controller's timeline."""
+
+    #: Detector ID -> whether every such activation had cleared by closure.
+    detectors: dict[str, bool]
+    #: Scenario names (``scenario-slo.`` stripped) the synthetic-traffic detector reported late.
+    scenarios: frozenset[str]
+
+    @classmethod
+    def of(cls, timeline: Iterable[DetectorTimelineEntry], bound: datetime | None) -> _LateFindings:
+        detectors: dict[str, bool] = {}
+        scenarios: set[str] = set()
+        for entry in timeline:
+            if entry.relation != "after_dispatch" or (bound is not None and entry.first_activated_at > bound):
+                continue
+            detectors[entry.detector_id] = detectors.get(entry.detector_id, True) and entry.cleared_at is not None
+            if entry.rule_id.startswith(SCENARIO_RULE_PREFIX):
+                scenarios.add(entry.rule_id.removeprefix(SCENARIO_RULE_PREFIX))
+        return cls(detectors, frozenset(scenarios))
+
+
+def _check_parts(source: str, known: Callable[[str], bool], what: str) -> tuple[bool, str | None]:
+    """Whether every source part ``source`` names is ``known``; the reason names the parts that are not."""
+
+    missing = [part for part in _source_parts(source) if not known(part)]
+    if not missing:
+        return True, None
+    return False, f"{what}: {', '.join(missing)}"
+
+
+def _check_state_parts(source: str, changed: _StateChangeEvidence) -> tuple[bool | None, str | None]:
+    results = [changed.check(part) for part in _source_parts(source)]
+    for verified, reason in results:
+        if verified is False:
+            return False, reason
+    if any(verified is None for verified, _ in results):
+        return None, None
+    return True, None
+
+
 def _verify(
     cause: ConfirmedRootCause,
     fired: set[str],
     scenarios: set[str],
+    late: _LateFindings,
     changed: _StateChangeEvidence,
     latest: dict[str, DetectorEvaluation],
     repairs: _Repairs,
@@ -309,11 +387,19 @@ def _verify(
         verified: bool | None
         reason: str | None = None
         if item.kind == "detector-finding":
-            verified = item.source in fired
+            verified, reason = _check_parts(
+                item.source,
+                lambda part: part in fired or part in late.detectors,
+                "no finding was reported in this incident before health cleared",
+            )
         elif item.kind == "synthetic-traffic":
-            verified = item.source.removeprefix(SCENARIO_RULE_PREFIX) in scenarios
+            verified, reason = _check_parts(
+                item.source,
+                lambda part: (name := part.removeprefix(SCENARIO_RULE_PREFIX)) in scenarios or name in late.scenarios,
+                "no scenario finding was reported in this incident before health cleared",
+            )
         elif item.kind == "state-change":
-            verified, reason = changed.check(item.source)
+            verified, reason = _check_state_parts(item.source, changed)
         else:
             verified = None
         checks.append(EvidenceCheck(kind=item.kind, source=item.source, verified=verified, reason=reason))
@@ -322,12 +408,17 @@ def _verify(
         evaluation = latest.get(detector_id)
         cleared = None if evaluation is None else evaluation.status == DetectorEvaluationStatus.CLEAR
         was_firing = detector_id in fired
+        fired_late = detector_id in late.detectors
+        if evaluation is None and fired_late and late.detectors[detector_id]:
+            # No post-response evaluation of a detector that joined late: its own clear time is the record.
+            cleared = True
         flips.append(
             DetectorFlip(
                 detector_id=detector_id,
                 fired_at_dispatch=was_firing,
+                fired_after_dispatch=fired_late,
                 cleared_after_fix=cleared,
-                flipped=was_firing and cleared is True,
+                flipped=(was_firing or fired_late) and cleared is True,
             )
         )
     repair = repairs.attribute(cause)

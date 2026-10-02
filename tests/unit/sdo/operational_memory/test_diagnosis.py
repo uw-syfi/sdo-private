@@ -810,7 +810,11 @@ def test_a_finding_that_never_joined_an_incident_is_not_evidence() -> None:
 
 
 def test_a_finding_that_activated_after_health_cleared_does_not_confirm_a_cause() -> None:
-    entry = _timeline_entry("late-configmap-detector", activated_at=HEALTH_CLEARED + timedelta(seconds=5))
+    entry = _timeline_entry(
+        "late-configmap-detector",
+        activated_at=HEALTH_CLEARED + timedelta(seconds=5),
+        cleared_at=HEALTH_CLEARED + timedelta(seconds=30),
+    )
 
     verification = _verify_late(_late_cause("late-configmap-detector"), [entry])
 
@@ -820,7 +824,9 @@ def test_a_finding_that_activated_after_health_cleared_does_not_confirm_a_cause(
 
 def test_a_finding_that_activated_after_the_responder_finished_does_not_confirm_a_cause() -> None:
     done = _DISPATCHED + timedelta(minutes=2)
-    entry = _timeline_entry("late-configmap-detector", activated_at=done + timedelta(seconds=1))
+    entry = _timeline_entry(
+        "late-configmap-detector", activated_at=done + timedelta(seconds=1), cleared_at=done + timedelta(seconds=9)
+    )
 
     verification = _verify_late(
         _late_cause("late-configmap-detector"), [entry], health_cleared_at=None, responder_completed_at=done
@@ -902,7 +908,9 @@ def test_joined_synthetic_traffic_scenarios_are_matched_individually() -> None:
     )
 
     [verification] = verify_diagnosis(
-        _traffic_request("hotel-login", "hotel-search"), _result(cause), final_detector_states=[_clear("traffic-health")]
+        _traffic_request("hotel-login", "hotel-search"),
+        _result(cause),
+        final_detector_states=[_clear("traffic-health")],
     )
 
     assert verification.evidence[0].verified is True
@@ -935,9 +943,7 @@ def test_scenarios_no_finding_ever_reported_stay_contradicted_with_the_parts_nam
         explained=("traffic-health",),
     )
 
-    [verification] = verify_diagnosis(
-        _request(), _result(cause), final_detector_states=[_clear("traffic-health")]
-    )
+    [verification] = verify_diagnosis(_request(), _result(cause), final_detector_states=[_clear("traffic-health")])
 
     assert verification.verdict == DiagnosisVerdict.CONTRADICTED
     reason = verification.evidence[0].reason or ""
@@ -999,7 +1005,9 @@ def test_replay_of_the_mixed_mini_stream_a4_composite_confirms_the_late_cited_ca
         resources=(_NETWORK_POLICY,),
         summary="deny-all isolates user",
     )
-    result = _result(configmap_cause, policy_cause, actions=[_repair("restore", _CONFIGMAP), _repair("drop", _NETWORK_POLICY)])
+    result = _result(
+        configmap_cause, policy_cause, actions=[_repair("restore", _CONFIGMAP), _repair("drop", _NETWORK_POLICY)]
+    )
 
     verifications = verify_diagnosis(
         request,

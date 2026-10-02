@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from sdo.contracts import (
     DetectorEvaluation,
+    DetectorTimelineEntry,
     IncidentRequest,
     IncidentResult,
     IncidentStatus,
@@ -42,6 +43,10 @@ class OutcomeFacts(BaseModel):
     # must predate the responder's own repair of it. None from controllers
     # that predate it.
     observed_state_changes: list[ObservedStateChange] | None = None
+    # The controller's firing timeline for the incident window. A learned
+    # detector that activated after dispatch backs a cause the responder cited
+    # through pull-before-act. Empty from controllers that predate it.
+    detector_timeline: list[DetectorTimelineEntry] = Field(default_factory=list)
     health_verified: bool
     fault_confirmed: bool
     missed_fault_detected: bool = False
@@ -78,6 +83,7 @@ def derive_outcome(facts: OutcomeFacts) -> OutcomeRecord:
         observed_state_changes=facts.observed_state_changes,
         dispatched_at=facts.dispatched_at,
         responder_completed_at=facts.responder_completed_at,
+        detector_timeline=facts.detector_timeline,
     )
     classification = _classification(facts, verification)
     applied_playbooks = [] if result is None else [playbook.path for playbook in result.applied_playbooks]

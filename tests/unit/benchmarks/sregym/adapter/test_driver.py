@@ -1774,6 +1774,7 @@ def test_receipt_diagnosis_verification_comes_from_the_broker_closure() -> None:
     assert verification["detectors"][0] == {
         "detector_id": "missing-configmap",
         "fired_at_dispatch": True,
+        "fired_after_dispatch": False,
         "cleared_after_fix": True,
         "flipped": True,
     }
@@ -1851,6 +1852,52 @@ def test_receipt_credits_a_repair_whose_reported_clock_trails_health_clearing_in
     assert [item["verdict"] for item in verification] == ["confirmed"]
     assert verification[0]["repair"]["clock_skew_corrected"] == [result["repair_actions"][0]["action_id"]]
     assert _recovery_attribution(verification) == "responder"
+
+
+def test_receipt_diagnosis_confirms_a_detector_the_responder_cited_that_activated_after_dispatch() -> None:
+    """The receipt recomputes the verdict from the closure, so the controller's detector timeline must reach it."""
+
+    fixtures = Path(__file__).resolve().parents[4] / "fixtures" / "sdo" / "contracts"
+    request = json.loads((fixtures / "incident_request_state_changes.json").read_text(encoding="utf-8"))
+    result = json.loads((fixtures / "incident_result.json").read_text(encoding="utf-8"))
+    request["incident_id"] = result["incident_id"]
+    policy = {"kind": "NetworkPolicy", "name": "deny-all"}
+    result["repair_actions"][0]["resources"] = [policy]
+    result["repair_actions"][0]["target"] = "NetworkPolicy/deny-all"
+    result["confirmed_root_causes"][0]["resources"] = [policy]
+    result["confirmed_root_causes"][0]["evidence"] = [
+        {"kind": "detector-finding", "source": "late-detector", "observation": "late finding"}
+    ]
+    result["confirmed_root_causes"][0]["explained_detectors"] = ["late-detector"]
+    closure = {
+        "request": request,
+        "result": result,
+        "final_detector_states": result["final_detector_states"],
+        "final_state_changes": {**request["state_changes"], "changes": []},
+        "detector_timeline": [
+            {
+                "detector_id": "late-detector",
+                "rule_id": "selected-pods-denied-all",
+                "fingerprint": "late-detector/selected-pods-denied-all/ns/deny-all",
+                "first_activated_at": "2026-07-09T18:01:07Z",
+                "last_seen_at": "2026-07-09T18:05:00Z",
+                "cleared_at": "2026-07-09T18:06:00Z",
+                "relation": "after_dispatch",
+            }
+        ],
+        "health_cleared_at": "2026-07-09T18:12:00Z",
+        "detected_at": "2026-07-09T18:00:31Z",
+        "dispatched_at": "2026-07-09T18:01:00Z",
+        "responder_completed_at": "2026-07-09T18:13:05Z",
+        "verified_at": "2026-07-09T18:13:10Z",
+    }
+
+    [verification] = _diagnosis_verification(closure)
+    [without] = _diagnosis_verification({**closure, "detector_timeline": []})
+
+    assert verification["verdict"] == "confirmed"
+    assert verification["detectors"][0]["fired_after_dispatch"] is True
+    assert without["verdict"] == "contradicted"
 
 
 @pytest.mark.parametrize(
