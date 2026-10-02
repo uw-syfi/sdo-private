@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from controller.builder.errors import ControllerBuilderError
 from controller.builder.go_runner import GoRunner
 from controller.builder.paths import find_app_root, find_tool_paths
+from controller.builder.schema import SchemaSourceError, schema_identity
 from controller.builder.workspace import BuildWorkspace, BuildWorkspaceConfig
 
 if TYPE_CHECKING:
@@ -63,6 +64,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_common_args(test)
     test.add_argument("--keep-workdir", action="store_true", help=argparse.SUPPRESS)
     _add_healthy_baseline_arg(test)
+    _add_expect_schema_arg(test)
 
     draft_test = subparsers.add_parser(
         "draft-test",
@@ -71,6 +73,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_common_args(draft_test)
     draft_test.add_argument("--detector-id", action="append", required=True)
     _add_healthy_baseline_arg(draft_test)
+    _add_expect_schema_arg(draft_test)
 
     run_once = subparsers.add_parser("run-once", help="build and run detectors once against a Kubernetes namespace")
     _add_common_args(run_once)
@@ -188,6 +191,42 @@ def _add_healthy_baseline_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_expect_schema_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--expect-schema",
+        default=None,
+        metavar="IDENTITY",
+        help="validator schema identity the caller expects this image to embed; when set, startup fails "
+        "loud if the image's own schema differs (a stale validator image). Default: not checked.",
+    )
+
+
+def _assert_expected_schema(args: argparse.Namespace) -> None:
+    """Fail loud when a stale image's embedded schema differs from the caller's.
+
+    Seam 4 of docs/seam-contracts-decisions.md: the sandbox passes the schema
+    identity it expects (sdo.contracts.sdk_schema.SDK_SCHEMA_IDENTITY); this
+    recomputes the identity from the image's own baked SDK sources. A mismatch
+    means the running image predates the current schema -- the stale-validator
+    bug class (an old SDK silently dropping `links.yaml`) -- so refuse up front
+    rather than validate against the wrong contract.
+    """
+
+    expected = getattr(args, "expect_schema", None)
+    if not expected:
+        return
+    try:
+        actual = schema_identity()
+    except SchemaSourceError as exc:
+        raise ValueError(f"cannot verify validator schema identity: {exc}") from exc
+    if actual != expected:
+        raise ValueError(
+            "stale validator image: it embeds schema "
+            f"{actual!r} but the caller expects {expected!r}. "
+            "Rebuild the sdo-detector-validator image from the current SDK (scripts/build_sdo_images.sh)."
+        )
+
+
 def _healthy_baseline(args: argparse.Namespace, app_root: Path) -> Path | None:
     value: Path | None = args.healthy_baseline
     if value is None:
@@ -215,6 +254,7 @@ def _check(args: argparse.Namespace) -> int:
 
 
 def _test(args: argparse.Namespace) -> int:
+    _assert_expected_schema(args)
     app_root = _app_root(args)
     tool_paths = find_tool_paths()
     runner = GoRunner.from_environment()
@@ -241,6 +281,7 @@ def _test(args: argparse.Namespace) -> int:
 
 
 def _draft_test(args: argparse.Namespace) -> int:
+    _assert_expected_schema(args)
     app_root = _app_root(args)
     tool_paths = find_tool_paths()
     runner = GoRunner.from_environment()

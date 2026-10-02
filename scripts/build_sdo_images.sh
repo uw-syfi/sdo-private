@@ -7,9 +7,13 @@ tag="${SDO_IMAGE_TAG:-v0.1.0}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # SDO_IMAGE_TAG builds under a private tag so shared v0.1.0 images stay untouched.
 tag="${SDO_IMAGE_TAG:-v0.1.0}"
+# Compute the validator schema identity from the SDK/manifest sources being
+# baked and pin it into the image (seam 4). Only stdlib is needed, so no venv.
+validator_schema_identity="$(PYTHONPATH="${repo_root}" python3 -c 'from controller.builder.schema import schema_identity; print(schema_identity())')"
 docker build \
   --load \
   --file "${repo_root}/controller/Dockerfile.validator" \
+  --build-arg "SDO_VALIDATOR_SCHEMA_IDENTITY=${validator_schema_identity}" \
   --tag sdo-detector-validator:${tag} \
   "${repo_root}"
 docker build \

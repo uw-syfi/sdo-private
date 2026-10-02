@@ -291,3 +291,42 @@ def test_container_validation_identity_distinguishes_the_healthy_baseline_gate()
         runner_for(None).validation_identity() == "container-sandbox/v1:sha256:abc:controller.builder.check_cli-test/v1"
     )
     assert runner_for("b").validation_identity() != runner_for(None).validation_identity()
+
+
+def test_container_sandbox_passes_the_expected_schema_identity(tmp_path: Path) -> None:
+    # Seam 4: the sandbox tells the image which schema it must embed, so a stale
+    # image is caught loud at startup rather than silently validating against an
+    # old SDK schema.
+    from sdo.contracts.sdk_schema import SDK_SCHEMA_IDENTITY
+
+    captured: list[str] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured.extend(command)
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    ContainerSandboxRunner(command_runner=fake_run).run(tmp_path)
+
+    assert captured[captured.index("--expect-schema") + 1] == SDK_SCHEMA_IDENTITY
+
+
+def test_container_sandbox_expected_schema_is_optional(tmp_path: Path) -> None:
+    captured: list[str] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured.extend(command)
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    ContainerSandboxRunner(command_runner=fake_run, expect_schema=None).run(tmp_path)
+
+    assert "--expect-schema" not in captured
+
+
+def test_kubernetes_job_passes_the_expected_schema_identity() -> None:
+    from sdo.contracts.sdk_schema import SDK_SCHEMA_IDENTITY
+    from sdo.operational_memory.sandbox import KubernetesJobSandboxRunner
+
+    job = KubernetesJobSandboxRunner(namespace="n", image="i", repository_pvc="p")._job("run", "sub")
+    args = job["spec"]["template"]["spec"]["containers"][0]["args"]  # type: ignore[index]
+
+    assert args[args.index("--expect-schema") + 1] == SDK_SCHEMA_IDENTITY

@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Protocol
 
+from sdo.contracts.sdk_schema import SDK_SCHEMA_IDENTITY
 from sdo.operational_memory.models import ValidatorNetworkPolicyCanary
 
 if TYPE_CHECKING:
@@ -95,10 +96,16 @@ class ContainerSandboxRunner:
         authoring_check: bool = False,
         healthy_baseline: str | None = None,
         command_runner: CommandRunner | None = None,
+        expect_schema: str | None = SDK_SCHEMA_IDENTITY,
     ) -> None:
         # SDO_VALIDATOR_IMAGE selects a private validator tag for host-side lifecycle validation, so a
         # run on a privately tagged build never validates against a stale shared tag.
         self.image = image or os.environ.get("SDO_VALIDATOR_IMAGE", "").strip() or DEFAULT_VALIDATOR_IMAGE
+        # Seam 4: the identity we expect the validator image to embed. The
+        # in-image check_cli recomputes its own identity and fails loud if it
+        # differs, catching a stale image instead of silently validating against
+        # an old SDK schema. None disables the check.
+        self.expect_schema = expect_schema
         self.healthy_baseline = healthy_baseline_argument(healthy_baseline)
         self.runtime = runtime or shutil.which("docker") or shutil.which("podman") or "docker"
         self.timeout_seconds = timeout_seconds
@@ -188,6 +195,8 @@ class ContainerSandboxRunner:
             "--app",
             "/workspace",
         ]
+        if self.expect_schema:
+            command.extend(["--expect-schema", self.expect_schema])
         for detector_id in self.detector_ids:
             command.extend(["--detector-id", detector_id])
         if self.healthy_baseline:
@@ -313,6 +322,7 @@ class KubernetesJobSandboxRunner:
         poll_interval_seconds: float = 1,
         healthy_baseline: str | None = None,
         command_runner: CommandRunner = subprocess.run,
+        expect_schema: str | None = SDK_SCHEMA_IDENTITY,
     ) -> None:
         self.healthy_baseline = healthy_baseline_argument(healthy_baseline)
         if not namespace or not image or not repository_pvc:
@@ -321,6 +331,9 @@ class KubernetesJobSandboxRunner:
             raise ValueError("validator timeout must be positive and poll interval non-negative")
         self.namespace = namespace
         self.image = image
+        # Seam 4: the schema identity the validator image must embed; a stale
+        # image is rejected loud at startup by the in-image check_cli.
+        self.expect_schema = expect_schema
         self.repository_pvc = repository_pvc
         self.repository_mount_path = repository_mount_path.resolve()
         self.timeout_seconds = timeout_seconds
@@ -620,6 +633,7 @@ class KubernetesJobSandboxRunner:
                                     "test",
                                     "--app",
                                     "/workspace",
+                                    *(["--expect-schema", self.expect_schema] if self.expect_schema else []),
                                     *(["--healthy-baseline", self.healthy_baseline] if self.healthy_baseline else []),
                                 ],
                                 "workingDir": "/workspace",
