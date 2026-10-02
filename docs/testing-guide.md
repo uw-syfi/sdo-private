@@ -13,6 +13,10 @@ SDO spans Python orchestration, Go controller modules, generated detector worksp
 - `controller/core/*_test.go` — detector execution and validation.
 - `controller/runtime/*_test.go` — scheduling, persistence, batching, dispatch, broker effects, and state.
 
+## Validator image
+
+Host-side lifecycle runs and `sdo detector check` validate in a container image selected by the configured `validator_image`, or `SDO_VALIDATOR_IMAGE` when none is configured, and last by the shared `sdo-detector-validator:v0.1.0`. After changing `controller/sdk`, rebuild with `SDO_IMAGE_TAG=<tag> scripts/build_sdo_images.sh` and pass that tag for the controller and the validator alike; a stale validator image fails with `StaleValidatorImageError` naming the rejected field.
+
 ## Core commands
 
 ```bash
