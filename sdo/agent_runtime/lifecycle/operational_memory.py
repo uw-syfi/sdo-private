@@ -34,6 +34,10 @@ from sdo.operational_memory import (
     BROKER_AUTHOR_EMAIL,
     TRAFFIC_DIRECTORY,
     TRAFFIC_INCIDENT_WORKLOAD_PREFIX,
+    TRAFFIC_LINK_MAX_LINKS,
+    TRAFFIC_PROBER_SOURCE,
+    TRAFFIC_TOPOLOGY_WORKLOAD,
+    TRAFFIC_TOPOLOGY_WORKLOAD_PREFIX,
     VALIDATION_PASSED_TRAILER,
     ContainerSandboxRunner,
     SandboxResult,
@@ -1178,11 +1182,16 @@ _GENERIC_BLOCK_RE = re.compile(
 )
 
 
-#: Judge-authored traffic files, relative to ``.sdo/diagnostics/traffic/``;
-#: the responder-owned ``generators/incident/`` and ``incident-*`` workloads are excluded.
+#: Judge-authored traffic files, relative to ``.sdo/diagnostics/traffic/``; the responder-owned
+#: ``generators/incident/`` and ``incident-*`` workloads and the lifecycle-derived ``topology-*``
+#: workloads are excluded.
 _JUDGE_TRAFFIC_FILE = re.compile(
-    rf"generators/[a-z0-9_]+\.go|workloads/(?!{TRAFFIC_INCIDENT_WORKLOAD_PREFIX})[a-z0-9]([-a-z0-9]{{0,61}}[a-z0-9])?\.yaml"
+    r"generators/[a-z0-9_]+\.go|workloads/"
+    rf"(?!{TRAFFIC_INCIDENT_WORKLOAD_PREFIX}|{TRAFFIC_TOPOLOGY_WORKLOAD_PREFIX})"
+    r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\.yaml"
 )
+TRAFFIC_TOPOLOGY_MAX_LINKS = TRAFFIC_LINK_MAX_LINKS
+_TOPOLOGY_WORKLOAD_PATH = f"workloads/{TRAFFIC_TOPOLOGY_WORKLOAD}.yaml"
 
 
 def _is_judge_traffic_path(path: str) -> bool:
@@ -1239,7 +1248,8 @@ def _link_probe_workloads(root: Path) -> list[str]:
 
 def _workloads_with_purpose(root: Path, purpose: str) -> list[str]:
     names = []
-    for path in _judge_traffic_files(root):
+    derived = root / TRAFFIC_DIRECTORY / _TOPOLOGY_WORKLOAD_PATH
+    for path in [*_judge_traffic_files(root), *([derived] if derived.is_file() else [])]:
         if path.suffix != ".yaml":
             continue
         try:
@@ -1373,13 +1383,98 @@ func TestRegistration(t *testing.T) {{
 """
 
 
+def topology_link_workload(root: Path) -> TrafficWorkload | None:
+    """The link-probe workload that dials every Service port the application source declares.
+
+    The health judge lists the dependency edges it finds in the source, and that list
+    varies from one lifecycle to the next. This workload does not depend on it: it is
+    derived from the tracked Service manifests alone, so a Service the judge left out
+    still has an edge, dialed afresh by the prober (``from`` is the prober itself).
+    Skipped, because a TCP dial of them says nothing: ExternalName Services, Services
+    without a TCP port, and Services of a kind other than core ``v1``. The same name
+    and port declared by several deployment variants is one edge. A Service that is
+    not deployed, or a port nothing listens on, never connects, and the link detector
+    ignores an edge that never connected. Edges are sorted by Service and port and
+    capped at the link-probe limit, so a very large application is probed
+    deterministically, not completely. ``None`` when the source declares no Service.
+    """
+
+    edges: set[tuple[str, int]] = set()
+    for relative in _git(root, "ls-files").splitlines():
+        if not relative or relative.startswith(".sdo/") or Path(relative).suffix.lower() not in {".yaml", ".yml"}:
+            continue
+        try:
+            documents = list(yaml.safe_load_all((root / relative).read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
+            continue
+        for document in documents:
+            edges.update(_service_tcp_edges(document))
+    if not edges:
+        return None
+    ordered = sorted(edges)
+    truncated = len(ordered) - TRAFFIC_TOPOLOGY_MAX_LINKS
+    document = {
+        "apiVersion": "sdo.dev/v1alpha1",
+        "kind": "TrafficWorkload",
+        "name": TRAFFIC_TOPOLOGY_WORKLOAD,
+        "purpose": "link-probe",
+        "links": [
+            {"from": TRAFFIC_PROBER_SOURCE, "to": name, "port": port}
+            for name, port in ordered[:TRAFFIC_TOPOLOGY_MAX_LINKS]
+        ],
+    }
+    workload = TrafficWorkload.model_validate(document)
+    if truncated > 0:
+        logger.warning("topology link probe covers %d of %d Service ports", TRAFFIC_TOPOLOGY_MAX_LINKS, len(ordered))
+    return workload
+
+
+def _service_tcp_edges(document: object) -> set[tuple[str, int]]:
+    if not isinstance(document, dict) or document.get("apiVersion") != "v1" or document.get("kind") != "Service":
+        return set()
+    metadata, spec = document.get("metadata"), document.get("spec")
+    if not isinstance(metadata, dict) or not isinstance(spec, dict) or spec.get("type") == "ExternalName":
+        return set()
+    name = metadata.get("name")
+    ports = spec.get("ports")
+    if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?", name):
+        return set()
+    if name == TRAFFIC_PROBER_SOURCE or not isinstance(ports, list):
+        return set()
+    return {
+        (name, entry["port"])
+        for entry in ports
+        if isinstance(entry, dict)
+        and type(entry.get("port")) is int
+        and 1 <= entry["port"] <= 65535
+        and entry.get("protocol", "TCP") == "TCP"
+    }
+
+
+def _ensure_topology_link_workload(root: Path) -> None:
+    path = root / TRAFFIC_DIRECTORY / _TOPOLOGY_WORKLOAD_PATH
+    workload = topology_link_workload(root)
+    if workload is None:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = yaml.safe_dump(workload.model_dump(mode="json", by_alias=True, exclude_none=True, exclude_defaults=True))
+    path.write_text(
+        "# Lifecycle-derived from the Services the application source declares; not authored by the health judge.\n"
+        + document,
+        encoding="utf-8",
+    )
+
+
 def _ensure_generic_health_detectors(root: Path) -> None:
     """Install the endpoint check and one traffic detector per health-probe or link-probe workload, idempotently.
 
     Their registrations sit in marked blocks at the end of the detector list so a
-    refresh replaces exactly them and never touches responder-owned entries.
+    refresh replaces exactly them and never touches responder-owned entries. The
+    topology link workload is derived first, so it gets its detector like any other.
     """
 
+    _ensure_topology_link_workload(root)
     diagnostics = root / ".sdo" / "diagnostics"
     health = diagnostics / "detectors" / "health"
     health_workloads = _health_probe_workloads(root)
@@ -1451,7 +1546,7 @@ def _traffic_errors(files: list[AuthoredTrafficFile], deployer: DeployerAssessme
     workloads = [authored for authored in files if authored.path.startswith("workloads/")]
     errors.extend(
         f"traffic file {authored.path!r} must be generators/<file>.go or workloads/<name>.yaml "
-        f"(not an {TRAFFIC_INCIDENT_WORKLOAD_PREFIX}* workload)"
+        f"(not an {TRAFFIC_INCIDENT_WORKLOAD_PREFIX}* or {TRAFFIC_TOPOLOGY_WORKLOAD_PREFIX}* workload)"
         for authored in files
         if not _JUDGE_TRAFFIC_FILE.fullmatch(authored.path)
     )

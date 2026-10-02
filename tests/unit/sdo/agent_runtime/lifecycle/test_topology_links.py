@@ -183,7 +183,9 @@ def test_the_topology_workload_belongs_to_the_lifecycle_not_to_a_judge_round(tmp
     forged = AuthoredTrafficFile(
         path=f"workloads/{TRAFFIC_TOPOLOGY_WORKLOAD}.yaml", content=_links(("example", "example2", 80))
     )
-    errors = _traffic_errors([forged], RecordingBackend().run_deployer(repository=repository, application="x", correction_feedback=None))
+    errors = _traffic_errors(
+        [forged], RecordingBackend().run_deployer(repository=repository, application="x", correction_feedback=None)
+    )
     assert any(TRAFFIC_TOPOLOGY_WORKLOAD in error or "topology-" in error for error in errors)
 
 

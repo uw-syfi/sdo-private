@@ -119,11 +119,18 @@ def test_lifecycle_installs_a_link_detector_for_a_link_probe_workload(tmp_path: 
     assert [workload.name for workload in MemoryRepository(repository).traffic_workloads()] == [
         "health",
         "links",
+        "topology-links",
         "verify",
     ]
     manifest = load_manifest(repository / ".sdo/diagnostics/manifest.yaml", app_root=repository)
     registrations = {detector.id: detector for detector in manifest.detectors}
-    assert sorted(registrations) == ["health-objective", "service-endpoints", "traffic-health", "traffic-links"]
+    assert sorted(registrations) == [
+        "health-objective",
+        "service-endpoints",
+        "traffic-health",
+        "traffic-links",
+        "traffic-topology-links",
+    ]
     assert registrations["traffic-links"].owner == "health_judge"
     assert [(watch.api_version, watch.kind) for watch in registrations["traffic-links"].watches] == [
         ("sdo.dev/v1alpha1", "SyntheticTraffic")

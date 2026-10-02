@@ -153,6 +153,12 @@ TRAFFIC_GENERATORS_DIRECTORY = f"{TRAFFIC_DIRECTORY}/generators"
 TRAFFIC_INCIDENT_GENERATORS_DIRECTORY = f"{TRAFFIC_GENERATORS_DIRECTORY}/incident"
 TRAFFIC_WORKLOAD_DIRECTORY = f"{TRAFFIC_DIRECTORY}/workloads"
 TRAFFIC_INCIDENT_WORKLOAD_PREFIX = "incident-"
+#: The lifecycle derives one ``link-probe`` workload from the source-declared Services
+#: (``workloads/topology-links.yaml``); neither the health judge nor a responder authors ``topology-*``.
+TRAFFIC_TOPOLOGY_WORKLOAD_PREFIX = "topology-"
+TRAFFIC_TOPOLOGY_WORKLOAD = f"{TRAFFIC_TOPOLOGY_WORKLOAD_PREFIX}links"
+#: ``from`` of an edge the prober dials by itself; mirrors ``traffic.ProberSource`` in the Go SDK.
+TRAFFIC_PROBER_SOURCE = "sdo-prober"
 TRAFFIC_MAX_RATE_PER_SECOND = 20.0
 TRAFFIC_MAX_TIMEOUT_SECONDS = 10.0
 TRAFFIC_MAX_ITERATION_TIMEOUT_SECONDS = 30.0
