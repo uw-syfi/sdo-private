@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import dataclasses
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-from sregym_fake_host import CODEX_PIN, FakeHost, REPOSITORY_ROOT
+from sregym_fake_host import CODEX_PIN, REPOSITORY_ROOT, FakeHost
 
 from benchmarks.sregym.runner.experiment import ExperimentConfig, RunnerEnv
 from benchmarks.sregym.runner.launch_contract import CONTROLLER_HELP_COMMAND
 from benchmarks.sregym.runner.preflight import PreflightReport, PreflightSettings, check_images, run_preflight
 from sdo.controller_install import controller_launch_flags
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 NOW = 1_790_000_000.0
 

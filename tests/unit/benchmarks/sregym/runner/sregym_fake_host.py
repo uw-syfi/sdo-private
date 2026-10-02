@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from benchmarks.sregym.runner.launch_contract import CONTROLLER_HELP_COMMAND, IMAGE_TRAFFIC_SDK
 from benchmarks.sregym.runner.preflight import GB, ImageInfo, ImageVersions
 from sdo.controller_install import controller_launch_flags
-
-from pathlib import Path
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
