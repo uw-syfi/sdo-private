@@ -180,3 +180,66 @@ def test_persistent_gate_waits_for_the_resumed_controllers_all_clear_before_inje
     assert timings["controller_baseline_wait"] == pytest.approx(2.0)
     assert all(namespace == "hotel-sdo" for _, namespace in calls)
     assert calls[0][0][:2] == ["logs", "job/sdo-controller-run"]
+
+
+def _warm_gate_kubectl(clock: _Clock, *, prober_ready_at: float | None):
+    """A kubectl whose controller is all-clear at once and whose prober pod is Ready from ``prober_ready_at``."""
+
+    def kubectl(args: list[str], *, namespace: str, check: bool) -> subprocess.CompletedProcess[str]:
+        if args[0] == "logs":
+            stdout = _evaluation("resolved") + "\n" + _maintenance("active", "stage-1") + "\n" + _evaluation("resolved")
+            return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+        assert args[:2] == ["get", "pod/sdo-prober"]
+        if prober_ready_at is None:
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr='pods "sdo-prober" not found')
+        ready = clock.now >= prober_ready_at
+        pod = {
+            "status": {
+                "phase": "Running" if ready else "Pending",
+                "conditions": [{"type": "Ready", "status": str(ready)}],
+            }
+        }
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(pod), stderr="")
+
+    return kubectl
+
+
+def test_gate_waits_for_the_prober_to_warm_so_link_probes_see_the_edge_before_the_fault() -> None:
+    from benchmarks.sregym.adapter.fault_gate import PROBER_WARMUP_SECONDS
+
+    clock = _Clock()
+    injected_at: list[float] = []
+
+    timings = inject_fault_after_resumed_baseline(
+        "hotel-sdo",
+        "stage-1",
+        inject=lambda: injected_at.append(clock.now),
+        kubectl_runner=_warm_gate_kubectl(clock, prober_ready_at=7.0),
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+        timeout_seconds=600,
+    )
+
+    assert len(injected_at) == 1
+    assert injected_at[0] >= 7.0 + PROBER_WARMUP_SECONDS
+    assert timings["prober_warm_wait"] >= PROBER_WARMUP_SECONDS
+
+
+def test_gate_does_not_wait_forever_for_an_app_without_a_prober() -> None:
+    from benchmarks.sregym.adapter.fault_gate import PROBER_APPEAR_SECONDS
+
+    clock = _Clock()
+    injected_at: list[float] = []
+
+    inject_fault_after_resumed_baseline(
+        "hotel-sdo",
+        "stage-1",
+        inject=lambda: injected_at.append(clock.now),
+        kubectl_runner=_warm_gate_kubectl(clock, prober_ready_at=None),
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+        timeout_seconds=600,
+    )
+
+    assert len(injected_at) == 1
+    assert injected_at[0] <= PROBER_APPEAR_SECONDS + 5

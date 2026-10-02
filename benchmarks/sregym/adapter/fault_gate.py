@@ -24,6 +24,13 @@ AWAITING_FAULT_INJECTION = "awaiting_fault_injection"
 BASELINE_TIMEOUT_SECONDS = 1800
 BASELINE_POLL_SECONDS = 1.0
 PERSISTENT_LOG_TAIL = 2000
+PROBER_POD = "pod/sdo-prober"
+#: A link-reachability finding needs the edge to have connected once, so the fault must not land before the
+#: prober has been dialling for a while. Dials run every second, so this leaves many samples.
+PROBER_WARMUP_SECONDS = 30.0
+#: An application without traffic workloads has no prober; do not wait for one longer than this.
+PROBER_APPEAR_SECONDS = 45.0
+PROBER_WAIT_CAP_SECONDS = 300.0
 
 
 class FaultGateError(RuntimeError):
@@ -159,7 +166,11 @@ def inject_fault_after_resumed_baseline(
     sleep: Callable[[float], None] = time.sleep,
     timeout_seconds: float = BASELINE_TIMEOUT_SECONDS,
 ) -> dict[str, float]:
-    """Inject once the persistent controller reports all-clear after resuming ``generation``."""
+    """Inject once the persistent controller reports all-clear after resuming ``generation``.
+
+    The controller's first all-clear can precede the prober's first dial, and a link detector reports only edges that
+    connected at least once, so the gate also waits for a Ready prober to warm up before the fault lands.
+    """
 
     started = monotonic()
     deadline = started + timeout_seconds
@@ -177,12 +188,62 @@ def inject_fault_after_resumed_baseline(
             last_error = f"latest controller evaluation has active findings {sorted(set(active))}"
         if active == []:
             baseline_ready = monotonic()
+            warm_wait = _wait_for_prober_warm(control_namespace, kubectl_runner, monotonic, sleep)
+            warm_ready = monotonic()
             inject()
             return {
                 "controller_baseline_wait": baseline_ready - started,
-                "fault_injection_request": monotonic() - baseline_ready,
+                "prober_warm_wait": warm_wait,
+                "fault_injection_request": monotonic() - warm_ready,
             }
         if completed.returncode != 0:
             last_error = (completed.stderr or completed.stdout or "").strip() or last_error
         sleep(BASELINE_POLL_SECONDS)
     raise FaultGateError(f"controller did not report an all-clear baseline within {timeout_seconds:.0f}s: {last_error}")
+
+
+def _prober_ready(completed: subprocess.CompletedProcess[str]) -> bool:
+    if completed.returncode != 0:
+        return False
+    try:
+        pod = json.loads(completed.stdout)
+        status = pod["status"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return False
+    if not isinstance(status, dict) or status.get("phase") != "Running":
+        return False
+    conditions = status.get("conditions") or []
+    return any(
+        isinstance(condition, dict) and condition.get("type") == "Ready" and condition.get("status") == "True"
+        for condition in conditions
+    )
+
+
+def _wait_for_prober_warm(
+    control_namespace: str,
+    kubectl_runner: KubectlRunner,
+    monotonic: Callable[[], float],
+    sleep: Callable[[float], None],
+) -> float:
+    """Wait until the controller's prober pod has been Ready for PROBER_WARMUP_SECONDS; return the seconds waited.
+
+    Returns early when no prober pod shows up (an application without traffic workloads) and gives up at a cap.
+    """
+
+    started = monotonic()
+    ready_since: float | None = None
+    seen = False
+    while True:
+        now = monotonic()
+        completed = kubectl_runner(["get", PROBER_POD, "-o", "json"], namespace=control_namespace, check=False)
+        if _prober_ready(completed):
+            seen = True
+            ready_since = now if ready_since is None else ready_since
+            if now - ready_since >= PROBER_WARMUP_SECONDS:
+                return now - started
+        else:
+            ready_since = None
+            seen = seen or completed.returncode == 0
+        if now - started >= PROBER_WAIT_CAP_SECONDS or (not seen and now - started >= PROBER_APPEAR_SECONDS):
+            return now - started
+        sleep(BASELINE_POLL_SECONDS)
