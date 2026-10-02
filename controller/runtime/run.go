@@ -65,6 +65,20 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	if stderr == nil {
 		stderr = os.Stderr
 	}
+	if len(args) > 0 && args[0] == LaunchConfigFlag {
+		// Launch from one typed ControllerConfig the launcher mounted, instead
+		// of a hand-mirrored flag list. The config expands to this controller's
+		// own flags through the single in-tree mapping, so the flag parsing and
+		// validation below stay the one source of flag semantics.
+		if len(args) < 2 {
+			return fmt.Errorf("%s requires a controller config path", LaunchConfigFlag)
+		}
+		config, err := LoadControllerConfig(args[1])
+		if err != nil {
+			return err
+		}
+		args = append(controllerConfigToArgs(config), args[2:]...)
+	}
 	if len(args) > 0 && args[0] == "--run-once" {
 		return core.RunWithOptions(ctx, detectors, core.RuntimeOptions{Args: args[1:], Stdout: stdout, Stderr: stderr})
 	}
