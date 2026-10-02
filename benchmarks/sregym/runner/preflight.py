@@ -938,7 +938,7 @@ def _fmt_epoch(value: float | None) -> str:
     return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(value))
 
 
-def _as_check(name: str, findings: Sequence[launch_contract.Finding]) -> PreflightCheck:
+def check_from_findings(name: str, findings: Sequence[launch_contract.Finding]) -> PreflightCheck:
     """One report line for the findings of one launch-contract check over every arm."""
 
     failed = [finding for finding in findings if finding.status == "fail"]
@@ -979,7 +979,7 @@ def _launch_checks(ctx: _Context) -> list[PreflightCheck]:
     sdk_root = ctx.project_root / "controller" / "sdk"
     if arms:
         checks.append(
-            _as_check(
+            check_from_findings(
                 "image-tags",
                 [
                     launch_contract.check_image_tags(
@@ -1003,12 +1003,14 @@ def _launch_checks(ctx: _Context) -> list[PreflightCheck]:
             if validator in present
         ]
         if flag_findings:
-            checks.append(_as_check("controller-flags", flag_findings))
+            checks.append(check_from_findings("controller-flags", flag_findings))
         if sdk_findings:
-            checks.append(_as_check("validator-sdk", sdk_findings))
-        checks.append(_as_check("launch-lint", [launch_contract.check_launch_lint(features) for _, features in arms]))
+            checks.append(check_from_findings("validator-sdk", sdk_findings))
+        checks.append(
+            check_from_findings("launch-lint", [launch_contract.check_launch_lint(features) for _, features in arms])
+        )
     checks.append(
-        _as_check(
+        check_from_findings(
             "host-load",
             [
                 launch_contract.check_host_load(
@@ -1019,7 +1021,7 @@ def _launch_checks(ctx: _Context) -> list[PreflightCheck]:
     )
     if ctx.agents & {"sdo_codex", "codex"}:
         codex_home = Path(ctx.env.get("CODEX_HOME", "").strip() or ctx.host.home / ".codex")
-        checks.append(_as_check("codex-auth", [launch_contract.check_codex_auth(codex_home)]))
+        checks.append(check_from_findings("codex-auth", [launch_contract.check_codex_auth(codex_home)]))
     return checks
 
 
@@ -1089,21 +1091,21 @@ def check_images(
     validator = images.get("validator_image")
     if controller and ctx.host.image(controller) is not None:
         checks.append(
-            _as_check(
+            check_from_findings(
                 "controller-flags",
                 [launch_contract.check_controller_flags(host, controller, launch_contract.ALL_FEATURES)],
             )
         )
     if validator and ctx.host.image(validator) is not None:
         checks.append(
-            _as_check(
+            check_from_findings(
                 "validator-sdk",
                 [launch_contract.check_validator_sdk(host, validator, project_root / "controller" / "sdk")],
             )
         )
     if controller and validator:
         checks.append(
-            _as_check(
+            check_from_findings(
                 "image-tags",
                 [
                     launch_contract.check_image_tags(

@@ -18,6 +18,7 @@ from benchmarks.sregym.runner.launch_contract import (
     check_launch_lint,
     check_seed,
     check_validator_sdk,
+    inspect_seed,
     workload_tags,
 )
 from sdo.controller_install import controller_launch_flags
@@ -315,3 +316,17 @@ def test_a_cluster_in_use_by_another_experiment_fails() -> None:
     assert check_cluster_available(FakeClusters(["mi-w60"]), "mi-w60").status == "pass"
     assert check_cluster_available(FakeClusters([]), "mi-w60").status == "pass"
     assert check_cluster_available(FakeClusters(None), "mi-w60").status == "unknown"
+
+
+def test_inspecting_a_seed_accepts_cold_and_attested_and_rejects_half_built(tmp_path: Path) -> None:
+    seed = _git_repo(tmp_path / "seed")
+    assert inspect_seed(seed).status == "pass"
+    assert "cold" in inspect_seed(seed).detail
+
+    (seed / ".sdo").mkdir()
+    assert inspect_seed(seed).status == "fail"  # .sdo without lifecycle provenance: a half-built lifecycle
+
+    (seed / ".sdo" / "lifecycle-provenance.yaml").write_text("{}", encoding="utf-8")
+    assert inspect_seed(seed).status == "unknown"  # attested, but no links workload
+
+    assert inspect_seed(tmp_path).status == "fail"

@@ -86,7 +86,7 @@ def test_up_builds_the_same_one_worker_kind_lane_as_the_experiments(tmp_path: Pa
 
 def test_up_rejects_a_negative_worker_count(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="kind-worker-nodes"):
-        main(["up", "--run-dir", str(tmp_path), "--kind-worker-nodes", "-1"])
+        main(["up", "--run-dir", str(tmp_path), "--kind-worker-nodes", "-1", "--no-preflight"])
 
 
 class _StopAtProxy(Exception):

@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 from benchmarks.sregym.fastloop.environment import DEFAULT_PROBLEM, FastloopEnvironment, Images
 from benchmarks.sregym.fastloop.fault_driver import SregymFaultDriver
 from benchmarks.sregym.fastloop.loop import LoopConfig, run_incidents
+from benchmarks.sregym.fastloop.preflight import run_launch_preflight
 from benchmarks.sregym.fastloop.records import AgentSummary, IncidentRecord, load_records, summarize
 from benchmarks.sregym.fastloop.worker_client import SregymWorker, worker_argv
 from sdo.operational_memory import DEFAULT_REFLECTION_SESSION
@@ -89,6 +90,7 @@ def up_worker_environment(args: argparse.Namespace, *, workspace: Path) -> dict[
 
 
 def _up(args: argparse.Namespace) -> int:
+    run_launch_preflight(args, stage="up")
     if args.kind_worker_nodes < 0:
         raise SystemExit("--kind-worker-nodes must not be negative")
     run_dir = args.run_dir.resolve()
@@ -270,6 +272,7 @@ def _sdo_agent(
 
 def _run(args: argparse.Namespace) -> int:
     environment = FastloopEnvironment.load(args.run_dir.resolve())
+    run_launch_preflight(args, stage="run", images=environment.images)
     os.environ["KUBECONFIG"] = str(environment.kubeconfig)
     run_id = args.run_id or f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{args.agent}"
     results_dir = environment.run_dir / "results" / run_id
@@ -519,6 +522,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="run the SREGym worker without a private /tmp (unsafe next to other SREGym runs)",
     )
+    up.add_argument(
+        "--no-preflight",
+        action="store_true",
+        help="skip the launch preflight (flag contract, validator SDK, seed, lane, load, Codex login)",
+    )
     up.set_defaults(handler=_up)
 
     run = commands.add_parser("run", help="loop incidents against the warm environment")
@@ -574,6 +582,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=600.0,
         help="composite problems: seconds SDO waits for another incident while faults remain",
+    )
+    run.add_argument(
+        "--no-preflight",
+        action="store_true",
+        help="skip the launch preflight (images against this run's features, risky option combinations, load)",
     )
     run.set_defaults(handler=_run)
 

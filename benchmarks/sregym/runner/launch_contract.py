@@ -274,3 +274,15 @@ def check_cluster_available(probe: ClusterProbe, cluster: str) -> Finding:
             "fail", f"cluster {cluster} is in use by {owner}", "choose another --cluster-prefix or --worker-id"
         )
     return Finding("pass", f"cluster {cluster} exists and is free; it will be reused")
+
+
+def inspect_seed(seed: Path) -> Finding:
+    """A seed repository is a git repository that is either source-only (cold) or a finished lifecycle (attested)."""
+
+    if not (seed / ".git").exists():
+        return Finding(
+            "fail", f"seed {seed} is not a git repository", "pass a git repository with the application source"
+        )
+    if not (seed / ".sdo").is_dir():
+        return Finding("pass", f"seed {seed} is a cold source-only repository (the lifecycle will run)")
+    return check_seed(seed, expect="attested")
