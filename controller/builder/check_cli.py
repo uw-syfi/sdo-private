@@ -155,6 +155,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="follow-up responders for health findings that stay active after a response; zero disables",
     )
     controller.add_argument("--follow-up-cooldown", default="30s")
+    controller.add_argument(
+        "--closeout-state-gate",
+        action="store_true",
+        help="send back objects still different from the healthy baseline that no repair touched or responder acknowledged",
+    )
     controller.add_argument("--repair-policy", choices=("commit", "recorded-actions"), default="commit")
     controller.add_argument("--duration", default="")
     controller.add_argument("--lease-name", default="sdo-controller")
@@ -514,6 +519,8 @@ def _controller_once(args: argparse.Namespace) -> int:
             "--repository-pvc-subpath": args.repository_pvc_subpath,
             "--duration": args.duration,
         }
+        if args.closeout_state_gate:
+            command.append("--closeout-state-gate")
         if args.exit_after_closure:
             command.append("--exit-after-closure")
         if getattr(args, "supervise", False) and not getattr(args, "controller_update_rollout", False):

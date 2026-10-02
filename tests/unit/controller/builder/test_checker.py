@@ -519,6 +519,7 @@ done
             "3",
             "--follow-up-cooldown",
             "45s",
+            "--closeout-state-gate",
             "--repair-policy",
             "recorded-actions",
         ]
@@ -539,6 +540,7 @@ done
     assert "--verification-timeout 90s" in argv
     assert "--max-follow-ups 3" in argv
     assert "--follow-up-cooldown 45s" in argv
+    assert "--closeout-state-gate" in argv
     assert "--repair-policy recorded-actions" in argv
 
 
