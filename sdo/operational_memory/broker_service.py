@@ -518,6 +518,7 @@ class BrokerService:
                 final_state_changes=closure.final_state_changes,
                 health_cleared_at=closure.health_cleared_at,
                 observed_state_changes=closure.observed_state_changes,
+                detector_timeline=closure.detector_timeline,
                 health_verified=health_verified,
                 fault_confirmed=bool(result and result.confirmed_root_causes),
                 inspected_playbooks=surfaced,

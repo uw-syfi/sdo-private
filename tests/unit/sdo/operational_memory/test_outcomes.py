@@ -8,6 +8,7 @@ import pytest
 
 from sdo.contracts import (
     ConfirmedRootCause,
+    DetectorTimelineEntry,
     IncidentRequest,
     IncidentResult,
     IncidentStatus,
@@ -336,3 +337,38 @@ def test_a_repair_with_a_slightly_late_reported_clock_is_still_an_sdo_success_an
     assert verification.verdict == DiagnosisVerdict.CONFIRMED
     assert verification.repair is not None
     assert verification.repair.clock_skew_corrected == ["repair-0"]
+
+
+def test_a_detector_that_activated_after_dispatch_and_was_cited_by_the_responder_is_learnable() -> None:
+    """Phase A mini stream a, incident 4: the learned detector fired 7 s after dispatch and was cited.
+
+    The controller's timeline must reach the verifier, so the cause is confirmed (reflection may
+    learn from it) instead of contradicted.
+    """
+
+    cause = ConfirmedRootCause(
+        summary="deny-all isolates the pods",
+        resources=[ObjectRef(kind="NetworkPolicy", name="deny-all")],
+        evidence=[RootCauseEvidence(kind="detector-finding", source="late-detector", observation="late finding")],
+        explained_detectors=["late-detector"],
+    )
+    facts = _attribution_facts(cause, repaired=("NetworkPolicy/deny-all",))
+    activated = facts.dispatched_at + timedelta(seconds=7)
+    entry = DetectorTimelineEntry(
+        detector_id="late-detector",
+        rule_id="selected-pods-denied-all",
+        fingerprint="late-detector/selected-pods-denied-all/ns/deny-all",
+        first_activated_at=activated,
+        last_seen_at=activated + timedelta(seconds=30),
+        cleared_at=activated + timedelta(seconds=40),
+        relation="after_dispatch",
+    )
+
+    without = derive_outcome(facts)
+    outcome = derive_outcome(facts.model_copy(update={"detector_timeline": [entry]}))
+
+    assert [verification.verdict for verification in without.diagnosis_verification] == [DiagnosisVerdict.CONTRADICTED]
+    assert outcome.classification == OutcomeClassification.SUCCESS
+    [verification] = outcome.diagnosis_verification
+    assert verification.verdict == DiagnosisVerdict.CONFIRMED
+    assert [flip.fired_after_dispatch for flip in verification.detectors] == [True]

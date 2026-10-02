@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -10,6 +10,7 @@ import pytest
 from sdo.contracts import (
     ConfirmedRootCause,
     DetectorEvaluation,
+    DetectorTimelineEntry,
     IncidentRequest,
     IncidentResult,
     ObjectRef,
@@ -20,6 +21,7 @@ from sdo.contracts import (
     StateChanges,
 )
 from sdo.operational_memory import DiagnosisVerdict, verify_diagnosis
+from sdo.operational_memory.diagnosis import DetectorFlip
 
 FIXTURE_DIR = Path(__file__).resolve().parents[3] / "fixtures" / "sdo" / "contracts"
 AFTER = datetime(2026, 7, 9, 18, 12, 30, tzinfo=timezone.utc)
@@ -704,3 +706,320 @@ def test_a_failed_skewed_repair_is_not_credited() -> None:
     assert verification.verdict == DiagnosisVerdict.UNATTRIBUTED
     assert verification.repair is not None
     assert verification.repair.actions == []
+
+
+# Late findings: in a composite the faults land a few seconds apart, so a learned detector can
+# activate after dispatch and the responder cites it through pull-before-act. The mixed mini
+# stream (phase A step 3) marked 12 such causes ``contradicted`` because the verifier only
+# counted the dispatch snapshot. The controller's detector timeline is the independent record.
+_LATE_AT = _DISPATCHED + timedelta(seconds=7)
+_LATE_CLEARED = datetime(2026, 7, 9, 18, 9, tzinfo=timezone.utc)
+
+
+def _timeline_entry(
+    detector_id: str,
+    *,
+    rule_id: str = "rule",
+    relation: str = "after_dispatch",
+    activated_at: datetime = _LATE_AT,
+    cleared_at: datetime | None = _LATE_CLEARED,
+) -> DetectorTimelineEntry:
+    return DetectorTimelineEntry.model_validate(
+        {
+            "detector_id": detector_id,
+            "rule_id": rule_id,
+            "fingerprint": f"{detector_id}/{rule_id}/ns/obj",
+            "first_activated_at": activated_at.isoformat(),
+            "last_seen_at": (cleared_at or activated_at).isoformat(),
+            "cleared_at": None if cleared_at is None else cleared_at.isoformat(),
+            "relation": relation,
+        }
+    )
+
+
+def _late_cause(*sources: str, explained: tuple[str, ...] = ("late-configmap-detector",)) -> ConfirmedRootCause:
+    return _cause(
+        *(RootCauseEvidence(kind="detector-finding", source=source, observation="reported") for source in sources),
+        explained=explained,
+        resources=(_CONFIGMAP, ObjectRef(kind="Deployment", name="geo")),
+        summary="geo lost its required ConfigMap",
+    )
+
+
+def _verify_late(
+    cause: ConfirmedRootCause,
+    timeline: list[DetectorTimelineEntry],
+    *,
+    final_states: list[DetectorEvaluation] | None = None,
+    health_cleared_at: datetime | None = HEALTH_CLEARED,
+    responder_completed_at: datetime | None = _RESPONDER_DONE,
+    request: IncidentRequest | None = None,
+):
+    [verification] = verify_diagnosis(
+        request or _request(),
+        _result(cause, actions=[_repair("restore-configmap", _CONFIGMAP)]),
+        final_detector_states=[] if final_states is None else final_states,
+        final_state_changes=_unchanged_except("ConfigMap/geo-config"),
+        health_cleared_at=health_cleared_at,
+        dispatched_at=_DISPATCHED,
+        responder_completed_at=responder_completed_at,
+        detector_timeline=timeline,
+    )
+    return verification
+
+
+def test_a_detector_finding_that_activated_after_dispatch_confirms_the_cause() -> None:
+    verification = _verify_late(_late_cause("late-configmap-detector"), [_timeline_entry("late-configmap-detector")])
+
+    assert verification.verdict == DiagnosisVerdict.CONFIRMED
+    assert [check.verified for check in verification.evidence] == [True]
+    [flip] = verification.detectors
+    assert (flip.fired_at_dispatch, flip.fired_after_dispatch, flip.cleared_after_fix, flip.flipped) == (
+        False,
+        True,
+        True,
+        True,
+    )
+
+
+def test_a_dispatch_time_finding_is_not_marked_as_firing_after_dispatch() -> None:
+    [verification] = verify_diagnosis(
+        _request(),
+        _result(_cause(RootCauseEvidence(kind="detector-finding", source="missing-configmap", observation="absent"))),
+        final_detector_states=[_clear("missing-configmap")],
+    )
+
+    [flip] = verification.detectors
+    assert (flip.fired_at_dispatch, flip.fired_after_dispatch, flip.flipped) == (True, False, True)
+
+
+def test_a_detector_that_never_fired_during_the_incident_is_still_contradicted() -> None:
+    verification = _verify_late(
+        _late_cause("late-configmap-detector"), [_timeline_entry("some-other-detector")], final_states=[]
+    )
+
+    assert verification.verdict == DiagnosisVerdict.CONTRADICTED
+    assert [check.verified for check in verification.evidence] == [False]
+    assert "late-configmap-detector" in (verification.evidence[0].reason or "")
+
+
+def test_a_finding_that_never_joined_an_incident_is_not_evidence() -> None:
+    entry = _timeline_entry("late-configmap-detector", relation="no_incident")
+
+    assert _verify_late(_late_cause("late-configmap-detector"), [entry]).verdict == DiagnosisVerdict.CONTRADICTED
+
+
+def test_a_finding_that_activated_after_health_cleared_does_not_confirm_a_cause() -> None:
+    entry = _timeline_entry(
+        "late-configmap-detector",
+        activated_at=HEALTH_CLEARED + timedelta(seconds=5),
+        cleared_at=HEALTH_CLEARED + timedelta(seconds=30),
+    )
+
+    verification = _verify_late(_late_cause("late-configmap-detector"), [entry])
+
+    assert verification.verdict == DiagnosisVerdict.CONTRADICTED
+    assert [flip.fired_after_dispatch for flip in verification.detectors] == [False]
+
+
+def test_a_finding_that_activated_after_the_responder_finished_does_not_confirm_a_cause() -> None:
+    done = _DISPATCHED + timedelta(minutes=2)
+    entry = _timeline_entry(
+        "late-configmap-detector", activated_at=done + timedelta(seconds=1), cleared_at=done + timedelta(seconds=9)
+    )
+
+    verification = _verify_late(
+        _late_cause("late-configmap-detector"), [entry], health_cleared_at=None, responder_completed_at=done
+    )
+
+    assert verification.verdict == DiagnosisVerdict.CONTRADICTED
+
+
+def test_a_late_detector_that_never_cleared_leaves_the_cause_unverified() -> None:
+    entry = _timeline_entry("late-configmap-detector", cleared_at=None)
+
+    verification = _verify_late(_late_cause("late-configmap-detector"), [entry])
+
+    assert verification.verdict == DiagnosisVerdict.UNVERIFIED
+    assert [check.verified for check in verification.evidence] == [True]
+    assert [flip.cleared_after_fix for flip in verification.detectors] == [None]
+
+
+def test_a_post_response_evaluation_outranks_the_timeline_clear() -> None:
+    entry = _timeline_entry("late-configmap-detector")
+
+    verification = _verify_late(
+        _late_cause("late-configmap-detector"), [entry], final_states=[_firing("late-configmap-detector")]
+    )
+
+    assert verification.verdict == DiagnosisVerdict.UNVERIFIED
+    assert [flip.cleared_after_fix for flip in verification.detectors] == [False]
+
+
+def test_without_a_timeline_the_dispatch_only_rule_still_holds() -> None:
+    [verification] = verify_diagnosis(
+        _request(),
+        _result(_late_cause("late-configmap-detector")),
+        final_detector_states=[_clear("late-configmap-detector")],
+    )
+
+    assert verification.verdict == DiagnosisVerdict.CONTRADICTED
+
+
+def test_joined_detector_sources_are_checked_one_by_one() -> None:
+    entry = _timeline_entry("late-configmap-detector")
+    joined = "late-configmap-detector; missing-configmap"
+
+    verification = _verify_late(
+        _late_cause(joined, explained=("late-configmap-detector", "missing-configmap")),
+        [entry],
+        final_states=[_clear("missing-configmap")],
+    )
+
+    assert verification.verdict == DiagnosisVerdict.CONFIRMED
+    assert [check.verified for check in verification.evidence] == [True]
+
+
+def test_one_unfired_part_of_a_joined_source_contradicts_the_citation_and_names_it() -> None:
+    entry = _timeline_entry("late-configmap-detector")
+    joined = "late-configmap-detector, ghost-detector"
+
+    verification = _verify_late(_late_cause(joined), [entry])
+
+    assert verification.verdict == DiagnosisVerdict.CONTRADICTED
+    assert verification.evidence[0].verified is False
+    assert "ghost-detector" in (verification.evidence[0].reason or "")
+    assert "late-configmap-detector" not in (verification.evidence[0].reason or "")
+
+
+def _traffic_request(*scenarios: str) -> IncidentRequest:
+    request = _request()
+    findings = [
+        request.findings[0].model_copy(update={"detector_id": "traffic-health", "rule_id": f"scenario-slo.{name}"})
+        for name in scenarios
+    ]
+    return request.model_copy(update={"findings": [*request.findings, *findings]})
+
+
+def test_joined_synthetic_traffic_scenarios_are_matched_individually() -> None:
+    cause = _cause(
+        RootCauseEvidence(kind="synthetic-traffic", source="hotel-login, hotel-search", observation="failing"),
+        explained=("traffic-health",),
+    )
+
+    [verification] = verify_diagnosis(
+        _traffic_request("hotel-login", "hotel-search"),
+        _result(cause),
+        final_detector_states=[_clear("traffic-health")],
+    )
+
+    assert verification.evidence[0].verified is True
+
+
+def test_a_scenario_that_activated_after_dispatch_is_matched_from_the_timeline() -> None:
+    cause = _late_cause("traffic-health", explained=("traffic-health",))
+    cause = cause.model_copy(
+        update={
+            "evidence": [
+                RootCauseEvidence(kind="synthetic-traffic", source="hotel-login, hotel-search", observation="failing")
+            ]
+        }
+    )
+    timeline = [_timeline_entry("traffic-health", rule_id="scenario-slo.hotel-search")]
+
+    verification = _verify_late(cause, timeline, request=_traffic_request("hotel-login"))
+
+    assert verification.evidence[0].verified is True
+    assert verification.verdict == DiagnosisVerdict.CONFIRMED
+
+
+def test_scenarios_no_finding_ever_reported_stay_contradicted_with_the_parts_named() -> None:
+    """Phase A mini stream b, incident 3: the readiness cause cited three scenarios no finding named."""
+
+    cause = _cause(
+        RootCauseEvidence(
+            kind="synthetic-traffic", source="hotel-login, hotel-search, hotel-recommendations", observation="slow"
+        ),
+        explained=("traffic-health",),
+    )
+
+    [verification] = verify_diagnosis(_request(), _result(cause), final_detector_states=[_clear("traffic-health")])
+
+    assert verification.verdict == DiagnosisVerdict.CONTRADICTED
+    reason = verification.evidence[0].reason or ""
+    assert all(name in reason for name in ("hotel-login", "hotel-search", "hotel-recommendations"))
+
+
+def test_old_flip_records_without_the_after_dispatch_field_still_validate() -> None:
+    flip = DetectorFlip.model_validate(
+        {"detector_id": "missing-configmap", "fired_at_dispatch": True, "cleared_after_fix": True, "flipped": True}
+    )
+
+    assert flip.fired_after_dispatch is False
+
+
+# Replay of phase A mini stream a, incident 4 (composite3c: ConfigMap + NetworkPolicy + readiness):
+# the learned detectors activated 7 s, 14 s and 20 s after dispatch, the responder pulled and cited
+# them, and the verifier marked both causes contradicted. Times are the receipt's own.
+_A4_DISPATCH = datetime(2026, 10, 2, 9, 17, 10, 850000, tzinfo=timezone.utc)
+_A4_HEALTH_CLEARED = datetime(2026, 10, 2, 9, 18, 31, 700000, tzinfo=timezone.utc)
+_A4_DONE = datetime(2026, 10, 2, 9, 18, 50, tzinfo=timezone.utc)
+
+
+def _a4(detector_id: str, rule_id: str, activated: str, cleared: str) -> DetectorTimelineEntry:
+    day = "2026-10-02T09:"
+    return _timeline_entry(
+        detector_id,
+        rule_id=rule_id,
+        activated_at=datetime.fromisoformat(f"{day}{activated}+00:00"),
+        cleared_at=datetime.fromisoformat(f"{day}{cleared}+00:00"),
+    )
+
+
+def test_replay_of_the_mixed_mini_stream_a4_composite_confirms_the_late_cited_causes() -> None:
+    request = _request().model_copy(
+        update={
+            "findings": [
+                _request().findings[0].model_copy(update={"detector_id": "health-objective", "rule_id": "deployment"}),
+                _request().findings[0].model_copy(update={"detector_id": "service-endpoints", "rule_id": "endpoints"}),
+            ],
+            "detector_history": [_firing("health-objective"), _firing("service-endpoints")],
+        }
+    )
+    timeline = [
+        _a4("missing-deployment-configmap", "required-configmap-absent", "17:17.585035", "18:06.758250"),
+        _a4("deny-all-network-policy", "selected-pods-denied-all", "17:24.781060", "19:05.448715"),
+        _a4("traffic-links", "link-reachability.frontend.user.8086", "17:31.094149", "18:37.094634"),
+    ]
+    configmap_cause = _cause(
+        RootCauseEvidence(kind="detector-finding", source="missing-deployment-configmap", observation="late finding"),
+        RootCauseEvidence(kind="live-observation", source="kubectl get configmap mongo-geo-script", observation="x"),
+        explained=("missing-deployment-configmap", "health-objective", "service-endpoints"),
+        resources=(_CONFIGMAP,),
+        summary="mongo-geo-script is missing",
+    )
+    policy_cause = _cause(
+        RootCauseEvidence(kind="detector-finding", source="deny-all-network-policy", observation="late finding"),
+        RootCauseEvidence(kind="detector-finding", source="traffic-links", observation="late finding"),
+        explained=("deny-all-network-policy", "traffic-links"),
+        resources=(_NETWORK_POLICY,),
+        summary="deny-all isolates user",
+    )
+    result = _result(
+        configmap_cause, policy_cause, actions=[_repair("restore", _CONFIGMAP), _repair("drop", _NETWORK_POLICY)]
+    )
+
+    verifications = verify_diagnosis(
+        request,
+        result,
+        final_detector_states=[_clear("health-objective"), _clear("service-endpoints"), _clear("traffic-links")],
+        health_cleared_at=_A4_HEALTH_CLEARED,
+        dispatched_at=_A4_DISPATCH,
+        responder_completed_at=_A4_DONE,
+        detector_timeline=timeline,
+    )
+
+    for verification in verifications:
+        assert all(check.verified is not False for check in verification.evidence)
+        assert all(flip.flipped for flip in verification.detectors)
+        assert verification.verdict not in (DiagnosisVerdict.CONTRADICTED, DiagnosisVerdict.UNVERIFIED)

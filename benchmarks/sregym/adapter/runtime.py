@@ -632,6 +632,7 @@ def _diagnosis_verification(closure: dict[str, Any]) -> list[dict[str, Any]]:
             observed_state_changes=parsed.observed_state_changes,
             dispatched_at=parsed.dispatched_at,
             responder_completed_at=parsed.responder_completed_at,
+            detector_timeline=parsed.detector_timeline,
         )
     ]
 
