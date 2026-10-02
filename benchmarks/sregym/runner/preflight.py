@@ -60,6 +60,7 @@ except ModuleNotFoundError:  # Python 3.10
 
 from collections.abc import Callable
 
+from benchmarks.sregym.runner import launch_contract
 from benchmarks.sregym.runner.experiment import ExperimentConfig, load_experiment_config, resolve_config
 from benchmarks.sregym.runner.pipeline import is_pipeline_config, load_pipeline_config, merge_stage_config
 
@@ -70,6 +71,8 @@ CheckStatus = Literal["pass", "fail", "unknown"]
 PreflightMode = Literal["enforce", "warn"]
 PREFLIGHT_MODE_ENV = "SDO_PREFLIGHT"
 MAX_QUOTA_USED_ENV = "SDO_PREFLIGHT_MAX_QUOTA_USED_PERCENT"
+MAX_LOAD_ENV = "SDO_PREFLIGHT_MAX_LOAD"
+WAIT_LOAD_ENV = "SDO_PREFLIGHT_WAIT_LOAD_SECONDS"
 
 GB = 10**9
 DEFAULT_KIND_CLUSTER_PREFIX = "sregym-w"
@@ -135,8 +138,13 @@ class ModelPolicy:
 @dataclass(frozen=True)
 class PreflightSettings:
     min_free_bytes: int = 100 * GB
-    #: Fail when the newest Codex quota snapshot shows at least this much of a window used.
-    max_quota_used_percent: float = 85.0
+    #: Fail when the newest Codex quota snapshot shows at least this much of a window used. The default only stops a
+    #: run on a window that is fully used: quota headroom is not otherwise a reason to hold an experiment.
+    max_quota_used_percent: float = 100.0
+    #: Fail when the 1-minute host load average is above this (health timeouts and not-Ready pods follow).
+    max_load: float = 25.0
+    #: Wait up to this long for the load to fall below ``max_load`` before failing.
+    load_wait_seconds: float = 0.0
     #: A snapshot older than this says nothing reliable about the quota now.
     quota_snapshot_max_age_seconds: float = 6 * 3600
     policy: ModelPolicy = field(default_factory=ModelPolicy)
@@ -148,11 +156,22 @@ class PreflightSettings:
             raise ValueError(f"max_quota_used_percent must be in (0, 100], got {self.max_quota_used_percent}")
         if self.quota_snapshot_max_age_seconds <= 0:
             raise ValueError("quota_snapshot_max_age_seconds must be positive")
+        if self.max_load <= 0:
+            raise ValueError(f"max_load must be positive, got {self.max_load}")
+        if self.load_wait_seconds < 0:
+            raise ValueError(f"load_wait_seconds must not be negative, got {self.load_wait_seconds}")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> PreflightSettings:
-        raw = env.get(MAX_QUOTA_USED_ENV, "").strip()
-        return cls(max_quota_used_percent=float(raw)) if raw else cls()
+        defaults = cls()
+        quota = env.get(MAX_QUOTA_USED_ENV, "").strip()
+        load = env.get(MAX_LOAD_ENV, "").strip()
+        wait = env.get(WAIT_LOAD_ENV, "").strip()
+        return cls(
+            max_quota_used_percent=float(quota) if quota else defaults.max_quota_used_percent,
+            max_load=float(load) if load else defaults.max_load,
+            load_wait_seconds=float(wait) if wait else defaults.load_wait_seconds,
+        )
 
 
 # --------------------------------------------------------------------------- report
@@ -250,6 +269,7 @@ class HostProbe(Protocol):
     def cluster_lock_owner(self, cluster: str) -> str | None: ...
     def git(self, repository: Path, *args: str) -> str | None: ...
     def load_average(self) -> tuple[float, float, float] | None: ...
+    def image_output(self, ref: str, argv: list[str]) -> str | None: ...
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -320,6 +340,9 @@ class SystemHost:
             agentshim=python.get("agentshim"),
             import_error=python.get("import_error") if python_out else "python3 probe failed to run",
         )
+
+    def image_output(self, ref: str, argv: list[str]) -> str | None:
+        return self._text(["docker", "run", "--rm", "--entrypoint", argv[0], ref, *argv[1:]], timeout=120)
 
     def npm_resolves(self, spec: str) -> bool | None:
         try:
@@ -915,6 +938,93 @@ def _fmt_epoch(value: float | None) -> str:
     return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(value))
 
 
+def check_from_findings(name: str, findings: Sequence[launch_contract.Finding]) -> PreflightCheck:
+    """One report line for the findings of one launch-contract check over every arm."""
+
+    failed = [finding for finding in findings if finding.status == "fail"]
+    unknown = [finding for finding in findings if finding.status == "unknown"]
+    if failed:
+        return PreflightCheck(
+            name,
+            "fail",
+            "; ".join(dict.fromkeys(finding.detail for finding in failed)),
+            " ".join(dict.fromkeys(finding.remedy for finding in failed if finding.remedy)),
+        )
+    if unknown:
+        return PreflightCheck(name, "unknown", "; ".join(dict.fromkeys(finding.detail for finding in unknown)))
+    return PreflightCheck(name, "pass", "; ".join(dict.fromkeys(finding.detail for finding in findings)))
+
+
+def _sdo_launch_arms(ctx: _Context) -> list[tuple[dict[str, str], launch_contract.LaunchFeatures]]:
+    """Each distinct (images, features) pair the SDO arms or stages will launch."""
+
+    arms: list[tuple[dict[str, str], launch_contract.LaunchFeatures]] = []
+    for config in ctx.configs:
+        if config.agent != "sdo_codex":
+            continue
+        arm = (
+            sdo_images(config),
+            launch_contract.LaunchFeatures.from_agent_config(config.agent_config.get("sdo_codex") or {}),
+        )
+        if arm not in arms:
+            arms.append(arm)
+    return arms
+
+
+def _launch_checks(ctx: _Context) -> list[PreflightCheck]:
+    """Checks that catch integration mistakes (flags, validator SDK, risky options) before any run time is spent."""
+
+    checks: list[PreflightCheck] = []
+    arms = _sdo_launch_arms(ctx)
+    sdk_root = ctx.project_root / "controller" / "sdk"
+    if arms:
+        checks.append(
+            check_from_findings(
+                "image-tags",
+                [
+                    launch_contract.check_image_tags(
+                        controller_image=images["controller_image"],
+                        responder_image=images["responder_image"],
+                        validator_image=images["validator_image"],
+                    )
+                    for images, _ in arms
+                ],
+            )
+        )
+        present = {ref for images, _ in arms for ref in images.values() if ctx.host.image(ref) is not None}
+        flag_findings = [
+            launch_contract.check_controller_flags(ctx.host, images["controller_image"], features)
+            for images, features in arms
+            if images["controller_image"] in present
+        ]
+        sdk_findings = [
+            launch_contract.check_validator_sdk(ctx.host, validator, sdk_root)
+            for validator in dict.fromkeys(images["validator_image"] for images, _ in arms)
+            if validator in present
+        ]
+        if flag_findings:
+            checks.append(check_from_findings("controller-flags", flag_findings))
+        if sdk_findings:
+            checks.append(check_from_findings("validator-sdk", sdk_findings))
+        checks.append(
+            check_from_findings("launch-lint", [launch_contract.check_launch_lint(features) for _, features in arms])
+        )
+    checks.append(
+        check_from_findings(
+            "host-load",
+            [
+                launch_contract.check_host_load(
+                    ctx.host, max_load=ctx.settings.max_load, wait_seconds=ctx.settings.load_wait_seconds
+                )
+            ],
+        )
+    )
+    if ctx.agents & {"sdo_codex", "codex"}:
+        codex_home = Path(ctx.env.get("CODEX_HOME", "").strip() or ctx.host.home / ".codex")
+        checks.append(check_from_findings("codex-auth", [launch_contract.check_codex_auth(codex_home)]))
+    return checks
+
+
 def run_preflight(
     configs: Sequence[ExperimentConfig],
     *,
@@ -949,6 +1059,7 @@ def run_preflight(
         _check_model_policy(ctx),
         _check_parity(ctx),
         _check_quota(ctx),
+        *_launch_checks(ctx),
     ]
     return PreflightReport(tuple(check for check in checks if check is not None), ctx.facts, mode)
 
@@ -976,6 +1087,35 @@ def check_images(
         images=dict(images),
     )
     checks = [_check_codex_pins(ctx), _check_agentshim(ctx), _check_sdo_images(ctx)]
+    controller = images.get("controller_image")
+    validator = images.get("validator_image")
+    if controller and ctx.host.image(controller) is not None:
+        checks.append(
+            check_from_findings(
+                "controller-flags",
+                [launch_contract.check_controller_flags(host, controller, launch_contract.ALL_FEATURES)],
+            )
+        )
+    if validator and ctx.host.image(validator) is not None:
+        checks.append(
+            check_from_findings(
+                "validator-sdk",
+                [launch_contract.check_validator_sdk(host, validator, project_root / "controller" / "sdk")],
+            )
+        )
+    if controller and validator:
+        checks.append(
+            check_from_findings(
+                "image-tags",
+                [
+                    launch_contract.check_image_tags(
+                        controller_image=controller,
+                        responder_image=images.get("responder_image", controller),
+                        validator_image=validator,
+                    )
+                ],
+            )
+        )
     return PreflightReport(tuple(check for check in checks if check is not None), ctx.facts, "enforce")
 
 

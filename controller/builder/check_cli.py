@@ -419,6 +419,95 @@ def _controller(args: argparse.Namespace) -> int:
         print(json.dumps({"controller_supervisor": "relaunch", "launches": launches}), flush=True)
 
 
+def runtime_command(
+    args: argparse.Namespace,
+    *,
+    binary: Path,
+    app_root: Path,
+    worktree_root: Path,
+    prober_binary: Path | None,
+) -> list[str]:
+    """The Go controller runtime command line for the parsed ``controller`` arguments."""
+
+    responder_args = args.responder_arg or ["-m", "sdo.agent_runtime.responder.job"]
+    broker_args = args.broker_arg or [
+        "-m",
+        "sdo.agent_runtime.responder.broker_cli",
+        "--proposal-command",
+        "git -c core.whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab diff --check HEAD --",
+    ]
+    command = [
+        str(binary),
+        "--namespace",
+        args.namespace,
+        "--app-root",
+        str(app_root),
+        "--dispatcher-mode",
+        "job",
+        "--dispatcher",
+        args.responder_command,
+    ]
+    for responder_arg in responder_args:
+        command.extend(["--dispatcher-arg", responder_arg])
+    for environment in args.responder_env:
+        command.extend(["--responder-env", environment])
+    command.extend(
+        [
+            "--responder-image",
+            args.responder_image,
+            "--repository-pvc",
+            args.repository_pvc,
+            "--repository-mount-path",
+            args.repository_mount_path,
+            "--responder-credentials-secret",
+            args.credentials_secret,
+            "--broker",
+            args.broker_command,
+        ]
+    )
+    for broker_arg in broker_args:
+        command.extend(["--broker-arg", broker_arg])
+    command.extend(
+        [
+            "--broker-worktree-root",
+            str(worktree_root),
+            "--response-timeout",
+            args.response_timeout,
+            "--verification-timeout",
+            args.verification_timeout,
+            "--max-follow-ups",
+            str(args.max_follow_ups),
+            "--follow-up-cooldown",
+            args.follow_up_cooldown,
+            "--repair-policy",
+            args.repair_policy,
+            "--lease-name",
+            args.lease_name,
+        ]
+    )
+    optional_values = {
+        "--control-namespace": args.control_namespace,
+        "--application": args.application,
+        "--source-commit": args.source_commit,
+        "--deployed-commit": args.deployed_commit,
+        "--repository-pvc-subpath": args.repository_pvc_subpath,
+        "--duration": args.duration,
+    }
+    if args.closeout_state_gate:
+        command.append("--closeout-state-gate")
+    if args.exit_after_closure:
+        command.append("--exit-after-closure")
+    if getattr(args, "supervise", False) and not getattr(args, "controller_update_rollout", False):
+        command.append("--restart-after-closure")
+    if prober_binary is not None:
+        optional_values["--prober-binary"] = str(prober_binary)
+        optional_values["--prober-image"] = args.prober_image
+    for flag, value in optional_values.items():
+        if value:
+            command.extend([flag, value])
+    return command
+
+
 def _controller_once(args: argparse.Namespace) -> int:
     app_root = _app_root(args)
     worktree_root = args.worktree_root.resolve()
@@ -455,82 +544,9 @@ def _controller_once(args: argparse.Namespace) -> int:
             if prober_binary is None:
                 return 1
 
-        responder_args = args.responder_arg or ["-m", "sdo.agent_runtime.responder.job"]
-        broker_args = args.broker_arg or [
-            "-m",
-            "sdo.agent_runtime.responder.broker_cli",
-            "--proposal-command",
-            "git -c core.whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab diff --check HEAD --",
-        ]
-        command = [
-            str(binary),
-            "--namespace",
-            args.namespace,
-            "--app-root",
-            str(app_root),
-            "--dispatcher-mode",
-            "job",
-            "--dispatcher",
-            args.responder_command,
-        ]
-        for responder_arg in responder_args:
-            command.extend(["--dispatcher-arg", responder_arg])
-        for environment in args.responder_env:
-            command.extend(["--responder-env", environment])
-        command.extend(
-            [
-                "--responder-image",
-                args.responder_image,
-                "--repository-pvc",
-                args.repository_pvc,
-                "--repository-mount-path",
-                args.repository_mount_path,
-                "--responder-credentials-secret",
-                args.credentials_secret,
-                "--broker",
-                args.broker_command,
-            ]
+        command = runtime_command(
+            args, binary=binary, app_root=app_root, worktree_root=worktree_root, prober_binary=prober_binary
         )
-        for broker_arg in broker_args:
-            command.extend(["--broker-arg", broker_arg])
-        command.extend(
-            [
-                "--broker-worktree-root",
-                str(worktree_root),
-                "--response-timeout",
-                args.response_timeout,
-                "--verification-timeout",
-                args.verification_timeout,
-                "--max-follow-ups",
-                str(args.max_follow_ups),
-                "--follow-up-cooldown",
-                args.follow_up_cooldown,
-                "--repair-policy",
-                args.repair_policy,
-                "--lease-name",
-                args.lease_name,
-            ]
-        )
-        optional_values = {
-            "--control-namespace": args.control_namespace,
-            "--application": args.application,
-            "--source-commit": args.source_commit,
-            "--deployed-commit": args.deployed_commit,
-            "--repository-pvc-subpath": args.repository_pvc_subpath,
-            "--duration": args.duration,
-        }
-        if args.closeout_state_gate:
-            command.append("--closeout-state-gate")
-        if args.exit_after_closure:
-            command.append("--exit-after-closure")
-        if getattr(args, "supervise", False) and not getattr(args, "controller_update_rollout", False):
-            command.append("--restart-after-closure")
-        if prober_binary is not None:
-            optional_values["--prober-binary"] = str(prober_binary)
-            optional_values["--prober-image"] = args.prober_image
-        for flag, value in optional_values.items():
-            if value:
-                command.extend([flag, value])
         completed = subprocess.run(command, cwd=workspace.path, check=False)
         if args.keep_workdir:
             print(f"kept controller build workspace: {workspace.path}", file=sys.stderr)

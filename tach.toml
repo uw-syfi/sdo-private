@@ -89,6 +89,7 @@ depends_on = [
 path = "benchmarks.sregym.fastloop"
 depends_on = [
     "benchmarks.sregym.adapter",
+    "benchmarks.sregym.runner",
     "controller.builder",
     "sdo.agent_runtime.lifecycle",
     "sdo.controller_install",
@@ -112,6 +113,7 @@ depends_on = [
 path = "benchmarks.sregym.runner"
 depends_on = [
     "benchmarks.sregym.protocol",
+    "sdo.controller_install",
 ]
 
 [[modules]]

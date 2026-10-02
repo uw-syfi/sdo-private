@@ -132,6 +132,33 @@ class ControllerInstallConfig:
         return self.control_namespace != self.namespace
 
 
+def controller_launch_flags(**features: Any) -> frozenset[str]:
+    """The ``sdo-detector-check controller`` flags the launcher passes when *features* are on.
+
+    *features* are :class:`ControllerInstallConfig` fields (``closeout_state_gate``, ``max_follow_ups``,
+    ``late_findings``, ``healthy_baseline``, ``controller_namespace``...). Preflight compares the result with the
+    ``--help`` of the controller image: a flag the image lacks makes every controller pod exit before any incident.
+    Values nested in ``--broker-arg=`` and ``--responder-env=`` belong to other programs and are not listed.
+    """
+
+    config = ControllerInstallConfig(
+        repository=Path("/preflight/application"),
+        namespace="preflight",
+        application="preflight",
+        controller_image="sdo-controller:preflight",
+        responder_image="sdo-responder:preflight",
+        validator_image="sdo-detector-validator:preflight",
+        repository_pvc="preflight",
+        credentials_secret="preflight",
+        model="preflight",
+        timeout_seconds=1,
+        **features,
+    )
+    (job,) = (resource for resource in controller_resources(config) if resource["kind"] == "Job")
+    (container,) = (c for c in job["spec"]["template"]["spec"]["containers"] if c["name"] == "controller")
+    return frozenset(argument.split("=", 1)[0] for argument in container["args"] if argument.startswith("--"))
+
+
 @dataclass(frozen=True)
 class ControllerInstallResult:
     """Artifacts produced by one completed controller execution."""

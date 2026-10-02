@@ -23,7 +23,8 @@ if TYPE_CHECKING:
 @pytest.fixture
 def fake_host(tmp_path: Path) -> FakeHost:
     home = tmp_path / "home"
-    home.mkdir()
+    (home / ".codex").mkdir(parents=True)
+    (home / ".codex" / "auth.json").write_text("{}", encoding="utf-8")
     return FakeHost(home=home)
 
 

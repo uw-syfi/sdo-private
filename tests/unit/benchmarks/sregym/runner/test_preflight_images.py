@@ -25,7 +25,7 @@ def test_built_images_that_import_their_entry_points_at_the_pins_pass(fake_host:
 
     assert report.ok, report.to_dict()
     assert sorted(fake_host.probed) == ["ci/controller:1", "ci/responder:1"]
-    assert {check.name for check in report.checks} == {"codex-cli-pins", "agentshim", "sdo-images"}
+    assert {check.name for check in report.checks} == {"codex-cli-pins", "agentshim", "sdo-images", "controller-flags"}
 
 
 def test_an_image_that_cannot_import_its_entry_point_fails(fake_host: FakeHost) -> None:

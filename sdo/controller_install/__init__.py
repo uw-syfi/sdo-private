@@ -17,6 +17,7 @@ from sdo.controller_install.kubernetes import (
     ControllerInstallError,
     ControllerInstallExtension,
     ControllerInstallResult,
+    controller_launch_flags,
     controller_resources,
     controller_security_contexts,
     install_controller,
@@ -29,6 +30,7 @@ from sdo.controller_install.kubernetes import (
 )
 
 __all__ = [
+    "controller_launch_flags",
     "require_matching_image_tags",
     "APPLICATION_NAMESPACE_LABEL",
     "CLAUDE_CONFIG_PATH",
