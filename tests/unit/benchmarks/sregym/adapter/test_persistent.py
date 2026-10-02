@@ -534,7 +534,11 @@ def test_a_rejected_receipt_is_still_reported_to_a_caller_that_drains_one_incide
 
     with pytest.raises(ReceiptRejectedError, match="completed=true"):
         drain_pending_incident(
-            record, ops=ops, repository=tmp_path / "s0" / "application_workspace", drained_by="fastloop"
+            record,
+            ops=ops,
+            repository=tmp_path / "s0" / "application_workspace",
+            drained_by="fastloop",
+            clock=_clock(ops),
         )
 
 

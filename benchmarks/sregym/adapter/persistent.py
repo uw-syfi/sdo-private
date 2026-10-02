@@ -73,6 +73,15 @@ CONTROLLER_LOGS_SUBDIR = Path(RUNTIME_ARTIFACTS_DIRNAME) / "controller_logs"
 POLL_SECONDS = 1.0
 MAINTENANCE_ACK_TIMEOUT_SECONDS = 600.0
 DRAIN_TIMEOUT_SECONDS = 3600.0
+# After the reflection drain returns, the controller's asynchronous close-out may
+# still be settling the two volatile signals the strict receipt samples: the
+# durable responder result reaching a terminal ``completed`` status, and the
+# shared worktree directory draining. The relaunch-after-closure predicate can
+# fire on an intermediate relaunch on composite incidents (follow-ups and closure
+# retries), so the gate must wait for these to settle before it samples, or a
+# solved incident is rejected. Bounded so a genuinely unsettled receipt still
+# rejects promptly.
+CLOSEOUT_SETTLE_TIMEOUT_SECONDS = 120.0
 STAGE_END_EVIDENCE_SCOPE = "stage-end snapshot; the drained strict receipt supersedes it"
 _ZERO_TIME = "0001-01-01T00:00:00Z"
 
@@ -650,6 +659,44 @@ def collect_followup_incident(
     return resolution
 
 
+def _closeout_settled(receipt: dict[str, Any]) -> bool:
+    """Whether the two volatile close-out signals the strict receipt samples have settled.
+
+    ``completed`` is the durable responder result's terminal status and
+    ``remaining_worktrees`` is the shared worktree directory the controller drains
+    asynchronously at acknowledge. The reflection-drain predicate can return while
+    either is still settling on composite incidents, so the gate must not sample
+    until both are quiescent.
+    """
+
+    return receipt.get("completed") is True and receipt.get("remaining_worktrees") == []
+
+
+def _collect_settled_receipt(
+    ops: ClusterOps,
+    config: RuntimeConfig,
+    incident_id: str,
+    receipt_dir: Path,
+    clock: Clock,
+    timeout: float = CLOSEOUT_SETTLE_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Collect the receipt once close-out has settled, or once the bounded wait elapses.
+
+    Re-samples the receipt until its volatile close-out signals settle so a solved
+    incident is not rejected because the asynchronous close-out had not finished.
+    A genuinely unsettled receipt (for example a responder that never reported
+    ``completed``) still falls through after ``timeout`` and is validated as-is, so
+    a real failure is reported promptly rather than hidden.
+    """
+
+    receipt = ops.collect_receipt(config, incident_id, receipt_dir)
+    deadline = clock.monotonic() + timeout
+    while not _closeout_settled(receipt) and clock.monotonic() < deadline:
+        clock.sleep(POLL_SECONDS)
+        receipt = ops.collect_receipt(config, incident_id, receipt_dir)
+    return receipt
+
+
 def drain_pending_incident(
     record: ControllerRecord,
     *,
@@ -676,14 +723,16 @@ def drain_pending_incident(
         # The controller log holds every broker rejection of the closure.
         ops.export_controller_logs(record.control_namespace, pending.receipt_dir)
         raise
-    waited = clock.monotonic() - started
     config = replace(
         runtime_config_from_payload(record.runtime_config),
         repository=repository,
         artifacts_dir=pending.receipt_dir,
         persistent=True,
     )
-    receipt = ops.collect_receipt(config, pending.incident_id, pending.receipt_dir)
+    receipt = _collect_settled_receipt(ops, config, pending.incident_id, pending.receipt_dir, clock)
+    # The reflection-drain cost includes the wait for close-out to settle; neither
+    # is resolution time (both are excluded below).
+    waited = clock.monotonic() - started
     receipt.update(pending.stage_receipt)
     recovery = receipt.get("phase_timings_seconds", {}).get("operational_recovery")
     if "incident_resolution_seconds" not in receipt and isinstance(recovery, (int, float)):

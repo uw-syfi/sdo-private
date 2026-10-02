@@ -30,8 +30,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import pytest
-
 from benchmarks.sregym.adapter.persistent import (
     STRICT_RECEIPT_FILENAME,
     PersistentState,
@@ -102,10 +100,6 @@ def _drained_record(tmp_path: Path, ops: FakeOps):
     return state.controllers["hotel"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="close-out gate samples 'completed' before the durable responder result is terminal",
-)
 def test_drain_waits_for_the_responder_result_to_report_completed(tmp_path: Path) -> None:
     ops = _LateCompletingOps()
     ops.completed_settle["incident-1"] = 2
@@ -124,10 +118,6 @@ def test_drain_waits_for_the_responder_result_to_report_completed(tmp_path: Path
     assert (record.pending.receipt_dir / STRICT_RECEIPT_FILENAME).is_file()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="close-out gate samples 'remaining_worktrees' before the close-out drains the worktree",
-)
 def test_drain_waits_for_the_worktree_to_drain(tmp_path: Path) -> None:
     ops = _LateDrainingWorktreeOps()
     ops.worktree_settle["incident-1"] = 2
