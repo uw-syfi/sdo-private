@@ -168,3 +168,15 @@ Backstop confirmation:
 - Cold NP single: **both** `traffic-links` (frontend edge) and `traffic-topology-links` (sdo-prober backstop) fired `before_dispatch` for recommendation.8085 — coverage no longer hinges on the judge's edge list.
 
 Caveat carried into Step 4: in the cold C1 the diagnosis verifier marked the NetworkPolicy cause **contradicted** (2 unverified, 1 contradicted) because its link evidence fired `after_dispatch`; all repairs were still attributed and the oracle passed. This is the exact gap `vic/fix/verifier-late-findings` closes (read the controller's `detector_timeline` for `after_dispatch` findings the responder legitimately pulled). Merge it before the pilot and expect contradicted-cause counts to drop to ~0 on composites.
+
+### Step 4 prelude: healthy-window soak (mi5 source, no injection, 2026-10-02 17:30–17:45Z)
+
+The false-alarm soak (`fastloop.assurance run --no-single --soak-minutes 11`) on a fresh cluster `mi-w65`, seed `soak-lifecycle-mi5` — the cold-C1 lifecycle reset to its lifecycle commit `f4093d7` (both `traffic-links` and `traffic-topology-links` installed, `outcomes.jsonl` empty). Controller built from the mi5 source commit; synthetic traffic runs, nothing injected. Raw: `/mnt/data/shli/clc-runs/mi-healthy-w5/assurance/results/mi-healthy-w5.json`.
+
+- **no detector finding while healthy: 0 of 131 evaluations** (both link detectors silent for the full window).
+- no incident opened while healthy: 0.
+- incident status healthy throughout: 0 of 3 probes unhealthy.
+- post-soak `selector-mismatch` passed (`diff=exact`, cleared 3.9 s, verified 14.6 s, 0 left): the soak left no residue in the state diff.
+- resource drift over ~11 min: controller CPU ~1.5 core-s/min idle, RSS steady 48–50 MiB; prober steady ~9–10 MiB; apiserver ~0.3 req/s; 0 port-forward restarts.
+
+Takeaway: the deterministic topology-links backstop adds no false positives. Meaning: 131 healthy evaluations, 0 link findings from either `traffic-links` (judge edges) or `traffic-topology-links` (every in-namespace Service port). Confidence: high for this app/lifecycle (n=131 evals, one cold lifecycle). Implication: dialing every Service port every evaluation does not flap on a healthy namespace, so the backstop is safe to leave on for the pilot. Next step: merge the verifier late-findings fix, rebuild mi6, run the 10-incident pilot.
