@@ -57,6 +57,9 @@ from sdo.operational_memory.sandbox import (
     LocalSandboxRunner,
     SandboxResult,
     SandboxRunner,
+    StaleValidatorImageError,
+    require_matching_image_tags,
+    validator_image_environment,
 )
 from sdo.operational_memory.validation import (
     PLACEHOLDER_RE,
@@ -112,6 +115,9 @@ __all__ = [
     "ReflectionSessionMode",
     "SandboxResult",
     "SandboxRunner",
+    "StaleValidatorImageError",
+    "require_matching_image_tags",
+    "validator_image_environment",
     "TopologyReview",
     "TrafficWorkload",
     "WarmPlaybookMatch",

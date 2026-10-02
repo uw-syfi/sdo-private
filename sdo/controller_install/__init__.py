@@ -21,6 +21,7 @@ from sdo.controller_install.kubernetes import (
     controller_security_contexts,
     install_controller,
     kubectl,
+    require_matching_image_tags,
     set_controller_maintenance,
     start_repository_sync,
     stop_repository_sync,
@@ -28,6 +29,7 @@ from sdo.controller_install.kubernetes import (
 )
 
 __all__ = [
+    "require_matching_image_tags",
     "APPLICATION_NAMESPACE_LABEL",
     "CLAUDE_CONFIG_PATH",
     "CODEX_HOME_PATH",

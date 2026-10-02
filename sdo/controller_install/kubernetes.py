@@ -20,6 +20,7 @@ from sdo.operational_memory import (
     REFLECTION_GUIDANCE_MODES,
     REFLECTION_SESSION_MODES,
     SOURCE_REPAIR_CHECK_COMMAND,
+    require_matching_image_tags,
 )
 
 
@@ -100,6 +101,7 @@ class ControllerInstallConfig:
     reuse_existing: bool = False
 
     def __post_init__(self) -> None:
+        require_matching_image_tags(controller_image=self.controller_image, validator_image=self.validator_image)
         if self.controller_namespace is not None and not _NAMESPACE_PATTERN.fullmatch(self.controller_namespace):
             raise ValueError(f"controller_namespace must be a Kubernetes namespace name: {self.controller_namespace!r}")
         if self.repair_policy not in ("commit", "recorded-actions"):

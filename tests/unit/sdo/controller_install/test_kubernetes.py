@@ -486,3 +486,26 @@ def test_follow_ups_reach_the_controller_arguments() -> None:
 def test_invalid_follow_up_settings_are_rejected(update: dict[str, int]) -> None:
     with pytest.raises(ValueError, match="follow_up"):
         ControllerInstallConfig(**{**_config().__dict__, **update})
+
+
+def test_controller_install_rejects_a_validator_on_another_tag_than_the_controller() -> None:
+    with pytest.raises(ValueError, match="different tags"):
+        ControllerInstallConfig(
+            **{
+                **_config().__dict__,
+                "controller_image": "sdo-controller:mx1",
+                "validator_image": "sdo-detector-validator:v0.1.0",
+            }
+        )
+
+
+def test_controller_install_accepts_images_built_together() -> None:
+    config = ControllerInstallConfig(
+        **{
+            **_config().__dict__,
+            "controller_image": "sdo-controller:mx1",
+            "validator_image": "sdo-detector-validator:mx1",
+        }
+    )
+
+    assert config.validator_image == "sdo-detector-validator:mx1"

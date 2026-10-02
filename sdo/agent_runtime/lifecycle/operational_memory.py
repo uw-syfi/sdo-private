@@ -39,6 +39,7 @@ from sdo.operational_memory import (
     SandboxResult,
     SandboxRunner,
     TrafficWorkload,
+    validator_image_environment,
 )
 
 if TYPE_CHECKING:
@@ -165,6 +166,14 @@ def _write_health_judge_authoring_context(
     )
 
 
+def _select_validator(validator: SandboxRunner | None, validator_image: str | None) -> SandboxRunner:
+    """An injected validator wins; otherwise validate in the configured image, never a silent shared default."""
+
+    if validator is not None:
+        return validator
+    return ContainerSandboxRunner(image=validator_image)
+
+
 def reuse_initial_lifecycle_if_valid(
     app_root: Path,
     *,
@@ -172,9 +181,12 @@ def reuse_initial_lifecycle_if_valid(
     health_objective: str,
     active_resources: list[ActiveTopologyResourceDTO] | None = None,
     validator: SandboxRunner | None = None,
+    validator_image: str | None = None,
     validation_cache: LifecycleValidationCache | None = None,
 ) -> bool:
     """Reuse a real lifecycle handoff only while its source and contracts remain valid.
+
+    ``validator_image`` is the validator the check runs in when no ``validator`` is injected.
 
     An opt-in ``validation_cache`` shares passing validator verdicts, under the
     attestation's own key, across workspace copies and records in ``source``
@@ -232,7 +244,7 @@ def reuse_initial_lifecycle_if_valid(
             active_resources=active_resources,
         ):
             return False
-        selected_validator = validator or ContainerSandboxRunner()
+        selected_validator = _select_validator(validator, validator_image)
         validation_identity = _validator_identity(selected_validator)
         diagnostics_digest = _diagnostics_digest(root)
         validation = provenance.get("validation")
@@ -350,11 +362,16 @@ def run_initial_lifecycle(
     active_resources: list[ActiveTopologyResourceDTO] | None = None,
     backend: LifecycleAgentBackend | None = None,
     validator: SandboxRunner | None = None,
+    validator_image: str | None = None,
     judge_rounds: int = 3,
     judge_corrections_per_round: int = 3,
     deployer_attempts: int = 3,
 ) -> str:
     """Bootstrap memory with fresh model-backed deployer and health-judge sessions.
+
+    ``validator_image`` is the validator for this lifecycle: the controller's own validations use it, and it is
+    exported as ``SDO_VALIDATOR_IMAGE`` to the agent sessions so the judge's ``sdo detector check`` validates in
+    the same image. An injected ``validator`` takes precedence for the controller's own validations.
 
     Agents never run in ``app_root`` itself: its path is chosen by whoever hosts the
     workspace (a benchmark names it after the stage, and so after the injected fault).
@@ -365,7 +382,10 @@ def run_initial_lifecycle(
     if judge_rounds < 1 or judge_corrections_per_round < 1 or deployer_attempts < 1:
         raise ValueError("lifecycle rounds, corrections, and deployer attempts must be positive")
     root = app_root.resolve()
-    with tempfile.TemporaryDirectory(prefix="sdo-lifecycle-source-") as temp_dir:
+    with (
+        validator_image_environment(validator_image),
+        tempfile.TemporaryDirectory(prefix="sdo-lifecycle-source-") as temp_dir,
+    ):
         agent_checkout = Path(temp_dir) / "application"
         _clone(root, agent_checkout, purpose="lifecycle agent checkout")
         return _run_initial_lifecycle(
@@ -375,7 +395,7 @@ def run_initial_lifecycle(
             health_objective=health_objective,
             active_resources=active_resources,
             backend=backend,
-            validator=validator,
+            validator=_select_validator(validator, validator_image),
             judge_rounds=judge_rounds,
             judge_corrections_per_round=judge_corrections_per_round,
             deployer_attempts=deployer_attempts,

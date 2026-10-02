@@ -36,6 +36,7 @@ from sdo.controller_install import (
     ControllerInstallError,
     ControllerInstallResult,
     install_controller,
+    require_matching_image_tags,
 )
 
 
@@ -89,6 +90,7 @@ class OperationConfig:
                 raise TypeError(f"{name} must be a string")
             if not value.strip():
                 raise ValueError(f"{name} must not be empty")
+        require_matching_image_tags(controller_image=self.controller_image, validator_image=self.validator_image)
         if self.repair_policy not in ("commit", "recorded-actions"):
             raise ValueError("repair_policy must be 'commit' or 'recorded-actions'")
         if self.agent_provider not in ("codex", "claude"):
@@ -116,6 +118,7 @@ class LifecycleReuser(Protocol):
         *,
         application: str,
         health_objective: str,
+        validator_image: str | None = None,
     ) -> bool: ...
 
 
@@ -127,6 +130,7 @@ class LifecycleRunner(Protocol):
         application: str,
         health_objective: str,
         backend: LifecycleAgentBackend | None = None,
+        validator_image: str | None = None,
     ) -> str: ...
 
 
@@ -164,9 +168,13 @@ class ControllerDeploymentVerifier:
         command_runner: CommandRunner = subprocess.run,
         python_executable: str = sys.executable,
         timeout_seconds: int = 1800,
+        validator_image: str | None = None,
     ) -> None:
         if timeout_seconds < 1:
             raise ValueError("verifier timeout must be positive")
+        if validator_image is not None and not validator_image.strip():
+            raise ValueError("validator image must not be empty")
+        self.validator_image = validator_image
         self.lifecycle_backend = lifecycle_backend or CodexLifecycleBackend(model=model)
         self.lifecycle_reuser = lifecycle_reuser
         self.lifecycle_runner = lifecycle_runner
@@ -189,6 +197,7 @@ class ControllerDeploymentVerifier:
                 root,
                 application=application,
                 health_objective=health_objective,
+                validator_image=self.validator_image,
             )
             if not reusable:
                 self.lifecycle_runner(
@@ -196,6 +205,7 @@ class ControllerDeploymentVerifier:
                     application=application,
                     health_objective=health_objective,
                     backend=self.lifecycle_backend,
+                    validator_image=self.validator_image,
                 )
         except (LifecycleError, OSError, TypeError, ValueError) as exc:
             return DeploymentVerification(
@@ -265,6 +275,7 @@ def operate(
     selected_verifier = verifier or ControllerDeploymentVerifier(
         lifecycle_backend=lifecycle_type(model=config.model, timeout_seconds=config.timeout_seconds),
         timeout_seconds=config.timeout_seconds,
+        validator_image=config.validator_image,
     )
     try:
         deployment = deployment_runner(
