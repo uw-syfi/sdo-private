@@ -24,7 +24,7 @@ from sdo.operational_memory.models import (
     TrafficWorkload,
 )
 from sdo.operational_memory.repository import MemoryRepository
-from sdo.operational_memory.validation import MemoryValidator, MemoryValidationError
+from sdo.operational_memory.validation import MemoryValidationError, MemoryValidator
 from tests.unit.sdo.agent_runtime.lifecycle.test_agents import RecordingBackend, _git
 from tests.unit.sdo.agent_runtime.lifecycle.test_link_reachability import _links
 from tests.unit.sdo.agent_runtime.lifecycle.test_traffic_lifecycle import OBJECTIVE, _files, _judged
