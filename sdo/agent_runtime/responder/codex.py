@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -12,11 +13,13 @@ from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_
 from sdo.agent_runtime.responder.reflection import INCIDENT_REASONING_EFFORT
 from sdo.contracts import (
     ROOT_CAUSE_EVIDENCE_KINDS,
+    ConfirmedRootCause,
     DetectorEvaluation,
     DetectorEvaluationStatus,
     Finding,
     IncidentRequest,
     IncidentResult,
+    RootCauseEvidence,
     StateFieldChange,
 )
 from sdo.operational_memory import (
@@ -85,7 +88,89 @@ def execute_incident(
         result = result.model_copy(update={"responder_session_id": completed.session_id})
     if result.incident_id != request.incident_id:
         raise ResponderExecutionError(f"{selected_provider} result incident_id does not match request")
-    return result
+    return _normalize_evidence_kinds(result, request)
+
+
+#: Rule-ID prefix of the synthetic-traffic detector's per-scenario findings.
+#: Mirrors ``sdo.operational_memory.diagnosis.SCENARIO_RULE_PREFIX``.
+_SCENARIO_RULE_PREFIX = "scenario-slo."
+#: Separators between the several sources one cited evidence item may name,
+#: matching the verifier's ``_source_parts`` split.
+_SOURCE_SEPARATOR = re.compile(r"\s*[;,]\s*")
+
+
+def _source_parts(source: str) -> list[str]:
+    """The individual sources a cited item names; models join several with ``,`` or ``;``."""
+
+    return [part for part in _SOURCE_SEPARATOR.split(source.strip()) if part] or [source]
+
+
+def _normalize_evidence_kinds(result: IncidentResult, request: IncidentRequest) -> IncidentResult:
+    """Degrade a cited ``detector-finding`` or ``synthetic-traffic`` source that
+    names nothing in this incident's detector or scenario catalog to a
+    ``live-observation``.
+
+    A model sometimes cites an ad-hoc signal under the wrong kind: SDO's own
+    ``sdo incident status`` verify burst, a ``kubectl``/``curl`` it ran, or the
+    configuration diff as a whole. The verifier then marks the citation
+    contradicted and sinks an otherwise sound cause, so reflection never learns
+    from it. Degrading the unrecognized source to a live observation (which the
+    verifier accepts as unverifiable rather than false) keeps the cause
+    learnable. A source that names a real detector or scenario is left
+    untouched, so the verifier still contradicts a genuine red herring that
+    cites a real finding that never fired. The rule is catalog membership only,
+    never a fault- or scenario-specific name.
+    """
+
+    known_detectors = {finding.detector_id for finding in request.findings} | {
+        evaluation.detector_id for evaluation in request.detector_history
+    }
+    known_scenarios = {
+        finding.rule_id.removeprefix(_SCENARIO_RULE_PREFIX)
+        for finding in request.findings
+        if finding.rule_id.startswith(_SCENARIO_RULE_PREFIX)
+    }
+    causes = [_normalize_cause(cause, known_detectors, known_scenarios) for cause in result.confirmed_root_causes]
+    if causes == list(result.confirmed_root_causes):
+        return result
+    return result.model_copy(update={"confirmed_root_causes": causes})
+
+
+def _normalize_cause(
+    cause: ConfirmedRootCause, known_detectors: set[str], known_scenarios: set[str]
+) -> ConfirmedRootCause:
+    evidence: list[RootCauseEvidence] = []
+    for item in cause.evidence:
+        evidence.extend(_normalize_evidence_item(item, known_detectors, known_scenarios))
+    if evidence == list(cause.evidence):
+        return cause
+    return cause.model_copy(update={"evidence": evidence})
+
+
+def _normalize_evidence_item(
+    item: RootCauseEvidence, known_detectors: set[str], known_scenarios: set[str]
+) -> list[RootCauseEvidence]:
+    if item.kind == "detector-finding":
+        known = known_detectors
+        strip = False
+    elif item.kind == "synthetic-traffic":
+        known = known_scenarios
+        strip = True
+    else:
+        return [item]
+    parts = _source_parts(item.source)
+    kept = [part for part in parts if (part.removeprefix(_SCENARIO_RULE_PREFIX) if strip else part) in known]
+    unknown = [part for part in parts if part not in kept]
+    if not unknown:
+        return [item]
+    if not kept:
+        # Nothing the controller can recognize: the whole item is a live observation.
+        return [item.model_copy(update={"kind": "live-observation"})]
+    # Keep the recognized parts as cited; move the rest to a live observation.
+    return [
+        item.model_copy(update={"source": "; ".join(kept)}),
+        RootCauseEvidence(kind="live-observation", source="; ".join(unknown), observation=item.observation),
+    ]
 
 
 def _incident_result_schema() -> dict[str, object]:
@@ -537,7 +622,13 @@ def _verification_instructions() -> str:
         "synthetic scenario (source: its scenario ID), a change listed since the last healthy state (source: its "
         "`Kind/name`; a change your own repair made is not evidence of the cause, and SDO checks that the change "
         "predates your repair of that object), or a live observation (source: the command; observation: what its "
-        "output showed). Scripts, "
+        "output showed). Match the kind to what you actually observed: use detector-finding only for a detector ID "
+        "SDO reported (in this request or a late finding you pulled), and synthetic-traffic only for a failing "
+        "scenario ID. SDO's own verify command (`sdo incident status`), a `kubectl` or `curl` you ran, and the "
+        "configuration diff as a whole are live observations (source: the command), not detector findings or "
+        "scenarios; a listed configuration change is a state-change. SDO degrades any detector or scenario source "
+        "it does not recognize to a live observation, and a cause whose only evidence it cannot recognize cannot "
+        "be confirmed. Scripts, "
         "manifests, ConfigMap bodies, source files, and architecture notes show what could go wrong, not what did: "
         "list them only in static_context. Name in explained_detectors the detectors whose findings the cause "
         "explains; they must clear after your fix, and SDO checks that they do.\n\n"
