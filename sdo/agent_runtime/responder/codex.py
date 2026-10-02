@@ -198,6 +198,20 @@ def _incident_result_schema() -> dict[str, object]:
             "additionalProperties": False,
         },
     }
+    if os.getenv(CLOSEOUT_STATE_GATE_ENV):
+        properties["acknowledged_state_changes"] = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "minLength": 1},
+                    "name": {"type": "string", "minLength": 1},
+                    "reason": {"type": "string", "minLength": 1},
+                },
+                "required": ["kind", "name", "reason"],
+                "additionalProperties": False,
+            },
+        }
     return {
         "type": "object",
         "properties": properties,
@@ -485,6 +499,18 @@ def _state_changes_section(request: IncidentRequest) -> str:
         "Objects not listed existed unchanged while the application was healthy, so they did not cause a new "
         "incident on their own. If no listed change explains the symptoms, the fault is likely not a "
         "configuration change in these kinds.\n\n"
+        f"{_acknowledgement_instructions()}"
+    )
+
+
+def _acknowledgement_instructions() -> str:
+    if not os.getenv(CLOSEOUT_STATE_GATE_ENV):
+        return ""
+    return (
+        "Before you return, account for every change listed above: either a successful repair action's "
+        "`resources` include it, or you list it in `acknowledged_state_changes` with its kind, name, and a "
+        "one-sentence reason it is unrelated to this incident. After health clears, SDO sends the incident back "
+        "for any listed change that is neither repaired nor acknowledged.\n\n"
     )
 
 
@@ -537,6 +563,9 @@ def _no_action_instructions() -> str:
 
 
 LATE_FINDINGS_ENV = "SDO_LATE_FINDINGS"
+#: Set by the controller install when its close-out state gate is on; the responder then acknowledges diff
+#: objects it leaves alone (the field and the prompt text are absent otherwise).
+CLOSEOUT_STATE_GATE_ENV = "SDO_CLOSEOUT_STATE_GATE"
 
 
 def late_findings_guidance(request: IncidentRequest, *, mode: str | None = None) -> str:

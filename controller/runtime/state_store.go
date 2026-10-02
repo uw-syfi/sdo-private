@@ -302,6 +302,12 @@ func cloneIncidentResult(result *IncidentResult) *IncidentResult {
 		}
 	}
 	copy.RepairChanges = append(make([]string, 0, len(result.RepairChanges)), result.RepairChanges...)
+	if result.AcknowledgedStateChanges != nil {
+		copy.AcknowledgedStateChanges = append(
+			make([]StateChangeAcknowledgement, 0, len(result.AcknowledgedStateChanges)),
+			result.AcknowledgedStateChanges...,
+		)
+	}
 	copy.RepairActions = append(
 		make([]RepairActionReceipt, 0, len(result.RepairActions)), result.RepairActions...,
 	)
@@ -330,6 +336,11 @@ func cloneIncidentClosure(closure *IncidentClosure) *IncidentClosure {
 		copy.ObservedStateChanges = append(
 			make([]ObservedStateChange, 0, len(closure.ObservedStateChanges)), closure.ObservedStateChanges...,
 		)
+	}
+	if closure.CloseoutGate != nil {
+		gate := *closure.CloseoutGate
+		gate.Objects = append(make([]CloseoutGateObject, 0, len(closure.CloseoutGate.Objects)), closure.CloseoutGate.Objects...)
+		copy.CloseoutGate = &gate
 	}
 	if closure.HealthClearedAt != nil {
 		clearedAt := *closure.HealthClearedAt

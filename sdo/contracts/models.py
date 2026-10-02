@@ -333,6 +333,14 @@ class RepairActionReceipt(ContractModel):
         return self
 
 
+class StateChangeAcknowledgement(ContractModel):
+    """A configuration-diff object the responder left unrepaired on purpose, and why."""
+
+    kind: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
 class IncidentResult(ContractModel):
     schema_version: Literal["sdo.dev/v1alpha1"] = SCHEMA_VERSION
     incident_id: str = Field(min_length=1)
@@ -344,6 +352,7 @@ class IncidentResult(ContractModel):
     final_detector_states: list[DetectorEvaluation] = Field(default_factory=list)
     proposed_memory_changes: list[str] = Field(default_factory=list)
     verification_evidence: list[VerificationEvidence] = Field(default_factory=list)
+    acknowledged_state_changes: list[StateChangeAcknowledgement] = Field(default_factory=list)
     usage: UsageMetrics
     timing: TimingMetrics
     responder_session_id: str | None = None

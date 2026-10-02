@@ -23,7 +23,7 @@ from sdo.operational_memory.broker_service import BrokerClosure
 
 GO_FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "sdo" / "contracts" / "go"
 VIEWS = ("incident_view_empty.json", "incident_view_open.json", "incident_view_populated.json")
-CLOSURES = ("closure_repaired.json", "closure_own_edit.json")
+CLOSURES = ("closure_repaired.json", "closure_own_edit.json", "closure_closeout_gate.json")
 
 
 def _raw(name: str) -> Any:

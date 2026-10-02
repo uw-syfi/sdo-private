@@ -226,6 +226,7 @@ def _sdo_agent(
         late_findings=args.late_findings,
         max_follow_ups=args.max_follow_ups,
         follow_up_cooldown_seconds=args.follow_up_cooldown_seconds,
+        closeout_state_gate=args.closeout_state_gate,
         healthy_baseline=args.healthy_baseline,
         controller_namespace=control_namespace_for(environment.namespace),
     )
@@ -541,6 +542,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--max-follow-ups", type=int, default=0, help="follow-up responders for residual health findings")
     run.add_argument("--follow-up-cooldown-seconds", type=int, default=30)
+    run.add_argument(
+        "--closeout-state-gate",
+        action="store_true",
+        help="send back objects still different from the healthy baseline that no repair touched",
+    )
     run.add_argument("--reasoning-effort", default=None, help="Codex baseline reasoning effort (default: Codex's)")
     run.add_argument("--timeout", type=int, default=3600, help="per-incident agent timeout in seconds")
     run.add_argument(

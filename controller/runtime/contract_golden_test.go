@@ -76,6 +76,14 @@ func goldenIncident(
 	t *testing.T, timeline func(time.Time) []StateChange, result func(IncidentRequest) IncidentResult,
 ) (IncidentRequest, *IncidentView, IncidentClosure) {
 	t.Helper()
+	return goldenIncidentWith(t, func(*ControllerConfig) {}, timeline, result)
+}
+
+func goldenIncidentWith(
+	t *testing.T, configure func(*ControllerConfig), timeline func(time.Time) []StateChange,
+	result func(IncidentRequest) IncidentResult,
+) (IncidentRequest, *IncidentView, IncidentClosure) {
+	t.Helper()
 	cause := controllerDetector(
 		"cause", time.Second, stateFinding("cause"), stateFinding("cause"),
 		sdk.Finding{}, sdk.Finding{}, sdk.Finding{}, sdk.Finding{}, sdk.Finding{},
@@ -83,6 +91,7 @@ func goldenIncident(
 	dispatcher := &fixedResultDispatcher{requests: make(chan IncidentRequest, 1), result: result}
 	config := testControllerConfig()
 	config.RepairPolicy = "recorded-actions"
+	configure(&config)
 	controller, err := NewController(
 		config, []sdk.Detector{cause}, staticProvider{snapshot: sdktest.Snapshot{}}, dispatcher, time.Unix(0, 0),
 	)
@@ -213,6 +222,34 @@ func TestGoContractFixtures(t *testing.T) {
 		)
 	})
 	checkGoContractFixture(t, "closure_own_edit.json", ownEdit)
+
+	// The close-out gate on with no follow-up budget: the unrepaired object
+	// is marked on the closure instead of being sent back.
+	isolation := []StateChange{{Kind: "NetworkPolicy", Name: "deny-all-recommendation", Change: StateChangeAdded}}
+	_, _, gated := goldenIncidentWith(t, func(config *ControllerConfig) { config.CloseoutStateGate = true },
+		func(time.Time) []StateChange { return isolation },
+		func(request IncidentRequest) IncidentResult {
+			return goldenResult(request,
+				ConfirmedRootCause{
+					Summary:   "the readiness probe pointed at the wrong port",
+					Resources: []sdk.ObjectRef{{Kind: "Deployment", Name: "geo"}},
+					Evidence: []RootCauseEvidence{
+						{Kind: "live-observation", Source: "kubectl get deployment geo", Observation: "wrong probe port"},
+					},
+					ExplainedDetectors: []string{"cause"},
+				},
+				RepairActionReceipt{
+					ActionID: "fix-probe", Kind: "kubectl", Target: "deployment/geo",
+					Resources: []sdk.ObjectRef{{Kind: "Deployment", Name: "geo"}},
+					Summary:   "fix the probe", Details: "kubectl patch", StartedAt: time.Unix(1, 500_000_000).UTC(),
+					CompletedAt: time.Unix(1, 600_000_000).UTC(), Success: true, Reversible: true,
+				},
+			)
+		})
+	checkGoContractFixture(t, "closure_closeout_gate.json", gated)
+	if gated.CloseoutGate == nil || gated.CloseoutGate.Outcome != CloseoutExhausted {
+		t.Fatalf("the unrepaired policy must be marked on the closure: %+v", gated.CloseoutGate)
+	}
 	if len(ownEdit.ObservedStateChanges) != 1 || !ownEdit.ObservedStateChanges[0].FirstObservedAt.Equal(time.Unix(2, 0).UTC()) {
 		t.Fatalf("the restart must first be observed after the repair started: %+v", ownEdit.ObservedStateChanges)
 	}

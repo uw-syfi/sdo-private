@@ -482,6 +482,16 @@ def test_follow_ups_reach_the_controller_arguments() -> None:
     assert args[args.index("--follow-up-cooldown") + 1] == "45s"
 
 
+def test_closeout_state_gate_is_opt_in_and_reaches_the_controller() -> None:
+    assert "--closeout-state-gate" not in _controller_job_args(_config())
+    config = ControllerInstallConfig(**{**_config().__dict__, "closeout_state_gate": True})
+
+    args = _controller_job_args(config)
+    assert "--closeout-state-gate" in args
+    assert "--responder-env=SDO_CLOSEOUT_STATE_GATE=1" in args
+    assert not any("SDO_CLOSEOUT_STATE_GATE" in arg for arg in _controller_job_args(_config()))
+
+
 @pytest.mark.parametrize("update", [{"max_follow_ups": -1}, {"follow_up_cooldown_seconds": -1}])
 def test_invalid_follow_up_settings_are_rejected(update: dict[str, int]) -> None:
     with pytest.raises(ValueError, match="follow_up"):
