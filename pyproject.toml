@@ -67,7 +67,7 @@ include = [
 
 [tool.ruff]
 line-length = 120
-exclude = ["apps/", "bench/", "exp/", "third_party/"]
+exclude = ["apps/", "bench/", "exp/", "third_party/", "sdo/contracts/_gen/"]
 
 [tool.ruff.format]
 quote-style = "double"

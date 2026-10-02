@@ -22,12 +22,24 @@ compile time; CI regenerates and asserts no diff.
 ## Regenerate
 
 ```bash
-buf lint
-buf generate
+scripts/gen_proto.sh     # buf lint + buf generate
+scripts/check_proto.sh   # buf lint + buf breaking + assert committed codegen matches
 ```
 
-Toolchain: `buf`, `protoc-gen-go` (`go install google.golang.org/protobuf/cmd/protoc-gen-go@latest`),
-and the Python plugins referenced in `buf.gen.yaml`.
+Toolchain (installed via `go install`, so they land in `~/go/bin` — add it to `PATH`):
+
+- `buf` — `go install github.com/bufbuild/buf/cmd/buf@latest`
+- `protoc-gen-go` — `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest`
+- Python: the remote buf plugins `buf.build/protocolbuffers/python` and `.../pyi`,
+  **pinned to `v33.4`** in `buf.gen.yaml`. That pin matches the `protobuf==6.33.4`
+  runtime locked in `uv.lock`; the unpinned (latest) plugin emits gencode newer than
+  that runtime, which then refuses to load it. Bump the two pins together with the
+  protobuf runtime. The buf registry is reachable in this environment, so no local
+  `protoc --python_out` fallback is needed; if it ever becomes unreachable, swap the
+  two remote plugins for `local: protoc` with `--python_out`/`--pyi_out`.
+
+Generated Go lives in its own module `sdo.dev/controller/contracts` (`controller/contracts/`,
+go_package `.../gen/...`); consumers add a `require` + relative `replace` for it.
 
 ## Rules
 
