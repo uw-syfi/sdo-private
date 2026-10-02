@@ -128,3 +128,42 @@ def test_codex_run_hands_the_worker_an_agent_kubeconfig_path_it_can_write(
 
     assert requested == [results_dir / "agent.kubeconfig"]
     assert results_dir.is_dir()
+
+
+def test_sdo_run_validates_the_lifecycle_in_the_images_the_environment_was_built_with(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from benchmarks.sregym import adapter
+    from benchmarks.sregym.fastloop import cli, sdo_agent
+    from benchmarks.sregym.fastloop.environment import Images
+
+    captured: dict[str, object] = {}
+    lifecycle_calls: list[dict[str, object]] = []
+
+    class RecordingAgent:
+        def __init__(self, settings: object, **arguments: object) -> None:
+            captured.update(arguments)
+
+    def record_lifecycle(*_args: object, **kwargs: object) -> bool:
+        lifecycle_calls.append(kwargs)
+        return False
+
+    monkeypatch.setattr(sdo_agent, "SdoPersistentAgent", RecordingAgent)
+    monkeypatch.setattr(adapter, "run_or_reuse_lifecycle", record_lifecycle)
+    environment = FastloopEnvironment(
+        run_dir=tmp_path,
+        cluster="fastloop-w0",
+        kubeconfig=tmp_path / "kubeconfig",
+        namespace="hotel-reservation",
+        application="Hotel Reservation",
+        workspace=tmp_path / "workspace",
+        sregym_dir=tmp_path / "sregym",
+        private_tmp=None,
+        images=Images(controller="sdo-controller:t1", responder="sdo-sregym-responder:t1", validator="v:t1"),
+    )
+    args = build_parser().parse_args(["run", "--run-dir", str(tmp_path), "--agent", "sdo"])
+
+    cli._sdo_agent(args, environment, tmp_path / "results")
+    captured["run_lifecycle"](object())  # type: ignore[operator]
+
+    assert lifecycle_calls[0]["validator_image"] == "v:t1"

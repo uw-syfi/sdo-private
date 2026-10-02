@@ -251,6 +251,7 @@ def _sdo_agent(
             context=context,
             provider=args.provider,
             model=args.model,
+            validator_image=environment.images.validator,
             validation_cache=validation_cache,
         ),
     }

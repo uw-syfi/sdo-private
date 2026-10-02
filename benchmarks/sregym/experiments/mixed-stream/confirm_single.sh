@@ -10,7 +10,7 @@ cd /mnt/data/shli/sdo-worktrees/mixed-integration
 RUN=/mnt/data/shli/clc-runs/$NAME
 mkdir -p $RUN
 echo "$(date -u +%FT%TZ) load=$(cut -d' ' -f1 /proc/loadavg) up" >> $RUN/seq.log
-uv run --extra test python -m benchmarks.sregym.fastloop up --run-dir $RUN --cluster-prefix mi-w --worker-id $WID \
+uv run --extra test python -m benchmarks.sregym.fastloop up --run-dir $RUN --seed ${SEED_REPO:-/mnt/data/shli/clc-runs/seeds/cold-hotel} --cluster-prefix mi-w --worker-id $WID \
   --controller-image sdo-controller:$TAG --responder-image sdo-sregym-responder:$TAG --validator-image sdo-detector-validator:$TAG \
   --builder mi$WID --redeploy > $RUN/up.log 2>&1 || { echo "up failed" >> $RUN/seq.log; exit 1; }
 echo "$(date -u +%FT%TZ) load=$(cut -d' ' -f1 /proc/loadavg) run $P" >> $RUN/seq.log
