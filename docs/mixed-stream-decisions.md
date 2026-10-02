@@ -129,3 +129,24 @@ Goal: show that the three fixes (validator-image plumbing, lifecycle guard, clos
 | Cold C1 composite, conductor (`confirm-c1`), luna xhigh judge | `mi2` | compare with Tier 0 (2/3 faults, NetworkPolicy missed) | the same: 2/3 faults repaired, official `NetworkPolicyMitigationOracle` failed, Diagnosis 2/3. No link finding: this lifecycle's judge wrote `links.yaml` with only `frontend->consul` and `search->consul`. |
 
 Finding: link coverage varies across cold lifecycles (the NP-single lifecycle declared five frontend edges and caught the fault; the C1 lifecycle declared two consul edges and did not). The prompt is the same. Proposal (about 25 min, plus one cold C1 rerun): a deterministic backstop that dials every in-namespace Service port, or a validator rule that every Service the health objective names has an inbound edge. Not implemented in this phase.
+
+### Step 3: mixed mini stream, two sequences (images `mi4`, luna, gate on, `seq_mixed.sh`, 2026-10-02 08:32 to 09:45Z)
+
+Stream: `network_policy_block`, `missing_configmap`, `readiness_probe`, C4 (first composite, after its three component singles), C4 again, C1 (a different mix of the same components). Fastloop, probe graded plus the official oracle of the problem; no LLM judge. Two replicate sequences `mi-mini-a` (worker 62) and `mi-mini-b` (worker 63, started 3 min later); load at launches 8 to 14 (no run was started above 20). Raw: `/mnt/data/shli/clc-runs/mi-mini-{a,b}`.
+
+| # | problem | a: oracle, inj to det / mit s, tokens (resp + refl) | b: oracle, inj to det / mit s, tokens (resp + refl) |
+| --- | --- | --- | --- |
+| 1 | `network_policy_block` | pass, 6.1 / 32.5, 0.43M (0.14 + 0.30) | pass, 6.5 / 45.1, 0.33M (0.13 + 0.20) |
+| 2 | `missing_configmap` | pass, 0.7 / 32.2, 0.43M (0.21 + 0.22) | pass, 0.7 / 60.3, 0.47M (0.26 + 0.21) |
+| 3 | `readiness_probe` | pass, 0.7 / 67.2, 0.50M (0.25 + 0.25) | pass, 0.8 / 32.3, 0.26M (0.15 + 0.11) |
+| 4 | C4 first composite | pass, 0.8 / 84.9, 0.80M (0.46 + 0.34) | pass, 0.7 / 66.1, 1.09M (0.49 + 0.60) |
+| 5 | C4 exact repeat | pass, 0.7 / 58.9, 0.29M (0.29 + 0) | pass, 0.7 / 133.0, 0.54M (0.54 + 0) |
+| 6 | C1 variant | pass, 0.7 / 61.0, 0.78M (0.48 + 0.30) | pass, 0.6 / 144.9, 0.90M (0.61 + 0.28) |
+
+12 of 12 incidents pass the official oracle, including the three composites that contain a NetworkPolicy fault; 0 errors, 0 undetected, 0 follow-up incidents needed. The single NetworkPolicy is detected by the link probe 6 s after injection (health-judge `traffic-links`, before dispatch); every repair was `sdo_mitigated` (attributed), `clock_skew_corrected` was empty on every receipt (no responder start time landed within 30 s after health cleared), and reflection ran on every incident except the C4 repeat (skipped as an exact-match success). Learned incident playbooks after six incidents: 3 (NetworkPolicy, ConfigMap, readiness) in each sequence, no learned detector fired outside its fault component, and the healthy-baseline gate rejected nothing. The close-out gate recorded no send-backs (no receipt carries a `closeout_gate` outcome), so this run does not exercise it.
+
+Takeaways:
+
+1. The stream resolves with the three fixes on and the link probe. Meaning: 12 of 12 by the official oracle, including composites with a NetworkPolicy fault (0 of 2 in the cold Tier 0 and C1 conductor runs, whose lifecycles lacked the recommendation edge). Confidence: medium (n=2 sequences, one app, one lifecycle seed with a good five-edge `links.yaml`). Implication: the earlier misses came from the missing link coverage and the clock-skew attribution, not from the oracle. Next step: a cold C1 with the link-coverage backstop (queued).
+2. Composition from singles saves little on its first composite. Meaning: C4 first occurrence costs 0.80M and 1.09M tokens (the old cold C1 to C3 cost 0.85M to 1.25M), almost all of it a 0.3M to 0.6M reflection; the exact repeat costs 0.29M and 0.54M with no reflection; the C1 variant costs 0.78M and 0.90M, again with a reflection. Time shows no trend (33 to 145 s). Confidence: low (n=2). Implication: memory pays on exact repeats, not on first or variant composites at this stream length, as in the composite-stream study. Next step: the 10-incident pilot.
+3. In composites the learned ConfigMap and NetworkPolicy detectors fired after dispatch, not before (only the learned readiness detector fired before dispatch in sequence a), and the diagnosis verification marked two of three composite root causes `contradicted` (the responder cited a learned detector finding as evidence that had not fired at dispatch). Meaning: the responder repairs correctly (oracle pass, attributed repairs) but cites evidence that the verifier cannot confirm. Confidence: medium (4 of 4 first composites). Implication: this affects learning quality, not resolution. Next step: check what the reflection stores from `contradicted` verdicts.
