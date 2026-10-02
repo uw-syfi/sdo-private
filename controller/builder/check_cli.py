@@ -158,7 +158,7 @@ def _build_parser() -> argparse.ArgumentParser:
     controller.add_argument(
         "--closeout-state-gate",
         action="store_true",
-        help="send back objects still different from the healthy baseline that no repair touched or responder acknowledged",
+        help="send back objects still different from the healthy baseline that no repair touched or acknowledged",
     )
     controller.add_argument("--repair-policy", choices=("commit", "recorded-actions"), default="commit")
     controller.add_argument("--duration", default="")
