@@ -124,7 +124,7 @@ func run(namespace string, clusterDomain string, listen string, check bool, cata
 		return err
 	}
 	if check {
-		if failures := traffic.CheckCatalog(context.Background(), catalog); len(failures) > 0 {
+		if failures := traffic.CheckCatalog(context.Background(), catalog); len(catalog) > 0 && len(failures) > 0 {
 			return errors.Join(failures...)
 		}
 		return nil

@@ -25,6 +25,12 @@ const (
 	// ("link-reachability.<from>.<to>.<port>").
 	LinkRuleIDPrefix = "link-reachability."
 
+	// ProberSource is the From of an edge that the prober dials by itself,
+	// not on behalf of a calling Service: a link derived from the declared
+	// Services rather than from a caller's source. Such an edge names no
+	// calling Service, so its finding relates none.
+	ProberSource = "sdo-prober"
+
 	DefaultLinkInterval = 1 * time.Second
 	DefaultLinkTimeout  = 1 * time.Second
 	// DefaultLinkFailures is how many consecutive failed dials report an
@@ -198,14 +204,22 @@ func LinkFinding(spec sdk.DetectorSpec, namespace string, window Window, observe
 		messages = append(messages, fmt.Sprintf("[%s] %s (%s)",
 			sample.At.UTC().Format(time.RFC3339), sample.Error, sample.Duration.Round(time.Millisecond)))
 	}
+	longLived := fmt.Sprintf("Existing long-lived connections from %s to %s may still work, so user-facing probes can stay green.",
+		link.From, link.To)
+	if link.From == ProberSource {
+		longLived = fmt.Sprintf("Existing long-lived connections to %s may still work, so user-facing probes can stay green.", link.To)
+	}
 	evidence := fmt.Sprintf(
 		"link %s: the last %d fresh TCP dials of Service %s port %d from the prober pod all failed over %s "+
-			"(workload %s; interval %s, timeout %s), after the link had connected before. Existing long-lived "+
-			"connections from %s to %s may still work, so user-facing probes can stay green. Recent failures: %s.",
+			"(workload %s; interval %s, timeout %s), after the link had connected before. %s Recent failures: %s.",
 		link, len(run), link.To, link.Port, run[len(run)-1].At.Sub(run[0].At).Round(time.Millisecond),
 		window.Workload.Name, window.Workload.Interval.Duration(), window.Workload.Timeout.Duration(),
-		link.From, link.To, strings.Join(messages, "; "),
+		longLived, strings.Join(messages, "; "),
 	)
+	related := []sdk.ObjectRef{}
+	if link.From != ProberSource {
+		related = append(related, sdk.ObjectRef{APIVersion: "v1", Kind: "Service", Namespace: namespace, Name: link.From})
+	}
 	return sdk.Finding{
 		DetectorID: spec.ID,
 		RuleID:     LinkRuleIDPrefix + link.ID(),
@@ -215,7 +229,7 @@ func LinkFinding(spec sdk.DetectorSpec, namespace string, window Window, observe
 			link, len(run)),
 		Evidence:         evidence,
 		PrimaryResource:  sdk.ObjectRef{APIVersion: "v1", Kind: "Service", Namespace: namespace, Name: link.To},
-		RelatedResources: []sdk.ObjectRef{{APIVersion: "v1", Kind: "Service", Namespace: namespace, Name: link.From}},
+		RelatedResources: related,
 		Playbooks:        append([]string(nil), spec.Playbooks...),
 		Metadata: map[string]any{
 			"workload": window.Workload.Name, "from": link.From, "to": link.To, "port": link.Port,
