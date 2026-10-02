@@ -223,6 +223,37 @@ func TestControllerConfigOmitsUnsetFields(t *testing.T) {
 	}
 }
 
+// TestLoadControllerConfigRejectsUnknownField is the regression fixture for the
+// --closeout-state-gate drift bug: the launcher handed the controller a flag
+// (--closeout-state-gate) the controller binary did not define, so every
+// controller pod died with "unrecognized arguments" minutes into a run. Under
+// seam 3 the launcher no longer names flags; it populates one ControllerConfig.
+// A field the launcher writes that the controller does not define is now an
+// unknown field in the mounted protojson, which LoadControllerConfig rejects at
+// startup (protojson is strict by default), loud and immediate instead of a
+// late crash. This locks that failure mode shut.
+func TestLoadControllerConfigRejectsUnknownField(t *testing.T) {
+	raw := []byte(`{
+		"namespace": "hotel-reservation",
+		"app_root": "/workspace/app",
+		"dispatcher": "/usr/local/bin/responder",
+		"dispatcher_mode": "job",
+		"repair_policy": "commit",
+		"closeout_state_gate": true
+	}`)
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_, err := LoadControllerConfig(path)
+	if err == nil {
+		t.Fatal("expected an unknown config field to be rejected at startup")
+	}
+	if !strings.Contains(err.Error(), "closeout_state_gate") {
+		t.Fatalf("error should name the unknown field, got: %v", err)
+	}
+}
+
 func contains(args []string, want string) bool {
 	for _, arg := range args {
 		if arg == want {
