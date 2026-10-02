@@ -129,18 +129,45 @@ func (c *chaosToggle) get() bool {
 	return c.on
 }
 
-// chaosHealthDetector is a controllable health detector. The harness flips its
-// finding on and off to model fault injection and recovery independently of how
-// many evaluations the perturbed schedule happens to run -- unlike a fixed
-// sequence, it never desyncs when the clock jitter changes the step count. It
-// is deterministic and reads only its toggle, never an LLM or a verdict.
-type chaosHealthDetector struct {
-	spec   sdk.DetectorSpec
-	active chaosToggle
+// chaosDetector is a controllable detector. The harness flips its finding on
+// and off (and can make it return an error, modeling an unreachable prober or a
+// dropped evaluation) independently of how many evaluations the perturbed
+// schedule happens to run -- unlike a fixed sequence, it never desyncs when the
+// clock jitter changes the step count. It is deterministic and reads only its
+// toggles, never an LLM or a verdict.
+type chaosDetector struct {
+	spec     sdk.DetectorSpec
+	severity sdk.FindingSeverity
+	active   chaosToggle
+	erroring chaosToggle
 }
 
-func newChaosHealthDetector(id string) *chaosHealthDetector {
-	return &chaosHealthDetector{
+func (d *chaosDetector) Spec() sdk.DetectorSpec { return d.spec }
+
+func (d *chaosDetector) Detect(_ context.Context, _ sdk.DetectionContext) ([]sdk.Finding, error) {
+	if d.erroring.get() {
+		return nil, errChaosEvaluation
+	}
+	if !d.active.get() {
+		return nil, nil
+	}
+	finding := stateFinding(d.spec.ID)
+	finding.Severity = d.severity
+	return []sdk.Finding{finding}, nil
+}
+
+// errChaosEvaluation stands in for a detector whose backing signal is
+// unavailable (an unreachable prober, a dropped snapshot). Per the architecture
+// such an error blocks closure but must never open an incident.
+var errChaosEvaluation = errChaos("chaos: detector signal unavailable")
+
+type errChaos string
+
+func (e errChaos) Error() string { return string(e) }
+
+func newChaosHealthDetector(id string) *chaosDetector {
+	return &chaosDetector{
+		severity: sdk.SeverityCritical,
 		spec: sdk.DetectorSpec{
 			ID: id, Interval: time.Second,
 			Class: sdk.DetectorClassHealth, Owner: sdk.DetectorOwnerHealthJudge,
@@ -151,15 +178,18 @@ func newChaosHealthDetector(id string) *chaosHealthDetector {
 	}
 }
 
-func (d *chaosHealthDetector) Spec() sdk.DetectorSpec { return d.spec }
-
-func (d *chaosHealthDetector) Detect(_ context.Context, _ sdk.DetectionContext) ([]sdk.Finding, error) {
-	if !d.active.get() {
-		return nil, nil
+func newChaosIncidentDetector(id string) *chaosDetector {
+	return &chaosDetector{
+		severity: sdk.SeverityWarning,
+		spec: sdk.DetectorSpec{
+			ID: id, Interval: time.Second,
+			Class: sdk.DetectorClassIncident, Owner: sdk.DetectorOwnerResponder,
+			Persistence:         sdk.PersistencePolicy{Firing: 2, Clearing: 2},
+			Batching:            sdk.BatchingPolicy{Severity: sdk.SeverityWarning},
+			OriginatingIncident: "incident-0",
+			OriginatingCommit:   "commit-0",
+		},
 	}
-	finding := stateFinding(d.spec.ID)
-	finding.Severity = sdk.SeverityCritical
-	return []sdk.Finding{finding}, nil
 }
 
 // chaosController bundles a controller with the fakes and the mutable clock the
@@ -168,7 +198,7 @@ func (d *chaosHealthDetector) Detect(_ context.Context, _ sdk.DetectionContext) 
 type chaosController struct {
 	controller *Controller
 	dispatcher *recordingDispatcher
-	detector   *chaosHealthDetector
+	detector   *chaosDetector
 	now        time.Time
 }
 
