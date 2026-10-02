@@ -93,3 +93,39 @@ Takeaways:
 1. The mixed stream is feasible in the conductor path: composite IDs need no harness change (receipt, judges, oracle, deferred injection, persistent controller all work). Confidence: high for one stage; no repeat stage was run.
 2. A cold first composite containing a NetworkPolicy fault is not solved by the health detectors, and this is the exact fault class the fairness audit removed hard-coded knowledge for (`fairness-DECISIONS.md` item 2). The user-facing traffic checks stay green with `recommendation` isolated, so SDO declares health restored while the official oracle disagrees. Confidence: medium (n=1; the earlier fast-loop stream resolved the cold C1 3/3, so part of the difference may be run-to-run luck or the stricter conductor grading versus read-only probes). Implication: in the full-conductor mixed stream, composites that contain the NetworkPolicy fault will score as unsolved on first occurrence unless a detector for it is learned, so score them separately and expect the learning curve to show up there. Next step: rerun the cold C1 once or twice to see whether the miss is systematic, and look at whether the controller's `traffic-health` probes ever hit `recommendation`.
 3. The second (repeat) stage was not run: stage 1 was not clean, which was the condition for running it.
+
+## Phase A runs (2026-10-02, branch `vic/exp/mixed-integration`)
+
+Goal: show that the three fixes (validator-image plumbing, lifecycle guard, close-out gate) work on a cluster, then run the mixed mini stream. Codex gpt-6-luna for the SDO agents and the SREGym judge (xhigh); the Codex quota check is ignored (user, 2026-10-02). Raw runs: `/mnt/data/shli/clc-runs/mi-*` and `third_party/sregym/logs/*confirm-c1*` in the `mixed-integration` worktree.
+
+### Decisions
+
+| # | Decision | Alternatives | Why |
+| --- | --- | --- | --- |
+| 1 | Integration branch `vic/exp/mixed-integration` from `vic/exp/mixed-stream`, merging smoke, lifecycle-guard, validator-image and close-out-gate (one add/add doc conflict; kept both sections). Later merged preflight, efficiency and repair-attribution-clock. | Test each fix on its own branch. | One build under one tag for the three fixes is what a confirming run needs; the controller and validator tags must match. |
+| 2 | Images built under private tags `mi1` to `mi4` (`SDO_IMAGE_TAG`, `BUILDX_BUILDER=sdo-example`); `SDO_VALIDATOR_IMAGE` left unset in every run. | Export the env var as the earlier runs did. | Leaving it unset is the point of the validator-image fix; `mi1` and `mi2` each exposed a bug that the env var had masked. |
+| 3 | Cold fastloop seed `/mnt/data/shli/clc-runs/seeds/cold-hotel` built from `SREGym-applications/hotelReservation` (one commit, no `.sdo`). | Reuse `lifecycle-stream` or `mini-lifecycle` (both already carry a `.sdo`). | A cold lifecycle was the thing under test. |
+| 4 | Conductor C1 run sets `SDO_PREFLIGHT_MAX_QUOTA_USED_PERCENT=100`. | `SDO_PREFLIGHT=warn` (records the run as `invalid_infra`). | User: ignore quota checks. |
+| 5 | Stopped three runs by hand before a result existed (a conductor run still in its lifecycle, two fastloop singles whose NetworkPolicy could not be detected); removed the leaked `deny-all-recommendation` policy manually and deleted the controller namespace before every rerun. | Wait out the 900 s timeout. | Each wait was 10+ min for a known miss. Never killed a run after a fault without recovering it. |
+| 6 | Mini stream with `seq_mixed.sh` (efficiency branch): no `--inject-before-resume`, `--timeout 900`, `--detection-timeout 120`, close-out gate on, seed `seeds/mi-lifecycle` (the cold NP-single lifecycle at its attestation commit, with no incident memory and five frontend links). | `COLD=1` with a fresh lifecycle; Tier 0's seed. | A cold lifecycle's link coverage is nondeterministic (see findings), so the mini stream tests the stream behaviour, not the lifecycle. A cold lifecycle stays required for any final number. |
+
+### Bugs found and fixed on the way (each test-first, pushed)
+
+| Commit | Bug | Effect |
+| --- | --- | --- |
+| `320b5dcf` | `fastloop run` called `run_or_reuse_lifecycle` without `validator_image`, so host-side validation fell back to `v0.1.0` and the judge dropped `links.yaml`. | The validator-image branch had wired only the driver call sites. |
+| `d58898f0`, `7d17e7eb` | The Python controller launcher (`sdo-detector-check controller`) did not define `--closeout-state-gate`; every controller pod exited with "unrecognized arguments". | The close-out gate could not have run on any cluster. |
+| `ce7663db` | The fault gate injected at the controller's first clear evaluation, before the prober's first dial; a link finding needs an edge that connected once. | A cold NetworkPolicy was never detected even with the link probe. Now waits 30 s for a Ready prober (none for apps without one). |
+| `aabf8b0d` | The responder deleted the policy at 07:57:07.5, before health cleared (07:57:08.8), but wrote `started_at` from a later clock read (07:57:17); the receipt said unattributed, reflection was skipped, nothing was learned. | Prompt now asks for `date -u` around the mutation; the clock-skew branch fixes it in code. |
+| `7c057f94` | Go `omitempty` vs Python default `[]` for `acknowledged_state_changes` broke the `incident_result` golden round trip after the gate merge. | Field optional in Python, empty list dropped from the fixture. |
+
+### Step 2: confirming runs (luna, gate on)
+
+| Run | Image | What | Result |
+| --- | --- | --- | --- |
+| Cold lifecycle, fastloop (`mi-np-single`) and conductor (`confirm-c1`) | `mi2` | `links.yaml` and the `traffic-links` detector survive validation | pass on both paths; no "unknown field" |
+| Cold `network_policy_block` single, fastloop, load 12 to 28 | `mi2` | link finding, responder, repair | `link-reachability.frontend.recommendation.8085` fired 7.2 s after injection (before dispatch); responder 133k tokens; oracle success; inj to mit 44 s; the receipt was `unattributed` (clock) |
+| Healthy window after the incident | `mi2` | 10.4 min, 124 controller iterations, no injection | 0 active findings (0 link false positives) |
+| Cold C1 composite, conductor (`confirm-c1`), luna xhigh judge | `mi2` | compare with Tier 0 (2/3 faults, NetworkPolicy missed) | the same: 2/3 faults repaired, official `NetworkPolicyMitigationOracle` failed, Diagnosis 2/3. No link finding: this lifecycle's judge wrote `links.yaml` with only `frontend->consul` and `search->consul`. |
+
+Finding: link coverage varies across cold lifecycles (the NP-single lifecycle declared five frontend edges and caught the fault; the C1 lifecycle declared two consul edges and did not). The prompt is the same. Proposal (about 25 min, plus one cold C1 rerun): a deterministic backstop that dials every in-namespace Service port, or a validator rule that every Service the health objective names has an inbound edge. Not implemented in this phase.
