@@ -54,6 +54,7 @@ from sdo.controller_install import (
     start_repository_sync,
     stop_repository_sync,
 )
+from sdo.operational_memory import incident_worktree_dirname
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -249,6 +250,8 @@ class ClusterOps(Protocol):
 
     def collect_receipt(self, config: RuntimeConfig, incident_id: str, artifacts_dir: Path) -> dict[str, Any]: ...
 
+    def reap_orphan_worktrees(self, config: RuntimeConfig, keep_dirnames: set[str]) -> list[str]: ...
+
     def export_runtime_artifacts(self, config: RuntimeConfig, artifacts_dir: Path) -> dict[str, str | None]: ...
 
     def export_controller_logs(self, control_namespace: str, artifacts_dir: Path) -> None: ...
@@ -317,6 +320,45 @@ class KubectlClusterOps:
         start_repository_sync(config)
         try:
             return collect_production_receipt(config, incident_id, artifacts_dir)
+        finally:
+            stop_repository_sync(config)
+
+    def reap_orphan_worktrees(self, config: RuntimeConfig, keep_dirnames: set[str]) -> list[str]:
+        """Remove worktrees under the shared root whose directory is not in *keep_dirnames*.
+
+        The caller guarantees the controller is quiescent, so every worktree
+        other than the kept ones belongs to a terminal incident. Returns the
+        worktree paths that remain after the reap.
+        """
+
+        control = config.control_namespace
+        start_repository_sync(config)
+        try:
+            listing = kubectl(
+                [
+                    "exec",
+                    "sdo-repository-sync",
+                    "--",
+                    "find",
+                    "/workspace/worktrees",
+                    "-mindepth",
+                    "1",
+                    "-maxdepth",
+                    "1",
+                    "-print",
+                ],
+                namespace=control,
+            )
+            remaining: list[str] = []
+            for line in listing.stdout.splitlines():
+                path = line.strip()
+                if not path:
+                    continue
+                if path.rsplit("/", 1)[-1] in keep_dirnames:
+                    remaining.append(path)
+                    continue
+                kubectl(["exec", "sdo-repository-sync", "--", "rm", "-rf", "--", path], namespace=control)
+            return remaining
         finally:
             stop_repository_sync(config)
 
@@ -672,6 +714,44 @@ def _closeout_settled(receipt: dict[str, Any]) -> bool:
     return receipt.get("completed") is True and receipt.get("remaining_worktrees") == []
 
 
+def _orphan_reap_keep_set(state: dict[str, Any], draining_incident_id: str) -> set[str] | None:
+    """Dirnames to keep when reaping orphan worktrees, or ``None`` to reap nothing.
+
+    Reaping is safe only when the single-incident controller has gone positively
+    quiescent with the draining incident its last acknowledged incident: no
+    incident open and no closure in flight. Any ambiguity -- an unreadable state,
+    an open incident, a closure (including a follow-up) still settling, or a
+    different last-acknowledged incident -- yields ``None`` so no worktree is
+    removed. When quiescent, only the draining incident's worktree (shared by its
+    follow-ups) is kept; every other worktree belongs to a terminal incident.
+    """
+
+    if not state:
+        return None
+    if state.get("incident_open") or state.get("pending_closure") is not None:
+        return None
+    if state.get("last_acknowledged_incident_id") != draining_incident_id:
+        return None
+    return {incident_worktree_dirname(draining_incident_id)}
+
+
+def _reap_orphan_worktrees(ops: ClusterOps, config: RuntimeConfig, control: str, draining_incident_id: str) -> None:
+    """Reap worktrees leaked by terminal incidents, but only when positively safe.
+
+    A worktree is orphaned when its incident was prepared and then abandoned
+    before any closure, so ``acknowledge`` never reaped it (``release_incident``
+    is the source fix). The gate samples the shared worktree directory globally,
+    so a leaked worktree from an earlier incident rejects a later incident's
+    receipt. On a single-incident controller that has gone quiescent, the drain
+    completes the teardown the abandoned incident never did.
+    """
+
+    keep = _orphan_reap_keep_set(ops.runtime_state(control), draining_incident_id)
+    if keep is None:
+        return
+    ops.reap_orphan_worktrees(config, keep)
+
+
 def _collect_settled_receipt(
     ops: ClusterOps,
     config: RuntimeConfig,
@@ -729,6 +809,10 @@ def drain_pending_incident(
         artifacts_dir=pending.receipt_dir,
         persistent=True,
     )
+    # Complete the teardown an abandoned incident left behind, so its leaked
+    # worktree does not reject this solved incident's receipt. Safe-guarded: only
+    # when the controller is positively quiescent.
+    _reap_orphan_worktrees(ops, config, record.control_namespace, pending.incident_id)
     receipt = _collect_settled_receipt(ops, config, pending.incident_id, pending.receipt_dir, clock)
     # The reflection-drain cost includes the wait for close-out to settle; neither
     # is resolution time (both are excluded below).
