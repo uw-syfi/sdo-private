@@ -518,15 +518,20 @@ def run_or_reuse_lifecycle(
     context: DeployedLifecycleContext,
     provider: str,
     model: str,
+    validator_image: str | None = None,
     validation_cache: LifecycleValidationCache | None = None,
 ) -> bool:
-    """Reuse a still-valid lifecycle handoff, or run a fresh model-backed lifecycle; return whether it was reused."""
+    """Reuse a still-valid lifecycle handoff, or run a fresh model-backed lifecycle; return whether it was reused.
+
+    The lifecycle validates in ``validator_image``: the image the adapter installs the controller with.
+    """
 
     reused = reuse_initial_lifecycle_if_valid(
         repository,
         application=application,
         health_objective=context.health_objective,
         active_resources=context.active_resources,
+        validator_image=validator_image,
         validation_cache=validation_cache,
     )
     if not reused:
@@ -537,6 +542,7 @@ def run_or_reuse_lifecycle(
             health_objective=context.health_objective,
             active_resources=context.active_resources,
             backend=lifecycle_type(model=model),
+            validator_image=validator_image,
         )
     return reused
 
@@ -605,6 +611,7 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
                 context=lifecycle_context,
                 provider=args.provider,
                 model=args.model,
+                validator_image=args.validator_image,
                 validation_cache=validation_cache,
             )
         if args.logs_dir and persist_lifecycle_seed(repository) is None:
@@ -691,6 +698,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         application=application,
         health_objective=health_objective,
         active_resources=lifecycle_context.active_resources,
+        validator_image=args.validator_image,
         validation_cache=validation_cache,
     )
     if not lifecycle_reused:
@@ -701,6 +709,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             health_objective=health_objective,
             active_resources=lifecycle_context.active_resources,
             backend=lifecycle_type(model=args.model),
+            validator_image=args.validator_image,
         )
     lifecycle_ready = time.monotonic()
     lifecycle_seed_checkpoint_error: str | None = None

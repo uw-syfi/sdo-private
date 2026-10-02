@@ -62,6 +62,7 @@ def test_sregym_adapter_routes_only_through_production_job_controller(tmp_path: 
             application="Hotel Reservation",
             controller_image="sdo-controller:v1",
             responder_image="sdo-responder:v1",
+            validator_image="sdo-detector-validator:v1",
             repository_pvc="sdo-repository",
             credentials_secret="sdo-codex-credentials",
             model="gpt-5",
@@ -102,7 +103,7 @@ def test_sregym_adapter_routes_only_through_production_job_controller(tmp_path: 
     assert "--broker-arg=--validator-mode" in command
     assert "--broker-arg=kubernetes" in command
     assert "--broker-arg=--validator-image" in command
-    assert "--broker-arg=sdo-detector-validator:v0.1.0" in command
+    assert "--broker-arg=sdo-detector-validator:v1" in command
     assert "--broker-arg=--validator-namespace" in command
     assert "--broker-arg=hotel-reservation" in command
     assert "--broker-arg=--validator-repository-pvc" in command
@@ -1852,3 +1853,32 @@ def test_sregym_agent_config_selects_bounded_follow_ups(monkeypatch: pytest.Monk
     )
     args = driver._parse_args([])
     assert (args.max_follow_ups, args.follow_up_cooldown_seconds) == (3, 20)
+
+
+def test_lifecycle_runs_in_the_adapters_validator_image(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import benchmarks.sregym.adapter.driver as driver
+
+    seen: dict[str, dict[str, object]] = {}
+
+    def fake_reuse(*_args: object, **kwargs: object) -> bool:
+        seen["reuse"] = kwargs
+        return False
+
+    def fake_lifecycle(*_args: object, **kwargs: object) -> str:
+        seen["lifecycle"] = kwargs
+        return "commit"
+
+    monkeypatch.setattr(driver, "reuse_initial_lifecycle_if_valid", fake_reuse)
+    monkeypatch.setattr(driver, "run_initial_lifecycle", fake_lifecycle)
+
+    driver.run_or_reuse_lifecycle(
+        tmp_path,
+        application="demo",
+        context=driver.DeployedLifecycleContext(health_objective="healthy", active_resources=[]),
+        provider="codex",
+        model="gpt-6-luna",
+        validator_image="sdo-detector-validator:mx1",
+    )
+
+    assert seen["reuse"]["validator_image"] == "sdo-detector-validator:mx1"
+    assert seen["lifecycle"]["validator_image"] == "sdo-detector-validator:mx1"

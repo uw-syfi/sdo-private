@@ -139,7 +139,7 @@ def test_controller_verifier_bootstraps_memory_and_accepts_empty_finding_stream(
     assert verification == DeploymentVerification(healthy=True, feedback="independent detector found no failures")
     assert calls["reuse"] == (
         repository.resolve(),
-        {"application": "example", "health_objective": "Users can complete requests."},
+        {"application": "example", "health_objective": "Users can complete requests.", "validator_image": None},
     )
     assert calls["lifecycle"] == (
         repository.resolve(),
@@ -147,6 +147,7 @@ def test_controller_verifier_bootstraps_memory_and_accepts_empty_finding_stream(
             "application": "example",
             "health_objective": "Users can complete requests.",
             "backend": backend,
+            "validator_image": None,
         },
     )
     command_args, command_kwargs = calls["command"]
@@ -372,3 +373,53 @@ def test_operate_can_install_the_controller_in_its_own_namespace(tmp_path: Path)
     )
     assert installed[0].control_namespace == "demo-sdo"  # type: ignore[attr-defined]
     assert installed[0].namespace == "demo"  # type: ignore[attr-defined]
+
+
+def test_controller_verifier_runs_the_lifecycle_in_the_configured_validator_image(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    calls: dict[str, dict[str, object]] = {}
+
+    def reuse(_root: Path, **kwargs: object) -> bool:
+        calls["reuse"] = kwargs
+        return False
+
+    def lifecycle(_root: Path, **kwargs: object) -> str:
+        calls["lifecycle"] = kwargs
+        return "memory-commit"
+
+    def command(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    verifier = ControllerDeploymentVerifier(
+        lifecycle_backend=object(),
+        lifecycle_reuser=reuse,
+        lifecycle_runner=lifecycle,
+        command_runner=command,
+        validator_image="sdo-detector-validator:mx1",
+    )
+    verifier.verify(
+        repository=repository,
+        namespace="demo",
+        application="example",
+        health_objective="Users can complete requests.",
+        attempt=DeploymentAttempt(
+            deployed=True,
+            source_commit="a" * 40,
+            agent_session_id="deployment-session",
+            summary="deployed",
+        ),
+    )
+
+    assert calls["reuse"]["validator_image"] == "sdo-detector-validator:mx1"
+    assert calls["lifecycle"]["validator_image"] == "sdo-detector-validator:mx1"
+
+
+def test_operation_config_rejects_a_validator_on_another_tag_than_the_controller(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="different tags"):
+        OperationConfig(
+            repository=tmp_path,
+            namespace="demo",
+            application="example",
+            health_objective="Users can complete requests.",
+            controller_image="sdo-controller:mx1",
+        )
