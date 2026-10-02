@@ -175,3 +175,35 @@ func TestLinkDetectorReportsUnloadableWindow(t *testing.T) {
 		t.Fatalf("expected the load error")
 	}
 }
+
+func TestLinkFromTheProberNamesNoCallingService(t *testing.T) {
+	workload, err := traffic.ParseWorkloadJSON([]byte(`{
+	  "apiVersion": "sdo.dev/v1alpha1", "kind": "TrafficWorkload", "name": "topology-links", "purpose": "link-probe",
+	  "links": [{"from": "` + traffic.ProberSource + `", "to": "recommendation", "port": 8085}]
+	}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	window := traffic.Window{Workload: workload, ObservedAt: observedAt, Links: []traffic.LinkObservations{{
+		Link: workload.Links[0], Qualified: true,
+		Samples: []traffic.LinkSample{
+			linkOK(6 * time.Second), linkFailed(5 * time.Second), linkFailed(4 * time.Second), linkFailed(3 * time.Second),
+			linkFailed(2 * time.Second), linkFailed(time.Second),
+		},
+	}}}
+	snapshot := sdktest.Snapshot{NamespaceName: "hotel-reservation", Traffic: map[string]traffic.Window{"topology-links": window}}
+	findings, err := traffic.NewLinkDetector(linkSpec(), "topology-links").Detect(context.Background(), snapshot)
+	if err != nil || len(findings) != 1 {
+		t.Fatalf("findings %+v err %v", findings, err)
+	}
+	finding := findings[0]
+	if finding.PrimaryResource.Name != "recommendation" || finding.PrimaryResource.Kind != "Service" {
+		t.Fatalf("primary: %+v", finding.PrimaryResource)
+	}
+	if len(finding.RelatedResources) != 0 {
+		t.Fatalf("the prober is not a Service of the application: related %+v", finding.RelatedResources)
+	}
+	if !strings.Contains(finding.Summary, "recommendation:8085") {
+		t.Fatalf("summary %q", finding.Summary)
+	}
+}
