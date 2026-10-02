@@ -71,3 +71,24 @@ dependency-bump ripple mid-migration.
   responder-edge conversion) will add a classic-compatible validator then.
 - Do **not** add gRPC services here — SDO keeps its file/PVC/git/HTTP transports.
 - `.sdo/` git memory, detector Go source, and JSONL log formats are out of scope.
+
+## Classic-protobuf-runtime bridge (revisit in Stage 2b)
+
+The repo runs the classic `google.protobuf` runtime (`protobuf==6.33.4`), while the
+current `protovalidate` tooling targets the newer `protobuf-py` runtime. Three choices
+bridge that gap today; all three exist to keep a single classic runtime, and **Stage 2b**
+(which lands Python validation at the responder-edge conversion on a classic-compatible
+validator) should revisit them so it inherits the context rather than a surprise:
+
+1. **CEL is checked on the Go side only.** `buf.build/go/protovalidate` validates the
+   generated Go messages; `protovalidate` is deliberately *not* in `uv.lock` because v2+
+   would drag in the incompatible `protobuf-py` runtime. 2b adds a classic-compatible
+   Python validator (or vendors one) for the conversion seam.
+2. **Vendored `buf/validate/validate_pb2.py`.** The proto field options force the Python
+   gencode to `import buf.validate`; `gen_proto.sh` vendors the classic form into
+   `sdo/contracts/_gen/buf`. If 2b's validator ships a classic `buf.validate`, drop the
+   vendoring.
+3. **Proto package renamed `sdo.contracts` → `sdodev.contracts`** so the generated Python
+   root does not shadow the real `sdo` package (the facade puts `_gen` on `sys.path`). If
+   2b changes the Python import strategy, the rename can be reconsidered. go_package is
+   unchanged and protojson is field-name based, so the wire is unaffected either way.
