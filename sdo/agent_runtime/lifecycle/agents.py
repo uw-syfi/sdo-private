@@ -562,10 +562,12 @@ handoff. Do not include source code in the response because the files are the au
         except StructuredTurnError as exc:
             raise LifecycleAgentError(f"{role} failed: {exc}") from exc
         task_outputs = ClaudeTaskOutputs.for_session(turn.session_id, environ=os.environ, uid=os.getuid())
-        escaped_command = _first_repository_escape(turn.shell_commands, repository.resolve(), task_outputs=task_outputs)
-        if escaped_command is not None:
+        escape = _first_repository_escape(turn.shell_commands, repository.resolve(), task_outputs=task_outputs)
+        if escape is not None:
+            escaped_command, escaped_path = escape
             raise LifecycleAgentError(
-                f"{role} read outside the application repository; discarding its output: {escaped_command[:300]}"
+                f"{role} read outside the application repository ({escaped_path!r}); "
+                f"discarding its output: {escaped_command[:300]}"
             )
         try:
             output = output_type.model_validate_json(turn.output_json)
@@ -582,16 +584,13 @@ class ClaudeLifecycleBackend(CodexLifecycleBackend):
 
 def _first_repository_escape(
     commands: Sequence[str], repository: Path, *, task_outputs: ClaudeTaskOutputs | None = None
-) -> str | None:
-    """Return the first shell command that reaches outside *repository*, if any."""
-    return next(
-        (
-            command
-            for command in commands
-            if _command_escapes_repository(command, repository, task_outputs=task_outputs)
-        ),
-        None,
-    )
+) -> tuple[str, str] | None:
+    """Return the first shell command that reaches outside *repository* and the path that does, if any."""
+    for command in commands:
+        target = _repository_escape_target(command, repository, task_outputs=task_outputs)
+        if target is not None:
+            return command, target
+    return None
 
 
 _SHELL_WRAPPERS = frozenset({"bash", "sh", "/bin/bash", "/bin/sh", "/usr/bin/bash", "/usr/bin/sh"})
@@ -608,12 +607,34 @@ def _unwrap_shell_command(command: str) -> str:
     return command
 
 
+# A quoted ``/`` right after one of these starts a regular-expression alternative or follows a
+# group, class or quantifier (``(a|b)/.*``, ``[a-z]+/x``); a path the shell opens starts a token.
+_REGEX_SLASH_PREDECESSORS = frozenset("|()]*+?}")
+
+_QUOTED_HEREDOC_FILE_WRITE = re.compile(
+    r"(?P<head>\b(?:cat|tee)\b[^\n|;&<]*<<-?[ \t]*(?P<quote>['\"])(?P<tag>\w+)(?P=quote)[ \t]*)\n"
+    r"(?P<body>.*?)\n(?P<end>[ \t]*(?P=tag)[ \t]*)(?=\n|$)",
+    re.DOTALL,
+)
+
+
+def _mask_quoted_heredoc_bodies(script: str) -> str:
+    """Drop the body of a quoted-delimiter heredoc that ``cat`` or ``tee`` writes to a file.
+
+    The shell neither expands nor executes that body, so a route such as ``"/hotels"`` inside
+    generated Go source is data, not a path. A heredoc fed to anything else (``bash <<'EOF'``,
+    ``cat <<'EOF' | sh``) is executed text and an unquoted delimiter expands ``$(...)``; both stay
+    audited.
+    """
+    return _QUOTED_HEREDOC_FILE_WRITE.sub(lambda match: f"{match.group('head')}\n{match.group('end')}", script)
+
+
 def _mask_quoted_pattern_alternatives(script: str) -> str:
     """Hide ``/route`` alternatives inside quoted strings, such as ``rg 'HandleFunc|/items'``.
 
-    Inside a quoted argument a ``/`` right after ``|`` or ``(`` starts a regular-expression
-    alternative or group, not a path the shell opens. Unquoted text, including a pipe into an
-    absolute command, is left for the path audit.
+    Inside a quoted argument a ``/`` right after ``|``, ``(`` or a group, class or quantifier
+    closer starts a regular-expression alternative or continues a token, not a path the shell
+    opens. Unquoted text, including a pipe into an absolute command, is left for the path audit.
     """
     masked: list[str] = []
     quote: str | None = None
@@ -627,7 +648,7 @@ def _mask_quoted_pattern_alternatives(script: str) -> str:
             quote = char
         elif char == quote:
             quote = None
-        elif quote is not None and char == "/" and masked and masked[-1] in {"|", "("}:
+        elif quote is not None and char == "/" and masked and masked[-1] in _REGEX_SLASH_PREDECESSORS:
             masked.append(" ")
             continue
         masked.append(char)
@@ -637,15 +658,24 @@ def _mask_quoted_pattern_alternatives(script: str) -> str:
 def _command_escapes_repository(
     command: str, repository: Path, *, task_outputs: ClaudeTaskOutputs | None = None
 ) -> bool:
-    if _PARENT_PATH.search(command):
-        return True
+    return _repository_escape_target(command, repository, task_outputs=task_outputs) is not None
+
+
+def _repository_escape_target(
+    command: str, repository: Path, *, task_outputs: ClaudeTaskOutputs | None = None
+) -> str | None:
+    """Return the path in *command* that reaches outside *repository*, or None when it stays inside."""
+    if (parent := _PARENT_PATH.search(command)) is not None:
+        return parent.group(0).strip(" \t'\"=;(")
     # ``git show <object>:/path`` addresses a path inside this repository's object
     # database. Mask only the path portion so unrelated absolute paths in the same
     # compound command remain subject to the confinement audit.
     audited_command = _GIT_OBJECT_PATH.sub(
         lambda match: match.group(0).replace(match.group(1), ".git-object-path"), command
     )
-    audited_command = _mask_quoted_pattern_alternatives(_unwrap_shell_command(audited_command))
+    audited_command = _mask_quoted_pattern_alternatives(
+        _mask_quoted_heredoc_bodies(_unwrap_shell_command(audited_command))
+    )
     write_only_paths = {match.group(1) for match in _WRITE_REDIRECT_ABSOLUTE_PATH.finditer(audited_command)}
     for raw_path in _ABSOLUTE_PATH.findall(audited_command):
         if raw_path in write_only_paths:
@@ -655,10 +685,10 @@ def _command_escapes_repository(
         candidate = Path(raw_path)
         # ``Path`` keeps ``..`` segments, so ``<repository>/../x`` would look contained.
         if ".." in candidate.parts:
-            return True
+            return raw_path
         if candidate == repository or repository in candidate.parents:
             continue
         if any(candidate == root or root in candidate.parents for root in _SYSTEM_COMMAND_ROOTS):
             continue
-        return True
-    return False
+        return raw_path
+    return None
