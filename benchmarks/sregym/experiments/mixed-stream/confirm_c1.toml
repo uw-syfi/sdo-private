@@ -1,7 +1,7 @@
 # Phase A confirm: Tier 0 smoke rerun on the integration build (validator-image fix, lifecycle-guard fix, close-out gate on). Was: one composite (C1) as a single stage of a persistent-controller
 # pipeline through the full conductor (luna agent and judge, strict receipt, official
 # oracle). All-on SDO settings from docs/composite-stream-decisions.md. Private
-# `mi1` images. Decisions: docs/mixed-stream-decisions.md (Tier 0).
+# `mi2` images. Decisions: docs/mixed-stream-decisions.md (Tier 0).
 
 [pipeline]
 name = "sdo-codex-luna-mixed-confirm-c1"
@@ -37,9 +37,9 @@ backend = "agent-cli"
 provider = "codex"
 model = "gpt-6-luna"
 timeout_sec = 3600
-controller_image = "sdo-controller:mi1"
-responder_image = "sdo-sregym-responder:mi1"
-validator_image = "sdo-detector-validator:mi1"
+controller_image = "sdo-controller:mi2"
+responder_image = "sdo-sregym-responder:mi2"
+validator_image = "sdo-detector-validator:mi2"
 credentials_secret = "sdo-agent-credentials"
 persistent_controller = true
 reflection_session = "fresh"

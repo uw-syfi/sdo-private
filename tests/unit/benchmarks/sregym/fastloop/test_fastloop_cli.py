@@ -167,3 +167,10 @@ def test_sdo_run_validates_the_lifecycle_in_the_images_the_environment_was_built
     captured["run_lifecycle"](object())  # type: ignore[operator]
 
     assert lifecycle_calls[0]["validator_image"] == "v:t1"
+
+
+def test_run_takes_an_optional_detection_timeout() -> None:
+    base = ["run", "--run-dir", "/tmp/x", "--agent", "sdo"]
+
+    assert build_parser().parse_args(base).detection_timeout is None
+    assert build_parser().parse_args([*base, "--detection-timeout", "120"]).detection_timeout == 120.0

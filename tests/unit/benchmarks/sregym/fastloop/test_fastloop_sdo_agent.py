@@ -329,3 +329,14 @@ def test_times_seen_at_verification_are_not_replaced_by_the_receipt(tmp_path: Pa
 
     assert learned.detected_at == DETECTED - timedelta(seconds=1)
     assert learned.resolved_at == VERIFIED
+
+
+def test_detection_timeout_reaches_the_stage_so_an_undetected_fault_ends_early(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    agent = _agent(tmp_path, FakeOps(), [])
+    assert agent.stage_inputs("s", tmp_path, "fp").detection_timeout_seconds is None
+
+    agent._settings = replace(agent._settings, detection_timeout_seconds=120.0)
+
+    assert agent.stage_inputs("s", tmp_path, "fp").detection_timeout_seconds == 120.0

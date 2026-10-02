@@ -240,6 +240,7 @@ def _sdo_agent(
         kubeconfig=str(environment.kubeconfig),
         verification_timeout_seconds=float(args.composite_deadline if composite else args.timeout + 300),
         validation_cache=validation_cache,
+        detection_timeout_seconds=args.detection_timeout,
     )
     ops = _cluster_ops(args, environment.namespace)
     agent_arguments = {
@@ -540,6 +541,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--inject-before-resume",
         action="store_true",
         help="composite SDO runs: inject every fault while the controller is paused, then resume it (simultaneous)",
+    )
+    run.add_argument(
+        "--detection-timeout",
+        type=float,
+        default=None,
+        help="end an incident as a detection miss (its fault is recovered) if none opens this many seconds after injection",
     )
     run.add_argument("--max-follow-ups", type=int, default=0, help="follow-up responders for residual health findings")
     run.add_argument("--follow-up-cooldown-seconds", type=int, default=30)

@@ -53,6 +53,8 @@ class SdoAgentSettings:
     kubeconfig: str | None = None
     verification_timeout_seconds: float = 3900.0
     validation_cache: LifecycleValidationCache | None = None
+    #: End an incident as a detection miss if none opens this long after injection (None waits the whole budget).
+    detection_timeout_seconds: float | None = None
 
     def __post_init__(self) -> None:
         if self.runtime_config.submission_api_base or self.runtime_config.submission_relay_target_base:
@@ -147,6 +149,7 @@ class SdoPersistentAgent:
             kubeconfig=settings.kubeconfig,
             verification_timeout_seconds=settings.verification_timeout_seconds,
             validation_cache=settings.validation_cache,
+            detection_timeout_seconds=settings.detection_timeout_seconds,
             stop_on_detector_review=self._stop_on_detector_review,
         )
 
