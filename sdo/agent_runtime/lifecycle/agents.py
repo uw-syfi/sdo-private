@@ -562,10 +562,12 @@ handoff. Do not include source code in the response because the files are the au
         except StructuredTurnError as exc:
             raise LifecycleAgentError(f"{role} failed: {exc}") from exc
         task_outputs = ClaudeTaskOutputs.for_session(turn.session_id, environ=os.environ, uid=os.getuid())
-        escaped_command = _first_repository_escape(turn.shell_commands, repository.resolve(), task_outputs=task_outputs)
-        if escaped_command is not None:
+        escape = _first_repository_escape(turn.shell_commands, repository.resolve(), task_outputs=task_outputs)
+        if escape is not None:
+            escaped_command, escaped_path = escape
             raise LifecycleAgentError(
-                f"{role} read outside the application repository; discarding its output: {escaped_command[:300]}"
+                f"{role} read outside the application repository ({escaped_path!r}); "
+                f"discarding its output: {escaped_command[:300]}"
             )
         try:
             output = output_type.model_validate_json(turn.output_json)
@@ -582,16 +584,13 @@ class ClaudeLifecycleBackend(CodexLifecycleBackend):
 
 def _first_repository_escape(
     commands: Sequence[str], repository: Path, *, task_outputs: ClaudeTaskOutputs | None = None
-) -> str | None:
-    """Return the first shell command that reaches outside *repository*, if any."""
-    return next(
-        (
-            command
-            for command in commands
-            if _command_escapes_repository(command, repository, task_outputs=task_outputs)
-        ),
-        None,
-    )
+) -> tuple[str, str] | None:
+    """Return the first shell command that reaches outside *repository* and the path that does, if any."""
+    for command in commands:
+        target = _repository_escape_target(command, repository, task_outputs=task_outputs)
+        if target is not None:
+            return command, target
+    return None
 
 
 _SHELL_WRAPPERS = frozenset({"bash", "sh", "/bin/bash", "/bin/sh", "/usr/bin/bash", "/usr/bin/sh"})
@@ -659,8 +658,15 @@ def _mask_quoted_pattern_alternatives(script: str) -> str:
 def _command_escapes_repository(
     command: str, repository: Path, *, task_outputs: ClaudeTaskOutputs | None = None
 ) -> bool:
-    if _PARENT_PATH.search(command):
-        return True
+    return _repository_escape_target(command, repository, task_outputs=task_outputs) is not None
+
+
+def _repository_escape_target(
+    command: str, repository: Path, *, task_outputs: ClaudeTaskOutputs | None = None
+) -> str | None:
+    """Return the path in *command* that reaches outside *repository*, or None when it stays inside."""
+    if (parent := _PARENT_PATH.search(command)) is not None:
+        return parent.group(0).strip(" \t'\"=;(")
     # ``git show <object>:/path`` addresses a path inside this repository's object
     # database. Mask only the path portion so unrelated absolute paths in the same
     # compound command remain subject to the confinement audit.
@@ -679,10 +685,10 @@ def _command_escapes_repository(
         candidate = Path(raw_path)
         # ``Path`` keeps ``..`` segments, so ``<repository>/../x`` would look contained.
         if ".." in candidate.parts:
-            return True
+            return raw_path
         if candidate == repository or repository in candidate.parents:
             continue
         if any(candidate == root or root in candidate.parents for root in _SYSTEM_COMMAND_ROOTS):
             continue
-        return True
-    return False
+        return raw_path
+    return None

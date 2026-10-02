@@ -26,6 +26,7 @@ from sdo.agent_runtime.lifecycle.agents import (
     LifecycleAgentError,
     TopologyResourceDTO,
     _command_escapes_repository,
+    _first_repository_escape,
 )
 from sdo.agent_runtime.lifecycle.operational_memory import (
     _HEALTH_DETECTOR_TEST_SOURCE,
@@ -1015,6 +1016,25 @@ def test_codex_backend_starts_independent_read_only_sessions_and_validates_struc
 
 
 @pytest.mark.parametrize(
+    ("escaped_command", "offending_path"),
+    [
+        ("find ../older-run -name detector.go", "../older-run"),
+        ("sed -n 1,80p {outside}/detector.go", "{outside}/detector.go"),
+        ("cat /proc/self/environ", "/proc/self/environ"),
+    ],
+)
+def test_repository_escape_error_names_the_offending_path(
+    tmp_path: Path, escaped_command: str, offending_path: str
+) -> None:
+    outside = str(tmp_path.parent / "older-run")
+    command = escaped_command.format(outside=outside)
+
+    escape = _first_repository_escape(["ls", command], _repository(tmp_path).resolve())
+
+    assert escape == (command, offending_path.format(outside=outside))
+
+
+@pytest.mark.parametrize(
     "escaped_command",
     [
         "find ../older-run -name detector.go",
@@ -1104,11 +1124,16 @@ _GO_SOURCE_HEREDOC = (
 @pytest.mark.parametrize(
     "command",
     [
-        pytest.param(f'/bin/bash -lc "{_GO_SOURCE_HEREDOC}"'.replace("\\", "\\\\"), id="wrapped-quoted-heredoc-file-write"),
+        pytest.param(
+            f'/bin/bash -lc "{_GO_SOURCE_HEREDOC}"'.replace("\\", "\\\\"), id="wrapped-quoted-heredoc-file-write"
+        ),
         pytest.param(_GO_SOURCE_HEREDOC, id="quoted-heredoc-file-write"),
-        pytest.param("tee notes.md <<\"EOF\"\nsee /hotels and /user\nEOF", id="double-quoted-delimiter-tee"),
+        pytest.param('tee notes.md <<"EOF"\nsee /hotels and /user\nEOF', id="double-quoted-delimiter-tee"),
         pytest.param("""/bin/bash -lc "rg --files | rg '(a|b)/.*\\\\.go'\"""", id="regex-group-then-slash"),
-        pytest.param("""rg --files | rg '(frontend|search)/.*[.]go$|kubernetes/.*/.*service.yaml$'""", id="regex-group-then-slash-bare"),
+        pytest.param(
+            """rg --files | rg '(frontend|search)/.*[.]go$|kubernetes/.*/.*service.yaml$'""",
+            id="regex-group-then-slash-bare",
+        ),
     ],
 )
 def test_repository_audit_allows_data_and_regex_slashes(tmp_path: Path, command: str) -> None:
