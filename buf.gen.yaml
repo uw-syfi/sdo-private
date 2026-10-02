@@ -1,0 +1,15 @@
+version: v2
+clean: true
+managed:
+  enabled: true
+plugins:
+  # Go types for the controller (module: sdo.dev/controller/contracts).
+  - local: protoc-gen-go
+    out: controller/contracts/gen
+    opt: paths=source_relative
+  # Python types for sdo/contracts. Prefer the local protoc builtin; Stage 1
+  # pins the exact plugin once generation is validated in this environment.
+  - remote: buf.build/protocolbuffers/python
+    out: sdo/contracts/_gen
+  - remote: buf.build/protocolbuffers/pyi
+    out: sdo/contracts/_gen

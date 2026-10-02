@@ -1,0 +1,15 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # Our package versioning lives in the path (sdo/contracts/v1alpha1); the
+    # STANDARD suffix rule is satisfied by that layout.
+    - PACKAGE_VERSION_SUFFIX
+breaking:
+  use:
+    - FILE
+deps:
+  - buf.build/bufbuild/protovalidate
