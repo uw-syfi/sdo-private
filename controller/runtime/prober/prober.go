@@ -135,8 +135,12 @@ func New(config Config) (*Prober, error) {
 		namespace, domain := config.Namespace, config.ClusterDomain
 		config.LinkAddress = func(link traffic.Link) string { return LinkAddress(link, namespace, domain) }
 	}
-	if err := config.Catalog.Validate(); err != nil {
-		return nil, err
+	// An application with no scenarios (nothing that speaks HTTP to probe) can still
+	// have link workloads; a scenario workload without a catalog fails in ValidateAgainst.
+	if len(config.Catalog) > 0 {
+		if err := config.Catalog.Validate(); err != nil {
+			return nil, err
+		}
 	}
 	prober := &Prober{config: config, probes: map[string]*probe{}, links: map[string]*linkProbe{}, bursts: map[string]traffic.Workload{}}
 	for _, workload := range config.Workloads {

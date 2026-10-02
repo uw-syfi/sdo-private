@@ -166,3 +166,25 @@ func TestLinkProbeSamplesABlockedLinkOnTheIntervalNotIntervalPlusTimeout(t *test
 		t.Fatalf("a blocked link was sampled only %d times in 1s", got)
 	}
 }
+
+func TestALinkOnlyProberNeedsNoScenarioCatalog(t *testing.T) {
+	workloads, err := prober.ParseWorkloads(linkDocuments())
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	p, err := prober.New(prober.Config{Namespace: "shop", Workloads: workloads})
+	if err != nil || p == nil {
+		t.Fatalf("a prober with only link workloads must build without scenarios: %v", err)
+	}
+	scenarioDocuments := map[string][]byte{
+		"health": []byte(`{"apiVersion": "sdo.dev/v1alpha1", "kind": "TrafficWorkload", "name": "health", "purpose": "health-probe",
+			"scenarios": [{"id": "home"}]}`),
+	}
+	scenarioWorkloads, err := prober.ParseWorkloads(scenarioDocuments)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, err := prober.New(prober.Config{Namespace: "shop", Workloads: scenarioWorkloads}); err == nil {
+		t.Fatalf("a scenario workload still needs a catalog that provides its scenarios")
+	}
+}

@@ -158,10 +158,55 @@ def test_workloads_without_generators_are_rejected(tmp_path: Path) -> None:
         _workspace(tmp_path / "app", tmp_path / "sdo")
 
 
+def test_link_probe_workloads_need_no_generators(tmp_path: Path) -> None:
+    diagnostics = _hotel_app(tmp_path / "app")
+    shutil.rmtree(diagnostics / "traffic" / "generators")
+    for workload in (diagnostics / "traffic" / "workloads").iterdir():
+        workload.unlink()
+    (diagnostics / "traffic" / "workloads" / "topology-links.yaml").write_text(
+        LINK_WORKLOAD.replace("name: links", "name: topology-links").replace("from: frontend", "from: sdo-prober"),
+        encoding="utf-8",
+    )
+
+    with _workspace(tmp_path / "app", tmp_path / "sdo") as workspace:
+        assert workspace.has_prober
+        catalog = (workspace.path / "generated" / "traffic.go").read_text(encoding="utf-8")
+        assert (workspace.path / "cmd" / "prober" / "main.go").is_file()
+    assert "catalog := traffic.Catalog{}" in catalog
+    assert '"topology-links": []byte(' in catalog
+    assert "generators" not in catalog.replace("TrafficCatalog is every scenario the application's generators", "")
+
+
+def test_scenario_workloads_beside_link_probes_still_need_generators(tmp_path: Path) -> None:
+    diagnostics = _hotel_app(tmp_path / "app")
+    (diagnostics / "traffic" / "workloads" / "links.yaml").write_text(LINK_WORKLOAD, encoding="utf-8")
+    shutil.rmtree(diagnostics / "traffic" / "generators")
+
+    with pytest.raises(ValueError, match="no Go package"):
+        _workspace(tmp_path / "app", tmp_path / "sdo")
+
+
 def test_check_accepts_the_hotel_generators_and_builds_the_prober(
     tmp_path: Path, capfd: pytest.CaptureFixture[str]
 ) -> None:
     _hotel_app(tmp_path / "app")
+
+    exit_code = check_main(["test", "--app", str(tmp_path / "app")])
+
+    output = capfd.readouterr()
+    assert exit_code == 0, output.out + output.err
+
+
+def test_check_accepts_an_application_that_has_only_link_probes(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    diagnostics = _hotel_app(tmp_path / "app")
+    shutil.rmtree(diagnostics / "traffic")
+    shutil.rmtree(diagnostics / "detectors" / "health" / "traffic-health")
+    manifest = diagnostics / "manifest.yaml"
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace(TRAFFIC_REGISTRATION, ""), encoding="utf-8")
+    (diagnostics / "traffic" / "workloads").mkdir(parents=True)
+    _add_link_probe(diagnostics)
 
     exit_code = check_main(["test", "--app", str(tmp_path / "app")])
 

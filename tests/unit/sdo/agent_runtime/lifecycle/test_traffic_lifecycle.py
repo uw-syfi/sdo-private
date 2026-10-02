@@ -105,10 +105,19 @@ def test_lifecycle_installs_traffic_and_one_detector_per_health_probe_workload(t
 
     traffic = repository / ".sdo" / "diagnostics" / "traffic"
     assert (traffic / "generators" / "generators.go").read_text(encoding="utf-8") == GENERATORS
-    assert [workload.name for workload in MemoryRepository(repository).traffic_workloads()] == ["health", "verify"]
+    assert [workload.name for workload in MemoryRepository(repository).traffic_workloads()] == [
+        "health",
+        "topology-links",
+        "verify",
+    ]
     manifest = load_manifest(repository / ".sdo/diagnostics/manifest.yaml", app_root=repository)
     registrations = {detector.id: detector for detector in manifest.detectors}
-    assert sorted(registrations) == ["health-objective", "service-endpoints", "traffic-health"]
+    assert sorted(registrations) == [
+        "health-objective",
+        "service-endpoints",
+        "traffic-health",
+        "traffic-topology-links",
+    ]
     for detector_id in ("service-endpoints", "traffic-health"):
         registration = registrations[detector_id]
         assert registration.detector_class == "health"
@@ -140,8 +149,12 @@ def test_lifecycle_without_traffic_still_installs_the_endpoint_detector(tmp_path
     )
 
     manifest = load_manifest(repository / ".sdo/diagnostics/manifest.yaml", app_root=repository)
-    assert sorted(detector.id for detector in manifest.detectors) == ["health-objective", "service-endpoints"]
-    assert MemoryRepository(repository).traffic_workloads() == []
+    assert sorted(detector.id for detector in manifest.detectors) == [
+        "health-objective",
+        "service-endpoints",
+        "traffic-topology-links",
+    ]
+    assert [workload.name for workload in MemoryRepository(repository).traffic_workloads()] == ["topology-links"]
 
 
 def test_judge_traffic_must_be_valid_and_target_source_backed_services(tmp_path: Path) -> None:

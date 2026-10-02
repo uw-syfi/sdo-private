@@ -128,24 +128,33 @@ def write_generated_traffic(workspace_path: Path, *, module_path: str) -> bool:
     generators = _go_sources(workspace_path / GENERATORS_DIR)
     workloads = load_workload_documents(workspace_path)
     if not generators:
-        if workloads:
+        # Link-probe workloads dial Service ports and run no scenario, so they need no generators.
+        if any(document.get("purpose") != "link-probe" for document in workloads.values()):
             raise ValueError("traffic workloads exist but .sdo/diagnostics/traffic/generators/ has no Go package")
-        _write_no_traffic(workspace_path)
-        return False
-    errors = generator_source_errors(workspace_path, module_path)
-    if errors:
-        raise ValueError("invalid traffic generators:\n" + "\n".join(errors))
-    has_incident = bool(
-        [path for path in _go_sources(workspace_path / INCIDENT_GENERATORS_DIR) if not path.name.endswith("_test.go")]
-    )
-    imports = [
-        '\t"sdo.dev/controller/sdk/traffic"',
-        f'\tgenerators "{module_path}/{GENERATORS_DIR.as_posix()}"',
-    ]
-    catalog = "\tcatalog := append(traffic.Catalog{}, generators.Scenarios()...)\n"
-    if has_incident:
-        imports.append(f'\tincident "{module_path}/{INCIDENT_GENERATORS_DIR.as_posix()}"')
-        catalog += "\tcatalog = append(catalog, incident.Scenarios()...)\n"
+        if not workloads:
+            _write_no_traffic(workspace_path)
+            return False
+        imports = ['\t"sdo.dev/controller/sdk/traffic"']
+        catalog = "\tcatalog := traffic.Catalog{}\n"
+    else:
+        errors = generator_source_errors(workspace_path, module_path)
+        if errors:
+            raise ValueError("invalid traffic generators:\n" + "\n".join(errors))
+        has_incident = bool(
+            [
+                path
+                for path in _go_sources(workspace_path / INCIDENT_GENERATORS_DIR)
+                if not path.name.endswith("_test.go")
+            ]
+        )
+        imports = [
+            '\t"sdo.dev/controller/sdk/traffic"',
+            f'\tgenerators "{module_path}/{GENERATORS_DIR.as_posix()}"',
+        ]
+        catalog = "\tcatalog := append(traffic.Catalog{}, generators.Scenarios()...)\n"
+        if has_incident:
+            imports.append(f'\tincident "{module_path}/{INCIDENT_GENERATORS_DIR.as_posix()}"')
+            catalog += "\tcatalog = append(catalog, incident.Scenarios()...)\n"
     rendered_workloads = "".join(
         f"\t{json.dumps(name)}: []byte({json.dumps(json.dumps(document, sort_keys=True))}),\n"
         for name, document in sorted(workloads.items())
@@ -197,6 +206,9 @@ import (
 )
 
 func TestTrafficGeneratorsDetectTheirFaultClasses(t *testing.T) {
+\tif len(TrafficCatalog()) == 0 {
+\t\treturn // link workloads only: there are no generators to check
+\t}
 \tfor _, failure := range traffic.CheckCatalog(context.Background(), TrafficCatalog()) {
 \t\tt.Error(failure)
 \t}

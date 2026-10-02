@@ -44,6 +44,8 @@ Inspect firing/clearing thresholds, debounce state, snapshot versions, durable c
 
 The prober dials each declared edge afresh every interval and the finding needs `failures` consecutive failed dials of an edge that had connected before. The caller may still hold an old connection, so user-facing probes can stay healthy for the whole fault. Check that the edge and port are grounded in the application source, that the fix restored fresh connectivity for the same edge (the finding must clear), and that no finding appeared for an edge the prober never reached (those are never reported: the prober's own identity may simply not be admitted there). Detection time is the first failed dial plus about `failures` intervals; a link detector should not carry the scenario detector's 9 s minimum duration.
 
+Two link workloads can feed the signature: the judge-authored `links` (edges named after callers) and the lifecycle-derived `topology-links` (detector `traffic-topology-links`, `from: sdo-prober`, one edge per TCP port of every source-declared core `v1` Service, capped at 64 sorted edges). If a faulted Service has no finding, check that `topology-links.yaml` lists it and its port (a cap hit, a Helm-templated or non-core manifest, or a port nothing listened on at lifecycle time can all leave it out) and that the edge had connected before the fault (an edge that never connected is silent by design).
+
 ## Responder detour or thrashing
 
 **Signature:** the responder performs broad exploration, repeats hypotheses, changes unrelated source, or alternates between fixes without improving detector/health evidence.
