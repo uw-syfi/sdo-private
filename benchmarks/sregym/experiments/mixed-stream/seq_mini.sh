@@ -3,7 +3,8 @@
 # Tier 1 fastloop run of the mixed stream: all fixes on (pull late findings, 3 follow-ups, inject-before-resume,
 # healthy-baseline gate, generalize/fresh reflection), Codex gpt-6-luna, probe-graded, no LLM judge.
 # One persistent controller and `.sdo` per sequence; the app is redeployed before each incident.
-# Same flags as composite-stream/seq_stream.sh; images mini1 are a local retag of main's mx1 build.
+# Same flags as composite-stream/seq_stream.sh; images mini1 are a local retag of main's mx1 build. The seed (SEED_REPO) is a copy of a finished
+# lifecycle (goal, architecture, health judge) from main, so incident 1 starts with no incident memory but no cold lifecycle.
 WID=$1; NAME=$2; shift 2
 # Host-side lifecycle validation reads SDO_VALIDATOR_IMAGE (default sdo-detector-validator:v0.1.0, which predates the
 # link-probe SDK); without it the health judge compiles against a stale SDK and the cold lifecycle fails.
@@ -18,7 +19,7 @@ mkdir -p $RUN
 i=1
 for P in "$@"; do
   echo "$(date -u +%FT%TZ) load=$(cut -d' ' -f1 /proc/loadavg) up before #$i $P" >> $RUN/seq.log
-  SEEDARG=""; [ $i -eq 1 ] && SEEDARG="--seed /mnt/data/shli/detgen-runs/seeds/lifecycle-stream"
+  SEEDARG=""; [ $i -eq 1 ] && SEEDARG="--seed ${SEED_REPO:-/mnt/data/shli/clc-runs/seeds/mini-lifecycle}"
   uv run --extra test python -m benchmarks.sregym.fastloop up --run-dir $RUN $SEEDARG --cluster-prefix mini-w --worker-id $WID \
     --controller-image sdo-controller:mini1 --responder-image sdo-sregym-responder:mini1 --validator-image sdo-detector-validator:mini1 \
     --builder mini$WID --redeploy > $RUN/up-$i.log 2>&1 || { echo "up failed #$i" >> $RUN/seq.log; exit 1; }

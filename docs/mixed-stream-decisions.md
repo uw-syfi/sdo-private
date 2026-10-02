@@ -21,3 +21,34 @@ Branch `vic/exp/mixed-stream` (from `main` `d6efc100`), worktree `/mnt/data/shli
 ### Environment
 
 - SREGym submodule populated with `git -c protocol.file.allow=always submodule update --init --reference <main checkout>` at the pinned `8035c290` (branch `sdo`, `fix(problems): keep both composite_factories registrations apart in the registry`), then `SREGym-applications` at `d1a7e02`. The test that checks every composite id against `composed_failures.py` passes there: C1, C2, C4 and C5 are registered at the pinned commit. The earlier note that C4/C5 were only in a private submodule gitdir no longer holds for `8035c290` (it contains `composite3c`/`composite4`), but I did not confirm that the commit is on the SREGym remote.
+
+### Tier 1 fastloop mini-stream: run log and result (2026-10-02, not completed)
+
+**Result: no incident of the mini stream was graded.** The generator (above) is done and tested; the fastloop run produced harness and product findings but no resolution, token or timing data. Quota: 92 % used throughout (stop rule 97 %). Load: 7 to 24 at launches (CI runners and other users' jobs dominate; two of my clusters at most). Raw dirs: `/mnt/data/shli/clc-runs/mini-a`, `mini-b` (attempt 1), `mini2-a`, `mini2-b` (attempt 2), `mini3-a`, `mini3-b` (attempt 3, with `controller-final.log` and `networkpolicies-at-stop.txt`). Clusters `mini-w180` and `mini-w181` deleted. Script: `benchmarks/sregym/experiments/mixed-stream/seq_mini.sh`.
+
+| attempt | start (Z) | setup | outcome | class |
+| --- | --- | --- | --- | --- |
+| 1 `mini-a/b` | 04:48 | cold lifecycle from the `lifecycle-stream` seed repo, images `mini1` (retag of main's `mx1`) | incident 1 failed in the lifecycle after 648 s (a) and 750 s (b): `traffic.NewLinkDetector` undefined in the health judge's `traffic-links` detector | my config: host-side lifecycle validation reads `SDO_VALIDATOR_IMAGE` (default `sdo-detector-validator:v0.1.0`, SDK predates `link.go`); `--validator-image` only reaches the controller install |
+| 2 `mini2-a/b` | 05:08 | `SDO_VALIDATOR_IMAGE` exported, cold lifecycle again | b failed after 708 s (`health judge round 1 exhausted bounded correction attempts: ... read outside the application repository`, a benign `rg --files \| rg '(a\|b)/.*\.go'` flagged by `_first_repository_escape` in `sdo/agent_runtime/lifecycle/agents.py`); a still in the lifecycle after 12 min | product: lifecycle guard false positive and slow cold lifecycle with luna (fix is on `vic/fix/lifecycle-guard-false-positive`, `c1659de7`, not used here) |
+| 3 `mini3-a/b` | 05:28 | seed = copy of Tier 0's finished post-lifecycle workspace (`lifecycle_seed_stage0`, no incident memory), `SDO_VALIDATOR_IMAGE` exported | incident 1 (`network_policy_block`, cold) was injected at about 05:35 and never detected: controller `findings: []` in 132 (a) and 97 (b) consecutive iterations, 11 and 8.5 min after injection, no responder dispatched. I stopped both runs at 05:46. | product, but degraded SDO (see caveat) |
+
+**Caveat on every NetworkPolicy-related result (incident 1 and C4, C4 repeat).** The coordinator's read-only investigation found that the judge's `links.yaml` (fresh-dial link probe frontend to `recommendation:8085`) was authored but dropped in Tier 0's lifecycle, and therefore in the `lifecycle_seed_stage0` copy used by attempt 3 (and attempt 2), because the host-side self-check fell back to the stale `v0.1.0` validator (strict decode rejects the `links` field). So "a cold NetworkPolicy single is undetectable" is a degraded SDO, not main's behavior with the link probe. Validator-image plumbing is being fixed on a separate branch. These runs were all **without the link probe**.
+
+**Procedure mistake that confounded incident 2.** Stopping incident 1 by killing the `fastloop run` process skipped the fault recovery, so `deny-all-recommendation` stayed in the cluster (kept through `up --redeploy`, which redeploys workloads only). Incident 2 (`missing_configmap`) therefore ran with the NetworkPolicy already present: on mini3-b both `deny-all-recommendation` (27 min old) and a responder-added `allow-frontend-recommendation` were present at stop; on mini3-a the controller log shows the healthy-baseline gate rejecting a learned `deny-all-ingress` incident detector (`TestIncidentDetectorsStayQuietOnHealthyBaseline`: it fired on the "healthy" snapshots, which contained the leaked NetworkPolicy). The gate did what it is for, but the result says nothing about the mini stream. Both runs were stopped at about 06:05 and incident 2 is not reported. Also, each `run` re-ran the lifecycle self-check (a `codex exec` health judge started at incident 2 in both sequences, and mini3-b logged `health judge source commit does not match the published deployer assessment`), which I did not diagnose.
+
+### Tier 1 decisions (run)
+
+| # | Decision | Alternatives | Why |
+| --- | --- | --- | --- |
+| 10 | Use `mx1` (main HEAD, built by the Tier 0 agent at 04:45Z) retagged locally as `mini1`, not `nf5`. | `nf5` (composite-stream build); a fresh build. | Tier 1 validates main's behavior; `nf5` predates the merge. A retag adds no state to the shared images and avoids a 10 to 15 min build. |
+| 11 | Two replicate sequences on separate clusters (`mini-w180`, `mini-w181`), staggered 3 min in attempt 3. | One sequence. | n=2 gives a cheap variance check; both within the 1-2 cluster allowance. |
+| 12 | Attempt 3 seeds from Tier 0's finished lifecycle instead of a fourth cold lifecycle. | Retry the cold lifecycle again. | Two cold-lifecycle attempts had already failed or stalled for reasons outside the stream (validator image, guard false positive). The seed has no incident memory, so incident 1 is still cold for memory. |
+| 13 | Stop incident 1 after 11 min without detection by killing `fastloop run`. | Wait for the 3600 s default; rerun with `--timeout 900`. | Over the 10 to 15 min stall rule with no responder activity. This was the wrong way to stop it (no recovery, see above); a rerun should pass `--timeout 900` and let the harness recover the fault. |
+| 14 | Stop everything at 06:05 and report the partial result. | Continue past the 06:10 budget. | The coordinator budget; incident 2 was already confounded. |
+
+### Tier 1 next steps
+
+1. Rebuild the lifecycle seed with the validator-image fix, so the link probe is present, then rerun the mini stream.
+2. Run the mini stream with `--timeout 900` per incident; if an incident must be abandoned, run the harness fault recovery (or delete the leaked NetworkPolicy) before the next one.
+3. Find out why each `fastloop run` re-ran the lifecycle self-check (source commit mismatch) when the seed already carried an attested lifecycle.
+4. Decide whether the mixed stream's NetworkPolicy single stays first: with the link probe it should be detectable; without it every NetworkPolicy single burns the full per-incident timeout.
