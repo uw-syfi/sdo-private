@@ -51,10 +51,14 @@ from sdo.agent_runtime.lifecycle import (
     ActiveTopologyResourceDTO,
     ClaudeLifecycleBackend,
     CodexLifecycleBackend,
+    LifecycleSeedCache,
     LifecycleValidationCache,
+    SeedInputs,
+    lifecycle_code_digest,
     reuse_initial_lifecycle_if_valid,
     run_initial_lifecycle,
     validation_report,
+    validator_identity,
 )
 from sdo.controller_install import kubectl
 from sdo.operational_memory import DEFAULT_REFLECTION_SESSION
@@ -526,20 +530,38 @@ def run_or_reuse_lifecycle(
     model: str,
     validator_image: str | None = None,
     validation_cache: LifecycleValidationCache | None = None,
+    seed_cache: LifecycleSeedCache | None = None,
 ) -> bool:
     """Reuse a still-valid lifecycle handoff, or run a fresh model-backed lifecycle; return whether it was reused.
 
     The lifecycle validates in ``validator_image``: the image the adapter installs the controller with.
+
+    An opt-in ``seed_cache`` supplies a stored cold lifecycle to a workspace that has none, and keeps the one a cold
+    run produces. A restored lifecycle is reused only if it passes the same validity check as any other, so the cache
+    saves model time without widening what is trusted. Leave it off to measure a cold lifecycle.
     """
 
-    reused = reuse_initial_lifecycle_if_valid(
-        repository,
-        application=application,
-        health_objective=context.health_objective,
-        active_resources=context.active_resources,
-        validator_image=validator_image,
-        validation_cache=validation_cache,
-    )
+    def reuse() -> bool:
+        return reuse_initial_lifecycle_if_valid(
+            repository,
+            application=application,
+            health_objective=context.health_objective,
+            active_resources=context.active_resources,
+            validator_image=validator_image,
+            validation_cache=validation_cache,
+        )
+
+    reused = reuse()
+    seed_key = _seed_key(seed_cache, repository, context, provider, model, validator_image)
+    if not reused and seed_cache is not None and seed_key is not None:
+        restored = seed_cache.restore(repository, seed_key)
+        if restored is not None:
+            reused = reuse()
+            if reused:
+                logger.info("lifecycle restored from the seed cache (key %s)", seed_key[:12])
+            else:
+                restored.revert()
+                logger.warning("a cached lifecycle failed validation; running the cold lifecycle")
     if not reused:
         lifecycle_type = ClaudeLifecycleBackend if provider == "claude" else CodexLifecycleBackend
         run_initial_lifecycle(
@@ -550,7 +572,38 @@ def run_or_reuse_lifecycle(
             backend=lifecycle_type(model=model),
             validator_image=validator_image,
         )
+        if seed_cache is not None and seed_key is not None and (repository / ".sdo").is_dir():
+            seed_cache.store(repository, seed_key)
     return reused
+
+
+def _seed_key(
+    seed_cache: LifecycleSeedCache | None,
+    repository: Path,
+    context: DeployedLifecycleContext,
+    provider: str,
+    model: str,
+    validator_image: str | None,
+) -> str | None:
+    """The cache key for a workspace that has no lifecycle yet, or ``None`` when the cache cannot be used."""
+
+    if seed_cache is None or not seed_cache.eligible(repository):
+        return None
+    identity = validator_identity(validator_image)
+    if identity is None:
+        return None
+    resources = (
+        None if context.active_resources is None else [(item.kind, item.name) for item in context.active_resources]
+    )
+    inputs = SeedInputs(
+        health_objective=context.health_objective,
+        active_resources=resources,
+        validator_identity=identity,
+        provider=provider,
+        model=model,
+        code_digest=lifecycle_code_digest(),
+    )
+    return seed_cache.key(repository, inputs)
 
 
 @contextlib.contextmanager

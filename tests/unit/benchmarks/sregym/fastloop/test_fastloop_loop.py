@@ -6,7 +6,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from benchmarks.sregym.fastloop.loop import AgentOutcome, InjectionWindow, LoopConfig, run_incidents
+from benchmarks.sregym.fastloop.loop import (
+    AgentOutcome,
+    InjectionWindow,
+    LoopConfig,
+    UndetectedIncidentError,
+    run_incidents,
+)
 from benchmarks.sregym.fastloop.records import OracleVerdict, TokenCounts, load_records
 
 if TYPE_CHECKING:
@@ -58,6 +64,7 @@ class FakeAgent:
     model: str = "gpt-test"
     events: list[str] = field(default_factory=list)
     fail_on: set[int] = field(default_factory=set)
+    undetected_on: set[int] = field(default_factory=set)
     resolution: str | None = None
 
     def resolve(self, index: int, problem_id: str, inject: Callable[[], InjectionWindow]) -> AgentOutcome:
@@ -66,6 +73,8 @@ class FakeAgent:
         window = inject()
         if index in self.fail_on:
             raise RuntimeError("responder crashed")
+        if index in self.undetected_on:
+            raise UndetectedIncidentError("no incident opened within 240s of fault injection")
         self.clock.advance(60)
         return AgentOutcome(
             injection=window,
@@ -157,3 +166,32 @@ def test_config_rejects_empty_problem_lists_and_non_positive_counts(tmp_path: Pa
         LoopConfig(run_id="r", problems=(), incidents=1, results_path=tmp_path / "x.jsonl")
     with pytest.raises(ValueError, match="incidents"):
         LoopConfig(run_id="r", problems=("p",), incidents=0, results_path=tmp_path / "x.jsonl")
+
+
+def test_an_undetected_incident_is_recorded_as_such_recovered_and_does_not_stop_the_stream(tmp_path: Path) -> None:
+    clock = FakeClock()
+    driver, agent = FakeDriver(clock, oracle_success=False), FakeAgent(clock, undetected_on={0})
+
+    records = run_incidents(agent, driver, _config(tmp_path, 2, ("p1", "p2")), monotonic=clock.monotonic)
+
+    assert driver.events == ["inject:p1", "oracle", "recover", "inject:p2", "oracle", "recover"]
+    assert agent.events == ["resolve:0", "resolve:1", "learn:incident-1", "close"]
+    first, second = records
+    assert first.undetected is True
+    assert first.error is not None
+    assert first.error.startswith("undetected: ")
+    assert first.oracle is not None
+    assert first.oracle.success is False
+    assert first.fault_recovery_seconds == 10.0
+    assert second.undetected is False
+
+
+def test_records_written_before_the_undetected_field_still_load(tmp_path: Path) -> None:
+    clock = FakeClock()
+    run_incidents(FakeAgent(clock), FakeDriver(clock), _config(tmp_path, 1), monotonic=clock.monotonic)
+    path = tmp_path / "incidents.jsonl"
+    legacy = path.read_text(encoding="utf-8").replace('"undetected":false,', "")
+    assert "undetected" not in legacy
+    path.write_text(legacy, encoding="utf-8")
+
+    assert load_records(path)[0].undetected is False

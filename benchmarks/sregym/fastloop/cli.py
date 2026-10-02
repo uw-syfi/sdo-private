@@ -24,6 +24,8 @@ import os
 import socket
 import subprocess
 import sys
+import time
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -37,9 +39,13 @@ from benchmarks.sregym.fastloop.worker_client import SregymWorker, worker_argv
 from sdo.operational_memory import DEFAULT_REFLECTION_SESSION
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from benchmarks.sregym.adapter import ClusterOps
     from benchmarks.sregym.fastloop.composite import CompositeSettings
+    from benchmarks.sregym.fastloop.hostguard import LoadWait
     from benchmarks.sregym.fastloop.loop import IncidentAgent
+    from sdo.agent_runtime.lifecycle import LifecycleSeedCache, LifecycleValidationCache
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +95,39 @@ def up_worker_environment(args: argparse.Namespace, *, workspace: Path) -> dict[
     return worker_env
 
 
+def _hold_for_calm_load(
+    args: argparse.Namespace, run_dir: Path, *, wait: Callable[..., LoadWait] | None = None
+) -> LoadWait | None:
+    """Hold cluster creation until the host load has been calm, and record what the host was doing.
+
+    A host that never calms down is reported and the run goes on, flagged as load-contaminated.
+    """
+
+    from benchmarks.sregym.fastloop.hostguard import LoadPolicy, wait_for_calm_load
+
+    if args.no_load_governor:
+        return None
+    policy = LoadPolicy(max_load=args.max_load, calm_seconds=args.calm_seconds, max_wait_seconds=args.max_load_wait)
+    result = (wait or wait_for_calm_load)(policy, lambda: os.getloadavg()[0], time.sleep, time.monotonic)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "host-load.json").write_text(json.dumps(asdict(result)), encoding="utf-8")
+    if not result.calm:
+        logger.warning(
+            "host load stayed above %.0f for %.0fs (peak %.0f): this run is load-contaminated",
+            policy.max_load,
+            result.waited_seconds,
+            result.peak_load,
+        )
+    return result
+
+
 def _up(args: argparse.Namespace) -> int:
     run_launch_preflight(args, stage="up")
     if args.kind_worker_nodes < 0:
         raise SystemExit("--kind-worker-nodes must not be negative")
     run_dir = args.run_dir.resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
+    _hold_for_calm_load(args, run_dir)
     workspace = run_dir / "application_workspace"
     if not workspace.exists():
         if args.seed is None:
@@ -188,10 +221,44 @@ def _cluster_ops(args: argparse.Namespace, namespace: str) -> ClusterOps:
     if args.inject_before_resume:
         from benchmarks.sregym.fastloop.simultaneous import InjectBeforeResumeOps
 
+        logger.warning(
+            "--inject-before-resume injects while the controller is paused, so the link probe never sees the "
+            "dependency edges connect first: an isolating NetworkPolicy fault cannot be detected in this mode"
+        )
+
         ops = InjectBeforeResumeOps(ops)  # type: ignore[assignment]
     if args.healthy_baseline:
         ops = kubectl_capture_ops(ops, namespace=namespace, kubectl_runner=kubectl)  # type: ignore[assignment]
     return ops
+
+
+def _shared_cache_root() -> Path:
+    base = os.environ.get("XDG_CACHE_HOME", "").strip()
+    return (Path(base) if base else Path.home() / ".cache") / "sdo"
+
+
+def _validation_cache(args: argparse.Namespace) -> LifecycleValidationCache | None:
+    """Detector validation verdicts, shared across runs: the key is the validator image and the diagnostics digest."""
+
+    from sdo.agent_runtime.lifecycle import LifecycleValidationCache
+
+    if args.no_validation_cache:
+        return None
+    return LifecycleValidationCache.from_env() or LifecycleValidationCache(
+        _shared_cache_root() / "lifecycle-validation"
+    )
+
+
+def _seed_cache(args: argparse.Namespace) -> LifecycleSeedCache | None:
+    """Cold lifecycle handoffs, shared across runs; ``--cold-lifecycle`` measures a cold one instead."""
+
+    from sdo.agent_runtime.lifecycle import LifecycleSeedCache
+
+    if args.cold_lifecycle:
+        return None
+    if args.lifecycle_seed_cache_dir is not None:
+        return LifecycleSeedCache(args.lifecycle_seed_cache_dir.resolve())
+    return LifecycleSeedCache.from_env() or LifecycleSeedCache(_shared_cache_root() / "lifecycle-seeds")
 
 
 def _sdo_agent(
@@ -204,11 +271,9 @@ def _sdo_agent(
         run_or_reuse_lifecycle,
     )
     from benchmarks.sregym.fastloop.sdo_agent import SdoAgentSettings, SdoPersistentAgent
-    from sdo.agent_runtime.lifecycle import LifecycleValidationCache
 
-    validation_cache = (
-        None if args.no_validation_cache else LifecycleValidationCache(environment.run_dir / "validation-cache")
-    )
+    validation_cache = _validation_cache(args)
+    seed_cache = _seed_cache(args)
 
     runtime_config = RuntimeConfig(
         repository=environment.workspace,
@@ -256,6 +321,7 @@ def _sdo_agent(
             model=args.model,
             validator_image=environment.images.validator,
             validation_cache=validation_cache,
+            seed_cache=seed_cache,
         ),
     }
     if composite:
@@ -518,6 +584,10 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("--validator-image", default=Images().validator)
     up.add_argument("--sregym-dir", type=Path, default=DEFAULT_SREGYM_DIR)
     up.add_argument("--redeploy", action="store_true", help="redeploy even if the application is healthy")
+    up.add_argument("--no-load-governor", action="store_true", help="do not wait for a calm host load first")
+    up.add_argument("--max-load", type=float, default=20.0, help="1-minute load the host must stay under first")
+    up.add_argument("--calm-seconds", type=float, default=120.0, help="how long the load must stay under --max-load")
+    up.add_argument("--max-load-wait", type=float, default=1200.0, help="longest wait for a calm host, in seconds")
     up.add_argument(
         "--no-sandbox",
         action="store_true",
@@ -550,12 +620,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="composite SDO runs: inject every fault while the controller is paused, then resume it (simultaneous)",
     )
-    run.add_argument(
-        "--detection-timeout",
-        type=float,
-        default=None,
-        help="end an incident as a detection miss if none opens this many seconds after injection",
-    )
     run.add_argument("--max-follow-ups", type=int, default=0, help="follow-up responders for residual health findings")
     run.add_argument("--follow-up-cooldown-seconds", type=int, default=30)
     run.add_argument(
@@ -568,7 +632,27 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--no-validation-cache",
         action="store_true",
-        help="revalidate the lifecycle detectors instead of sharing verdicts in <run-dir>/validation-cache",
+        help="revalidate the lifecycle detectors instead of sharing verdicts (default dir: "
+        "$SDO_LIFECYCLE_VALIDATION_CACHE_DIR or ~/.cache/sdo/lifecycle-validation)",
+    )
+    run.add_argument(
+        "--cold-lifecycle",
+        action="store_true",
+        help="author the lifecycle from scratch instead of restoring a cached cold lifecycle of the same source; "
+        "use it when the lifecycle itself is measured",
+    )
+    run.add_argument(
+        "--lifecycle-seed-cache-dir",
+        type=Path,
+        default=None,
+        help="cold lifecycle cache (default: $SDO_LIFECYCLE_SEED_CACHE_DIR or ~/.cache/sdo/lifecycle-seeds)",
+    )
+    run.add_argument(
+        "--detection-timeout",
+        type=float,
+        default=None,
+        help="SDO runs: end an incident as undetected when nothing opens one this many seconds after injection "
+        "(default: wait the whole per-incident timeout)",
     )
     run.add_argument("--health-timeout", type=float, default=300.0, help="seconds to wait for health after recovery")
     run.add_argument("--proxy-port", type=int, default=0, help="Codex baseline API proxy port (default: free port)")

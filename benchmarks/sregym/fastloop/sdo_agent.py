@@ -25,13 +25,14 @@ from benchmarks.sregym.adapter import (
     STRICT_RECEIPT_FILENAME,
     Clock,
     ClusterOps,
+    DetectionMissError,
     PersistentState,
     StageInputs,
     drain_pending_incident,
     receipt_resolution,
     run_persistent_stage,
 )
-from benchmarks.sregym.fastloop.loop import AgentOutcome, InjectionWindow
+from benchmarks.sregym.fastloop.loop import AgentOutcome, InjectionWindow, UndetectedIncidentError
 from benchmarks.sregym.fastloop.records import AgentName, TokenCounts
 from sdo.controller_install import ControllerInstallError
 
@@ -53,7 +54,7 @@ class SdoAgentSettings:
     kubeconfig: str | None = None
     verification_timeout_seconds: float = 3900.0
     validation_cache: LifecycleValidationCache | None = None
-    #: End an incident as a detection miss if none opens this long after injection (None waits the whole budget).
+    #: End an incident as undetected when nothing opens one this long after injection (default: wait it all out).
     detection_timeout_seconds: float | None = None
 
     def __post_init__(self) -> None:
@@ -61,6 +62,8 @@ class SdoAgentSettings:
             raise ValueError("the fast loop has no benchmark submission transport")
         if self.verification_timeout_seconds <= 0:
             raise ValueError("verification_timeout_seconds must be positive")
+        if self.detection_timeout_seconds is not None and self.detection_timeout_seconds <= 0:
+            raise ValueError("detection_timeout_seconds must be positive")
 
 
 def _timestamp(value: object) -> datetime | None:
@@ -162,14 +165,17 @@ class SdoPersistentAgent:
         def gated_inject() -> None:
             windows.append(inject())
 
-        resolution = run_persistent_stage(
-            self.stage_inputs(f"fastloop-{index:03d}", receipt_dir, lifecycle.fingerprint),
-            ops=self._ops,
-            run_lifecycle=lambda: self._run_lifecycle(lifecycle.context),
-            inject=gated_inject,
-            clock=self._clock,
-            pause_after_verified=not self._keep_running,
-        )
+        try:
+            resolution = run_persistent_stage(
+                self.stage_inputs(f"fastloop-{index:03d}", receipt_dir, lifecycle.fingerprint),
+                ops=self._ops,
+                run_lifecycle=lambda: self._run_lifecycle(lifecycle.context),
+                inject=gated_inject,
+                clock=self._clock,
+                pause_after_verified=not self._keep_running,
+            )
+        except DetectionMissError as error:
+            raise UndetectedIncidentError(str(error)) from error
         if not windows:
             raise RuntimeError("the controller verified an incident without the fault being injected")
         verified = _timestamp(resolution.get("verified_at"))

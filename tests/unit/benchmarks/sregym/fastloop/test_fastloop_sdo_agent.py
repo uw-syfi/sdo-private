@@ -9,9 +9,15 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from benchmarks.sregym.adapter.driver import DeployedLifecycle, DeployedLifecycleContext
-from benchmarks.sregym.adapter.persistent import Clock, ControllerPod, PersistentState, control_namespace_for
+from benchmarks.sregym.adapter.persistent import (
+    Clock,
+    ControllerPod,
+    PersistentControllerError,
+    PersistentState,
+    control_namespace_for,
+)
 from benchmarks.sregym.adapter.runtime import RuntimeConfig
-from benchmarks.sregym.fastloop.loop import InjectionWindow
+from benchmarks.sregym.fastloop.loop import InjectionWindow, UndetectedIncidentError
 from benchmarks.sregym.fastloop.sdo_agent import SdoAgentSettings, SdoPersistentAgent
 from sdo.agent_runtime.lifecycle.validation_cache import LifecycleValidationCache
 from sdo.controller_install import ControllerInstallError
@@ -164,6 +170,7 @@ def _agent(
     lifecycle_calls: list[str],
     *,
     validation_cache: LifecycleValidationCache | None = None,
+    detection_timeout_seconds: float | None = None,
 ) -> SdoPersistentAgent:
     repository = tmp_path / "application_workspace"
     repository.mkdir(exist_ok=True)
@@ -189,6 +196,7 @@ def _agent(
         results_dir=tmp_path / "incidents",
         verification_timeout_seconds=600,
         validation_cache=validation_cache,
+        detection_timeout_seconds=detection_timeout_seconds,
     )
     context = DeployedLifecycleContext(health_objective="objective", active_resources=[])
 
@@ -331,12 +339,32 @@ def test_times_seen_at_verification_are_not_replaced_by_the_receipt(tmp_path: Pa
     assert learned.resolved_at == VERIFIED
 
 
-def test_detection_timeout_reaches_the_stage_so_an_undetected_fault_ends_early(tmp_path: Path) -> None:
-    from dataclasses import replace
+@dataclass
+class QuietOps(FakeOps):
+    """A controller that never opens an incident: the fault is injected and nothing detects it."""
 
-    agent = _agent(tmp_path, FakeOps(), [])
-    assert agent.stage_inputs("s", tmp_path, "fp").detection_timeout_seconds is None
+    def inject_after_resume(
+        self, control_namespace: str, generation: str, inject: Callable[[], None]
+    ) -> dict[str, float]:
+        inject()
+        return {"controller_baseline_wait": 1.5, "fault_injection_request": 6.0}
 
-    agent._settings = replace(agent._settings, detection_timeout_seconds=120.0)
 
-    assert agent.stage_inputs("s", tmp_path, "fp").detection_timeout_seconds == 120.0
+def test_an_incident_nothing_detects_ends_as_undetected_at_the_detection_timeout(tmp_path: Path) -> None:
+    ops, calls = QuietOps(), []
+    agent = _agent(tmp_path, ops, calls, detection_timeout_seconds=30)
+
+    with pytest.raises(UndetectedIncidentError, match="no incident opened within 30s"):
+        agent.resolve(0, "p", _inject)
+
+    assert agent._clock.monotonic() < 120  # the 600 s verification timeout did not run out
+
+
+def test_without_a_detection_timeout_a_quiet_controller_runs_the_full_verification_timeout(tmp_path: Path) -> None:
+    ops, calls = QuietOps(), []
+    agent = _agent(tmp_path, ops, calls)
+
+    with pytest.raises(PersistentControllerError, match="verified no new incident within 600s"):
+        agent.resolve(0, "p", _inject)
+
+    assert agent._clock.monotonic() >= 600

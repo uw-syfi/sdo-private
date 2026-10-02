@@ -960,6 +960,12 @@ def _run_workspace_authored_candidate(
         return artifact, validator.run(candidate), _diagnostics_digest(candidate)
 
 
+def validator_identity(validator_image: str | None) -> str | None:
+    """Immutable identity of the validator the lifecycle would run in, or ``None`` when it cannot be attested."""
+
+    return _validator_identity(_select_validator(None, validator_image))
+
+
 def _validator_identity(validator: SandboxRunner) -> str | None:
     identity_method = getattr(validator, "validation_identity", None)
     if not callable(identity_method):

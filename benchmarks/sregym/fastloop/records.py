@@ -121,6 +121,8 @@ class IncidentRecord(_PersistedModel):
     incident_wall_seconds: float | None = None
     incident_id: str | None = None
     artifacts_dir: str | None = None
+    #: The fault was injected and nothing opened an incident within the detection timeout.
+    undetected: bool = False
     error: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]

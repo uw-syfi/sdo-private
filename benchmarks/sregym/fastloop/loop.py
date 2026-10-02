@@ -33,6 +33,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class UndetectedIncidentError(Exception):
+    """An agent raises this when the injected fault was never detected within its detection timeout.
+
+    The loop records the incident as undetected, grades and recovers the fault as for any incident, and goes on.
+    """
+
+
 @dataclass(frozen=True)
 class InjectionWindow:
     started_at: datetime
@@ -178,8 +185,13 @@ def _run_one(
 
     errors: list[str] = []
     outcome: AgentOutcome | None = None
+    undetected = False
     try:
         outcome = agent.resolve(index, problem_id, inject)
+    except UndetectedIncidentError as exc:
+        logger.warning("incident %d was not detected: %s", index, exc)
+        undetected = True
+        errors.append(f"undetected: {exc}")
     except Exception as exc:
         logger.exception("incident %d failed", index)
         errors.append(_describe(exc))
@@ -223,6 +235,7 @@ def _run_one(
         fault_recovery_seconds=recovery_seconds,
         incident_wall_seconds=monotonic() - started,
         error="; ".join(errors) or None,
+        undetected=undetected,
         **(_outcome_fields(outcome) if outcome is not None else {}),
     )
     return record, recovered
