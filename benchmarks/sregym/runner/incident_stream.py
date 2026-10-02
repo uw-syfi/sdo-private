@@ -20,6 +20,14 @@ Incident kinds:
     parameters (another service or ConfigMap), never seen before.
 
 Every repeat and variant follows the first occurrence of its family.
+
+A catalog may also carry composite families (several faults injected at once). A composite family
+names the single-fault families it is made of (``requires``), and its first occurrence has the extra kind:
+
+``composite``
+    The first occurrence of a composite family. Every component class has already appeared as a single
+    fault, so memory from the singles is all there is to compose from. Later occurrences of a composite
+    are ``exact`` (same composite) or ``variant`` (same family, another target mix).
 """
 
 from __future__ import annotations
@@ -30,7 +38,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-IncidentKind = Literal["first", "novel", "exact", "variant"]
+IncidentKind = Literal["first", "novel", "exact", "variant", "composite"]
+#: Kinds the generator shuffles. ``exact_c`` and ``variant_c`` are repeats and variants of composites.
+_Label = Literal["first", "novel", "exact", "variant", "composite", "exact_c", "variant_c"]
 
 STREAM_SEED = 20260930
 STREAM_LENGTH = 24
@@ -40,6 +50,13 @@ NOVEL_COUNT = 2
 VARIANT_SHARE = 1 / 3
 _MAX_ATTEMPTS = 20000
 
+MIXED_SEED = 20261002
+MIXED_LENGTH = 24
+#: The mixed pilot prefix is longer than the single-fault one: a composite can only start after all four core firsts.
+MIXED_PILOT_LENGTH = 10
+COMPOSITE_EXACT_COUNT = 4
+COMPOSITE_VARIANT_COUNT = 2
+
 
 @dataclass(frozen=True)
 class FaultFamily:
@@ -48,6 +65,8 @@ class FaultFamily:
     name: str
     problem_id: str
     variants: tuple[str, ...]
+    #: For a composite: the single-fault families whose first occurrence must precede its own.
+    requires: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -68,17 +87,30 @@ class Catalog:
 
     core: tuple[FaultFamily, ...]
     novel: tuple[FaultFamily, ...]
+    composite: tuple[FaultFamily, ...] = ()
 
     def __post_init__(self) -> None:
-        ids = [p for family in (*self.core, *self.novel) for p in family.all_problem_ids]
+        ids = [p for family in (*self.core, *self.novel, *self.composite) for p in family.all_problem_ids]
         if len(set(ids)) != len(ids):
             raise ValueError("catalog problem ids must be unique across families")
         if len(self.novel) < NOVEL_COUNT:
             raise ValueError(f"catalog needs at least {NOVEL_COUNT} novel families")
+        core_names = {family.name for family in self.core}
+        for family in self.composite:
+            if not family.requires or not set(family.requires) <= core_names:
+                raise ValueError(f"composite family {family.name!r} requires core families, got {family.requires}")
 
     @property
     def variant_supply(self) -> int:
         return sum(len(family.variants) for family in self.core)
+
+    @property
+    def composite_variant_supply(self) -> int:
+        return sum(len(family.variants) for family in self.composite)
+
+    @property
+    def all_families(self) -> tuple[FaultFamily, ...]:
+        return (*self.core, *self.novel, *self.composite)
 
 
 _HOTEL = "hotel_reservation"
@@ -113,6 +145,35 @@ HOTEL_CATALOG = Catalog(
     ),
 )
 
+_SINGLE_CLASSES = ("readiness-probe", "missing-configmap", "network-policy-block")
+
+#: The mixed catalog adds the hand-registered composites of the SREGym ``sdo`` branch (``composed_failures.py``).
+#: ``composite3``/``3b``/``3c`` share three fault classes on different targets (one family: C1, C2, C4);
+#: ``composite4`` adds the frontend selector (its own family: C5). ``composite5`` (C3) is left out: it contains an
+#: oversized resource request, which has no usable single fault (destructive on recovery), so its first occurrence
+#: could not be composed from singles.
+MIXED_CATALOG = Catalog(
+    core=HOTEL_CATALOG.core,
+    novel=HOTEL_CATALOG.novel,
+    composite=(
+        FaultFamily(
+            "composite-3-class",
+            "composite3_hotel_geo_rate_recommendation",
+            (
+                "composite3b_hotel_profile_mongodb_geo_recommendation",
+                "composite3c_hotel_rate_mongodb_geo_user",
+            ),
+            requires=_SINGLE_CLASSES,
+        ),
+        FaultFamily(
+            "composite-4-class",
+            "composite4_hotel_profile_rate_recommendation_frontend",
+            (),
+            requires=(*_SINGLE_CLASSES, "wrong-service-selector"),
+        ),
+    ),
+)
+
 
 @dataclass(frozen=True)
 class StreamIncident:
@@ -127,50 +188,63 @@ def _variant_count(length: int, catalog: Catalog) -> int:
 
 
 def _fill(
-    labels: list[IncidentKind],
+    labels: list[_Label],
     rng: random.Random,
     catalog: Catalog,
     core_order: list[FaultFamily],
     novel_order: list[FaultFamily],
     opening: tuple[str, ...] = (),
+    composite_order: list[FaultFamily] | None = None,
 ) -> list[StreamIncident] | None:
     """Turn a shuffled kind sequence into incidents, or None when it cannot be realised.
 
     ``opening`` pins the first incidents to given problem ids; ``labels`` then covers only the rest.
     """
 
-    family_of = {p: f.name for f in (*catalog.core, *catalog.novel) for p in f.all_problem_ids}
+    family_of = {p: f.name for f in catalog.all_families for p in f.all_problem_ids}
     core_iter, novel_iter = iter(core_order), iter(novel_order)
+    composite_iter = iter(composite_order or [])
+    requires = {f.name: set(f.requires) for f in catalog.composite}
     incidents: list[StreamIncident] = []
     seen: list[str] = []
     seen_families: set[str] = set()
     unused_variants: dict[str, list[str]] = {f.name: list(f.variants) for f in catalog.core}
+    unused_composite_variants: dict[str, list[str]] = {f.name: list(f.variants) for f in catalog.composite}
     core_names = {f.name for f in catalog.core}
     pinned: list[IncidentKind] = [
-        _pinned_kind(problem_id, family_of, core_names, seen, seen_families) for problem_id in opening
+        _pinned_kind(problem_id, family_of, core_names, seen, seen_families, requires) for problem_id in opening
     ]
     for index, (problem_id, kind) in enumerate(zip(opening, pinned, strict=True)):
-        if problem_id in unused_variants.get(family_of[problem_id], []):
-            unused_variants[family_of[problem_id]].remove(problem_id)
+        for unused in (unused_variants, unused_composite_variants):
+            if problem_id in unused.get(family_of[problem_id], []):
+                unused[family_of[problem_id]].remove(problem_id)
         incidents.append(StreamIncident(index, problem_id, kind, family_of[problem_id]))
-    for offset, kind in enumerate(labels):
+    for offset, label in enumerate(labels):
         index = len(opening) + offset
         previous = incidents[-1].problem_id if incidents else None
-        if kind == "first":
-            problem_id = next(core_iter).problem_id
-        elif kind == "novel":
-            problem_id = next(novel_iter).problem_id
-        elif kind == "variant":
-            candidates = [v for family in seen_families for v in unused_variants.get(family, [])]
+        kind: IncidentKind
+        if label == "first":
+            kind, problem_id = "first", next(core_iter).problem_id
+        elif label == "novel":
+            kind, problem_id = "novel", next(novel_iter).problem_id
+        elif label == "composite":
+            family = next(composite_iter)
+            if not requires[family.name] <= seen_families:
+                return None
+            kind, problem_id = "composite", family.problem_id
+        elif label in ("variant", "variant_c"):
+            pool = unused_variants if label == "variant" else unused_composite_variants
+            candidates = [v for family in seen_families for v in pool.get(family, [])]
             if not candidates:
                 return None
-            problem_id = rng.choice(sorted(candidates))
-            unused_variants[family_of[problem_id]].remove(problem_id)
+            kind, problem_id = "variant", rng.choice(sorted(candidates))
+            pool[family_of[problem_id]].remove(problem_id)
         else:
-            candidates = [p for p in seen if p != previous]
+            composites_only = label == "exact_c"
+            candidates = [p for p in seen if p != previous and (family_of[p] in requires) == composites_only]
             if not candidates:
                 return None
-            problem_id = rng.choice(candidates)
+            kind, problem_id = "exact", rng.choice(candidates)
         if problem_id == previous:
             return None
         incidents.append(StreamIncident(index, problem_id, kind, family_of[problem_id]))
@@ -180,16 +254,28 @@ def _fill(
     return incidents
 
 
-def _repeat(kind: IncidentKind, count: int) -> list[IncidentKind]:
+def _repeat(kind: _Label, count: int) -> list[_Label]:
     return [kind] * count
 
 
 def _pinned_kind(
-    problem_id: str, family_of: dict[str, str], core_names: set[str], seen: list[str], seen_families: set[str]
+    problem_id: str,
+    family_of: dict[str, str],
+    core_names: set[str],
+    seen: list[str],
+    seen_families: set[str],
+    composite_requires: dict[str, set[str]] | None = None,
 ) -> IncidentKind:
     family = family_of[problem_id]
+    composite_requires = composite_requires or {}
     if family not in seen_families:
-        kind: IncidentKind = "first" if family in core_names else "novel"
+        if family in composite_requires:
+            missing = composite_requires[family] - seen_families
+            if missing:
+                raise ValueError(f"composite {problem_id!r} precedes its component classes {sorted(missing)}")
+            kind: IncidentKind = "composite"
+        else:
+            kind = "first" if family in core_names else "novel"
     else:
         kind = "exact" if problem_id in seen else "variant"
     if problem_id not in seen:
@@ -210,6 +296,13 @@ def _is_learnable(incidents: list[StreamIncident], catalog: Catalog) -> bool:
     )
 
 
+def _is_mixed_learnable(incidents: list[StreamIncident], catalog: Catalog) -> bool:
+    """The mixed pilot prefix holds every core first, a composite, a repeat and a variant."""
+
+    pilot_kinds = [i.kind for i in incidents[:MIXED_PILOT_LENGTH]]
+    return pilot_kinds.count("first") == len(catalog.core) and {"composite", "exact", "variant"} <= set(pilot_kinds)
+
+
 #: The first four incidents of the stream, pinned. The first attempt sampled them from the seed, then had to
 #: replace a novel fault that namespace-scoped SDO can neither observe nor repair (see the decisions log);
 #: its four completed incidents are kept as this opening so they need not be rerun.
@@ -226,6 +319,8 @@ def generate_stream(
 ) -> list[StreamIncident]:
     """The incident stream for ``seed``: same seed, length and opening give the same incidents."""
 
+    if catalog.composite:
+        return _generate_mixed(seed, length, catalog, opening)
     variants = _variant_count(length, catalog)
     exact = length - len(catalog.core) - NOVEL_COUNT - variants
     if exact < 1 or length < PILOT_LENGTH:
@@ -237,7 +332,7 @@ def generate_stream(
     opened = {family_of[p] for p in opening}
     core_order = [f for f in rng.sample(list(catalog.core), len(catalog.core)) if f.name not in opened]
     novel_order = [f for f in rng.sample(list(catalog.novel), NOVEL_COUNT) if f.name not in opened]
-    kinds: list[IncidentKind] = [
+    kinds: list[_Label] = [
         *_repeat("first", len(core_order)),
         *_repeat("novel", len(novel_order)),
         *_repeat("variant", variants),
@@ -254,6 +349,70 @@ def generate_stream(
         if incidents is not None and _is_learnable(incidents, catalog):
             return incidents
     raise ValueError(f"no valid stream found for seed {seed} and length {length}")
+
+
+def _generate_mixed(seed: int, length: int, catalog: Catalog, opening: tuple[str, ...]) -> list[StreamIncident]:
+    """A stream of single faults and composites: composites start once every component class has appeared."""
+
+    family_of = {p: f.name for f in catalog.all_families for p in f.all_problem_ids}
+    if any(problem_id not in family_of for problem_id in opening):
+        raise ValueError("opening names a problem that is not in the catalog")
+    composite_variants = min(catalog.composite_variant_supply, COMPOSITE_VARIANT_COUNT)
+    variants = min(catalog.variant_supply, round(length * VARIANT_SHARE) - composite_variants)
+    rng = random.Random(seed)
+    opened = {family_of[p] for p in opening}
+    core_order = [f for f in rng.sample(list(catalog.core), len(catalog.core)) if f.name not in opened]
+    novel_order = [f for f in rng.sample(list(catalog.novel), NOVEL_COUNT) if f.name not in opened]
+    composite_order = [f for f in rng.sample(list(catalog.composite), len(catalog.composite)) if f.name not in opened]
+    kinds: list[_Label] = [
+        *_repeat("first", len(core_order)),
+        *_repeat("novel", len(novel_order)),
+        *_repeat("composite", len(composite_order)),
+        *_repeat("variant", variants),
+        *_repeat("variant_c", composite_variants),
+        *_repeat("exact_c", COMPOSITE_EXACT_COUNT),
+    ]
+    exact = length - len(opening) - len(kinds)
+    if exact < 1 or length < MIXED_PILOT_LENGTH:
+        raise ValueError(f"stream length {length} is too short for the mixed catalog")
+    kinds.extend(_repeat("exact", exact))
+    pinned = _fill([], rng, catalog, [], [], opening, []) or []
+    composite_names = {f.name for f in catalog.composite}
+    for pinned_incident in pinned:
+        if pinned_incident.kind in {"variant", "exact"}:
+            of_composite = pinned_incident.family in composite_names
+            repeat_label: _Label = (
+                ("exact_c" if of_composite else "exact")
+                if pinned_incident.kind == "exact"
+                else ("variant_c" if of_composite else "variant")
+            )
+            kinds.remove(repeat_label)
+    for _ in range(_MAX_ATTEMPTS):
+        labels = list(kinds)
+        rng.shuffle(labels)
+        incidents = _fill(labels, rng, catalog, core_order, novel_order, opening, composite_order)
+        if incidents is not None and _is_mixed_learnable(incidents, catalog):
+            return incidents
+    raise ValueError(f"no valid mixed stream found for seed {seed} and length {length}")
+
+
+#: Three singles, then a composite, its exact repeat, and a variant of it (another target mix).
+MINI_OPENING = (
+    "network_policy_block",
+    "missing_configmap_hotel_reservation",
+    "readiness_probe_misconfiguration_hotel_reservation",
+    "composite3c_hotel_rate_mongodb_geo_user",
+    "composite3c_hotel_rate_mongodb_geo_user",
+    "composite3_hotel_geo_rate_recommendation",
+)
+
+
+def mini_stream() -> list[StreamIncident]:
+    """The six-incident quick-validation stream: singles, then composition, repeat and variant of a composite."""
+
+    incidents = _fill([], random.Random(MIXED_SEED), MIXED_CATALOG, [], [], MINI_OPENING, [])
+    assert incidents is not None
+    return incidents
 
 
 def render_manifest(incidents: list[StreamIncident], seed: int = STREAM_SEED) -> str:
@@ -274,7 +433,13 @@ def render_manifest(incidents: list[StreamIncident], seed: int = STREAM_SEED) ->
 
 
 def _incident_lines(incidents: list[StreamIncident]) -> str:
-    return "\n".join(f"#   {i.index + 1:>2}  {i.kind:<8} {i.problem_id}" for i in incidents)
+    lines = "\n".join(f"#   {i.index + 1:>2}  {i.kind:<8} {i.problem_id}" for i in incidents)
+    if any(i.kind == "composite" for i in incidents):
+        lines += (
+            "\n#\n# composite = first occurrence of a multi-fault composite; every component class has already"
+            "\n# appeared as a single fault. Its repeats are exact, its other target mixes are variants."
+        )
+    return lines
 
 
 _SDO_HEADER = """\
@@ -425,6 +590,34 @@ def write_configs(directory: Path, *, seed: int = STREAM_SEED, length: int = STR
     return written
 
 
+def write_mixed_configs(directory: Path) -> list[Path]:
+    """Write the committed mixed-stream (singles and composites) configs and manifest into ``directory``."""
+
+    stream = generate_stream(MIXED_SEED, MIXED_LENGTH, MIXED_CATALOG)
+    mini = mini_stream()
+    files = {
+        "sdo_codex_luna_mixed_stream.toml": render_sdo_pipeline_toml(
+            stream, name="sdo_codex_luna_mixed_stream", seed=MIXED_SEED
+        ),
+        "sdo_codex_luna_mixed_pilot.toml": render_sdo_pipeline_toml(
+            stream[:MIXED_PILOT_LENGTH], name="sdo_codex_luna_mixed_pilot", seed=MIXED_SEED
+        ),
+        "sdo_codex_luna_mixed_mini.toml": render_sdo_pipeline_toml(
+            mini, name="sdo_codex_luna_mixed_mini", seed=MIXED_SEED
+        ),
+        "codex_luna_mixed_baseline.toml": render_baseline_toml(stream, label="mixed stream", seed=MIXED_SEED),
+        "codex_luna_mixed_baseline_mini.toml": render_baseline_toml(mini, label="mixed mini stream", seed=MIXED_SEED),
+        "mixed_stream_manifest.json": render_manifest(stream, MIXED_SEED),
+    }
+    written: list[Path] = []
+    for name, text in files.items():
+        path = directory / name
+        path.write_text(text, encoding="utf-8")
+        written.append(path)
+    return written
+
+
 if __name__ == "__main__":
-    for written_path in write_configs(Path(__file__).resolve().parents[1] / "experiments"):
+    experiments = Path(__file__).resolve().parents[1] / "experiments"
+    for written_path in (*write_configs(experiments), *write_mixed_configs(experiments)):
         print(written_path)
