@@ -17,8 +17,14 @@ from sdo.agent_runtime.lifecycle.operational_memory import (
     ensure_operational_memory,
     topology_link_workload,
 )
-from sdo.operational_memory.models import TRAFFIC_PROBER_SOURCE, TRAFFIC_TOPOLOGY_WORKLOAD, TrafficWorkload
+from sdo.operational_memory.models import (
+    TRAFFIC_PROBER_SOURCE,
+    TRAFFIC_TOPOLOGY_WORKLOAD,
+    ArtifactOwner,
+    TrafficWorkload,
+)
 from sdo.operational_memory.repository import MemoryRepository
+from sdo.operational_memory.validation import MemoryValidator, MemoryValidationError
 from tests.unit.sdo.agent_runtime.lifecycle.test_agents import RecordingBackend, _git
 from tests.unit.sdo.agent_runtime.lifecycle.test_link_reachability import _links
 from tests.unit.sdo.agent_runtime.lifecycle.test_traffic_lifecycle import OBJECTIVE, _files, _judged
@@ -204,3 +210,23 @@ def test_refreshing_the_lifecycle_regenerates_the_workload_idempotently(tmp_path
     ensure_operational_memory(repository, **kwargs)
 
     assert path.read_text(encoding="utf-8") == before
+
+
+def test_the_committed_topology_workload_passes_memory_validation_and_is_not_responder_owned(tmp_path: Path) -> None:
+    repository, deployer, artifact = _judged(tmp_path, files=_files())
+    ensure_operational_memory(
+        repository,
+        application="example",
+        health_objective=OBJECTIVE,
+        health_judge_artifact=artifact,
+        architecture_summary_markdown=deployer.architecture_summary_markdown,
+    )
+    changed = [f".sdo/diagnostics/traffic/workloads/{TRAFFIC_TOPOLOGY_WORKLOAD}.yaml"]
+
+    MemoryValidator(run_diagnostics=False).validate(
+        repository, actor=ArtifactOwner.HEALTH_JUDGE, changed_paths=changed, baseline_root=repository
+    )
+    with pytest.raises(MemoryValidationError):
+        MemoryValidator(run_diagnostics=False).validate(
+            repository, actor=ArtifactOwner.RESPONDER, changed_paths=changed, baseline_root=repository
+        )
