@@ -32,12 +32,14 @@ if str(_GEN_ROOT) not in sys.path:
 
 from google.protobuf import json_format
 
-from sdodev.contracts.v1alpha1 import common_pb2, messages_pb2, telemetry_pb2
+from sdodev.contracts.v1alpha1 import common_pb2, controller_config_pb2, messages_pb2, telemetry_pb2
 
 if TYPE_CHECKING:
     from google.protobuf.message import Message
 
 ObjectRef = common_pb2.ObjectRef
+
+ControllerConfig = controller_config_pb2.ControllerConfig
 
 Finding = messages_pb2.Finding
 DetectorEvaluation = messages_pb2.DetectorEvaluation
@@ -66,6 +68,7 @@ FiringRecord = telemetry_pb2.FiringRecord
 __all__ = [
     "AppliedPlaybook",
     "ConfirmedRootCause",
+    "ControllerConfig",
     "DetectorEvaluation",
     "DetectorTimelineEntry",
     "Finding",

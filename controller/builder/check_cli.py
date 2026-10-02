@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from controller.builder.errors import ControllerBuilderError
 from controller.builder.go_runner import GoRunner
+from controller.builder.manifest import duration_nanoseconds
 from controller.builder.paths import find_app_root, find_tool_paths
 from controller.builder.schema import SchemaSourceError, schema_identity
 from controller.builder.workspace import BuildWorkspace, BuildWorkspaceConfig
@@ -455,6 +456,155 @@ def _controller(args: argparse.Namespace) -> int:
         print(json.dumps({"controller_supervisor": "relaunch", "launches": launches}), flush=True)
 
 
+def _controller_flag_args(
+    args: argparse.Namespace,
+    *,
+    app_root: Path,
+    worktree_root: Path,
+    responder_args: list[str],
+    broker_args: list[str],
+    prober_binary: Path | None,
+) -> list[str]:
+    """Build the controller binary's launch flags (everything after the binary path).
+
+    This is the legacy argv boundary between the launcher and the Go controller.
+    Seam 3 replaces it with a single ``ControllerConfig`` (``_controller_config``);
+    the two are kept in lockstep by the parity test until the cutover flips the
+    launch to ``--config`` and this builder is removed.
+    """
+
+    flags = [
+        "--namespace",
+        args.namespace,
+        "--app-root",
+        str(app_root),
+        "--dispatcher-mode",
+        "job",
+        "--dispatcher",
+        args.responder_command,
+    ]
+    for responder_arg in responder_args:
+        flags.extend(["--dispatcher-arg", responder_arg])
+    for environment in args.responder_env:
+        flags.extend(["--responder-env", environment])
+    flags.extend(
+        [
+            "--responder-image",
+            args.responder_image,
+            "--repository-pvc",
+            args.repository_pvc,
+            "--repository-mount-path",
+            args.repository_mount_path,
+            "--responder-credentials-secret",
+            args.credentials_secret,
+            "--broker",
+            args.broker_command,
+        ]
+    )
+    for broker_arg in broker_args:
+        flags.extend(["--broker-arg", broker_arg])
+    flags.extend(
+        [
+            "--broker-worktree-root",
+            str(worktree_root),
+            "--response-timeout",
+            args.response_timeout,
+            "--verification-timeout",
+            args.verification_timeout,
+            "--max-follow-ups",
+            str(args.max_follow_ups),
+            "--follow-up-cooldown",
+            args.follow_up_cooldown,
+            "--repair-policy",
+            args.repair_policy,
+            "--lease-name",
+            args.lease_name,
+        ]
+    )
+    optional_values = {
+        "--control-namespace": args.control_namespace,
+        "--application": args.application,
+        "--source-commit": args.source_commit,
+        "--deployed-commit": args.deployed_commit,
+        "--repository-pvc-subpath": args.repository_pvc_subpath,
+        "--duration": args.duration,
+    }
+    if args.exit_after_closure:
+        flags.append("--exit-after-closure")
+    if getattr(args, "supervise", False) and not getattr(args, "controller_update_rollout", False):
+        flags.append("--restart-after-closure")
+    if prober_binary is not None:
+        optional_values["--prober-binary"] = str(prober_binary)
+        optional_values["--prober-image"] = args.prober_image
+    for flag, value in optional_values.items():
+        if value:
+            flags.extend([flag, value])
+    return flags
+
+
+def _controller_config(
+    args: argparse.Namespace,
+    *,
+    app_root: Path,
+    worktree_root: Path,
+    responder_args: list[str],
+    broker_args: list[str],
+    prober_binary: Path | None,
+) -> object:
+    """Build the controller's launch config as the shared ``ControllerConfig`` proto.
+
+    Seam 3's single source for the launcher -> controller boundary. The import is
+    function-scoped on purpose: the validator image has no ``sdo`` package and
+    never runs ``_controller_once``; the runtime image (which does run it) has it.
+    The no-module-level-sdo-import guard test enforces that.
+    """
+
+    from sdo.contracts.proto import ControllerConfig
+
+    config = ControllerConfig(
+        namespace=args.namespace,
+        app_root=str(app_root),
+        dispatcher_mode="job",
+        dispatcher=args.responder_command,
+        dispatcher_args=list(responder_args),
+        responder_env=list(args.responder_env),
+        responder_image=args.responder_image,
+        repository_pvc=args.repository_pvc,
+        repository_mount_path=args.repository_mount_path,
+        responder_credentials_secret=args.credentials_secret,
+        broker=args.broker_command,
+        broker_args=list(broker_args),
+        broker_worktree_root=str(worktree_root),
+        max_follow_ups=args.max_follow_ups,
+        repair_policy=args.repair_policy,
+        lease_name=args.lease_name,
+    )
+    config.response_timeout.FromNanoseconds(duration_nanoseconds(args.response_timeout))
+    config.verification_timeout.FromNanoseconds(duration_nanoseconds(args.verification_timeout))
+    config.follow_up_cooldown.FromNanoseconds(duration_nanoseconds(args.follow_up_cooldown))
+    if args.control_namespace:
+        config.control_namespace = args.control_namespace
+    if args.application:
+        config.application = args.application
+    if args.source_commit:
+        config.source_commit = args.source_commit
+    if args.deployed_commit:
+        config.deployed_commit = args.deployed_commit
+    if args.repository_pvc_subpath:
+        config.repository_pvc_subpath = args.repository_pvc_subpath
+    if args.duration:
+        config.duration.FromNanoseconds(duration_nanoseconds(args.duration))
+    if args.exit_after_closure:
+        config.exit_after_closure = True
+    if getattr(args, "supervise", False) and not getattr(args, "controller_update_rollout", False):
+        config.restart_after_closure = True
+    if prober_binary is not None:
+        config.prober_binary = str(prober_binary)
+        if args.prober_image:
+            config.prober_image = args.prober_image
+    return config
+
+
 def _controller_once(args: argparse.Namespace) -> int:
     app_root = _app_root(args)
     worktree_root = args.worktree_root.resolve()
@@ -498,73 +648,15 @@ def _controller_once(args: argparse.Namespace) -> int:
             "--proposal-command",
             "git -c core.whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab diff --check HEAD --",
         ]
-        command = [
-            str(binary),
-            "--namespace",
-            args.namespace,
-            "--app-root",
-            str(app_root),
-            "--dispatcher-mode",
-            "job",
-            "--dispatcher",
-            args.responder_command,
-        ]
-        for responder_arg in responder_args:
-            command.extend(["--dispatcher-arg", responder_arg])
-        for environment in args.responder_env:
-            command.extend(["--responder-env", environment])
-        command.extend(
-            [
-                "--responder-image",
-                args.responder_image,
-                "--repository-pvc",
-                args.repository_pvc,
-                "--repository-mount-path",
-                args.repository_mount_path,
-                "--responder-credentials-secret",
-                args.credentials_secret,
-                "--broker",
-                args.broker_command,
-            ]
+        flag_args = _controller_flag_args(
+            args,
+            app_root=app_root,
+            worktree_root=worktree_root,
+            responder_args=responder_args,
+            broker_args=broker_args,
+            prober_binary=prober_binary,
         )
-        for broker_arg in broker_args:
-            command.extend(["--broker-arg", broker_arg])
-        command.extend(
-            [
-                "--broker-worktree-root",
-                str(worktree_root),
-                "--response-timeout",
-                args.response_timeout,
-                "--verification-timeout",
-                args.verification_timeout,
-                "--max-follow-ups",
-                str(args.max_follow_ups),
-                "--follow-up-cooldown",
-                args.follow_up_cooldown,
-                "--repair-policy",
-                args.repair_policy,
-                "--lease-name",
-                args.lease_name,
-            ]
-        )
-        optional_values = {
-            "--control-namespace": args.control_namespace,
-            "--application": args.application,
-            "--source-commit": args.source_commit,
-            "--deployed-commit": args.deployed_commit,
-            "--repository-pvc-subpath": args.repository_pvc_subpath,
-            "--duration": args.duration,
-        }
-        if args.exit_after_closure:
-            command.append("--exit-after-closure")
-        if getattr(args, "supervise", False) and not getattr(args, "controller_update_rollout", False):
-            command.append("--restart-after-closure")
-        if prober_binary is not None:
-            optional_values["--prober-binary"] = str(prober_binary)
-            optional_values["--prober-image"] = args.prober_image
-        for flag, value in optional_values.items():
-            if value:
-                command.extend([flag, value])
+        command = [str(binary), *flag_args]
         completed = subprocess.run(command, cwd=workspace.path, check=False)
         if args.keep_workdir:
             print(f"kept controller build workspace: {workspace.path}", file=sys.stderr)
