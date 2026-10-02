@@ -170,6 +170,48 @@ def test_build_workspace_generates_registration_without_mutating_app_go_mod(tmp_
     assert app_go_mod.read_text(encoding="utf-8") == original_go_mod
 
 
+def test_build_workspace_replaces_the_contracts_module_when_present(tmp_path: Path) -> None:
+    # Go does not honor a dependency's own replace directives, so the runtime
+    # module's `replace sdo.dev/controller/contracts => ../contracts` is ignored
+    # when runtime is a workspace dependency. The synthesized workspace (the main
+    # module) must replace contracts itself or `go mod tidy` tries to fetch
+    # sdo.dev/controller/contracts and the whole validation fails.
+    app_root = tmp_path / "app"
+    tool_root = tmp_path / "sdo"
+    _write_app_diagnostics(app_root)
+    _write_tool_root(tool_root)
+    contracts_dir = tool_root / "controller" / "contracts"
+    contracts_dir.mkdir(parents=True)
+
+    config = BuildWorkspaceConfig(
+        app_root=app_root,
+        sdk_dir=tool_root / "controller" / "sdk",
+        core_dir=tool_root / "controller" / "core",
+    )
+    with BuildWorkspace.create(config) as workspace:
+        workspace_go_mod = (workspace.path / "go.mod").read_text(encoding="utf-8")
+
+    assert "require sdo.dev/controller/contracts v0.0.0" in workspace_go_mod
+    assert f"replace sdo.dev/controller/contracts => {contracts_dir}" in workspace_go_mod
+
+
+def test_build_workspace_omits_contracts_replace_when_absent(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    tool_root = tmp_path / "sdo"
+    _write_app_diagnostics(app_root)
+    _write_tool_root(tool_root)
+
+    config = BuildWorkspaceConfig(
+        app_root=app_root,
+        sdk_dir=tool_root / "controller" / "sdk",
+        core_dir=tool_root / "controller" / "core",
+    )
+    with BuildWorkspace.create(config) as workspace:
+        workspace_go_mod = (workspace.path / "go.mod").read_text(encoding="utf-8")
+
+    assert "sdo.dev/controller/contracts" not in workspace_go_mod
+
+
 def test_build_workspace_can_limit_an_authoring_check_to_one_detector(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     tool_root = tmp_path / "sdo"

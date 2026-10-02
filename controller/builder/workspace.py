@@ -40,6 +40,13 @@ class BuildWorkspaceConfig:
     sdk_dir: Path
     core_dir: Path
     runtime_dir: Path | None = None
+    #: The generated proto-contracts Go module the runtime requires. Go replace
+    #: directives are not transitive, so the synthesized workspace (the main
+    #: module) must replace it itself; the runtime module's own
+    #: ``replace sdo.dev/controller/contracts => ../contracts`` is ignored when
+    #: runtime is a dependency. Defaults to the runtime module's ``contracts``
+    #: sibling when unset.
+    contracts_dir: Path | None = None
     keep: bool = False
     detector_ids: tuple[str, ...] = ()
     #: Directory of recorded healthy-cluster snapshots (``*.json``); opt-in, see docs/feature-flags.md.
@@ -86,12 +93,18 @@ class BuildWorkspace:
         for package in excluded_packages:
             shutil.rmtree(workspace_path / package)
         module_path = _module_path(workspace_path / "go.mod")
+        runtime_dir = (config.runtime_dir or config.core_dir.parent / "runtime").resolve()
+        contracts_dir = config.contracts_dir.resolve() if config.contracts_dir is not None else None
+        if contracts_dir is None:
+            sibling = runtime_dir.parent / "contracts"
+            contracts_dir = sibling if sibling.is_dir() else None
         _write_go_mod(
             workspace_path / "go.mod",
             module_path=module_path,
             sdk_dir=config.sdk_dir.resolve(),
             core_dir=config.core_dir.resolve(),
-            runtime_dir=(config.runtime_dir or config.core_dir.parent / "runtime").resolve(),
+            runtime_dir=runtime_dir,
+            contracts_dir=contracts_dir,
         )
         _write_generated_registration(workspace_path, module_path=module_path, manifest=manifest)
         _write_generated_externalname_invariant(workspace_path / "generated", _source_service_names(app_root))
@@ -140,7 +153,15 @@ def _module_path(go_mod: Path) -> str:
     return module_path
 
 
-def _write_go_mod(go_mod: Path, *, module_path: str, sdk_dir: Path, core_dir: Path, runtime_dir: Path) -> None:
+def _write_go_mod(
+    go_mod: Path,
+    *,
+    module_path: str,
+    sdk_dir: Path,
+    core_dir: Path,
+    runtime_dir: Path,
+    contracts_dir: Path | None = None,
+) -> None:
     if go_mod.is_file():
         source = go_mod.read_text(encoding="utf-8").rstrip()
     else:
@@ -152,6 +173,7 @@ def _write_go_mod(go_mod: Path, *, module_path: str, sdk_dir: Path, core_dir: Pa
         if not line.strip().startswith("replace sdo.dev/controller/sdk =>")
         and not line.strip().startswith("replace sdo.dev/controller/core =>")
         and not line.strip().startswith("replace sdo.dev/controller/runtime =>")
+        and not line.strip().startswith("replace sdo.dev/controller/contracts =>")
     ]
     module_line_found = False
     for index, line in enumerate(lines):
@@ -168,11 +190,19 @@ def _write_go_mod(go_mod: Path, *, module_path: str, sdk_dir: Path, core_dir: Pa
         content += "\nrequire sdo.dev/controller/core v0.0.0"
     if "sdo.dev/controller/runtime" not in content:
         content += "\nrequire sdo.dev/controller/runtime v0.0.0"
+    # The runtime module requires the generated proto-contracts module. Go does
+    # not honor a dependency's own replace directives, so replace it here in the
+    # main module or `go mod tidy` tries to fetch sdo.dev/controller/contracts.
+    if contracts_dir is not None and "sdo.dev/controller/contracts" not in content:
+        content += "\nrequire sdo.dev/controller/contracts v0.0.0"
     content += (
         f"\n\nreplace sdo.dev/controller/sdk => {sdk_dir}"
         f"\nreplace sdo.dev/controller/core => {core_dir}"
-        f"\nreplace sdo.dev/controller/runtime => {runtime_dir}\n"
+        f"\nreplace sdo.dev/controller/runtime => {runtime_dir}"
     )
+    if contracts_dir is not None:
+        content += f"\nreplace sdo.dev/controller/contracts => {contracts_dir}"
+    content += "\n"
     go_mod.write_text(content, encoding="utf-8")
 
 
