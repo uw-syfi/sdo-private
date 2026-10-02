@@ -87,10 +87,19 @@ def _write_rollout(home: Path, *, used: float, observed: float, resets: float) -
     (sessions / "rollout-2026-09-28T07-48-49-x.jsonl").write_text(json.dumps(event) + "\n", encoding="utf-8")
 
 
-def _preflight(configs: list[ExperimentConfig], host: FakeHost, sregym_dir: Path, **env: str):
-    if not (host.home / ".codex").exists():
+def _preflight(
+    configs: list[ExperimentConfig],
+    host: FakeHost,
+    sregym_dir: Path,
+    *,
+    settings: PreflightSettings | None = None,
+    **env: str,
+):
+    if not (host.home / ".codex" / "sessions").exists():
         _write_rollout(host.home, used=40, observed=NOW - 60, resets=NOW + 86_400)
-    return run_preflight(configs, project_root=REPO_ROOT, sregym_dir=sregym_dir, env=env, host=host, now=NOW)
+    return run_preflight(
+        configs, project_root=REPO_ROOT, sregym_dir=sregym_dir, env=env, host=host, settings=settings, now=NOW
+    )
 
 
 def _check(report, name: str):
@@ -348,13 +357,24 @@ def test_compared_arms_that_differ_in_grading_settings_abort(fake_host: FakeHost
     assert "worker_cpu_limit" in check.detail
 
 
-def test_quota_at_the_limit_aborts_and_names_the_reset(fake_host: FakeHost, sregym_dir: Path) -> None:
+def test_quota_at_an_explicit_limit_aborts_and_names_the_reset(fake_host: FakeHost, sregym_dir: Path) -> None:
     _write_rollout(fake_host.home, used=90, observed=NOW - 120, resets=NOW + 5 * 86_400)
 
-    check = _check(_preflight([_luna()], fake_host, sregym_dir), "codex-quota")
+    check = _check(
+        _preflight([_luna()], fake_host, sregym_dir, settings=PreflightSettings(max_quota_used_percent=85)),
+        "codex-quota",
+    )
 
     assert check.status == "fail"
     assert "90% used" in check.detail
+
+
+def test_quota_headroom_does_not_hold_a_run_by_default(fake_host: FakeHost, sregym_dir: Path) -> None:
+    _write_rollout(fake_host.home, used=97, observed=NOW - 120, resets=NOW + 5 * 86_400)
+
+    assert _check(_preflight([_luna()], fake_host, sregym_dir), "codex-quota").status == "pass"
+    _write_rollout(fake_host.home, used=100, observed=NOW - 60, resets=NOW + 5 * 86_400)
+    assert _check(_preflight([_luna()], fake_host, sregym_dir), "codex-quota").status == "fail"
 
 
 @pytest.mark.parametrize(

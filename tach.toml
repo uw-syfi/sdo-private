@@ -112,6 +112,7 @@ depends_on = [
 path = "benchmarks.sregym.runner"
 depends_on = [
     "benchmarks.sregym.protocol",
+    "sdo.controller_install",
 ]
 
 [[modules]]

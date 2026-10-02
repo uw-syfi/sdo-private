@@ -5,12 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from benchmarks.sregym.runner.launch_contract import CONTROLLER_HELP_COMMAND, IMAGE_TRAFFIC_SDK
 from benchmarks.sregym.runner.preflight import GB, ImageInfo, ImageVersions
+from sdo.controller_install import controller_launch_flags
+
+from pathlib import Path
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from pathlib import Path
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
 CODEX_PIN = "0.157.1"
 AGENTSHIM_PIN = "0.7.0"
 
@@ -37,6 +41,9 @@ class FakeHost:
     git_answers: dict[tuple[str, ...], str] = field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
     load: tuple[float, float, float] | None = (1.0, 2.0, 3.0)
     probed: list[str] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+    #: Per-image overrides of what the image prints; an image not listed is built from this checkout.
+    controller_help: dict[str, str | None] = field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
+    traffic_sdk: dict[str, str | None] = field(default_factory=dict)  # pyright: ignore[reportUnknownVariableType]
 
     def free_bytes(self, path: Path) -> int | None:
         for prefix, value in self.free.items():
@@ -84,3 +91,26 @@ class FakeHost:
 
     def load_average(self) -> tuple[float, float, float] | None:
         return self.load
+
+    def image_output(self, ref: str, argv: list[str]) -> str | None:
+        if tuple(argv) == CONTROLLER_HELP_COMMAND:
+            if ref in self.controller_help:
+                return self.controller_help[ref]
+            flags = controller_launch_flags(
+                controller_namespace="fake-control",
+                closeout_state_gate=True,
+                max_follow_ups=1,
+                late_findings="pull",
+                healthy_baseline=True,
+            )
+            return "\n".join(sorted(flags))
+        if argv[:2] == ["sh", "-c"] and IMAGE_TRAFFIC_SDK in argv[2]:
+            if ref in self.traffic_sdk:
+                return self.traffic_sdk[ref]
+            traffic = REPOSITORY_ROOT / "controller" / "sdk" / "traffic"
+            return "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in sorted(traffic.glob("*.go"))
+                if not path.name.endswith("_test.go")
+            )
+        return None
