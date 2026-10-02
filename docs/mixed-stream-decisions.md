@@ -207,3 +207,13 @@ One persistent SDO controller (Codex gpt-6-luna, medium) answered a 10-incident 
 | 10 | exact | composite3_hotel_geo_rate_recommendation | **no** | ✗ | ✓ (3/3) | 191 | 0 | skip (exact-match) | 0.86M | 0 |
 
 Totals: **solved 9/10**, **mitigation 10/10** (every mitigation oracle), **diagnosis 9/10**, contradicted causes **0/2 composites** (was 1/1 on the pre-fix C1), 4/6 singles. Exact-match repeats (3, 10) skipped reflection as prior-verified successes. Network-policy single (5) detected before dispatch by the link probe (contra 0). Codex memoryless baseline on the identical incidents is reused from the stored run (not rerun); the composites are the discriminating incidents (memoryless Codex scored them poorly in the composite-stream study).
+
+### Decision: responder evidence-kind normalization seam (A vs B, 2026-10-02)
+
+The responder evidence-kind fix (`vic/fix/responder-evidence-kind`, merged) normalizes at the responder emit seam (`execute_incident`), which only sees the dispatch-time catalog — not the closure's after-dispatch `detector_timeline`. Consequence: on composites, a genuinely late *pulled* detector-finding is recorded as `live-observation` in the responder receipt. The cause still confirms (via `explained_detectors` + attribution) and reflection still learns — the verdict and learning are unchanged; only the receipt's evidence-kind label differs.
+
+Two options were surfaced by the verifier-fix agent:
+- **A** — relocate normalization into the verification/outcome pipeline so the catalog is `dispatch ∪ after-dispatch` and late pulled detectors keep the `detector-finding` label. Verdict-identical, reflection-identical; improves trajectory provenance for analysis/paper.
+- **B** — keep the verdict-safe responder fix and document the caveat.
+
+**Decision: B now; A held for coordinator sign-off (bundle with verifier fix #2).** Rationale: A's only benefit is receipt/trajectory-label fidelity (it changes neither the verdict nor what reflection learns), and its cost is touching the verification/outcome pipeline — the same fenced area as fix #2, which the coordinator asked us to treat carefully. A cosmetic-to-verdict relabel does not justify a unilateral change there. B's documentation (the analyze-experiment reference caveat) is required by CLAUDE.md regardless. If paper evidence-provenance tallies need the distinction, that is the trigger to approve A.
