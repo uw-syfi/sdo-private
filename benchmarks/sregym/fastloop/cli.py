@@ -546,7 +546,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--detection-timeout",
         type=float,
         default=None,
-        help="end an incident as a detection miss (its fault is recovered) if none opens this many seconds after injection",
+        help="end an incident as a detection miss if none opens this many seconds after injection",
     )
     run.add_argument("--max-follow-ups", type=int, default=0, help="follow-up responders for residual health findings")
     run.add_argument("--follow-up-cooldown-seconds", type=int, default=30)
