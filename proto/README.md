@@ -54,6 +54,15 @@ converge all controller modules onto protobuf v1.36.x so the version skew (and e
 the `replace` directives, once the module publishes) can be dropped. Deferred to avoid a
 dependency-bump ripple mid-migration.
 
+Relatedly, the relative `replace` directives are fragile because Go `replace` is **not
+transitive**: a consumer that depends on `runtime` does not inherit `runtime`'s
+`replace sdo.dev/controller/contracts => ../contracts`, so every main module in the graph
+must repeat it. The synthesized detector workspace hit exactly this (it had to grow its own
+`require` + `replace` for `contracts` in `controller/builder/workspace.py`, and both
+Dockerfiles copy `controller/contracts`). A `go.work` workspace, or publishing the
+`contracts` module, is the cleaner long-term fix than per-generated-`go.mod` replaces. Same
+deferral.
+
 ## Rules
 
 - These messages are serialized as **protojson**, never binary, on the wire.
