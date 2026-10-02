@@ -41,6 +41,13 @@ Toolchain (installed via `go install`, so they land in `~/go/bin` — add it to 
 Generated Go lives in its own module `sdo.dev/controller/contracts` (`controller/contracts/`,
 go_package `.../gen/...`); consumers add a `require` + relative `replace` for it.
 
+**Follow-up (not this refactor):** the `contracts` module needs `google.golang.org/protobuf`
+v1.36.x (the gencode runtime), while `sdk`/`core`/`runtime` still pin v1.33.0. Consumers
+therefore carry a `require` + relative `replace` on `contracts`. The clean endgame is to
+converge all controller modules onto protobuf v1.36.x so the version skew (and eventually
+the `replace` directives, once the module publishes) can be dropped. Deferred to avoid a
+dependency-bump ripple mid-migration.
+
 ## Rules
 
 - These messages are serialized as **protojson**, never binary, on the wire.
