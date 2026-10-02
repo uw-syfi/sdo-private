@@ -608,12 +608,34 @@ def _unwrap_shell_command(command: str) -> str:
     return command
 
 
+# A quoted ``/`` right after one of these starts a regular-expression alternative or follows a
+# group, class or quantifier (``(a|b)/.*``, ``[a-z]+/x``); a path the shell opens starts a token.
+_REGEX_SLASH_PREDECESSORS = frozenset("|()]*+?}")
+
+_QUOTED_HEREDOC_FILE_WRITE = re.compile(
+    r"(?P<head>\b(?:cat|tee)\b[^\n|;&<]*<<-?[ \t]*(?P<quote>['\"])(?P<tag>\w+)(?P=quote)[ \t]*)\n"
+    r"(?P<body>.*?)\n(?P<end>[ \t]*(?P=tag)[ \t]*)(?=\n|$)",
+    re.DOTALL,
+)
+
+
+def _mask_quoted_heredoc_bodies(script: str) -> str:
+    """Drop the body of a quoted-delimiter heredoc that ``cat`` or ``tee`` writes to a file.
+
+    The shell neither expands nor executes that body, so a route such as ``"/hotels"`` inside
+    generated Go source is data, not a path. A heredoc fed to anything else (``bash <<'EOF'``,
+    ``cat <<'EOF' | sh``) is executed text and an unquoted delimiter expands ``$(...)``; both stay
+    audited.
+    """
+    return _QUOTED_HEREDOC_FILE_WRITE.sub(lambda match: f"{match.group('head')}\n{match.group('end')}", script)
+
+
 def _mask_quoted_pattern_alternatives(script: str) -> str:
     """Hide ``/route`` alternatives inside quoted strings, such as ``rg 'HandleFunc|/items'``.
 
-    Inside a quoted argument a ``/`` right after ``|`` or ``(`` starts a regular-expression
-    alternative or group, not a path the shell opens. Unquoted text, including a pipe into an
-    absolute command, is left for the path audit.
+    Inside a quoted argument a ``/`` right after ``|``, ``(`` or a group, class or quantifier
+    closer starts a regular-expression alternative or continues a token, not a path the shell
+    opens. Unquoted text, including a pipe into an absolute command, is left for the path audit.
     """
     masked: list[str] = []
     quote: str | None = None
@@ -627,7 +649,7 @@ def _mask_quoted_pattern_alternatives(script: str) -> str:
             quote = char
         elif char == quote:
             quote = None
-        elif quote is not None and char == "/" and masked and masked[-1] in {"|", "("}:
+        elif quote is not None and char == "/" and masked and masked[-1] in _REGEX_SLASH_PREDECESSORS:
             masked.append(" ")
             continue
         masked.append(char)
@@ -645,7 +667,9 @@ def _command_escapes_repository(
     audited_command = _GIT_OBJECT_PATH.sub(
         lambda match: match.group(0).replace(match.group(1), ".git-object-path"), command
     )
-    audited_command = _mask_quoted_pattern_alternatives(_unwrap_shell_command(audited_command))
+    audited_command = _mask_quoted_pattern_alternatives(
+        _mask_quoted_heredoc_bodies(_unwrap_shell_command(audited_command))
+    )
     write_only_paths = {match.group(1) for match in _WRITE_REDIRECT_ABSOLUTE_PATH.finditer(audited_command)}
     for raw_path in _ABSOLUTE_PATH.findall(audited_command):
         if raw_path in write_only_paths:

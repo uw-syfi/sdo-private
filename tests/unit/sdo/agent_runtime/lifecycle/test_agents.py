@@ -1089,6 +1089,51 @@ def test_repository_audit_allows_route_alternatives_in_quoted_search_patterns(tm
     assert not _command_escapes_repository(command, repository)
 
 
+# Lifecycle health-judge commands from mini-stream runs (2026-10-02): the judge's own `.sdo`
+# file writes and a regex group followed by a slash both tripped the audit and aborted a 700 s
+# lifecycle after three bounded attempts.
+_GO_SOURCE_HEREDOC = (
+    "mkdir -p .sdo/diagnostics/traffic/generators; cat > .sdo/diagnostics/traffic/generators/hotel.go <<'EOF'\n"
+    "package generators\n\n"
+    "func Scenarios() traffic.Catalog {\n"
+    '\treturn traffic.Catalog{{ID: "hotel-search", Target: "/hotels?inDate=2015-04-09", Path: "/recommendations"}}\n'
+    "}\nEOF"
+)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param(f'/bin/bash -lc "{_GO_SOURCE_HEREDOC}"'.replace("\\", "\\\\"), id="wrapped-quoted-heredoc-file-write"),
+        pytest.param(_GO_SOURCE_HEREDOC, id="quoted-heredoc-file-write"),
+        pytest.param("tee notes.md <<\"EOF\"\nsee /hotels and /user\nEOF", id="double-quoted-delimiter-tee"),
+        pytest.param("""/bin/bash -lc "rg --files | rg '(a|b)/.*\\\\.go'\"""", id="regex-group-then-slash"),
+        pytest.param("""rg --files | rg '(frontend|search)/.*[.]go$|kubernetes/.*/.*service.yaml$'""", id="regex-group-then-slash-bare"),
+    ],
+)
+def test_repository_audit_allows_data_and_regex_slashes(tmp_path: Path, command: str) -> None:
+    repository = _repository(tmp_path)
+
+    assert not _command_escapes_repository(command, repository)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("bash <<'EOF'\ncat /etc/passwd\nEOF", id="heredoc-fed-to-shell"),
+        pytest.param("cat <<'EOF' | sh\ncat /etc/passwd\nEOF", id="heredoc-piped-to-shell"),
+        pytest.param("cat > notes.md <<EOF\n$(cat /etc/passwd)\nEOF", id="unquoted-heredoc-substitution"),
+        pytest.param("cat > notes.md <<'EOF'\nx\nEOF\ncat /etc/passwd", id="command-after-heredoc"),
+        pytest.param("cat > notes.md <<'EOF'\nx\nEOF\ncat ../secret", id="traversal-after-heredoc"),
+        pytest.param("rg -n '(a|b)' /etc/passwd", id="path-argument-after-regex-group"),
+    ],
+)
+def test_repository_audit_still_rejects_executed_or_external_paths(tmp_path: Path, command: str) -> None:
+    repository = _repository(tmp_path)
+
+    assert _command_escapes_repository(command, repository)
+
+
 @pytest.mark.parametrize(
     "command",
     [
