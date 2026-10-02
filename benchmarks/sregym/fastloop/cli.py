@@ -219,6 +219,11 @@ def _cluster_ops(args: argparse.Namespace, namespace: str) -> ClusterOps:
     if args.inject_before_resume:
         from benchmarks.sregym.fastloop.simultaneous import InjectBeforeResumeOps
 
+        logger.warning(
+            "--inject-before-resume injects while the controller is paused, so the link probe never sees the "
+            "dependency edges connect first: an isolating NetworkPolicy fault cannot be detected in this mode"
+        )
+
         ops = InjectBeforeResumeOps(ops)  # type: ignore[assignment]
     if args.healthy_baseline:
         ops = kubectl_capture_ops(ops, namespace=namespace, kubectl_runner=kubectl)  # type: ignore[assignment]

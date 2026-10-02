@@ -172,3 +172,20 @@ def test_the_load_governor_can_be_turned_off_or_tuned(tmp_path: Path) -> None:
     assert cli._hold_for_calm_load(_up_args("--no-load-governor"), tmp_path, wait=fail_wait) is None
     parsed = _up_args("--max-load", "12", "--calm-seconds", "30", "--max-load-wait", "600")
     assert (parsed.max_load, parsed.calm_seconds, parsed.max_load_wait) == (12.0, 30.0, 600.0)
+
+
+def test_injecting_before_resume_warns_that_the_link_probe_has_no_baseline(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING"):
+        cli._cluster_ops(_args(tmp_path, "--inject-before-resume"), "hotel-reservation")
+
+    assert "link probe" in caplog.text
+    assert "NetworkPolicy" in caplog.text
+
+
+def test_resuming_normally_does_not_warn_about_the_link_probe(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("WARNING"):
+        cli._cluster_ops(_args(tmp_path), "hotel-reservation")
+
+    assert "link probe" not in caplog.text
