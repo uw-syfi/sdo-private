@@ -76,6 +76,8 @@ def derive_outcome(facts: OutcomeFacts) -> OutcomeRecord:
         final_state_changes=facts.final_state_changes,
         health_cleared_at=facts.health_cleared_at,
         observed_state_changes=facts.observed_state_changes,
+        dispatched_at=facts.dispatched_at,
+        responder_completed_at=facts.responder_completed_at,
     )
     classification = _classification(facts, verification)
     applied_playbooks = [] if result is None else [playbook.path for playbook in result.applied_playbooks]

@@ -561,3 +561,146 @@ def test_a_change_the_controller_never_observed_is_contradicted() -> None:
 
     assert verification.verdict == DiagnosisVerdict.CONTRADICTED
     assert verification.evidence[1].verified is False
+
+
+# Responder-reported clocks drift: the phase A cold NetworkPolicy run deleted the policy
+# at 07:57:07.5, health cleared at 07:57:08.8, yet the receipt's ``started_at`` was read
+# at 07:57:17. The controller's own facts (dispatch, responder completion, the diff) are
+# the anchor, so a bounded skew is tolerated only inside the responder's session.
+_DISPATCHED = datetime(2026, 7, 9, 18, 5, tzinfo=timezone.utc)
+_RESPONDER_DONE = datetime(2026, 7, 9, 18, 10, 40, tzinfo=timezone.utc)
+
+
+def _skewed_policy_repair(skew_seconds: float, *, action_id: str = "delete-policy") -> RepairActionReceipt:
+    return _repair(
+        action_id,
+        _NETWORK_POLICY,
+        started_at=datetime.fromtimestamp(HEALTH_CLEARED.timestamp() + skew_seconds, tz=timezone.utc),
+    )
+
+
+def _verify_policy(
+    actions: list[RepairActionReceipt],
+    *,
+    reverted: tuple[str, ...] = ("NetworkPolicy/deny-all",),
+    dispatched_at: datetime | None = _DISPATCHED,
+    responder_completed_at: datetime | None = _RESPONDER_DONE,
+):
+    [verification] = verify_diagnosis(
+        _request(),
+        _result(_network_policy_cause(), actions=actions),
+        final_detector_states=[_clear("missing-configmap")],
+        final_state_changes=_unchanged_except(*reverted),
+        health_cleared_at=HEALTH_CLEARED,
+        dispatched_at=dispatched_at,
+        responder_completed_at=responder_completed_at,
+    )
+    return verification
+
+
+def test_a_repair_whose_reported_start_is_a_few_seconds_after_health_cleared_is_attributed_inside_the_session() -> None:
+    """The exact phase A timeline: the policy is gone from the closing diff and the action lists it."""
+
+    verification = _verify_policy([_skewed_policy_repair(8.5)])
+
+    assert verification.verdict == DiagnosisVerdict.CONFIRMED
+    assert verification.repair is not None
+    assert verification.repair.attributed is True
+    assert verification.repair.actions == ["delete-policy"]
+    assert verification.repair.clock_skew_corrected == ["delete-policy"]
+    assert verification.repair.externally_reverted == []
+
+
+def test_an_on_time_repair_is_not_marked_as_skew_corrected() -> None:
+    verification = _verify_policy([_skewed_policy_repair(-2.0)])
+
+    assert verification.verdict == DiagnosisVerdict.CONFIRMED
+    assert verification.repair is not None
+    assert verification.repair.clock_skew_corrected == []
+
+
+def test_a_skew_beyond_the_tolerance_does_not_back_the_cause() -> None:
+    verification = _verify_policy([_skewed_policy_repair(90.0)])
+
+    assert verification.verdict == DiagnosisVerdict.UNATTRIBUTED
+    assert verification.repair is not None
+    assert verification.repair.actions == []
+    assert verification.repair.clock_skew_corrected == []
+
+
+def test_a_skewed_repair_reported_after_the_responder_session_ended_is_not_credited() -> None:
+    # Within the skew bound of health_cleared_at, but the responder had already completed.
+    early_done = datetime(2026, 7, 9, 18, 8, tzinfo=timezone.utc)
+    verification = _verify_policy([_skewed_policy_repair(8.5)], responder_completed_at=early_done)
+
+    assert verification.verdict == DiagnosisVerdict.UNATTRIBUTED
+    assert verification.repair is not None
+    assert verification.repair.actions == []
+
+
+def test_a_skewed_repair_is_not_credited_without_the_session_window() -> None:
+    verification = _verify_policy([_skewed_policy_repair(8.5)], dispatched_at=None, responder_completed_at=None)
+
+    assert verification.verdict == DiagnosisVerdict.UNATTRIBUTED
+    assert verification.repair is not None
+    assert verification.repair.actions == []
+
+
+def test_a_skewed_repair_does_not_back_a_fault_that_is_still_present() -> None:
+    """The closing diff still shows the policy: the action did not restore it, whatever its clock says."""
+
+    verification = _verify_policy([_skewed_policy_repair(8.5)], reverted=())
+
+    assert verification.verdict == DiagnosisVerdict.UNATTRIBUTED
+    assert verification.repair is not None
+    assert verification.repair.actions == []
+
+
+def test_a_skewed_repair_of_an_object_outside_the_dispatch_diff_is_not_credited() -> None:
+    """A revert that the controller never saw as a dispatch-time change cannot be pinned on the action."""
+
+    unrelated = ObjectRef(kind="NetworkPolicy", namespace="hotel-reservation", name="other-policy")
+    skewed = _repair(
+        "delete-other",
+        unrelated,
+        started_at=datetime.fromtimestamp(HEALTH_CLEARED.timestamp() + 8.5, tz=timezone.utc),
+    )
+
+    verification = _verify_policy([skewed])
+
+    assert verification.verdict == DiagnosisVerdict.UNATTRIBUTED
+    assert verification.repair is not None
+    assert verification.repair.actions == []
+
+
+def test_an_external_revert_stays_unattributed_when_the_responder_touched_something_else() -> None:
+    """F8 still holds: the policy was reverted by someone else while the responder restarted frontend."""
+
+    skewed_restart = _repair(
+        "restart-frontend",
+        _FRONTEND,
+        started_at=datetime.fromtimestamp(HEALTH_CLEARED.timestamp() + 8.5, tz=timezone.utc),
+    )
+
+    verification = _verify_policy([skewed_restart])
+
+    assert verification.verdict == DiagnosisVerdict.UNATTRIBUTED
+    assert verification.repair is not None
+    assert verification.repair.actions == []
+    assert verification.repair.clock_skew_corrected == []
+    assert "NetworkPolicy/deny-all" in verification.repair.externally_reverted
+
+
+def test_a_failed_skewed_repair_is_not_credited() -> None:
+    failed = _repair(
+        "delete-policy",
+        _NETWORK_POLICY,
+        started_at=datetime.fromtimestamp(HEALTH_CLEARED.timestamp() + 8.5, tz=timezone.utc),
+        success=False,
+    )
+
+    verification = _verify_policy([failed])
+
+    assert verification.verdict == DiagnosisVerdict.UNATTRIBUTED
+    assert verification.repair is not None
+    assert verification.repair.actions == []

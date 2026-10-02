@@ -41,6 +41,7 @@ the health detectors alone decide.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -105,6 +106,14 @@ class DetectorFlip(BaseModel):
     flipped: bool
 
 
+#: How far past ``health_cleared_at`` a responder-reported repair start may be
+#: and still be credited, when the controller saw the repaired object revert
+#: during the responder's session. Models read the clock after the fact, so a
+#: real repair's reported start can trail the controller's record by seconds;
+#: beyond this the report is not trusted (F8 stays strict).
+REPAIR_CLOCK_SKEW = timedelta(seconds=30)
+
+
 class RepairAttribution(BaseModel):
     """Whether the responder's own recorded repair backs one root cause (F8)."""
 
@@ -118,6 +127,11 @@ class RepairAttribution(BaseModel):
     #: Baseline changes present at dispatch, gone at verification, that no
     #: responder repair touched, as ``Kind/name``.
     externally_reverted: list[str] = Field(default_factory=list)
+    #: IDs, among ``actions``, whose reported ``started_at`` fell after
+    #: ``health_cleared_at`` but within :data:`REPAIR_CLOCK_SKEW`, credited
+    #: because the controller saw the object revert during the responder's
+    #: session. Empty when every credited action started on time.
+    clock_skew_corrected: list[str] = Field(default_factory=list)
     reason: str
 
 
@@ -141,6 +155,8 @@ def verify_diagnosis(
     final_state_changes: StateChanges | None = None,
     health_cleared_at: datetime | None = None,
     observed_state_changes: Iterable[ObservedStateChange] | None = None,
+    dispatched_at: datetime | None = None,
+    responder_completed_at: datetime | None = None,
 ) -> list[RootCauseVerification]:
     """Verify each confirmed root cause of ``result`` against controller facts.
 
@@ -164,6 +180,15 @@ def verify_diagnosis(
     also how a late fault the responder reverted exactly, gone from both
     diffs, still verifies. ``None`` (a controller that predates it) keeps the
     union of the two diffs.
+
+    ``dispatched_at`` and ``responder_completed_at`` are the controller's
+    record of the responder's session. With them, a successful repair whose
+    self-reported ``started_at`` trails ``health_cleared_at`` by at most
+    :data:`REPAIR_CLOCK_SKEW` still backs the dispatch-diff objects it lists
+    that the controller saw reverted by closure (a model reads its clock after
+    the mutation, so the report can lag the controller's record). It never
+    backs a fault still present, an object outside the dispatch diff, or an
+    action reported outside the session. Without them the strict rule holds.
     """
 
     if result is None:
@@ -184,7 +209,10 @@ def verify_diagnosis(
     latest: dict[str, DetectorEvaluation] = {}
     for evaluation in sorted([*final_detector_states, *incident_detector_states], key=lambda item: item.evaluated_at):
         latest[evaluation.detector_id] = evaluation
-    repairs = _Repairs.of(result.repair_actions, request.state_changes, final_state_changes, health_cleared_at)
+    session = (
+        None if dispatched_at is None or responder_completed_at is None else (dispatched_at, responder_completed_at)
+    )
+    repairs = _Repairs.of(result.repair_actions, request.state_changes, final_state_changes, health_cleared_at, session)
     return [_verify(cause, fired, scenarios, changed, latest, repairs) for cause in result.confirmed_root_causes]
 
 
@@ -418,6 +446,34 @@ def _diff_keys(state_changes: StateChanges | None) -> list[_ObjectKey] | None:
     ]
 
 
+def _skew_creditable(
+    receipt: RepairActionReceipt,
+    keys: tuple[_ObjectKey, ...],
+    dispatch: list[_ObjectKey],
+    remaining: set[tuple[str, str]] | None,
+    health_cleared_at: datetime,
+    session: tuple[datetime, datetime] | None,
+) -> tuple[_ObjectKey, ...]:
+    """The objects a late-reported repair may still be credited with, or ``()``.
+
+    Only inside the bounded skew of ``health_cleared_at`` and the responder's
+    session, and only for objects the controller saw change at dispatch and
+    gone by closure: its own observations, not the model's clock, show the
+    revert happened while the responder was working.
+    """
+
+    if session is None or remaining is None:
+        return ()
+    dispatched_at, responder_completed_at = session
+    if receipt.started_at > health_cleared_at + REPAIR_CLOCK_SKEW:
+        return ()
+    if not dispatched_at - REPAIR_CLOCK_SKEW <= receipt.started_at <= responder_completed_at + REPAIR_CLOCK_SKEW:
+        return ()
+    return tuple(
+        key for key in keys if (key.kind, key.name) not in remaining and any(key.matches(change) for change in dispatch)
+    )
+
+
 @dataclass(frozen=True)
 class _Repairs:
     """The responder's successful, timely repair actions and the baseline changes they left alone."""
@@ -426,6 +482,8 @@ class _Repairs:
     dispatch_changes: tuple[_ObjectKey, ...]
     externally_reverted: tuple[str, ...]
     health_cleared_at: datetime | None
+    #: Action IDs credited only through the bounded clock-skew rule.
+    skew_corrected: frozenset[str] = frozenset()
 
     @classmethod
     def of(
@@ -434,23 +492,38 @@ class _Repairs:
         dispatch_state_changes: StateChanges | None,
         final_state_changes: StateChanges | None,
         health_cleared_at: datetime | None,
+        session: tuple[datetime, datetime] | None = None,
     ) -> _Repairs:
-        actions = tuple(
-            (receipt.action_id, tuple(_action_keys(receipt)))
-            for receipt in receipts
-            if receipt.success and (health_cleared_at is None or receipt.started_at <= health_cleared_at)
-        )
         dispatch = _diff_keys(dispatch_state_changes) or []
         final = _diff_keys(final_state_changes)
-        reverted: list[str] = []
-        if dispatch_state_changes is not None and final is not None:
-            remaining = {(key.kind, key.name) for key in final}
+        remaining = None if final is None else {(key.kind, key.name) for key in final}
+        actions: list[tuple[str, tuple[_ObjectKey, ...]]] = []
+        skew_corrected: set[str] = set()
+        for receipt in receipts:
+            if not receipt.success:
+                continue
+            keys = tuple(_action_keys(receipt))
+            if health_cleared_at is None or receipt.started_at <= health_cleared_at:
+                actions.append((receipt.action_id, keys))
+                continue
+            reverted = _skew_creditable(receipt, keys, dispatch, remaining, health_cleared_at, session)
+            if reverted:
+                actions.append((receipt.action_id, reverted))
+                skew_corrected.add(receipt.action_id)
+        reverted_labels: list[str] = []
+        if dispatch_state_changes is not None and remaining is not None:
             for key in dispatch:
                 if (key.kind, key.name) in remaining:
                     continue
                 if not any(touched.matches(key) for _, keys in actions for touched in keys):
-                    reverted.append(key.label)
-        return cls(actions, tuple(dispatch), tuple(sorted(set(reverted))), health_cleared_at)
+                    reverted_labels.append(key.label)
+        return cls(
+            tuple(actions),
+            tuple(dispatch),
+            tuple(sorted(set(reverted_labels))),
+            health_cleared_at,
+            frozenset(skew_corrected),
+        )
 
     def attribute(self, cause: ConfirmedRootCause) -> RepairAttribution:
         cited = [_ObjectKey.parse(item.source) for item in cause.evidence if item.kind == "state-change"]
@@ -463,6 +536,16 @@ class _Repairs:
                 action_ids.append(action_id)
                 repaired.extend(key for key in hits if key not in repaired)
         labels = sorted({key.label for key in repaired})
+        skewed = [action_id for action_id in action_ids if action_id in self.skew_corrected]
+        skew_note = (
+            ""
+            if not skewed
+            else (
+                f" (the start reported by {', '.join(skewed)} trails health_cleared_at by under "
+                f"{int(REPAIR_CLOCK_SKEW.total_seconds())} s; credited because the controller saw the object "
+                "revert during the responder's session)"
+            )
+        )
         if not action_ids:
             names = ", ".join(sorted({key.label for key in blamed})) or "none recorded"
             timing = (
@@ -488,7 +571,11 @@ class _Repairs:
                 actions=action_ids,
                 repaired_resources=labels,
                 externally_reverted=list(self.externally_reverted),
-                reason=f"the responder repaired {', '.join(sorted(set(changed)))}, changed since the healthy baseline",
+                clock_skew_corrected=skewed,
+                reason=(
+                    f"the responder repaired {', '.join(sorted(set(changed)))}, changed since the healthy baseline"
+                    f"{skew_note}"
+                ),
             )
         if self.externally_reverted:
             return RepairAttribution(
@@ -506,5 +593,6 @@ class _Repairs:
             attributed=True,
             actions=action_ids,
             repaired_resources=labels,
-            reason=f"the responder repaired {', '.join(labels)} before health cleared",
+            clock_skew_corrected=skewed,
+            reason=f"the responder repaired {', '.join(labels)} before health cleared{skew_note}",
         )
