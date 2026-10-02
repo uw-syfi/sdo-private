@@ -352,7 +352,7 @@ class IncidentResult(ContractModel):
     final_detector_states: list[DetectorEvaluation] = Field(default_factory=list)
     proposed_memory_changes: list[str] = Field(default_factory=list)
     verification_evidence: list[VerificationEvidence] = Field(default_factory=list)
-    acknowledged_state_changes: list[StateChangeAcknowledgement] = Field(default_factory=list)
+    acknowledged_state_changes: list[StateChangeAcknowledgement] | None = None
     usage: UsageMetrics
     timing: TimingMetrics
     responder_session_id: str | None = None

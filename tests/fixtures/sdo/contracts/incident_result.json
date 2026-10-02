@@ -105,7 +105,6 @@
       "observed_at": "2026-07-09T18:13:00Z"
     }
   ],
-  "acknowledged_state_changes": [],
   "usage": {
     "llm_calls": 1,
     "input_tokens": 12000,
