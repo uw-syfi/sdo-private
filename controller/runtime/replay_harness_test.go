@@ -36,8 +36,10 @@ import (
 	"sort"
 	"strconv"
 	"testing"
+	"time"
 
 	"k8s.io/client-go/kubernetes/fake"
+	"sdo.dev/controller/sdk"
 )
 
 // replayFixtureRoot is the directory tree of frozen incidents, relative to the
@@ -328,6 +330,39 @@ func replayStateRoundTrip(t *testing.T, fx replayFixture) {
 	if again != loadedRevision {
 		t.Fatalf("re-saving an unchanged state advanced the revision: %s -> %s", loadedRevision, again)
 	}
+}
+
+// TestReplayStateRoundTripContract exercises the state-round-trip dimension
+// directly. The stored runs expose no per-incident RuntimeState dump (the
+// controller's state ConfigMap is not exported), so no golden fixture lights
+// this dimension up today; this self-test pins the dimension against a
+// representative valid state so the shipped path is covered and the
+// ConfigMapStateStore round-trip contract stays guarded. When a real
+// RuntimeState is ever captured, dropping it in as state.json replays here
+// unchanged.
+func TestReplayStateRoundTripContract(t *testing.T) {
+	now := time.Unix(1_790_931_114, 0).UTC()
+	state := RuntimeState{
+		Version:            RuntimeStateVersion,
+		SchedulerDeadlines: map[string]time.Time{"health-objective": now},
+		FindingStates: map[string]FindingState{
+			"health-objective/deployment-unavailable/hotel-reservation/geo": {
+				DetectorID: "health-objective", FiringCount: 2, Active: true,
+				FirstSeenAt: now, Activations: 1,
+			},
+		},
+		PendingBatch:        BatcherState{Findings: []sdk.Finding{}},
+		EvaluationIteration: 42,
+		DetectorTimeline: []DetectorTimelineEntry{{
+			DetectorID: "health-objective", DetectorClass: "health", Owner: "health_judge",
+			RuleID: "deployment-unavailable", Fingerprint: "health-objective/deployment-unavailable/hotel-reservation/geo",
+			FirstActivatedAt: now, LastSeenAt: now, Relation: RelationBeforeDispatch, Activations: 1,
+		}},
+	}
+	if err := state.Validate(); err != nil {
+		t.Fatalf("representative state must be valid: %v", err)
+	}
+	replayStateRoundTrip(t, replayFixture{name: "state-round-trip-contract", state: &state})
 }
 
 // assertFiringRecordsEqual asserts two firing streams are equal record-by-record
