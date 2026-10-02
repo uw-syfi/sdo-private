@@ -57,6 +57,13 @@ type ControllerConfig struct {
 	// residual findings are treated as unresolved. It is capped by
 	// VerificationTimeout.
 	FollowUpCooldown time.Duration
+	// CloseoutStateGate makes closure wait on the configuration diff: after
+	// health clears, an object still different from the healthy baseline that
+	// no successful repair touched and no responder acknowledged is sent back
+	// through the bounded follow-up chain. With the follow-up budget spent
+	// (or MaxFollowUps zero) the incident closes with the objects marked in
+	// IncidentClosure.CloseoutGate. Off by default.
+	CloseoutStateGate bool
 }
 
 type dispatchCompletion struct {
@@ -110,7 +117,14 @@ type Controller struct {
 	detectorClearSince map[string]time.Time
 	// incidentObservedChanges maps Kind/name to the first time the open
 	// incident's diff showed that object changed. Guarded by mu.
-	incidentObservedChanges    map[string]ObservedStateChange
+	incidentObservedChanges map[string]ObservedStateChange
+	// incidentRepaired holds the normalized Kind/name of every object a
+	// successful repair action touched, across the incident's follow-up
+	// chain; incidentAcknowledged maps an object to the reason a responder
+	// left it alone. Both feed the close-out gate and are not persisted: a
+	// restart mid-incident can at worst cost one bounded follow-up.
+	incidentRepaired           map[string]struct{}
+	incidentAcknowledged       map[string]string
 	pendingClosure             *IncidentClosure
 	closureState               string
 	closureReceipt             *ClosureReceipt
@@ -478,6 +492,7 @@ func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 	c.detectorReviewReason = ""
 	c.resetDispatchRetryLocked()
 	c.incidentObservedChanges = make(map[string]ObservedStateChange)
+	c.incidentRepaired, c.incidentAcknowledged = nil, nil
 	c.observeStateChangesLocked(request.StateChanges, now)
 	c.dispatchState = "pending"
 	if c.broker != nil {
@@ -727,6 +742,7 @@ func (c *Controller) handleDispatchCompletion(completion dispatchCompletion, obs
 		c.dispatchState = "completed"
 		c.dispatchError = ""
 		c.currentIncidentResult = cloneIncidentResult(&completion.result)
+		c.recordCloseoutEvidenceLocked(completion.result)
 		c.resetDispatchRetryLocked()
 	}
 	c.mu.Unlock()
@@ -789,8 +805,14 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 	}
 	finalChanges := c.finalStateChangesLocked(now)
 	c.observeStateChangesLocked(finalChanges, now)
+	gate, sendBack := c.closeoutGateLocked(finalChanges, now)
+	if sendBack {
+		c.mu.Unlock()
+		return
+	}
 	closure := IncidentClosure{
-		Request: *cloneIncidentRequest(c.currentIncidentRequest), Result: cloneIncidentResult(c.currentIncidentResult),
+		CloseoutGate: gate,
+		Request:      *cloneIncidentRequest(c.currentIncidentRequest), Result: cloneIncidentResult(c.currentIncidentResult),
 		DispatchError: c.dispatchError, FinalDetectorStates: finalStates,
 		IncidentDetectorStates: c.incidentDetectorStates(),
 		FinalStateChanges:      finalChanges,
@@ -828,6 +850,7 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 	c.incidentFindingKeys = nil
 	c.cleanedHelpers = nil
 	c.incidentObservedChanges = nil
+	c.incidentRepaired, c.incidentAcknowledged = nil, nil
 	c.mu.Unlock()
 	if c.OnIncidentClosed != nil {
 		c.OnIncidentClosed(closure)
@@ -874,6 +897,15 @@ func (c *Controller) startFollowUpLocked(now time.Time) bool {
 	if len(residual) == 0 {
 		return false
 	}
+	return c.openFollowUpLocked(now, residual, "", nil)
+}
+
+// openFollowUpLocked replaces the open incident with a follow-up request for
+// the given residual findings; note is appended to the prior-responder
+// summary. Called with c.mu held.
+func (c *Controller) openFollowUpLocked(
+	now time.Time, residual []sdk.Finding, note string, changes *StateChanges,
+) bool {
 	parent := c.currentIncidentRequest
 	request := c.incidentRequest(now, residual)
 	if request.IncidentID == parent.IncidentID {
@@ -889,10 +921,11 @@ func (c *Controller) startFollowUpLocked(now time.Time) bool {
 	request.FollowUp = &FollowUpContext{
 		OriginalIncidentID: original, ParentIncidentID: parent.IncidentID,
 		Attempt: c.followUpAttemptLocked() + 1, MaxFollowUps: c.config.MaxFollowUps,
-		PriorSummary: boundedFollowUpSummary(priorSummary, followUpSummary(parent, c.currentIncidentResult, c.dispatchError)),
+		PriorSummary: boundedFollowUpSummary(priorSummary, followUpSummary(parent, c.currentIncidentResult, c.dispatchError)+note),
 	}
 	request.RepositoryWorktree = parent.RepositoryWorktree
 	request.RepositoryBaseCommit = parent.RepositoryBaseCommit
+	request.StateChanges = cloneStateChanges(changes)
 	c.batcher.RemoveKeys(findingKeys(residual))
 	c.currentIncidentRequest = cloneIncidentRequest(&request)
 	c.currentIncidentResult = nil

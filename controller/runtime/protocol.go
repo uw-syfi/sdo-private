@@ -160,10 +160,50 @@ type IncidentResult struct {
 	FinalDetectorStates   []DetectorEvaluation   `json:"final_detector_states"`
 	ProposedMemoryChanges []string               `json:"proposed_memory_changes"`
 	VerificationEvidence  []VerificationEvidence `json:"verification_evidence"`
-	Usage                 UsageMetrics           `json:"usage"`
-	Timing                TimingMetrics          `json:"timing"`
-	ResponderSessionID    string                 `json:"responder_session_id,omitempty"`
-	Error                 string                 `json:"error,omitempty"`
+	// AcknowledgedStateChanges are objects in the configuration diff that the
+	// responder deliberately left alone, each with the reason. The close-out
+	// gate accepts them instead of sending the incident back.
+	AcknowledgedStateChanges []StateChangeAcknowledgement `json:"acknowledged_state_changes,omitempty"`
+	Usage                    UsageMetrics                 `json:"usage"`
+	Timing                   TimingMetrics                `json:"timing"`
+	ResponderSessionID       string                       `json:"responder_session_id,omitempty"`
+	Error                    string                       `json:"error,omitempty"`
+}
+
+// StateChangeAcknowledgement is a configuration-diff object a responder left
+// unrepaired on purpose, and why.
+type StateChangeAcknowledgement struct {
+	Kind   string `json:"kind"`
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
+// Close-out gate outcomes.
+const (
+	// CloseoutGateDetectorID is the detector ID of the controller's own
+	// close-out findings; it is not a detector and owns no memory artifact.
+	CloseoutGateDetectorID = "sdo-closeout-gate"
+	CloseoutGateRuleID     = "closeout.unrepaired-state-change"
+	// CloseoutAcknowledged: every unrepaired object was acknowledged with a reason.
+	CloseoutAcknowledged = "acknowledged"
+	// CloseoutExhausted: unrepaired objects remained and the follow-up budget
+	// was spent, so the incident closed with them marked.
+	CloseoutExhausted = "exhausted"
+)
+
+// CloseoutGateObject is one configuration-diff object the gate looked at.
+type CloseoutGateObject struct {
+	Kind   string `json:"kind"`
+	Name   string `json:"name"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// CloseoutGateOutcome records that the close-out gate found objects in the
+// final configuration diff that no successful repair touched. Absent when the
+// gate is off or found nothing.
+type CloseoutGateOutcome struct {
+	Outcome string               `json:"outcome"`
+	Objects []CloseoutGateObject `json:"objects"`
 }
 
 // ObservedStateChange is one object the controller saw changed from the
@@ -215,6 +255,9 @@ type IncidentClosure struct {
 	// started; otherwise it is that repair's edit. Omitted without a
 	// baseline, when state changes cannot be checked at all.
 	ObservedStateChanges []ObservedStateChange `json:"observed_state_changes,omitempty"`
+	// CloseoutGate marks objects that were still different from the healthy
+	// baseline at closure although no successful repair touched them.
+	CloseoutGate *CloseoutGateOutcome `json:"closeout_gate,omitempty"`
 	// DetectorReviewRequiredAt is set when health did not clear within the
 	// verification window after the responder completed. Health that
 	// clears later was not verifiably restored by the responder.
@@ -265,6 +308,12 @@ func (result IncidentResult) ValidateFor(request IncidentRequest) error {
 	}
 	if result.Timing.CompletedAt.Before(result.Timing.StartedAt) {
 		return fmt.Errorf("completion time is before start time")
+	}
+	for _, acknowledged := range result.AcknowledgedStateChanges {
+		if strings.TrimSpace(acknowledged.Kind) == "" || strings.TrimSpace(acknowledged.Name) == "" ||
+			strings.TrimSpace(acknowledged.Reason) == "" {
+			return fmt.Errorf("acknowledged state change kind, name, and reason are required")
+		}
 	}
 	actionIDs := make(map[string]struct{}, len(result.RepairActions))
 	for _, action := range result.RepairActions {

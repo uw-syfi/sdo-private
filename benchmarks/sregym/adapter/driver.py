@@ -259,6 +259,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="wait after a response before its still-active health findings get a follow-up responder",
     )
     parser.add_argument(
+        "--closeout-state-gate",
+        action=argparse.BooleanOptionalAction,
+        default=bool(config.get("closeout_state_gate", False)),
+        help="send back objects still different from the healthy baseline that no repair touched (off by default)",
+    )
+    parser.add_argument(
         "--healthy-baseline",
         action=argparse.BooleanOptionalAction,
         default=bool(config.get("healthy_baseline", False)),
@@ -630,6 +636,7 @@ def _run_persistent(args: argparse.Namespace, api_base: str, started: float) -> 
         healthy_baseline=args.healthy_baseline,
         max_follow_ups=args.max_follow_ups,
         follow_up_cooldown_seconds=args.follow_up_cooldown_seconds,
+        closeout_state_gate=args.closeout_state_gate,
         submission_api_base=_in_cluster_api_base(api_base),
         submission_relay_target_base=_relay_target_api_base(api_base),
         artifacts_dir=receipt_dir,
@@ -738,6 +745,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             healthy_baseline=args.healthy_baseline,
             max_follow_ups=args.max_follow_ups,
             follow_up_cooldown_seconds=args.follow_up_cooldown_seconds,
+            closeout_state_gate=args.closeout_state_gate,
             submission_api_base=_in_cluster_api_base(api_base),
             submission_relay_target_base=_relay_target_api_base(api_base),
             artifacts_dir=_receipt_directory(args.logs_dir, repository),

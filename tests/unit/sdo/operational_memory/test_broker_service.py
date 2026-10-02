@@ -292,6 +292,24 @@ def test_closure_accepts_the_controllers_cleaned_helper_record(tmp_path: Path) -
     assert BrokerClosure.model_validate(_closure(tmp_path, "0" * 40).model_dump()).cleaned_helpers == []
 
 
+def test_closure_carries_the_closeout_gate_and_an_exhausted_gate_is_not_verified(tmp_path: Path) -> None:
+    payload = _closure(tmp_path, "0" * 40).model_dump(mode="json")
+    assert BrokerClosure.model_validate(payload).closeout_gate is None
+    assert BrokerClosure.model_validate(payload).health_verified
+
+    payload["closeout_gate"] = {
+        "outcome": "acknowledged",
+        "objects": [{"kind": "ConfigMap", "name": "x", "reason": "unrelated"}],
+    }
+    acknowledged = BrokerClosure.model_validate(payload)
+    assert acknowledged.closeout_gate is not None
+    assert acknowledged.closeout_gate.objects[0].reason == "unrelated"
+    assert acknowledged.health_verified
+
+    payload["closeout_gate"] = {"outcome": "exhausted", "objects": [{"kind": "NetworkPolicy", "name": "deny-all"}]}
+    assert not BrokerClosure.model_validate(payload).health_verified
+
+
 def _unlearned_closure(worktree: Path, base_commit: str) -> BrokerClosure:
     """A closure whose finding came from no registered incident detector."""
 

@@ -122,6 +122,13 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		30*time.Second,
 		"wait after a response completes before its still-active health findings get a follow-up responder",
 	)
+	closeoutStateGate := flags.Bool(
+		"closeout-state-gate",
+		false,
+		"before closing, send back through the follow-up chain any object still different from the healthy "+
+			"baseline that no successful repair touched and no responder acknowledged; with the follow-up budget "+
+			"spent the incident closes with those objects marked",
+	)
 	repairPolicy := flags.String("repair-policy", "commit", "repair evidence policy: commit or recorded-actions")
 	leaseName := flags.String("lease-name", "sdo-controller", "leader-election Lease name")
 	leaseDuration := flags.Duration("lease-duration", 60*time.Second, "leader-election Lease duration")
@@ -321,8 +328,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		RepositoryWorktree: resolvedRoot, ResponseTimeout: *responseTimeout,
 		VerificationTimeout: *verificationTimeout,
 		MaxFollowUps:        *maxFollowUps, FollowUpCooldown: *followUpCooldown,
-		RepairPolicy:    *repairPolicy,
-		FiringThreshold: 2, ClearThreshold: 2, BatchDebounce: 500 * time.Millisecond,
+		CloseoutStateGate: *closeoutStateGate,
+		RepairPolicy:      *repairPolicy,
+		FiringThreshold:   2, ClearThreshold: 2, BatchDebounce: 500 * time.Millisecond,
 		ConfirmationInterval: time.Second,
 		// The submit gate confirms a clearing finding on 3 fresh evaluations
 		// over at least 2 s instead of waiting for the detector's interval;

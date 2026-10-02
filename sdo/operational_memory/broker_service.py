@@ -128,6 +128,27 @@ class OutcomeReflector(Protocol):
     ) -> ReflectionProposal: ...
 
 
+class CloseoutGateObject(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    name: str
+    reason: str | None = None
+
+
+class CloseoutGateOutcome(BaseModel):
+    """What the controller's close-out gate found in the final configuration diff.
+
+    ``acknowledged``: every unrepaired object came with a responder's reason. ``exhausted``: unrepaired
+    objects remained when the follow-up budget ran out, so the closure is not independently verified.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Literal["acknowledged", "exhausted"]
+    objects: list[CloseoutGateObject] = Field(default_factory=list)
+
+
 class BrokerClosure(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -164,6 +185,9 @@ class BrokerClosure(BaseModel):
     # citation must predate the responder's own repair of that object. None
     # from controllers that predate it.
     observed_state_changes: list[ObservedStateChange] | None = None
+    # Set by the controller's close-out gate when objects still differed from the healthy baseline at
+    # closure although no successful repair touched them; None when the gate is off or found nothing.
+    closeout_gate: CloseoutGateOutcome | None = None
     # Responder helper objects the controller deleted, as Kind/namespace/name.
     cleaned_helpers: list[str] = Field(default_factory=list)
     # Set when health did not clear within the controller's verification
@@ -177,6 +201,7 @@ class BrokerClosure(BaseModel):
 
         return (
             self.detector_review_required_at is None
+            and (self.closeout_gate is None or self.closeout_gate.outcome != "exhausted")
             and bool(self.final_detector_states)
             and all(evaluation.status.value == "clear" for evaluation in self.final_detector_states)
         )

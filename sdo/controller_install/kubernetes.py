@@ -88,6 +88,8 @@ class ControllerInstallConfig:
     # Bounded follow-up responders for health findings that stay active after a response (opt-in; 0 = off).
     max_follow_ups: int = 0
     follow_up_cooldown_seconds: int = 30
+    # Before closing, send back any object still different from the healthy baseline that no repair touched (opt-in).
+    closeout_state_gate: bool = False
     # Reject a proposed incident detector that fires on recorded healthy-application snapshots (opt-in).
     # The caller must record the snapshots at HEALTHY_BASELINE_SOURCE before the first incident.
     healthy_baseline: bool = False
@@ -259,6 +261,8 @@ def controller_resources(
                 f"{config.follow_up_cooldown_seconds}s",
             ]
         )
+    if config.closeout_state_gate:
+        controller_args.extend(["--closeout-state-gate", "--responder-env=SDO_CLOSEOUT_STATE_GATE=1"])
     if config.healthy_baseline:
         controller_args.extend(
             [
