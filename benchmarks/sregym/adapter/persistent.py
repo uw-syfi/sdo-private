@@ -735,7 +735,9 @@ def _orphan_reap_keep_set(state: dict[str, Any], draining_incident_id: str) -> s
     return {incident_worktree_dirname(draining_incident_id)}
 
 
-def _reap_orphan_worktrees(ops: ClusterOps, config: RuntimeConfig, control: str, draining_incident_id: str) -> None:
+def _reap_orphan_worktrees(
+    ops: ClusterOps, config: RuntimeConfig, state: dict[str, Any], draining_incident_id: str
+) -> None:
     """Reap worktrees leaked by terminal incidents, but only when positively safe.
 
     A worktree is orphaned when its incident was prepared and then abandoned
@@ -744,9 +746,14 @@ def _reap_orphan_worktrees(ops: ClusterOps, config: RuntimeConfig, control: str,
     so a leaked worktree from an earlier incident rejects a later incident's
     receipt. On a single-incident controller that has gone quiescent, the drain
     completes the teardown the abandoned incident never did.
+
+    ``state`` is the controller state the reflection drain already sampled at
+    quiescence; the reap does not poll the controller again (an extra read is a
+    no-op in production but would advance the controller state machine a caller
+    is still driving).
     """
 
-    keep = _orphan_reap_keep_set(ops.runtime_state(control), draining_incident_id)
+    keep = _orphan_reap_keep_set(state, draining_incident_id)
     if keep is None:
         return
     ops.reap_orphan_worktrees(config, keep)
@@ -798,7 +805,9 @@ def drain_pending_incident(
         return 0.0
     started = clock.monotonic()
     try:
-        _wait_for_reflection_drain(ops, record.control_namespace, pending.incident_id, timeout_seconds, clock)
+        drained_state = _wait_for_reflection_drain(
+            ops, record.control_namespace, pending.incident_id, timeout_seconds, clock
+        )
     except ClosureFailedError:
         # The controller log holds every broker rejection of the closure.
         ops.export_controller_logs(record.control_namespace, pending.receipt_dir)
@@ -812,7 +821,7 @@ def drain_pending_incident(
     # Complete the teardown an abandoned incident left behind, so its leaked
     # worktree does not reject this solved incident's receipt. Safe-guarded: only
     # when the controller is positively quiescent.
-    _reap_orphan_worktrees(ops, config, record.control_namespace, pending.incident_id)
+    _reap_orphan_worktrees(ops, config, drained_state, pending.incident_id)
     receipt = _collect_settled_receipt(ops, config, pending.incident_id, pending.receipt_dir, clock)
     # The reflection-drain cost includes the wait for close-out to settle; neither
     # is resolution time (both are excluded below).
@@ -1137,12 +1146,15 @@ def wait_for_maintenance_ack(
     raise PersistentControllerError(f"controller in {control!r} did not acknowledge maintenance {generation!r}")
 
 
-def _wait_for_reflection_drain(ops: ClusterOps, control: str, incident_id: str, timeout: float, clock: Clock) -> None:
+def _wait_for_reflection_drain(
+    ops: ClusterOps, control: str, incident_id: str, timeout: float, clock: Clock
+) -> dict[str, Any]:
     """Wait until the incident is acknowledged and the supervisor relaunched the controller.
 
     The supervisor relaunches only after compiling and rolling out any
     detector the reflection accepted, so the relaunch marks learned memory
-    as live.
+    as live. Returns the final controller state sampled at quiescence, so the
+    caller need not poll the controller again to decide whether to reap.
     """
 
     deadline = clock.monotonic() + timeout
@@ -1151,7 +1163,7 @@ def _wait_for_reflection_drain(ops: ClusterOps, control: str, incident_id: str, 
         _raise_if_closure_failed(state, incident_id)
         acknowledged = state.get("last_acknowledged_incident_id") == incident_id
         if acknowledged and _relaunched_after(_log_records(ops.controller_logs(control)), incident_id):
-            return
+            return state
         clock.sleep(POLL_SECONDS)
     raise PersistentControllerError(f"incident {incident_id!r} was not reflected and rolled out within {timeout:.0f}s")
 

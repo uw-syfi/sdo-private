@@ -195,7 +195,7 @@ def test_reap_never_removes_a_live_or_mid_reflection_worktree(tmp_path: Path) ->
         "pending_closure": {"request": {"incident_id": "incident-1-f1"}},
         "last_acknowledged_incident_id": "incident-1",
     }
-    _reap_orphan_worktrees(ops, config, control, "incident-1")
+    _reap_orphan_worktrees(ops, config, ops.states[control], "incident-1")
     assert ops.worktrees == {orphan}
     assert not any(event[0] == "reap" for event in ops.events)
 
@@ -209,7 +209,7 @@ def test_reap_never_removes_the_draining_incidents_own_worktree(tmp_path: Path) 
     ops = FakeOps()
     ops.worktrees = {own, orphan}
     ops.states[control] = {"last_acknowledged_incident_id": "incident-1"}
-    _reap_orphan_worktrees(ops, config, control, "incident-1")
+    _reap_orphan_worktrees(ops, config, ops.states[control], "incident-1")
 
     # The orphan is reaped; the draining incident's own worktree is preserved.
     assert ops.worktrees == {own}

@@ -50,6 +50,9 @@ class FakeOps:
     logs: dict[str, list[str]] = field(default_factory=dict)
     maintenance: list[str] = field(default_factory=list)
     receipts: list[str] = field(default_factory=list)
+    #: Worktree directory names under the shared /workspace/worktrees root. Empty by
+    #: default, so there is nothing for the quiescent-drain reap to remove.
+    worktrees: set[str] = field(default_factory=set)
 
     def controller_pod(self, control_namespace: str) -> ControllerPod | None:
         return self.pods.get(control_namespace)
@@ -174,6 +177,10 @@ class FakeOps:
             "phase_timings_seconds": {"operational_recovery": 30.0, "post_recovery_learning_and_receipt": 60.0},
             "recorded_at": (INJECTED + timedelta(seconds=100)).isoformat(),
         }
+
+    def reap_orphan_worktrees(self, config: RuntimeConfig, keep_dirnames: set[str]) -> list[str]:
+        self.worktrees = {name for name in self.worktrees if name in keep_dirnames}
+        return [f"/workspace/worktrees/{name}" for name in sorted(self.worktrees)]
 
     def export_runtime_artifacts(self, config: Any, artifacts_dir: Path) -> dict[str, str | None]:
         return {"directory": None, "error": None}
