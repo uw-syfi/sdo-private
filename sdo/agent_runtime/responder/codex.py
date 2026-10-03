@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from libs.agent_cli.structured import AGENT_PROVIDERS, StructuredTurnError, run_structured_turn, turn_usage
+from sdo.agent_runtime.responder.cause_admissibility import CauseAdmissibilityPolicy, apply_cause_admissibility
 from sdo.agent_runtime.responder.reflection import INCIDENT_REASONING_EFFORT
 from sdo.contracts import (
     ROOT_CAUSE_EVIDENCE_KINDS,
@@ -85,7 +86,9 @@ def execute_incident(
         result = result.model_copy(update={"responder_session_id": completed.session_id})
     if result.incident_id != request.incident_id:
         raise ResponderExecutionError(f"{selected_provider} result incident_id does not match request")
-    return result
+    # Withhold weakly-evidenced causes before the result reaches the broker;
+    # this is upstream of and independent from the fenced diagnosis verifier.
+    return apply_cause_admissibility(result, request)
 
 
 def _incident_result_schema() -> dict[str, object]:
@@ -488,6 +491,23 @@ def _state_changes_section(request: IncidentRequest) -> str:
     )
 
 
+def _cause_admissibility_guidance() -> str:
+    """Problem-agnostic bar for asserting a confirmed root cause; empty when the gate is off."""
+
+    if not CauseAdmissibilityPolicy.from_environment().enabled:
+        return ""
+    return (
+        "Admissibility of a confirmed root cause: assert a cause in confirmed_root_causes only when it is anchored "
+        "to an incident signal that can be checked independently -- a detector you list in explained_detectors that "
+        "fired for this incident, a failing synthetic scenario, or a configuration change listed since the last "
+        "healthy state. A change you observe that does not explain the failing health signal (a benign drift) is "
+        "not a root cause: record it in static_context, never in confirmed_root_causes. A cause supported only by "
+        "your own narrative live observations, explaining no detector that fired and citing no corroborating finding "
+        "or change, is weakly evidenced; do not assert it. Asserting a weakly-evidenced or benign cause lowers "
+        "diagnosis quality even when your repair is correct.\n\n"
+    )
+
+
 def _verification_instructions() -> str:
     return (
         "Prefer one blocking command over checking in on a backgrounded one: give a command enough time to "
@@ -586,6 +606,7 @@ def _responder_prompt(request: IncidentRequest) -> str:
         f"{strategy}"
         f"{_no_action_instructions()}"
         f"{_verification_instructions()}"
+        f"{_cause_admissibility_guidance()}"
         "During this response, "
         "`.sdo/` is read-only. Do not create, edit, or delete any path under `.sdo/`. The controller independently "
         "verifies recovery after this response and records the authoritative outcome; only then may the broker open "
