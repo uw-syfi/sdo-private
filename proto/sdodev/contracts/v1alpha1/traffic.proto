@@ -1,0 +1,185 @@
+syntax = "proto3";
+
+// The traffic workload artifact tree: a `.sdo/diagnostics/traffic/workloads/
+// <name>.yaml` profile that both the Python commit-time validation gate
+// (sdo/operational_memory/repository.py) and the Go controller-side prober
+// (controller/sdk/traffic) load. Proto is the single schema SOURCE; it replaces
+// the hand-written Pydantic models in sdo/operational_memory/models.py and the
+// hand-mirrored Go structs in controller/sdk/traffic. The conformance tests
+// (tests/unit/sdo/contracts/test_traffic_proto_conformance.py and
+// controller/runtime/traffic_conformance_test.go) make drift a failure.
+//
+// Wire convention: this artifact predates the snake_case message tree and is
+// stored as camelCase YAML (apiVersion, ratePerSecond, minSamples, from/to).
+// protojson's default lowerCamelCase JSON names match those keys exactly, so
+// the stored format is unchanged by this migration; unlike messages.proto the
+// traffic loaders do NOT use preserving_proto_field_name.
+//
+// Durations stay Go-duration strings ("2s", "500ms", "1m30s") rather than
+// google.protobuf.Duration, so the stored YAML is byte-for-byte preserved. CEL
+// cannot parse a Go-duration string, so every duration bound and the
+// cross-field checks that depend on one (timeout/iterationTimeout ordering,
+// burst-duration ceiling, link interval) stay behavior-preserving HOST code on
+// each loader. Everything expressible without host computation -- field
+// patterns and ranges, enum membership, the link no-self-loop, duplicate and
+// purpose-structure rules -- is protovalidate CEL, checked on the Go side with
+// buf.build/go/protovalidate (the repo keeps no Python CEL runtime; the Python
+// loader mirrors these invariants in host code).
+package sdodev.contracts.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "sdo.dev/controller/contracts/gen/sdodev/contracts/v1alpha1;contractsv1alpha1";
+
+// TrafficSLO bounds a scenario's recent behaviour. Every field is optional: an
+// unset field inherits the workload's SLO, then the package defaults (the merge
+// is host code -- TrafficSLO.scenario_slo in Python, mergeSLO in Go). The
+// min_samples-not-exceeding-window check is cross-field host code because a
+// scenario SLO may set only one of the two and inherit the other. Mirrors
+// sdo.operational_memory.models.TrafficSLO and controller/sdk/traffic.SLO.
+message TrafficSLO {
+  optional int32 window = 1 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  optional int32 min_samples = 2 [(buf.validate.field).int32.gte = 1];
+  // Go-duration string; positivity and the <=10m ceiling are host-checked.
+  optional string max_age = 3;
+  optional double max_error_rate = 4 [(buf.validate.field).double = {gt: 0, lte: 1}];
+  optional double max_timeout_rate = 5 [(buf.validate.field).double = {gt: 0, lte: 1}];
+  optional int32 latency_percentile = 6 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  // Go-duration string; positivity is host-checked.
+  optional string max_latency = 7;
+}
+
+// TrafficWorkloadScenario selects one catalog scenario with a weight and an
+// optional SLO override. Mirrors
+// sdo.operational_memory.models.TrafficWorkloadScenario and
+// controller/sdk/traffic.WorkloadScenario.
+message TrafficWorkloadScenario {
+  string id = 1 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9_.-]{0,62}$"];
+  // weight 0 means "unset"; the loader defaults it to 1 before use. A set
+  // weight must be in [1, 100].
+  int32 weight = 2 [(buf.validate.field).cel = {
+    id: "scenario.weight_range"
+    message: "weight must be in [1, 100]"
+    expression: "this == 0 || (this >= 1 && this <= 100)"
+  }];
+  optional TrafficSLO slo = 3;
+}
+
+// TrafficLink is one declared service-to-service dependency edge: `from` calls
+// `to` on `port`. Mirrors sdo.operational_memory.models.TrafficLink and
+// controller/sdk/traffic.Link. The field names are `from`/`to` to match the
+// stored artifact exactly.
+message TrafficLink {
+  option (buf.validate.message).cel = {
+    id: "link.no_self_loop"
+    message: "a link must not call itself"
+    expression: "this.from != this.to"
+  };
+  option (buf.validate.message).cel = {
+    id: "link.protocol"
+    message: "link protocol must be tcp"
+    expression: "this.protocol == '' || this.protocol == 'tcp'"
+  };
+  string from = 1 [(buf.validate.field).string.pattern = "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"];
+  string to = 2 [(buf.validate.field).string.pattern = "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"];
+  int32 port = 3 [(buf.validate.field).int32 = {gte: 1, lte: 65535}];
+  // "" means unset; the loader defaults it to "tcp".
+  string protocol = 4;
+}
+
+// TrafficWorkload is a workload profile stored at
+// `.sdo/diagnostics/traffic/workloads/<name>.yaml`. A `health-probe` runs
+// continuously and feeds traffic health detectors; a `verify-burst` runs for a
+// few seconds on demand to verify a repair; a `journey` runs on demand for a
+// bounded time; a `link-probe` runs continuously with no scenarios and dials
+// each declared `links` edge afresh every `interval`, reporting an edge after
+// `failures` consecutive failed dials. Mirrors
+// sdo.operational_memory.models.TrafficWorkload and
+// controller/sdk/traffic.Workload.
+//
+// Defaulted scalars (arrival, rate_per_second, timeout, iteration_timeout,
+// seed, scenario weight, link protocol) carry a zero/empty "unset" sentinel the
+// loader fills before use, so their CEL tolerates the sentinel. Duration bounds
+// and the cross-field checks that need one stay host code.
+message TrafficWorkload {
+  // Non-link-probe purposes need at least one scenario; link-probe needs none.
+  option (buf.validate.message).cel = {
+    id: "workload.scenarios_for_purpose"
+    message: "a non-link-probe workload needs at least one scenario; a link-probe runs none"
+    expression:
+      "this.purpose == 'link-probe' ? size(this.scenarios) == 0 "
+      ": size(this.scenarios) >= 1"
+  };
+  // links, interval and failures apply only to a link-probe.
+  option (buf.validate.message).cel = {
+    id: "workload.link_fields_for_purpose"
+    message: "links, interval and failures apply only to a link-probe workload"
+    expression:
+      "this.purpose == 'link-probe' || "
+      "(size(this.links) == 0 && !has(this.interval) && !has(this.failures))"
+  };
+  // A link-probe declares 1..64 links.
+  option (buf.validate.message).cel = {
+    id: "workload.link_probe_link_count"
+    message: "a link-probe needs 1 to 64 links"
+    expression:
+      "this.purpose != 'link-probe' || "
+      "(size(this.links) >= 1 && size(this.links) <= 64)"
+  };
+  // A health-probe or link-probe runs continuously and takes no duration; a
+  // verify-burst or journey needs one (its bound is host-checked).
+  option (buf.validate.message).cel = {
+    id: "workload.duration_for_purpose"
+    message: "a health-probe or link-probe takes no duration; a verify-burst or journey needs one"
+    expression:
+      "(this.purpose == 'health-probe' || this.purpose == 'link-probe') "
+      "? !has(this.duration) : has(this.duration)"
+  };
+  // Scenario ids are unique.
+  option (buf.validate.message).cel = {
+    id: "workload.unique_scenarios"
+    message: "a scenario must not be listed twice"
+    expression: "this.scenarios.all(s, this.scenarios.filter(t, t.id == s.id).size() == 1)"
+  };
+  // Link edges (from, to, port) are unique.
+  option (buf.validate.message).cel = {
+    id: "workload.unique_links"
+    message: "a link must not be listed twice"
+    expression:
+      "this.links.all(l, this.links.filter(m, "
+      "m.from == l.from && m.to == l.to && m.port == l.port).size() == 1)"
+  };
+
+  string api_version = 1 [(buf.validate.field).string.const = "sdo.dev/v1alpha1"];
+  string kind = 2 [(buf.validate.field).string.const = "TrafficWorkload"];
+  string name = 3 [(buf.validate.field).string.pattern = "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"];
+  string description = 4;
+  string purpose = 5 [(buf.validate.field).string = {in: ["health-probe", "verify-burst", "journey", "link-probe"]}];
+  // "" means unset (host default "uniform").
+  string arrival = 6 [(buf.validate.field).cel = {
+    id: "workload.arrival"
+    message: "arrival must be uniform or poisson"
+    expression: "this == '' || this == 'uniform' || this == 'poisson'"
+  }];
+  // 0 means unset (host default 4.0). A set rate must be in (0, 20].
+  double rate_per_second = 7 [(buf.validate.field).cel = {
+    id: "workload.rate_per_second"
+    message: "ratePerSecond must be in (0, 20]"
+    expression: "this == 0.0 || (this > 0.0 && this <= 20.0)"
+  }];
+  // Go-duration string; present only for verify-burst and journey, bound host-checked.
+  optional string duration = 8;
+  // Go-duration string; "" means unset, bound host-checked.
+  string timeout = 9;
+  // Go-duration string; "" means unset, bound host-checked.
+  string iteration_timeout = 10;
+  // 0 means unset; the loader derives a deterministic seed from the name.
+  uint64 seed = 11;
+  TrafficSLO slo = 12;
+  repeated TrafficWorkloadScenario scenarios = 13;
+  repeated TrafficLink links = 14;
+  // Go-duration string; link-probe only, bound host-checked.
+  optional string interval = 15;
+  // link-probe only; consecutive failed dials that report an edge.
+  optional int32 failures = 16 [(buf.validate.field).int32 = {gte: 2, lte: 60}];
+}
