@@ -140,6 +140,8 @@ type Controller struct {
 	Helpers HelperCleaner
 	// firingSink receives detector firing telemetry; nil disables it.
 	firingSink FiringSink
+	// lifecycleSink receives incident lifecycle telemetry; nil disables it.
+	lifecycleSink LifecycleSink
 	// evaluationIteration counts evaluation passes that took a snapshot. It is
 	// durable so telemetry iterations keep increasing across restarts.
 	evaluationIteration int
@@ -495,8 +497,24 @@ func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 	c.incidentFindingKeys = findingKeys(batch)
 	c.noteBatchedLocked(request.IncidentID, batch)
 	c.pruneTimelineLocked(batch)
+	c.emitLifecycleLocked(LifecycleEvent{
+		Event: PhaseOpened, RecordedAt: c.incidentDetectedAt, IncidentID: request.IncidentID,
+		FindingKeys: append([]string(nil), c.incidentFindingKeys...), SurfacedPlaybooks: playbookPaths(request.SurfacedPlaybooks),
+	})
 	c.mu.Unlock()
 	return nil
+}
+
+// playbookPaths flattens surfaced playbooks to their paths for telemetry.
+func playbookPaths(playbooks []SurfacedPlaybook) []string {
+	if len(playbooks) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(playbooks))
+	for _, playbook := range playbooks {
+		paths = append(paths, playbook.Path)
+	}
+	return paths
 }
 
 func severityAtLeast(actual sdk.FindingSeverity, threshold sdk.FindingSeverity) bool {
@@ -738,6 +756,12 @@ func (c *Controller) handleDispatchCompletion(completion dispatchCompletion, obs
 		c.currentIncidentResult = cloneIncidentResult(&completion.result)
 		c.resetDispatchRetryLocked()
 	}
+	if c.responderDone {
+		c.emitLifecycleLocked(LifecycleEvent{
+			Event: PhaseResponderCompleted, RecordedAt: c.responderCompletedAt, IncidentID: completion.incidentID,
+			DispatchError: c.dispatchError != "",
+		})
+	}
 	c.mu.Unlock()
 	if completion.err == nil && c.Helpers != nil {
 		c.cleanupHelpers()
@@ -788,6 +812,11 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 				"health detectors did not clear within %s after responder completion",
 				c.config.VerificationTimeout,
 			)
+			c.emitLifecycleLocked(LifecycleEvent{
+				Event: PhaseDetectorReviewRequired, RecordedAt: c.detectorReviewRequiredAt,
+				IncidentID: c.currentIncidentRequest.IncidentID, Reason: c.detectorReviewReason,
+				DetectorReviewRequired: true,
+			})
 		}
 		c.mu.Unlock()
 		return
@@ -818,6 +847,11 @@ func (c *Controller) maybeCloseIncident(now time.Time) {
 	sortTimeline(closure.DetectorTimeline)
 	closure.IncidentDetectorFiredBeforeDispatch, closure.IncidentDetectorFiredAfterDispatch,
 		closure.NoIncidentDetectorFired = timelineSummary(closure.DetectorTimeline)
+	c.emitLifecycleLocked(LifecycleEvent{
+		Event: PhaseClosed, RecordedAt: verifiedAt, IncidentID: closure.Request.IncidentID,
+		HealthClearedAt: closure.HealthClearedAt, DetectorReviewRequired: closure.DetectorReviewRequiredAt != nil,
+		DispatchError: closure.DispatchError != "",
+	})
 	c.timeline = nil
 	c.pendingClosure = cloneIncidentClosure(&closure)
 	c.closureState = "pending"
@@ -911,6 +945,17 @@ func (c *Controller) startFollowUpLocked(now time.Time) bool {
 	if c.broker != nil && parent.IncidentID != "" && parent.IncidentID != request.IncidentID {
 		c.enqueueReleaseLocked(parent.IncidentID)
 	}
+	supersededAt := now.UTC()
+	c.emitLifecycleLocked(LifecycleEvent{
+		EventID: lifecycleEventID(parent.IncidentID, string(PhaseSuperseded), request.IncidentID),
+		Event:   PhaseSuperseded, RecordedAt: supersededAt, IncidentID: parent.IncidentID,
+		SupersededBy: request.IncidentID, Reason: "follow_up",
+	})
+	c.emitLifecycleLocked(LifecycleEvent{
+		Event: PhaseOpened, RecordedAt: supersededAt, IncidentID: request.IncidentID,
+		ParentIncidentID: parent.IncidentID, FollowUpAttempt: request.FollowUp.Attempt,
+		FindingKeys: findingKeys(residual), SurfacedPlaybooks: playbookPaths(request.SurfacedPlaybooks),
+	})
 	c.currentIncidentRequest = cloneIncidentRequest(&request)
 	c.currentIncidentResult = nil
 	c.dispatchError = ""

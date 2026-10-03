@@ -1,18 +1,9 @@
 package runtime
 
 import (
-	"bufio"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"sort"
-	"strings"
-	"sync"
 	"time"
 
 	"sdo.dev/controller/sdk"
@@ -89,80 +80,26 @@ type FiringSink interface {
 	Record(FiringRecord) error
 }
 
+// firingEventID derives a content-addressed firing event id from a transition's
+// durable content.
 func firingEventID(parts ...string) string {
-	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
-	return hex.EncodeToString(sum[:10])
+	return contentAddressedID(parts...)
 }
 
-// FileFiringSink appends JSON lines to one file, rotating it to "<path>.1" when
-// it would exceed maxBytes. A record whose event id is already in the current
-// or rotated file is dropped, which makes restarts idempotent.
+// FileFiringSink is the detector firing stream's durable sink. It is a thin
+// typed wrapper over the shared durableEventStream, so it inherits that stream's
+// bounded rotation, torn-line repair, content-addressed deduplication, and
+// StartFresh archival.
 type FileFiringSink struct {
-	path     string
-	maxBytes int64
-
-	mu   sync.Mutex
-	seen map[string]struct{}
-	size int64
-	// dirty is set when the file ends in a partial line from an interrupted write.
-	dirty bool
+	stream *durableEventStream
 }
 
 func NewFileFiringSink(path string, maxBytes int64) (*FileFiringSink, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("firing stream path is required")
-	}
-	if maxBytes <= 0 {
-		return nil, fmt.Errorf("firing stream size bound must be positive")
-	}
-	sink := &FileFiringSink{path: path, maxBytes: maxBytes, seen: make(map[string]struct{})}
-	if _, err := sink.scan(path+".1", false); err != nil {
-		return nil, err
-	}
-	if _, err := sink.scan(path, true); err != nil {
-		return nil, err
-	}
-	return sink, nil
-}
-
-// scan loads event ids from a stream file. current marks the live file, whose
-// size and trailing-newline state the sink tracks.
-func (s *FileFiringSink) scan(path string, current bool) (int64, error) {
-	file, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return 0, nil
-	}
+	stream, err := openDurableEventStream(path, maxBytes)
 	if err != nil {
-		return 0, fmt.Errorf("open firing stream: %w", err)
+		return nil, err
 	}
-	defer file.Close()
-	reader := bufio.NewReaderSize(file, 64*1024)
-	var total int64
-	endedWithNewline := true
-	for {
-		line, readErr := reader.ReadBytes('\n')
-		total += int64(len(line))
-		if len(line) > 0 {
-			endedWithNewline = line[len(line)-1] == '\n'
-			var record struct {
-				EventID string `json:"event_id"`
-			}
-			if json.Unmarshal(line, &record) == nil && record.EventID != "" {
-				s.seen[record.EventID] = struct{}{}
-			}
-		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			return 0, fmt.Errorf("read firing stream: %w", readErr)
-		}
-	}
-	if current {
-		s.size = total
-		s.dirty = total > 0 && !endedWithNewline
-	}
-	return total, nil
+	return &FileFiringSink{stream: stream}, nil
 }
 
 func (s *FileFiringSink) Record(record FiringRecord) error {
@@ -173,77 +110,12 @@ func (s *FileFiringSink) Record(record FiringRecord) error {
 	if err != nil {
 		return fmt.Errorf("encode firing record: %w", err)
 	}
-	payload = append(payload, '\n')
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, duplicate := s.seen[record.EventID]; duplicate {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return fmt.Errorf("create firing stream directory: %w", err)
-	}
-	if s.size > 0 && s.size+int64(len(payload)) > s.maxBytes {
-		if err := s.rotate(); err != nil {
-			return err
-		}
-	}
-	file, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open firing stream: %w", err)
-	}
-	defer file.Close()
-	if s.dirty {
-		// Terminate a line torn by a crash so the new record parses on its own.
-		payload = append([]byte{'\n'}, payload...)
-	}
-	if _, err := file.Write(payload); err != nil {
-		return fmt.Errorf("append firing record: %w", err)
-	}
-	if err := file.Sync(); err != nil {
-		return fmt.Errorf("sync firing stream: %w", err)
-	}
-	s.dirty = false
-	s.size += int64(len(payload))
-	s.seen[record.EventID] = struct{}{}
-	return nil
+	return s.stream.append(record.EventID, payload)
 }
 
-// rotate moves the live file to "<path>.1", discarding the previous rotation,
-// and keeps only the ids of the rotated file for deduplication.
-func (s *FileFiringSink) rotate() error {
-	if err := os.Rename(s.path, s.path+".1"); err != nil {
-		return fmt.Errorf("rotate firing stream: %w", err)
-	}
-	s.seen = make(map[string]struct{})
-	if _, err := s.scan(s.path+".1", false); err != nil {
-		return err
-	}
-	s.size = 0
-	s.dirty = false
-	return nil
-}
-
-// StartFresh archives a stream left by an earlier controller lifecycle. Event
-// ids derive from controller state, so a stream that outlived its state would
-// otherwise suppress the new lifecycle's records as duplicates.
+// StartFresh archives a stream left by an earlier controller lifecycle.
 func (s *FileFiringSink) StartFresh() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.size == 0 {
-		return nil
-	}
-	if err := os.Rename(s.path, s.path+".prev"); err != nil {
-		return fmt.Errorf("archive firing stream: %w", err)
-	}
-	s.seen = make(map[string]struct{})
-	s.size = 0
-	s.dirty = false
-	return s.scanRotatedLocked()
-}
-
-func (s *FileFiringSink) scanRotatedLocked() error {
-	_, err := s.scan(s.path+".1", false)
-	return err
+	return s.stream.StartFresh()
 }
 
 // DetectorTimelineEntry summarizes one finding's firing history within the
