@@ -362,7 +362,9 @@ def test_prompt_requires_live_evidence_for_every_root_cause() -> None:
     assert "must clear after your fix" in prompt
 
 
-def test_prompt_states_the_cause_admissibility_bar_by_default() -> None:
+def test_prompt_states_the_cause_admissibility_bar_only_when_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("SDO_CAUSE_ADMISSIBILITY", "on")
+
     prompt = _responder_prompt(IncidentRequest.model_validate_json(_fixture("incident_request.json")))
 
     assert "Admissibility of a confirmed root cause" in prompt
@@ -374,15 +376,19 @@ def test_prompt_states_the_cause_admissibility_bar_by_default() -> None:
     assert "LOG_LEVEL" not in prompt
 
 
-def test_off_mode_keeps_the_prompt_free_of_the_admissibility_bar(monkeypatch) -> None:
+def test_default_off_keeps_the_prompt_free_of_the_admissibility_bar(monkeypatch) -> None:
+    # Default (environment unset) and explicit off both omit the bar, so the
+    # prompt is byte-identical to the pre-gate responder prompt.
+    monkeypatch.delenv("SDO_CAUSE_ADMISSIBILITY", raising=False)
+    request = IncidentRequest.model_validate_json(_fixture("incident_request.json"))
+    assert "Admissibility of a confirmed root cause" not in _responder_prompt(request)
+
     monkeypatch.setenv("SDO_CAUSE_ADMISSIBILITY", "off")
-
-    prompt = _responder_prompt(IncidentRequest.model_validate_json(_fixture("incident_request.json")))
-
-    assert "Admissibility of a confirmed root cause" not in prompt
+    assert "Admissibility of a confirmed root cause" not in _responder_prompt(request)
 
 
-def test_execute_incident_withholds_a_weakly_evidenced_cause() -> None:
+def test_execute_incident_withholds_a_weakly_evidenced_cause(monkeypatch) -> None:
+    monkeypatch.setenv("SDO_CAUSE_ADMISSIBILITY", "on")
     request = IncidentRequest.model_validate_json(_fixture("incident_request.json"))
     result = IncidentResult.model_validate_json(_fixture("incident_result.json"))
     weak = result.confirmed_root_causes[0].model_copy(
@@ -417,6 +423,44 @@ def test_execute_incident_withholds_a_weakly_evidenced_cause() -> None:
     summaries = [cause.summary for cause in completed.confirmed_root_causes]
     assert "benign image drift" not in summaries
     assert summaries == ["The geo Deployment referenced an absent required ConfigMap"]
+
+
+def test_execute_incident_default_off_keeps_every_proposed_cause(monkeypatch) -> None:
+    # With the gate at its default (off), execute_incident does not touch the
+    # agent's confirmed_root_causes: behavior is byte-identical to pre-gate.
+    monkeypatch.delenv("SDO_CAUSE_ADMISSIBILITY", raising=False)
+    request = IncidentRequest.model_validate_json(_fixture("incident_request.json"))
+    result = IncidentResult.model_validate_json(_fixture("incident_result.json"))
+    weak = result.confirmed_root_causes[0].model_copy(
+        update={
+            "summary": "benign image drift",
+            "evidence": [
+                RootCauseEvidence(
+                    kind="live-observation",
+                    source="kubectl get deploy",
+                    observation="image tag differs from a prior build",
+                )
+            ],
+            "explained_detectors": ["phantom-detector"],
+        }
+    )
+    payload = result.model_copy(update={"confirmed_root_causes": [*result.confirmed_root_causes, weak]})
+    message = {"type": "agent_message", "id": "msg", "text": payload.model_dump_json(exclude_none=True)}
+    agent = ScriptedAgent(
+        lambda _request: FakeRun(
+            stdout=[
+                '{"type":"thread.started","thread_id":"session-1"}\n',
+                json.dumps({"type": "item.completed", "item": message}) + "\n",
+                '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,'
+                '"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":1}}\n',
+            ]
+        )
+    )
+
+    completed = execute_incident(request, executor=agent.executor)
+
+    summaries = [cause.summary for cause in completed.confirmed_root_causes]
+    assert "benign image drift" in summaries
 
 
 def test_prompt_lists_changes_since_the_healthy_baseline_once() -> None:

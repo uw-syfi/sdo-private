@@ -194,6 +194,17 @@ def test_off_mode_returns_the_result_unchanged() -> None:
     assert [cause.summary for cause in gated.confirmed_root_causes] == ["benign drift"]
 
 
+def test_default_environment_is_off_and_passes_the_result_through(monkeypatch) -> None:
+    monkeypatch.delenv(CAUSE_ADMISSIBILITY_ENV, raising=False)
+    weak = _cause("benign drift", evidence=[_narrative_evidence()], explained=["never-fired"])
+    result = _result([weak])
+
+    gated = apply_cause_admissibility(result, _request())
+
+    assert gated is result
+    assert [cause.summary for cause in gated.confirmed_root_causes] == ["benign drift"]
+
+
 def test_on_mode_drops_the_weakly_evidenced_cause_from_the_result() -> None:
     weak = _cause("benign drift", evidence=[_narrative_evidence()], explained=["never-fired"])
 
@@ -202,15 +213,16 @@ def test_on_mode_drops_the_weakly_evidenced_cause_from_the_result() -> None:
     assert gated.confirmed_root_causes == []
 
 
-def test_policy_reads_the_environment_and_defaults_on(monkeypatch) -> None:
+def test_policy_reads_the_environment_and_defaults_off(monkeypatch) -> None:
     monkeypatch.delenv(CAUSE_ADMISSIBILITY_ENV, raising=False)
-    assert CauseAdmissibilityPolicy.from_environment().enabled
-
-    monkeypatch.setenv(CAUSE_ADMISSIBILITY_ENV, "off")
     assert not CauseAdmissibilityPolicy.from_environment().enabled
+    assert not CauseAdmissibilityPolicy().enabled
 
-    monkeypatch.setenv(CAUSE_ADMISSIBILITY_ENV, "ON")
+    monkeypatch.setenv(CAUSE_ADMISSIBILITY_ENV, "on")
     assert CauseAdmissibilityPolicy.from_environment().enabled
+
+    monkeypatch.setenv(CAUSE_ADMISSIBILITY_ENV, "OFF")
+    assert not CauseAdmissibilityPolicy.from_environment().enabled
 
 
 def test_invalid_mode_is_rejected() -> None:

@@ -50,9 +50,11 @@ if TYPE_CHECKING:
 #: Environment variable selecting the gate mode on the responder Job.
 CAUSE_ADMISSIBILITY_ENV = "SDO_CAUSE_ADMISSIBILITY"
 
-#: Supported gate modes. ``on`` (default) withholds inadmissible causes;
-#: ``off`` returns the responder's result byte-for-byte unchanged, for A/B
-#: comparison against a run without the gate.
+#: Supported gate modes. ``off`` (default) returns the responder's result
+#: byte-for-byte unchanged, so enabling the gate is opt-in and a run without it
+#: is reproducible; ``on`` withholds inadmissible causes. The default stays off
+#: until a gate-on-vs-off validation arm earns a flip (see
+#: ``docs/cause-admissibility-decisions.md``).
 CAUSE_ADMISSIBILITY_MODES: tuple[str, ...] = ("on", "off")
 
 #: Evidence kinds an independent check can anchor to an incident signal: a
@@ -97,7 +99,7 @@ class AdmissibilityReview:
 class CauseAdmissibilityPolicy:
     """Configuration of the responder-side cause-admissibility gate."""
 
-    mode: str = "on"
+    mode: str = "off"
 
     def __post_init__(self) -> None:
         if self.mode not in CAUSE_ADMISSIBILITY_MODES:
@@ -111,9 +113,9 @@ class CauseAdmissibilityPolicy:
 
     @classmethod
     def from_environment(cls, mode: str | None = None) -> CauseAdmissibilityPolicy:
-        """Build a policy from ``mode`` or, when ``None``, the environment (default ``on``)."""
+        """Build a policy from ``mode`` or, when ``None``, the environment (default ``off``)."""
 
-        selected = (os.getenv(CAUSE_ADMISSIBILITY_ENV, "") if mode is None else mode).strip().lower() or "on"
+        selected = (os.getenv(CAUSE_ADMISSIBILITY_ENV, "") if mode is None else mode).strip().lower() or "off"
         return cls(mode=selected)
 
 

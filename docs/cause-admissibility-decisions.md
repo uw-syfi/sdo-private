@@ -77,24 +77,40 @@ unit test scans the bar for problem-specific vocabulary.
 
 ## Configuration and default
 
-`SDO_CAUSE_ADMISSIBILITY` (`on` | `off`, default `on`) on the responder Job
-selects the gate. `off` restores byte-identical pre-gate behavior — no prompt
-paragraph and no filtering — for A/B comparison against a run without the gate.
+`SDO_CAUSE_ADMISSIBILITY` (`on` | `off`, default `off`) on the responder Job
+selects the gate. Both modes are fully supported. Default **off** restores
+byte-identical pre-gate behavior — no prompt paragraph and no filtering, the
+same bytes the A/B/C runs produced — so enabling the gate is opt-in and a run
+without it stays reproducible.
 
-Default **on** is a deliberate decision: the gate is the intended production
-improvement for this thread. The stored n=3 baseline was produced without it;
-to reproduce that baseline exactly, set `SDO_CAUSE_ADMISSIBILITY=off`.
+Default **off** is a deliberate decision. Default-on would change the SDO
+agent's diagnosis behavior in every future experiment run, and the
+characterization benefit below is still a hypothesis. We will not land a
+paper-affecting behavioral default on an unvalidated hypothesis. Landing the
+gate default-off makes this a pure, byte-identical-behavior capability
+addition that is safe to merge now; the default-on flip is earned later with
+data.
+
+The flip is gated on a **validation arm**: run the composite diagnosis
+characterization scenario with `SDO_CAUSE_ADMISSIBILITY=on` versus `off`,
+reusing the stored memoryless Codex baseline (do not rerun it while
+unchanged). Only a measured, consistent characterization improvement with no
+regression (benign decoys still not cited; every genuine composite component
+still admitted) earns changing the default to `on`.
 
 ## Takeaways
 
-- **Meaning**: the responder no longer asserts a confirmed root cause it can
-  only narrate; weakly-evidenced and benign-drift causes are withheld before the
-  verifier sees them.
+- **Meaning**: when enabled, the responder no longer asserts a confirmed root
+  cause it can only narrate; weakly-evidenced and benign-drift causes are
+  withheld before the verifier sees them. Shipped default-off, so the capability
+  lands without changing any run's behavior.
 - **Confidence**: high that it cannot drop genuine causes (unit tests cover the
   genuine-composite and late-component cases); the production effect on the D2
-  characterization dock is a hypothesis to confirm with a repeat variance run.
+  characterization dock is a hypothesis, which is exactly why the default stays
+  off until the validation arm confirms it.
 - **Implication**: fenced verifier semantics are unchanged; the improvement is
-  purely upstream evidence hygiene.
-- **Next step**: rerun the composite characterization variance arm with the gate
-  on vs. `SDO_CAUSE_ADMISSIBILITY=off` and compare characterization consistency;
-  keep the memoryless Codex baseline reused.
+  purely upstream evidence hygiene, and default-off keeps the merge
+  byte-identical to prior behavior.
+- **Next step**: run the composite characterization validation arm with the gate
+  on vs. `SDO_CAUSE_ADMISSIBILITY=off`, reusing the memoryless Codex baseline; a
+  consistent improvement with no regression earns flipping the default to `on`.
