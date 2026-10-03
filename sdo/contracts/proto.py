@@ -32,7 +32,7 @@ if str(_GEN_ROOT) not in sys.path:
 
 from google.protobuf import json_format
 
-from sdodev.contracts.v1alpha1 import common_pb2, controller_config_pb2, messages_pb2, telemetry_pb2
+from sdodev.contracts.v1alpha1 import common_pb2, controller_config_pb2, messages_pb2, telemetry_pb2, traffic_pb2
 
 if TYPE_CHECKING:
     from google.protobuf.message import Message
@@ -65,6 +65,11 @@ IncidentClosure = messages_pb2.IncidentClosure
 
 FiringRecord = telemetry_pb2.FiringRecord
 
+TrafficSLO = traffic_pb2.TrafficSLO
+TrafficWorkloadScenario = traffic_pb2.TrafficWorkloadScenario
+TrafficLink = traffic_pb2.TrafficLink
+TrafficWorkload = traffic_pb2.TrafficWorkload
+
 __all__ = [
     "AppliedPlaybook",
     "ConfirmedRootCause",
@@ -88,6 +93,10 @@ __all__ = [
     "StateFieldChange",
     "SurfacedPlaybook",
     "TimingMetrics",
+    "TrafficLink",
+    "TrafficSLO",
+    "TrafficWorkload",
+    "TrafficWorkloadScenario",
     "UsageMetrics",
     "VerificationEvidence",
     "parse_json",

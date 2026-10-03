@@ -21,6 +21,12 @@ from sdo.contracts.models import (
     StateFieldChange,
     UsageMetrics,
 )
+from sdo.contracts.proto import (
+    TrafficLink,
+    TrafficSLO,
+    TrafficWorkload,
+    TrafficWorkloadScenario,
+)
 from sdo.contracts.sdk_schema import SDK_SCHEMA_IDENTITY
 
 __all__ = [
@@ -45,5 +51,9 @@ __all__ = [
     "ObservedStateChange",
     "StateChanges",
     "StateFieldChange",
+    "TrafficLink",
+    "TrafficSLO",
+    "TrafficWorkload",
+    "TrafficWorkloadScenario",
     "UsageMetrics",
 ]

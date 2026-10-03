@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 import yaml
-from pydantic import ValidationError
 
-from sdo.operational_memory.models import ArtifactOwner, TrafficWorkload
+from sdo.operational_memory.models import ArtifactOwner
 from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
+from sdo.operational_memory.traffic import TrafficWorkloadError, load_traffic_workload, scenario_slo
 from sdo.operational_memory.validation import MemoryValidationError, MemoryValidator
 from tests.unit.sdo.operational_memory.test_memory import _write_memory
 
@@ -36,13 +36,13 @@ def _write(root: Path, relative: str, text: str) -> None:
 
 
 def test_hotel_fixture_workloads_are_valid_with_documented_defaults() -> None:
-    health = TrafficWorkload.model_validate(_document("health"))
-    verify = TrafficWorkload.model_validate(_document("verify"))
+    health = load_traffic_workload(_document("health"))
+    verify = load_traffic_workload(_document("verify"))
 
     assert health.purpose == "health-probe"
-    assert health.duration is None
+    assert not health.HasField("duration")
     assert [scenario.id for scenario in health.scenarios] == ["search-hotels", "recommend", "login"]
-    assert health.scenario_slo("login").window == 5
+    assert scenario_slo(health, "login").window == 5
     assert verify.purpose == "verify-burst"
     assert verify.duration == "3s"
 
@@ -65,8 +65,8 @@ def test_workload_rejects_unsafe_or_ambiguous_profiles(mutate, message: str) -> 
     document = _document()
     mutate(document)
 
-    with pytest.raises(ValidationError, match=message):
-        TrafficWorkload.model_validate(document)
+    with pytest.raises(TrafficWorkloadError, match=message):
+        load_traffic_workload(document)
 
 
 def test_repository_loads_workloads_and_requires_matching_file_names(tmp_path: Path) -> None:

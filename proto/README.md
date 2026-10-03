@@ -1,7 +1,9 @@
 # SDO contract protos
 
 Single source of truth for the structured contracts that cross SDO's seams
-(controller↔responder messages, firing telemetry records, controller config).
+(controller↔responder messages, firing telemetry records, controller config, and
+the traffic workload artifact that the Python commit-time gate and the Go prober
+both load).
 See [`docs/seam-contracts-decisions.md`](../docs/seam-contracts-decisions.md) for the
 rationale and the per-seam plan.
 

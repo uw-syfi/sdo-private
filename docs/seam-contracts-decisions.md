@@ -61,9 +61,29 @@ The best way to keep two definitions in sync is to not have two definitions.
 | 2 | Telemetry record (`detector-firings.jsonl`, `detector_timeline`) | Go emitter + Python reader | `.proto` (file stays newline-JSON) | round-trip test |
 | 3 | Controller config | launcher argv flags + Go flag registration | **`ControllerConfig` message** the launcher populates, the controller reads | type is shared; no flag list to mirror |
 | 4 | Validator image ↔ schema | image tag convention + SDK schema version | schema version/digest pinned into the image identity | startup check: image schema == artifacts schema |
+| 5 | Traffic workload artifact (`traffic/workloads/<name>.yaml`) | `sdo/operational_memory/models.py` Pydantic + hand-mirrored `controller/sdk/traffic` structs | `traffic.proto` → Go + Python, protovalidate CEL | conformance ratchet both sides |
 
 (#1 and the manifest/`links` schema collapse into one source — a manifest schema *is* a
 contract schema.)
+
+### Seam 5 cuts over asymmetrically
+
+The traffic workload artifact crosses the Python commit-time gate and the Go
+controller prober. `proto/sdodev/contracts/v1alpha1/traffic.proto` is the single
+schema source, with the invariants expressible without parsing a Go-duration
+string carried as protovalidate CEL (patterns, ranges, enum membership, link
+no-self-loop, duplicate/purpose-structure rules); duration bounds and the
+cross-field checks that need one stay behaviour-preserving host code on each
+loader. The Python side is fully proto-exclusive: the Pydantic models are
+deleted and `sdo/operational_memory/traffic.py` loads the generated proto type
+(the repo keeps no Python CEL runtime, so its host validator mirrors the CEL).
+The Go struct deletion is deferred: it needs `google.golang.org/protobuf`
+converged from v1.33 to v1.36 across `controller/sdk`, `/core`, `/runtime`,
+every synthesized detector workspace, and the validator image (Go `replace` is
+not transitive) — the dependency ripple `proto/README.md` already defers. Until
+then `controller/runtime/traffic_conformance_test.go` ratchets the Go struct to
+the proto schema and CEL, so the schema is single-sourced and drift is a build
+failure.
 
 ### Seam 3 is a deletion, not a sync
 

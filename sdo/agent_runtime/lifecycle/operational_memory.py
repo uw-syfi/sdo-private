@@ -38,7 +38,7 @@ from sdo.operational_memory import (
     ContainerSandboxRunner,
     SandboxResult,
     SandboxRunner,
-    TrafficWorkload,
+    load_traffic_workload,
 )
 
 if TYPE_CHECKING:
@@ -1217,7 +1217,7 @@ def _workloads_with_purpose(root: Path, purpose: str) -> list[str]:
         if path.suffix != ".yaml":
             continue
         try:
-            workload = TrafficWorkload.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+            workload = load_traffic_workload(yaml.safe_load(path.read_text(encoding="utf-8")))
         except (yaml.YAMLError, ValueError):
             continue
         if workload.purpose == purpose and workload.name == path.stem:
@@ -1443,7 +1443,7 @@ def _traffic_errors(files: list[AuthoredTrafficFile], deployer: DeployerAssessme
     for authored in workloads:
         name = Path(authored.path).stem
         try:
-            workload = TrafficWorkload.model_validate(yaml.safe_load(authored.content))
+            workload = load_traffic_workload(yaml.safe_load(authored.content))
         except (yaml.YAMLError, ValueError) as exc:
             errors.append(f"traffic workload {authored.path!r} is invalid: {exc}")
             continue
@@ -1451,10 +1451,10 @@ def _traffic_errors(files: list[AuthoredTrafficFile], deployer: DeployerAssessme
             errors.append(f"traffic workload {authored.path!r} declares name {workload.name!r}; it must match its file")
         health_probes += workload.purpose == "health-probe"
         errors.extend(
-            f"traffic workload {authored.path!r} link {link.source} -> {link.target}:{link.port} names "
+            f"traffic workload {authored.path!r} link {getattr(link, 'from')} -> {link.to}:{link.port} names "
             f"Service/{missing}, which is not a source-backed Service in the deployer handoff"
             for link in workload.links
-            for missing in sorted({link.source, link.target} - services)
+            for missing in sorted({getattr(link, "from"), link.to} - services)
         )
     if generators and not health_probes:
         errors.append("traffic generators need a health-probe workload that runs them continuously")
