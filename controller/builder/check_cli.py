@@ -22,6 +22,9 @@ from controller.builder.workspace import BuildWorkspace, BuildWorkspaceConfig
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    # Type-only: the real import is function-scoped (validator image has no sdo).
+    from sdo.contracts.proto import ControllerConfig
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
@@ -550,7 +553,7 @@ def _controller_config(
     responder_args: list[str],
     broker_args: list[str],
     prober_binary: Path | None,
-) -> object:
+) -> ControllerConfig:
     """Build the controller's launch config as the shared ``ControllerConfig`` proto.
 
     Seam 3's single source for the launcher -> controller boundary. The import is
@@ -648,7 +651,16 @@ def _controller_once(args: argparse.Namespace) -> int:
             "--proposal-command",
             "git -c core.whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab diff --check HEAD --",
         ]
-        flag_args = _controller_flag_args(
+        # Seam 3: the launcher -> controller boundary is the shared ControllerConfig
+        # proto, serialized as protojson and handed to the controller via --config.
+        # The controller still accepts the legacy flags too (controller/runtime
+        # controllerConfigToArgs), so a stale binary keeps working until the flag
+        # path is retired. to_canonical_json is imported function-scoped for the
+        # same reason as ControllerConfig: the validator image has no sdo package
+        # and never runs _controller_once.
+        from sdo.contracts.proto import to_canonical_json
+
+        config = _controller_config(
             args,
             app_root=app_root,
             worktree_root=worktree_root,
@@ -656,7 +668,9 @@ def _controller_once(args: argparse.Namespace) -> int:
             broker_args=broker_args,
             prober_binary=prober_binary,
         )
-        command = [str(binary), *flag_args]
+        config_path = workspace.path / "controller-config.json"
+        config_path.write_text(to_canonical_json(config), encoding="utf-8")
+        command = [str(binary), "--config", str(config_path)]
         completed = subprocess.run(command, cwd=workspace.path, check=False)
         if args.keep_workdir:
             print(f"kept controller build workspace: {workspace.path}", file=sys.stderr)
