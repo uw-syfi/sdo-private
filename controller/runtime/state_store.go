@@ -48,16 +48,19 @@ type RuntimeState struct {
 	DetectorClearSince map[string]time.Time `json:"detector_clear_since,omitempty"`
 	// IncidentObservedChanges is every object seen changed while the open
 	// incident lasted, so a restart keeps first observations exact.
-	IncidentObservedChanges    []ObservedStateChange   `json:"incident_observed_changes,omitempty"`
-	DispatchState              string                  `json:"dispatch_state"`
-	IncidentFindingKeys        []string                `json:"incident_finding_keys"`
-	PendingClosure             *IncidentClosure        `json:"pending_closure,omitempty"`
-	ClosureState               string                  `json:"closure_state,omitempty"`
-	ClosureReceipt             *ClosureReceipt         `json:"closure_receipt,omitempty"`
-	ClosureFailure             *ClosureFailure         `json:"closure_failure,omitempty"`
-	LastAcknowledgedIncidentID string                  `json:"last_acknowledged_incident_id,omitempty"`
-	EvaluationIteration        int                     `json:"evaluation_iteration,omitempty"`
-	DetectorTimeline           []DetectorTimelineEntry `json:"detector_timeline,omitempty"`
+	IncidentObservedChanges    []ObservedStateChange `json:"incident_observed_changes,omitempty"`
+	DispatchState              string                `json:"dispatch_state"`
+	IncidentFindingKeys        []string              `json:"incident_finding_keys"`
+	PendingClosure             *IncidentClosure      `json:"pending_closure,omitempty"`
+	ClosureState               string                `json:"closure_state,omitempty"`
+	ClosureReceipt             *ClosureReceipt       `json:"closure_receipt,omitempty"`
+	ClosureFailure             *ClosureFailure       `json:"closure_failure,omitempty"`
+	LastAcknowledgedIncidentID string                `json:"last_acknowledged_incident_id,omitempty"`
+	// PendingReleases are incident IDs whose prepared worktree was stranded by a
+	// supersede and must still be reaped through the broker.
+	PendingReleases     []string                `json:"pending_releases,omitempty"`
+	EvaluationIteration int                     `json:"evaluation_iteration,omitempty"`
+	DetectorTimeline    []DetectorTimelineEntry `json:"detector_timeline,omitempty"`
 	// IncidentView is published for responders and never restored.
 	IncidentView *IncidentView `json:"incident_view,omitempty"`
 }

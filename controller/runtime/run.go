@@ -1003,6 +1003,12 @@ func executePausedEffects(ctx context.Context, controller *Controller) error {
 		if err := controller.ExecuteClosureAcknowledgmentEffect(ctx, acknowledgment); err != nil {
 			return fmt.Errorf("execute persisted closure acknowledgment effect: %w", err)
 		}
+		return nil
+	}
+	if release, ok := controller.PendingReleaseEffect(); ok {
+		if err := controller.ExecuteReleaseEffect(ctx, release); err != nil {
+			return fmt.Errorf("execute persisted release effect: %w", err)
+		}
 	}
 	return nil
 }
@@ -1030,6 +1036,12 @@ func executePendingEffects(ctx context.Context, controller *Controller) error {
 	if acknowledgment, ok := controller.PendingClosureAcknowledgmentEffect(); ok {
 		if err := controller.ExecuteClosureAcknowledgmentEffect(ctx, acknowledgment); err != nil {
 			return fmt.Errorf("execute persisted closure acknowledgment effect: %w", err)
+		}
+		return nil
+	}
+	if release, ok := controller.PendingReleaseEffect(); ok {
+		if err := controller.ExecuteReleaseEffect(ctx, release); err != nil {
+			return fmt.Errorf("execute persisted release effect: %w", err)
 		}
 	}
 	return nil
