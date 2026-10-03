@@ -57,6 +57,9 @@ type ControllerConfig struct {
 	// residual findings are treated as unresolved. It is capped by
 	// VerificationTimeout.
 	FollowUpCooldown time.Duration
+	// Admission configures load-aware incident admission. The zero value
+	// (disabled) admits every ready batch immediately, as before.
+	Admission AdmissionConfig
 }
 
 type dispatchCompletion struct {
@@ -132,6 +135,13 @@ type Controller struct {
 	pendingReleases []string
 	releaseInFlight string
 
+	// loadGauge, when set, reports host resource pressure to the admission gate;
+	// nil leaves the host-load term at zero. admissionRecheckAt is the next time a
+	// deferred incident re-evaluates admission; it is transient (a restart
+	// re-samples immediately).
+	loadGauge          LoadGauge
+	admissionRecheckAt time.Time
+
 	// Baseline, when set, records healthy configuration and attaches the
 	// diff against it to each new incident request.
 	Baseline StateBaseline
@@ -200,6 +210,9 @@ func NewController(
 	}
 	if config.FollowUpCooldown < 0 {
 		return nil, fmt.Errorf("follow-up cooldown must not be negative")
+	}
+	if err := config.Admission.validate(); err != nil {
+		return nil, err
 	}
 	if config.VerificationTimeout == 0 {
 		config.VerificationTimeout = config.ResponseTimeout
@@ -440,19 +453,94 @@ func (c *Controller) canAttachBeforeLaunchLocked() bool {
 		return false
 	}
 	switch c.dispatchState {
-	case "workspace_pending", "workspace_running", "pending":
+	case "workspace_pending", "workspace_running", "pending", admissionDeferredState:
 		return true
 	default:
 		return false
 	}
 }
 
+// SetLoadGauge attaches the admission gate's host-load source. A nil gauge (the
+// default) leaves the host-load term at zero, so only the release-backlog term
+// can defer admission.
+func (c *Controller) SetLoadGauge(gauge LoadGauge) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.loadGauge = gauge
+}
+
+// sampleLoad reads the host-load gauge without holding c.mu. A nil gauge reports
+// zero pressure; a gauge error is reported and treated as zero, so a transient
+// read failure fails open (admit) rather than wedging incident handling.
+func (c *Controller) sampleLoad() LoadSample {
+	c.mu.Lock()
+	gauge := c.loadGauge
+	c.mu.Unlock()
+	if gauge == nil {
+		return LoadSample{}
+	}
+	sample, err := gauge.Sample()
+	if err != nil {
+		if c.OnError != nil {
+			c.OnError(fmt.Errorf("sample host load for admission: %w", err))
+		}
+		return LoadSample{}
+	}
+	return sample
+}
+
+// reassessDeferredAdmission re-evaluates a held incident against a fresh load
+// sample. It resumes (to the normal pending/workspace_pending dispatch state and
+// a one-time admission_resumed event) only when pressure has cleared both low
+// watermarks; otherwise it schedules the next recheck.
+func (c *Controller) reassessDeferredAdmission(now time.Time) {
+	sample := c.sampleLoad()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.dispatchState != admissionDeferredState || c.currentIncidentRequest == nil {
+		return
+	}
+	assessment := c.config.Admission.assess(true, sample, len(c.pendingReleases))
+	if assessment.Defer {
+		c.admissionRecheckAt = now.Add(c.config.Admission.RecheckInterval)
+		return
+	}
+	next := "pending"
+	if c.broker != nil {
+		next = "workspace_pending"
+	}
+	c.dispatchState = next
+	c.admissionRecheckAt = time.Time{}
+	c.emitLifecycleLocked(LifecycleEvent{
+		Event: PhaseAdmissionResumed, RecordedAt: now.UTC(), IncidentID: c.currentIncidentRequest.IncidentID,
+		LoadPressure: assessment.Pressure, LoadThreshold: assessment.Threshold,
+		ReleaseBacklog: assessment.ReleaseBacklog, Reason: assessment.Reason,
+	})
+}
+
+// emitAdmissionDeferredLocked records that a ready batch was held under load.
+// Callers hold c.mu. Each (incident, admission_deferred) pair is emitted at most
+// once, so the event id is stable and a crash-replay drops the duplicate.
+func (c *Controller) emitAdmissionDeferredLocked(now time.Time, incidentID string, assessment admissionAssessment) {
+	c.emitLifecycleLocked(LifecycleEvent{
+		Event: PhaseAdmissionDeferred, RecordedAt: now.UTC(), IncidentID: incidentID,
+		LoadPressure: assessment.Pressure, LoadThreshold: assessment.Threshold,
+		ReleaseBacklog: assessment.ReleaseBacklog, Reason: assessment.Reason,
+	})
+}
+
 func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 	c.mu.Lock()
 	incidentOpen := c.incidentOpen
+	deferred := c.dispatchState == admissionDeferredState
 	closurePending := c.pendingClosure != nil && c.broker != nil
 	c.mu.Unlock()
 	if incidentOpen {
+		if deferred {
+			// A held incident re-evaluates admission against a fresh sample; it
+			// resumes only once pressure clears both low watermarks.
+			c.reassessDeferredAdmission(now)
+		}
 		c.mu.Lock()
 		attachable := c.canAttachBeforeLaunchLocked()
 		c.mu.Unlock()
@@ -475,6 +563,8 @@ func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 	if c.Baseline != nil {
 		request.StateChanges = cloneStateChanges(c.Baseline.Changes(now))
 	}
+	// Sample host load outside the lock so a gauge read never holds c.mu.
+	sample := c.sampleLoad()
 	c.mu.Lock()
 	c.incidentOpen = true
 	c.responderDone = false
@@ -490,9 +580,19 @@ func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 	c.resetDispatchRetryLocked()
 	c.incidentObservedChanges = make(map[string]ObservedStateChange)
 	c.observeStateChangesLocked(request.StateChanges, now)
-	c.dispatchState = "pending"
+	readyState := "pending"
 	if c.broker != nil {
-		c.dispatchState = "workspace_pending"
+		readyState = "workspace_pending"
+	}
+	// Load-aware admission: when the controller is over a pressure threshold the
+	// incident is held (admission_deferred) before any worktree is prepared or
+	// responder dispatched, rather than racing a congested drain. The incident
+	// keeps its identity and still coalesces later findings; it is never dropped.
+	assessment := c.config.Admission.assess(false, sample, len(c.pendingReleases))
+	c.dispatchState = readyState
+	if assessment.Defer {
+		c.dispatchState = admissionDeferredState
+		c.admissionRecheckAt = now.Add(c.config.Admission.RecheckInterval)
 	}
 	c.incidentFindingKeys = findingKeys(batch)
 	c.noteBatchedLocked(request.IncidentID, batch)
@@ -501,6 +601,9 @@ func (c *Controller) dispatchReady(ctx context.Context, now time.Time) error {
 		Event: PhaseOpened, RecordedAt: c.incidentDetectedAt, IncidentID: request.IncidentID,
 		FindingKeys: append([]string(nil), c.incidentFindingKeys...), SurfacedPlaybooks: playbookPaths(request.SurfacedPlaybooks),
 	})
+	if assessment.Defer {
+		c.emitAdmissionDeferredLocked(now, request.IncidentID, assessment)
+	}
 	c.mu.Unlock()
 	return nil
 }
@@ -551,6 +654,19 @@ func (c *Controller) NextWake() time.Time {
 	if probe := c.nextGateProbe(); !probe.IsZero() && (next.IsZero() || probe.Before(next)) {
 		next = probe
 	}
+	c.mu.Lock()
+	if c.dispatchState == admissionDeferredState {
+		// A held incident re-evaluates admission on a bounded cadence. A restored
+		// controller has no recheck time yet, so it re-samples on the next tick.
+		recheck := c.admissionRecheckAt
+		if recheck.IsZero() {
+			recheck = c.evaluationAt
+		}
+		if next.IsZero() || recheck.Before(next) {
+			next = recheck
+		}
+	}
+	c.mu.Unlock()
 	return c.closureRetryWake(c.dispatchRetryWake(next))
 }
 
