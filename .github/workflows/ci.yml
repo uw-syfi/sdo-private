@@ -49,12 +49,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [sdk, core, runtime]
+        # The runtime module's floor is go 1.26 (buf.build/go/protovalidate);
+        # pin its toolchain explicitly so the job is deterministic rather than
+        # silently network-downloading 1.26 via GOTOOLCHAIN=auto. sdk/core stay
+        # on 1.24.5 to keep proving they still build under the lower floor.
+        include:
+          - module: sdk
+            go-version: "1.24.5"
+          - module: core
+            go-version: "1.24.5"
+          - module: runtime
+            go-version: "1.26.8"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
-          go-version: "1.24.5"
+          go-version: "${{ matrix.go-version }}"
           cache-dependency-path: controller/${{ matrix.module }}/go.sum
       - run: go test -race ./...
         working-directory: controller/${{ matrix.module }}
@@ -101,7 +111,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
-          go-version: "1.24.5"
+          go-version: "1.26.8"
           cache-dependency-path: controller/runtime/go.sum
       - name: Run the deterministic replay suite
         run: go test -race -run '^TestReplay' -timeout 5m ./...
@@ -119,7 +129,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
-          go-version: "1.24.5"
+          go-version: "1.26.8"
           cache-dependency-path: controller/runtime/go.sum
       - name: Run the bounded, seeded chaos suite
         run: go test -race -run '^TestChaos' -timeout 5m ./...
