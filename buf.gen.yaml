@@ -1,0 +1,17 @@
+version: v2
+clean: true
+managed:
+  enabled: true
+plugins:
+  # Go types for the controller (module: sdo.dev/controller/contracts).
+  - local: protoc-gen-go
+    out: controller/contracts/gen
+    opt: paths=source_relative
+  # Python types for sdo/contracts. The remote buf plugins are pinned to v33.4
+  # so the generated gencode matches the protobuf runtime (6.33.4) locked in
+  # uv.lock; the unpinned (latest) plugin emits newer gencode that the pinned
+  # runtime refuses to load. Bump both pins together with the protobuf runtime.
+  - remote: buf.build/protocolbuffers/python:v33.4
+    out: sdo/contracts/_gen
+  - remote: buf.build/protocolbuffers/pyi:v33.4
+    out: sdo/contracts/_gen

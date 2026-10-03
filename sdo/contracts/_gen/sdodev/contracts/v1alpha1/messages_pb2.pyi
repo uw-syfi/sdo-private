@@ -1,0 +1,433 @@
+import datetime
+
+from buf.validate import validate_pb2 as _validate_pb2
+from google.protobuf import struct_pb2 as _struct_pb2
+from google.protobuf import timestamp_pb2 as _timestamp_pb2
+from sdodev.contracts.v1alpha1 import common_pb2 as _common_pb2
+from google.protobuf.internal import containers as _containers
+from google.protobuf import descriptor as _descriptor
+from google.protobuf import message as _message
+from collections.abc import Iterable as _Iterable, Mapping as _Mapping
+from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
+
+DESCRIPTOR: _descriptor.FileDescriptor
+
+class Finding(_message.Message):
+    __slots__ = ("detector_id", "rule_id", "status", "severity", "summary", "evidence", "primary_resource", "related_resources", "playbooks", "parameter_bindings", "fingerprint", "metadata")
+    class ParameterBindingsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: _common_pb2.ObjectRef
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[_common_pb2.ObjectRef, _Mapping]] = ...) -> None: ...
+    DETECTOR_ID_FIELD_NUMBER: _ClassVar[int]
+    RULE_ID_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    SEVERITY_FIELD_NUMBER: _ClassVar[int]
+    SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    EVIDENCE_FIELD_NUMBER: _ClassVar[int]
+    PRIMARY_RESOURCE_FIELD_NUMBER: _ClassVar[int]
+    RELATED_RESOURCES_FIELD_NUMBER: _ClassVar[int]
+    PLAYBOOKS_FIELD_NUMBER: _ClassVar[int]
+    PARAMETER_BINDINGS_FIELD_NUMBER: _ClassVar[int]
+    FINGERPRINT_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    detector_id: str
+    rule_id: str
+    status: str
+    severity: str
+    summary: str
+    evidence: str
+    primary_resource: _common_pb2.ObjectRef
+    related_resources: _containers.RepeatedCompositeFieldContainer[_common_pb2.ObjectRef]
+    playbooks: _containers.RepeatedScalarFieldContainer[str]
+    parameter_bindings: _containers.MessageMap[str, _common_pb2.ObjectRef]
+    fingerprint: str
+    metadata: _struct_pb2.Struct
+    def __init__(self, detector_id: _Optional[str] = ..., rule_id: _Optional[str] = ..., status: _Optional[str] = ..., severity: _Optional[str] = ..., summary: _Optional[str] = ..., evidence: _Optional[str] = ..., primary_resource: _Optional[_Union[_common_pb2.ObjectRef, _Mapping]] = ..., related_resources: _Optional[_Iterable[_Union[_common_pb2.ObjectRef, _Mapping]]] = ..., playbooks: _Optional[_Iterable[str]] = ..., parameter_bindings: _Optional[_Mapping[str, _common_pb2.ObjectRef]] = ..., fingerprint: _Optional[str] = ..., metadata: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+
+class DetectorEvaluation(_message.Message):
+    __slots__ = ("detector_id", "evaluated_at", "status", "fingerprints", "error")
+    DETECTOR_ID_FIELD_NUMBER: _ClassVar[int]
+    EVALUATED_AT_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    FINGERPRINTS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    detector_id: str
+    evaluated_at: _timestamp_pb2.Timestamp
+    status: str
+    fingerprints: _containers.RepeatedScalarFieldContainer[str]
+    error: str
+    def __init__(self, detector_id: _Optional[str] = ..., evaluated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., status: _Optional[str] = ..., fingerprints: _Optional[_Iterable[str]] = ..., error: _Optional[str] = ...) -> None: ...
+
+class SurfacedPlaybook(_message.Message):
+    __slots__ = ("path", "parameter_bindings")
+    class ParameterBindingsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: _common_pb2.ObjectRef
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[_common_pb2.ObjectRef, _Mapping]] = ...) -> None: ...
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    PARAMETER_BINDINGS_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    parameter_bindings: _containers.MessageMap[str, _common_pb2.ObjectRef]
+    def __init__(self, path: _Optional[str] = ..., parameter_bindings: _Optional[_Mapping[str, _common_pb2.ObjectRef]] = ...) -> None: ...
+
+class PriorOutcomeEvidence(_message.Message):
+    __slots__ = ("incident_id", "match_reason", "root_cause_summaries", "repair_action_summaries", "applied_playbooks", "source_commit", "exact_source_match")
+    INCIDENT_ID_FIELD_NUMBER: _ClassVar[int]
+    MATCH_REASON_FIELD_NUMBER: _ClassVar[int]
+    ROOT_CAUSE_SUMMARIES_FIELD_NUMBER: _ClassVar[int]
+    REPAIR_ACTION_SUMMARIES_FIELD_NUMBER: _ClassVar[int]
+    APPLIED_PLAYBOOKS_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    EXACT_SOURCE_MATCH_FIELD_NUMBER: _ClassVar[int]
+    incident_id: str
+    match_reason: str
+    root_cause_summaries: _containers.RepeatedScalarFieldContainer[str]
+    repair_action_summaries: _containers.RepeatedScalarFieldContainer[str]
+    applied_playbooks: _containers.RepeatedScalarFieldContainer[str]
+    source_commit: str
+    exact_source_match: bool
+    def __init__(self, incident_id: _Optional[str] = ..., match_reason: _Optional[str] = ..., root_cause_summaries: _Optional[_Iterable[str]] = ..., repair_action_summaries: _Optional[_Iterable[str]] = ..., applied_playbooks: _Optional[_Iterable[str]] = ..., source_commit: _Optional[str] = ..., exact_source_match: _Optional[bool] = ...) -> None: ...
+
+class StateFieldChange(_message.Message):
+    __slots__ = ("field", "before", "after")
+    FIELD_FIELD_NUMBER: _ClassVar[int]
+    BEFORE_FIELD_NUMBER: _ClassVar[int]
+    AFTER_FIELD_NUMBER: _ClassVar[int]
+    field: str
+    before: str
+    after: str
+    def __init__(self, field: _Optional[str] = ..., before: _Optional[str] = ..., after: _Optional[str] = ...) -> None: ...
+
+class StateChange(_message.Message):
+    __slots__ = ("kind", "name", "change", "fields")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    CHANGE_FIELD_NUMBER: _ClassVar[int]
+    FIELDS_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    name: str
+    change: str
+    fields: _containers.RepeatedCompositeFieldContainer[StateFieldChange]
+    def __init__(self, kind: _Optional[str] = ..., name: _Optional[str] = ..., change: _Optional[str] = ..., fields: _Optional[_Iterable[_Union[StateFieldChange, _Mapping]]] = ...) -> None: ...
+
+class StateChanges(_message.Message):
+    __slots__ = ("baseline_at", "observed_at", "changes", "omitted", "unobserved_kinds")
+    BASELINE_AT_FIELD_NUMBER: _ClassVar[int]
+    OBSERVED_AT_FIELD_NUMBER: _ClassVar[int]
+    CHANGES_FIELD_NUMBER: _ClassVar[int]
+    OMITTED_FIELD_NUMBER: _ClassVar[int]
+    UNOBSERVED_KINDS_FIELD_NUMBER: _ClassVar[int]
+    baseline_at: _timestamp_pb2.Timestamp
+    observed_at: _timestamp_pb2.Timestamp
+    changes: _containers.RepeatedCompositeFieldContainer[StateChange]
+    omitted: int
+    unobserved_kinds: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, baseline_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., observed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., changes: _Optional[_Iterable[_Union[StateChange, _Mapping]]] = ..., omitted: _Optional[int] = ..., unobserved_kinds: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class ObservedStateChange(_message.Message):
+    __slots__ = ("kind", "name", "first_observed_at")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    FIRST_OBSERVED_AT_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    name: str
+    first_observed_at: _timestamp_pb2.Timestamp
+    def __init__(self, kind: _Optional[str] = ..., name: _Optional[str] = ..., first_observed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class FollowUpContext(_message.Message):
+    __slots__ = ("original_incident_id", "parent_incident_id", "attempt", "max_follow_ups", "prior_responder_summary")
+    ORIGINAL_INCIDENT_ID_FIELD_NUMBER: _ClassVar[int]
+    PARENT_INCIDENT_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    MAX_FOLLOW_UPS_FIELD_NUMBER: _ClassVar[int]
+    PRIOR_RESPONDER_SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    original_incident_id: str
+    parent_incident_id: str
+    attempt: int
+    max_follow_ups: int
+    prior_responder_summary: str
+    def __init__(self, original_incident_id: _Optional[str] = ..., parent_incident_id: _Optional[str] = ..., attempt: _Optional[int] = ..., max_follow_ups: _Optional[int] = ..., prior_responder_summary: _Optional[str] = ...) -> None: ...
+
+class IncidentRequest(_message.Message):
+    __slots__ = ("schema_version", "application", "namespace", "incident_id", "findings", "detector_history", "surfaced_playbooks", "relevant_outcomes", "source_commit", "deployed_commit", "architecture_summary_path", "health_objective_path", "repository_worktree", "repository_base_commit", "response_deadline", "cancellation_token", "repair_policy", "state_changes", "follow_up")
+    SCHEMA_VERSION_FIELD_NUMBER: _ClassVar[int]
+    APPLICATION_FIELD_NUMBER: _ClassVar[int]
+    NAMESPACE_FIELD_NUMBER: _ClassVar[int]
+    INCIDENT_ID_FIELD_NUMBER: _ClassVar[int]
+    FINDINGS_FIELD_NUMBER: _ClassVar[int]
+    DETECTOR_HISTORY_FIELD_NUMBER: _ClassVar[int]
+    SURFACED_PLAYBOOKS_FIELD_NUMBER: _ClassVar[int]
+    RELEVANT_OUTCOMES_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    DEPLOYED_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    ARCHITECTURE_SUMMARY_PATH_FIELD_NUMBER: _ClassVar[int]
+    HEALTH_OBJECTIVE_PATH_FIELD_NUMBER: _ClassVar[int]
+    REPOSITORY_WORKTREE_FIELD_NUMBER: _ClassVar[int]
+    REPOSITORY_BASE_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    RESPONSE_DEADLINE_FIELD_NUMBER: _ClassVar[int]
+    CANCELLATION_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    REPAIR_POLICY_FIELD_NUMBER: _ClassVar[int]
+    STATE_CHANGES_FIELD_NUMBER: _ClassVar[int]
+    FOLLOW_UP_FIELD_NUMBER: _ClassVar[int]
+    schema_version: str
+    application: str
+    namespace: str
+    incident_id: str
+    findings: _containers.RepeatedCompositeFieldContainer[Finding]
+    detector_history: _containers.RepeatedCompositeFieldContainer[DetectorEvaluation]
+    surfaced_playbooks: _containers.RepeatedCompositeFieldContainer[SurfacedPlaybook]
+    relevant_outcomes: _containers.RepeatedCompositeFieldContainer[PriorOutcomeEvidence]
+    source_commit: str
+    deployed_commit: str
+    architecture_summary_path: str
+    health_objective_path: str
+    repository_worktree: str
+    repository_base_commit: str
+    response_deadline: _timestamp_pb2.Timestamp
+    cancellation_token: str
+    repair_policy: str
+    state_changes: StateChanges
+    follow_up: FollowUpContext
+    def __init__(self, schema_version: _Optional[str] = ..., application: _Optional[str] = ..., namespace: _Optional[str] = ..., incident_id: _Optional[str] = ..., findings: _Optional[_Iterable[_Union[Finding, _Mapping]]] = ..., detector_history: _Optional[_Iterable[_Union[DetectorEvaluation, _Mapping]]] = ..., surfaced_playbooks: _Optional[_Iterable[_Union[SurfacedPlaybook, _Mapping]]] = ..., relevant_outcomes: _Optional[_Iterable[_Union[PriorOutcomeEvidence, _Mapping]]] = ..., source_commit: _Optional[str] = ..., deployed_commit: _Optional[str] = ..., architecture_summary_path: _Optional[str] = ..., health_objective_path: _Optional[str] = ..., repository_worktree: _Optional[str] = ..., repository_base_commit: _Optional[str] = ..., response_deadline: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., cancellation_token: _Optional[str] = ..., repair_policy: _Optional[str] = ..., state_changes: _Optional[_Union[StateChanges, _Mapping]] = ..., follow_up: _Optional[_Union[FollowUpContext, _Mapping]] = ...) -> None: ...
+
+class RootCauseEvidence(_message.Message):
+    __slots__ = ("kind", "source", "observation")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    OBSERVATION_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    source: str
+    observation: str
+    def __init__(self, kind: _Optional[str] = ..., source: _Optional[str] = ..., observation: _Optional[str] = ...) -> None: ...
+
+class ConfirmedRootCause(_message.Message):
+    __slots__ = ("summary", "resources", "evidence", "explained_detectors", "static_context")
+    SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    RESOURCES_FIELD_NUMBER: _ClassVar[int]
+    EVIDENCE_FIELD_NUMBER: _ClassVar[int]
+    EXPLAINED_DETECTORS_FIELD_NUMBER: _ClassVar[int]
+    STATIC_CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    summary: str
+    resources: _containers.RepeatedCompositeFieldContainer[_common_pb2.ObjectRef]
+    evidence: _containers.RepeatedCompositeFieldContainer[RootCauseEvidence]
+    explained_detectors: _containers.RepeatedScalarFieldContainer[str]
+    static_context: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, summary: _Optional[str] = ..., resources: _Optional[_Iterable[_Union[_common_pb2.ObjectRef, _Mapping]]] = ..., evidence: _Optional[_Iterable[_Union[RootCauseEvidence, _Mapping]]] = ..., explained_detectors: _Optional[_Iterable[str]] = ..., static_context: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class AppliedPlaybook(_message.Message):
+    __slots__ = ("path", "parameter_bindings", "scripts")
+    class ParameterBindingsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: _common_pb2.ObjectRef
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[_common_pb2.ObjectRef, _Mapping]] = ...) -> None: ...
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    PARAMETER_BINDINGS_FIELD_NUMBER: _ClassVar[int]
+    SCRIPTS_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    parameter_bindings: _containers.MessageMap[str, _common_pb2.ObjectRef]
+    scripts: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, path: _Optional[str] = ..., parameter_bindings: _Optional[_Mapping[str, _common_pb2.ObjectRef]] = ..., scripts: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class VerificationEvidence(_message.Message):
+    __slots__ = ("name", "passed", "details", "observed_at")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    PASSED_FIELD_NUMBER: _ClassVar[int]
+    DETAILS_FIELD_NUMBER: _ClassVar[int]
+    OBSERVED_AT_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    passed: bool
+    details: str
+    observed_at: _timestamp_pb2.Timestamp
+    def __init__(self, name: _Optional[str] = ..., passed: _Optional[bool] = ..., details: _Optional[str] = ..., observed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class UsageMetrics(_message.Message):
+    __slots__ = ("llm_calls", "input_tokens", "output_tokens", "cached_input_tokens", "cache_read_input_tokens", "cache_write_input_tokens", "cache_write_1h_input_tokens", "uncached_input_tokens", "reasoning_output_tokens", "model_requests", "total_cost_usd")
+    LLM_CALLS_FIELD_NUMBER: _ClassVar[int]
+    INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    OUTPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    CACHED_INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    CACHE_READ_INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    CACHE_WRITE_INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    CACHE_WRITE_1H_INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    UNCACHED_INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    REASONING_OUTPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    MODEL_REQUESTS_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_COST_USD_FIELD_NUMBER: _ClassVar[int]
+    llm_calls: int
+    input_tokens: int
+    output_tokens: int
+    cached_input_tokens: int
+    cache_read_input_tokens: int
+    cache_write_input_tokens: int
+    cache_write_1h_input_tokens: int
+    uncached_input_tokens: int
+    reasoning_output_tokens: int
+    model_requests: int
+    total_cost_usd: float
+    def __init__(self, llm_calls: _Optional[int] = ..., input_tokens: _Optional[int] = ..., output_tokens: _Optional[int] = ..., cached_input_tokens: _Optional[int] = ..., cache_read_input_tokens: _Optional[int] = ..., cache_write_input_tokens: _Optional[int] = ..., cache_write_1h_input_tokens: _Optional[int] = ..., uncached_input_tokens: _Optional[int] = ..., reasoning_output_tokens: _Optional[int] = ..., model_requests: _Optional[int] = ..., total_cost_usd: _Optional[float] = ...) -> None: ...
+
+class TimingMetrics(_message.Message):
+    __slots__ = ("started_at", "completed_at")
+    STARTED_AT_FIELD_NUMBER: _ClassVar[int]
+    COMPLETED_AT_FIELD_NUMBER: _ClassVar[int]
+    started_at: _timestamp_pb2.Timestamp
+    completed_at: _timestamp_pb2.Timestamp
+    def __init__(self, started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class RepairActionReceipt(_message.Message):
+    __slots__ = ("action_id", "kind", "target", "resources", "summary", "details", "started_at", "completed_at", "success", "reversible")
+    ACTION_ID_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    TARGET_FIELD_NUMBER: _ClassVar[int]
+    RESOURCES_FIELD_NUMBER: _ClassVar[int]
+    SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    DETAILS_FIELD_NUMBER: _ClassVar[int]
+    STARTED_AT_FIELD_NUMBER: _ClassVar[int]
+    COMPLETED_AT_FIELD_NUMBER: _ClassVar[int]
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    REVERSIBLE_FIELD_NUMBER: _ClassVar[int]
+    action_id: str
+    kind: str
+    target: str
+    resources: _containers.RepeatedCompositeFieldContainer[_common_pb2.ObjectRef]
+    summary: str
+    details: str
+    started_at: _timestamp_pb2.Timestamp
+    completed_at: _timestamp_pb2.Timestamp
+    success: bool
+    reversible: bool
+    def __init__(self, action_id: _Optional[str] = ..., kind: _Optional[str] = ..., target: _Optional[str] = ..., resources: _Optional[_Iterable[_Union[_common_pb2.ObjectRef, _Mapping]]] = ..., summary: _Optional[str] = ..., details: _Optional[str] = ..., started_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., success: _Optional[bool] = ..., reversible: _Optional[bool] = ...) -> None: ...
+
+class IncidentResult(_message.Message):
+    __slots__ = ("schema_version", "incident_id", "status", "confirmed_root_causes", "applied_playbooks", "repair_changes", "repair_actions", "final_detector_states", "proposed_memory_changes", "verification_evidence", "usage", "timing", "responder_session_id", "error")
+    SCHEMA_VERSION_FIELD_NUMBER: _ClassVar[int]
+    INCIDENT_ID_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    CONFIRMED_ROOT_CAUSES_FIELD_NUMBER: _ClassVar[int]
+    APPLIED_PLAYBOOKS_FIELD_NUMBER: _ClassVar[int]
+    REPAIR_CHANGES_FIELD_NUMBER: _ClassVar[int]
+    REPAIR_ACTIONS_FIELD_NUMBER: _ClassVar[int]
+    FINAL_DETECTOR_STATES_FIELD_NUMBER: _ClassVar[int]
+    PROPOSED_MEMORY_CHANGES_FIELD_NUMBER: _ClassVar[int]
+    VERIFICATION_EVIDENCE_FIELD_NUMBER: _ClassVar[int]
+    USAGE_FIELD_NUMBER: _ClassVar[int]
+    TIMING_FIELD_NUMBER: _ClassVar[int]
+    RESPONDER_SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    schema_version: str
+    incident_id: str
+    status: str
+    confirmed_root_causes: _containers.RepeatedCompositeFieldContainer[ConfirmedRootCause]
+    applied_playbooks: _containers.RepeatedCompositeFieldContainer[AppliedPlaybook]
+    repair_changes: _containers.RepeatedScalarFieldContainer[str]
+    repair_actions: _containers.RepeatedCompositeFieldContainer[RepairActionReceipt]
+    final_detector_states: _containers.RepeatedCompositeFieldContainer[DetectorEvaluation]
+    proposed_memory_changes: _containers.RepeatedScalarFieldContainer[str]
+    verification_evidence: _containers.RepeatedCompositeFieldContainer[VerificationEvidence]
+    usage: UsageMetrics
+    timing: TimingMetrics
+    responder_session_id: str
+    error: str
+    def __init__(self, schema_version: _Optional[str] = ..., incident_id: _Optional[str] = ..., status: _Optional[str] = ..., confirmed_root_causes: _Optional[_Iterable[_Union[ConfirmedRootCause, _Mapping]]] = ..., applied_playbooks: _Optional[_Iterable[_Union[AppliedPlaybook, _Mapping]]] = ..., repair_changes: _Optional[_Iterable[str]] = ..., repair_actions: _Optional[_Iterable[_Union[RepairActionReceipt, _Mapping]]] = ..., final_detector_states: _Optional[_Iterable[_Union[DetectorEvaluation, _Mapping]]] = ..., proposed_memory_changes: _Optional[_Iterable[str]] = ..., verification_evidence: _Optional[_Iterable[_Union[VerificationEvidence, _Mapping]]] = ..., usage: _Optional[_Union[UsageMetrics, _Mapping]] = ..., timing: _Optional[_Union[TimingMetrics, _Mapping]] = ..., responder_session_id: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
+
+class IncidentView(_message.Message):
+    __slots__ = ("incident_id", "observed_at", "blocking_detectors", "blocking_findings", "clearing_findings", "state_changes")
+    INCIDENT_ID_FIELD_NUMBER: _ClassVar[int]
+    OBSERVED_AT_FIELD_NUMBER: _ClassVar[int]
+    BLOCKING_DETECTORS_FIELD_NUMBER: _ClassVar[int]
+    BLOCKING_FINDINGS_FIELD_NUMBER: _ClassVar[int]
+    CLEARING_FINDINGS_FIELD_NUMBER: _ClassVar[int]
+    STATE_CHANGES_FIELD_NUMBER: _ClassVar[int]
+    incident_id: str
+    observed_at: _timestamp_pb2.Timestamp
+    blocking_detectors: _containers.RepeatedScalarFieldContainer[str]
+    blocking_findings: _containers.RepeatedCompositeFieldContainer[Finding]
+    clearing_findings: _containers.RepeatedCompositeFieldContainer[Finding]
+    state_changes: StateChanges
+    def __init__(self, incident_id: _Optional[str] = ..., observed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., blocking_detectors: _Optional[_Iterable[str]] = ..., blocking_findings: _Optional[_Iterable[_Union[Finding, _Mapping]]] = ..., clearing_findings: _Optional[_Iterable[_Union[Finding, _Mapping]]] = ..., state_changes: _Optional[_Union[StateChanges, _Mapping]] = ...) -> None: ...
+
+class DetectorTimelineEntry(_message.Message):
+    __slots__ = ("detector_id", "detector_class", "owner", "rule_id", "fingerprint", "parameter_bindings", "surfaced_playbooks", "first_activated_at", "last_seen_at", "cleared_at", "relation", "activations")
+    class ParameterBindingsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: _common_pb2.ObjectRef
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[_common_pb2.ObjectRef, _Mapping]] = ...) -> None: ...
+    DETECTOR_ID_FIELD_NUMBER: _ClassVar[int]
+    DETECTOR_CLASS_FIELD_NUMBER: _ClassVar[int]
+    OWNER_FIELD_NUMBER: _ClassVar[int]
+    RULE_ID_FIELD_NUMBER: _ClassVar[int]
+    FINGERPRINT_FIELD_NUMBER: _ClassVar[int]
+    PARAMETER_BINDINGS_FIELD_NUMBER: _ClassVar[int]
+    SURFACED_PLAYBOOKS_FIELD_NUMBER: _ClassVar[int]
+    FIRST_ACTIVATED_AT_FIELD_NUMBER: _ClassVar[int]
+    LAST_SEEN_AT_FIELD_NUMBER: _ClassVar[int]
+    CLEARED_AT_FIELD_NUMBER: _ClassVar[int]
+    RELATION_FIELD_NUMBER: _ClassVar[int]
+    ACTIVATIONS_FIELD_NUMBER: _ClassVar[int]
+    detector_id: str
+    detector_class: str
+    owner: str
+    rule_id: str
+    fingerprint: str
+    parameter_bindings: _containers.MessageMap[str, _common_pb2.ObjectRef]
+    surfaced_playbooks: _containers.RepeatedScalarFieldContainer[str]
+    first_activated_at: _timestamp_pb2.Timestamp
+    last_seen_at: _timestamp_pb2.Timestamp
+    cleared_at: _timestamp_pb2.Timestamp
+    relation: str
+    activations: int
+    def __init__(self, detector_id: _Optional[str] = ..., detector_class: _Optional[str] = ..., owner: _Optional[str] = ..., rule_id: _Optional[str] = ..., fingerprint: _Optional[str] = ..., parameter_bindings: _Optional[_Mapping[str, _common_pb2.ObjectRef]] = ..., surfaced_playbooks: _Optional[_Iterable[str]] = ..., first_activated_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., last_seen_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., cleared_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., relation: _Optional[str] = ..., activations: _Optional[int] = ...) -> None: ...
+
+class IncidentClosure(_message.Message):
+    __slots__ = ("request", "result", "dispatch_error", "final_detector_states", "incident_detector_states", "detector_timeline", "incident_detector_fired_before_dispatch", "incident_detector_fired_after_dispatch", "no_incident_detector_fired", "final_state_changes", "detected_at", "dispatched_at", "responder_completed_at", "verified_at", "health_cleared_at", "observed_state_changes", "detector_review_required_at", "detector_review_reason", "cleaned_helpers")
+    REQUEST_FIELD_NUMBER: _ClassVar[int]
+    RESULT_FIELD_NUMBER: _ClassVar[int]
+    DISPATCH_ERROR_FIELD_NUMBER: _ClassVar[int]
+    FINAL_DETECTOR_STATES_FIELD_NUMBER: _ClassVar[int]
+    INCIDENT_DETECTOR_STATES_FIELD_NUMBER: _ClassVar[int]
+    DETECTOR_TIMELINE_FIELD_NUMBER: _ClassVar[int]
+    INCIDENT_DETECTOR_FIRED_BEFORE_DISPATCH_FIELD_NUMBER: _ClassVar[int]
+    INCIDENT_DETECTOR_FIRED_AFTER_DISPATCH_FIELD_NUMBER: _ClassVar[int]
+    NO_INCIDENT_DETECTOR_FIRED_FIELD_NUMBER: _ClassVar[int]
+    FINAL_STATE_CHANGES_FIELD_NUMBER: _ClassVar[int]
+    DETECTED_AT_FIELD_NUMBER: _ClassVar[int]
+    DISPATCHED_AT_FIELD_NUMBER: _ClassVar[int]
+    RESPONDER_COMPLETED_AT_FIELD_NUMBER: _ClassVar[int]
+    VERIFIED_AT_FIELD_NUMBER: _ClassVar[int]
+    HEALTH_CLEARED_AT_FIELD_NUMBER: _ClassVar[int]
+    OBSERVED_STATE_CHANGES_FIELD_NUMBER: _ClassVar[int]
+    DETECTOR_REVIEW_REQUIRED_AT_FIELD_NUMBER: _ClassVar[int]
+    DETECTOR_REVIEW_REASON_FIELD_NUMBER: _ClassVar[int]
+    CLEANED_HELPERS_FIELD_NUMBER: _ClassVar[int]
+    request: IncidentRequest
+    result: IncidentResult
+    dispatch_error: str
+    final_detector_states: _containers.RepeatedCompositeFieldContainer[DetectorEvaluation]
+    incident_detector_states: _containers.RepeatedCompositeFieldContainer[DetectorEvaluation]
+    detector_timeline: _containers.RepeatedCompositeFieldContainer[DetectorTimelineEntry]
+    incident_detector_fired_before_dispatch: bool
+    incident_detector_fired_after_dispatch: bool
+    no_incident_detector_fired: bool
+    final_state_changes: StateChanges
+    detected_at: _timestamp_pb2.Timestamp
+    dispatched_at: _timestamp_pb2.Timestamp
+    responder_completed_at: _timestamp_pb2.Timestamp
+    verified_at: _timestamp_pb2.Timestamp
+    health_cleared_at: _timestamp_pb2.Timestamp
+    observed_state_changes: _containers.RepeatedCompositeFieldContainer[ObservedStateChange]
+    detector_review_required_at: _timestamp_pb2.Timestamp
+    detector_review_reason: str
+    cleaned_helpers: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, request: _Optional[_Union[IncidentRequest, _Mapping]] = ..., result: _Optional[_Union[IncidentResult, _Mapping]] = ..., dispatch_error: _Optional[str] = ..., final_detector_states: _Optional[_Iterable[_Union[DetectorEvaluation, _Mapping]]] = ..., incident_detector_states: _Optional[_Iterable[_Union[DetectorEvaluation, _Mapping]]] = ..., detector_timeline: _Optional[_Iterable[_Union[DetectorTimelineEntry, _Mapping]]] = ..., incident_detector_fired_before_dispatch: _Optional[bool] = ..., incident_detector_fired_after_dispatch: _Optional[bool] = ..., no_incident_detector_fired: _Optional[bool] = ..., final_state_changes: _Optional[_Union[StateChanges, _Mapping]] = ..., detected_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., dispatched_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., responder_completed_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., verified_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., health_cleared_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., observed_state_changes: _Optional[_Iterable[_Union[ObservedStateChange, _Mapping]]] = ..., detector_review_required_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., detector_review_reason: _Optional[str] = ..., cleaned_helpers: _Optional[_Iterable[str]] = ...) -> None: ...

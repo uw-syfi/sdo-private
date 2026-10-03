@@ -23,3 +23,14 @@ fi
 
 echo "==> tach (module boundaries)"
 uv run tach check
+
+# Proto contract drift (buf lint/breaking + committed-codegen diff). Enforced
+# authoritatively by the dedicated `proto` CI job; skipped here when the buf
+# toolchain is absent so a buf-less environment still passes the Python gates.
+export PATH="${GOBIN:-${HOME}/go/bin}:${PATH}"
+if command -v buf >/dev/null 2>&1; then
+    echo "==> proto contracts (scripts/check_proto.sh)"
+    "$SCRIPT_DIR/check_proto.sh"
+else
+    echo "==> proto contracts: skipped (buf not installed; enforced by the proto CI job)"
+fi

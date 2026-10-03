@@ -14,11 +14,16 @@ from typing import TYPE_CHECKING
 
 from controller.builder.errors import ControllerBuilderError
 from controller.builder.go_runner import GoRunner
+from controller.builder.manifest import duration_nanoseconds
 from controller.builder.paths import find_app_root, find_tool_paths
+from controller.builder.schema import SchemaSourceError, schema_identity
 from controller.builder.workspace import BuildWorkspace, BuildWorkspaceConfig
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    # Type-only: the real import is function-scoped (validator image has no sdo).
+    from sdo.contracts.proto import ControllerConfig
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -63,6 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_common_args(test)
     test.add_argument("--keep-workdir", action="store_true", help=argparse.SUPPRESS)
     _add_healthy_baseline_arg(test)
+    _add_expect_schema_arg(test)
 
     draft_test = subparsers.add_parser(
         "draft-test",
@@ -71,6 +77,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_common_args(draft_test)
     draft_test.add_argument("--detector-id", action="append", required=True)
     _add_healthy_baseline_arg(draft_test)
+    _add_expect_schema_arg(draft_test)
 
     run_once = subparsers.add_parser("run-once", help="build and run detectors once against a Kubernetes namespace")
     _add_common_args(run_once)
@@ -188,6 +195,42 @@ def _add_healthy_baseline_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_expect_schema_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--expect-schema",
+        default=None,
+        metavar="IDENTITY",
+        help="validator schema identity the caller expects this image to embed; when set, startup fails "
+        "loud if the image's own schema differs (a stale validator image). Default: not checked.",
+    )
+
+
+def _assert_expected_schema(args: argparse.Namespace) -> None:
+    """Fail loud when a stale image's embedded schema differs from the caller's.
+
+    Seam 4 of docs/seam-contracts-decisions.md: the sandbox passes the schema
+    identity it expects (sdo.contracts.sdk_schema.SDK_SCHEMA_IDENTITY); this
+    recomputes the identity from the image's own baked SDK sources. A mismatch
+    means the running image predates the current schema -- the stale-validator
+    bug class (an old SDK silently dropping `links.yaml`) -- so refuse up front
+    rather than validate against the wrong contract.
+    """
+
+    expected = getattr(args, "expect_schema", None)
+    if not expected:
+        return
+    try:
+        actual = schema_identity()
+    except SchemaSourceError as exc:
+        raise ValueError(f"cannot verify validator schema identity: {exc}") from exc
+    if actual != expected:
+        raise ValueError(
+            "stale validator image: it embeds schema "
+            f"{actual!r} but the caller expects {expected!r}. "
+            "Rebuild the sdo-detector-validator image from the current SDK (scripts/build_sdo_images.sh)."
+        )
+
+
 def _healthy_baseline(args: argparse.Namespace, app_root: Path) -> Path | None:
     value: Path | None = args.healthy_baseline
     if value is None:
@@ -215,6 +258,7 @@ def _check(args: argparse.Namespace) -> int:
 
 
 def _test(args: argparse.Namespace) -> int:
+    _assert_expected_schema(args)
     app_root = _app_root(args)
     tool_paths = find_tool_paths()
     runner = GoRunner.from_environment()
@@ -241,6 +285,7 @@ def _test(args: argparse.Namespace) -> int:
 
 
 def _draft_test(args: argparse.Namespace) -> int:
+    _assert_expected_schema(args)
     app_root = _app_root(args)
     tool_paths = find_tool_paths()
     runner = GoRunner.from_environment()
@@ -414,6 +459,69 @@ def _controller(args: argparse.Namespace) -> int:
         print(json.dumps({"controller_supervisor": "relaunch", "launches": launches}), flush=True)
 
 
+def _controller_config(
+    args: argparse.Namespace,
+    *,
+    app_root: Path,
+    worktree_root: Path,
+    responder_args: list[str],
+    broker_args: list[str],
+    prober_binary: Path | None,
+) -> ControllerConfig:
+    """Build the controller's launch config as the shared ``ControllerConfig`` proto.
+
+    Seam 3's single source for the launcher -> controller boundary. The import is
+    function-scoped on purpose: the validator image has no ``sdo`` package and
+    never runs ``_controller_once``; the runtime image (which does run it) has it.
+    The no-module-level-sdo-import guard test enforces that.
+    """
+
+    from sdo.contracts.proto import ControllerConfig
+
+    config = ControllerConfig(
+        namespace=args.namespace,
+        app_root=str(app_root),
+        dispatcher_mode="job",
+        dispatcher=args.responder_command,
+        dispatcher_args=list(responder_args),
+        responder_env=list(args.responder_env),
+        responder_image=args.responder_image,
+        repository_pvc=args.repository_pvc,
+        repository_mount_path=args.repository_mount_path,
+        responder_credentials_secret=args.credentials_secret,
+        broker=args.broker_command,
+        broker_args=list(broker_args),
+        broker_worktree_root=str(worktree_root),
+        max_follow_ups=args.max_follow_ups,
+        repair_policy=args.repair_policy,
+        lease_name=args.lease_name,
+    )
+    config.response_timeout.FromNanoseconds(duration_nanoseconds(args.response_timeout))
+    config.verification_timeout.FromNanoseconds(duration_nanoseconds(args.verification_timeout))
+    config.follow_up_cooldown.FromNanoseconds(duration_nanoseconds(args.follow_up_cooldown))
+    if args.control_namespace:
+        config.control_namespace = args.control_namespace
+    if args.application:
+        config.application = args.application
+    if args.source_commit:
+        config.source_commit = args.source_commit
+    if args.deployed_commit:
+        config.deployed_commit = args.deployed_commit
+    if args.repository_pvc_subpath:
+        config.repository_pvc_subpath = args.repository_pvc_subpath
+    if args.duration:
+        config.duration.FromNanoseconds(duration_nanoseconds(args.duration))
+    if args.exit_after_closure:
+        config.exit_after_closure = True
+    if getattr(args, "supervise", False) and not getattr(args, "controller_update_rollout", False):
+        config.restart_after_closure = True
+    if prober_binary is not None:
+        config.prober_binary = str(prober_binary)
+        if args.prober_image:
+            config.prober_image = args.prober_image
+    return config
+
+
 def _controller_once(args: argparse.Namespace) -> int:
     app_root = _app_root(args)
     worktree_root = args.worktree_root.resolve()
@@ -457,73 +565,26 @@ def _controller_once(args: argparse.Namespace) -> int:
             "--proposal-command",
             "git -c core.whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab diff --check HEAD --",
         ]
-        command = [
-            str(binary),
-            "--namespace",
-            args.namespace,
-            "--app-root",
-            str(app_root),
-            "--dispatcher-mode",
-            "job",
-            "--dispatcher",
-            args.responder_command,
-        ]
-        for responder_arg in responder_args:
-            command.extend(["--dispatcher-arg", responder_arg])
-        for environment in args.responder_env:
-            command.extend(["--responder-env", environment])
-        command.extend(
-            [
-                "--responder-image",
-                args.responder_image,
-                "--repository-pvc",
-                args.repository_pvc,
-                "--repository-mount-path",
-                args.repository_mount_path,
-                "--responder-credentials-secret",
-                args.credentials_secret,
-                "--broker",
-                args.broker_command,
-            ]
+        # Seam 3: the launcher -> controller boundary is the shared ControllerConfig
+        # proto, serialized as protojson and handed to the controller via --config.
+        # The controller still accepts the legacy flags too (controller/runtime
+        # controllerConfigToArgs), so a stale binary keeps working until the flag
+        # path is retired. to_canonical_json is imported function-scoped for the
+        # same reason as ControllerConfig: the validator image has no sdo package
+        # and never runs _controller_once.
+        from sdo.contracts.proto import to_canonical_json
+
+        config = _controller_config(
+            args,
+            app_root=app_root,
+            worktree_root=worktree_root,
+            responder_args=responder_args,
+            broker_args=broker_args,
+            prober_binary=prober_binary,
         )
-        for broker_arg in broker_args:
-            command.extend(["--broker-arg", broker_arg])
-        command.extend(
-            [
-                "--broker-worktree-root",
-                str(worktree_root),
-                "--response-timeout",
-                args.response_timeout,
-                "--verification-timeout",
-                args.verification_timeout,
-                "--max-follow-ups",
-                str(args.max_follow_ups),
-                "--follow-up-cooldown",
-                args.follow_up_cooldown,
-                "--repair-policy",
-                args.repair_policy,
-                "--lease-name",
-                args.lease_name,
-            ]
-        )
-        optional_values = {
-            "--control-namespace": args.control_namespace,
-            "--application": args.application,
-            "--source-commit": args.source_commit,
-            "--deployed-commit": args.deployed_commit,
-            "--repository-pvc-subpath": args.repository_pvc_subpath,
-            "--duration": args.duration,
-        }
-        if args.exit_after_closure:
-            command.append("--exit-after-closure")
-        if getattr(args, "supervise", False) and not getattr(args, "controller_update_rollout", False):
-            command.append("--restart-after-closure")
-        if prober_binary is not None:
-            optional_values["--prober-binary"] = str(prober_binary)
-            optional_values["--prober-image"] = args.prober_image
-        for flag, value in optional_values.items():
-            if value:
-                command.extend([flag, value])
+        config_path = workspace.path / "controller-config.json"
+        config_path.write_text(to_canonical_json(config), encoding="utf-8")
+        command = [str(binary), "--config", str(config_path)]
         completed = subprocess.run(command, cwd=workspace.path, check=False)
         if args.keep_workdir:
             print(f"kept controller build workspace: {workspace.path}", file=sys.stderr)

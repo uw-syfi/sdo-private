@@ -67,7 +67,7 @@ include = [
 
 [tool.ruff]
 line-length = 120
-exclude = ["apps/", "bench/", "exp/", "third_party/"]
+exclude = ["apps/", "bench/", "exp/", "third_party/", "sdo/contracts/_gen/"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -80,6 +80,9 @@ ignore = ["SIM117", "SIM105", "SIM108", "PT009"]
 [tool.ruff.lint.per-file-ignores]
 # One-off experiment analysis scripts: hard-coded run paths and ad hoc table formatting.
 "benchmarks/sregym/experiments/*/*.py" = ["E501", "E741", "E401", "C408", "C416", "SIM115", "PERF401", "FURB167", "F401", "I001"]
+# The proto facade must insert the generated-code root on sys.path before importing
+# the generated modules, so those imports are intentionally not at the top.
+"sdo/contracts/proto.py" = ["E402", "I001"]
 
 [tool.coverage.run]
 source = ["sdo", "controller"]

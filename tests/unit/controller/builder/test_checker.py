@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -168,6 +169,48 @@ def test_build_workspace_generates_registration_without_mutating_app_go_mod(tmp_
         assert "runtime.Run(generated.All())" in generated_main
 
     assert app_go_mod.read_text(encoding="utf-8") == original_go_mod
+
+
+def test_build_workspace_replaces_the_contracts_module_when_present(tmp_path: Path) -> None:
+    # Go does not honor a dependency's own replace directives, so the runtime
+    # module's `replace sdo.dev/controller/contracts => ../contracts` is ignored
+    # when runtime is a workspace dependency. The synthesized workspace (the main
+    # module) must replace contracts itself or `go mod tidy` tries to fetch
+    # sdo.dev/controller/contracts and the whole validation fails.
+    app_root = tmp_path / "app"
+    tool_root = tmp_path / "sdo"
+    _write_app_diagnostics(app_root)
+    _write_tool_root(tool_root)
+    contracts_dir = tool_root / "controller" / "contracts"
+    contracts_dir.mkdir(parents=True)
+
+    config = BuildWorkspaceConfig(
+        app_root=app_root,
+        sdk_dir=tool_root / "controller" / "sdk",
+        core_dir=tool_root / "controller" / "core",
+    )
+    with BuildWorkspace.create(config) as workspace:
+        workspace_go_mod = (workspace.path / "go.mod").read_text(encoding="utf-8")
+
+    assert "require sdo.dev/controller/contracts v0.0.0" in workspace_go_mod
+    assert f"replace sdo.dev/controller/contracts => {contracts_dir}" in workspace_go_mod
+
+
+def test_build_workspace_omits_contracts_replace_when_absent(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    tool_root = tmp_path / "sdo"
+    _write_app_diagnostics(app_root)
+    _write_tool_root(tool_root)
+
+    config = BuildWorkspaceConfig(
+        app_root=app_root,
+        sdk_dir=tool_root / "controller" / "sdk",
+        core_dir=tool_root / "controller" / "core",
+    )
+    with BuildWorkspace.create(config) as workspace:
+        workspace_go_mod = (workspace.path / "go.mod").read_text(encoding="utf-8")
+
+    assert "sdo.dev/controller/contracts" not in workspace_go_mod
 
 
 def test_build_workspace_can_limit_an_authoring_check_to_one_detector(tmp_path: Path) -> None:
@@ -485,6 +528,7 @@ prev=""
 for a in "$@"; do
   if [ "$prev" = "-o" ]; then
     printf '#!/usr/bin/env bash\\nprintf "%%s\\n" "$*" > "$SDO_CONTROLLER_LOG"\\n' > "$a"
+    printf 'if [ "$1" = "--config" ]; then cat "$2" >> "$SDO_CONTROLLER_LOG"; fi\\n' >> "$a"
     chmod +x "$a"
   fi
   prev="$a"
@@ -528,18 +572,26 @@ done
     calls = [line.split("|", maxsplit=1)[1] for line in calls_log.read_text(encoding="utf-8").splitlines()]
     assert calls[0] == "mod tidy"
     assert calls[1].startswith("build -buildvcs=false -o ")
-    argv = controller_log.read_text(encoding="utf-8")
-    assert "--dispatcher-mode job" in argv
-    assert (
-        f"--dispatcher {os.sys.executable} --dispatcher-arg -m --dispatcher-arg sdo.agent_runtime.responder.job" in argv
-    )
-    assert f"--broker {os.sys.executable} --broker-arg -m --broker-arg sdo.agent_runtime.responder.broker_cli" in argv
-    assert f"--app-root {app_root}" in argv
-    assert f"--broker-worktree-root {tmp_path / 'workspace' / 'worktrees'}" in argv
-    assert "--verification-timeout 90s" in argv
-    assert "--max-follow-ups 3" in argv
-    assert "--follow-up-cooldown 45s" in argv
-    assert "--repair-policy recorded-actions" in argv
+    # Seam 3: the controller is launched with a single protojson ControllerConfig
+    # via --config, not a flattened flag list. The fake controller echoes its argv
+    # on the first line and the config file contents after it.
+    launch = controller_log.read_text(encoding="utf-8")
+    argv_line, _, config_text = launch.partition("\n")
+    argv = argv_line.split()
+    assert argv[0] == "--config"
+    assert len(argv) == 2  # argv is exactly: --config <path>
+    config = json.loads(config_text)
+    assert config["dispatcher_mode"] == "job"
+    assert config["dispatcher"] == os.sys.executable
+    assert config["dispatcher_args"] == ["-m", "sdo.agent_runtime.responder.job"]
+    assert config["broker"] == os.sys.executable
+    assert config["broker_args"][:2] == ["-m", "sdo.agent_runtime.responder.broker_cli"]
+    assert config["app_root"] == str(app_root)
+    assert config["broker_worktree_root"] == str(tmp_path / "workspace" / "worktrees")
+    assert config["verification_timeout"] == "90s"
+    assert config["max_follow_ups"] == 3
+    assert config["follow_up_cooldown"] == "45s"
+    assert config["repair_policy"] == "recorded-actions"
 
 
 def test_seed_go_cache_copies_trusted_image_cache(
@@ -763,9 +815,12 @@ def test_check_cli_supervised_controller_relaunches_after_each_closure(
     _write_app_diagnostics(app_root)
     _write_tool_root(tool_root)
     runs_log = tmp_path / "runs.log"
+    configs_log = tmp_path / "configs.log"
     fake_go = tmp_path / "go"
     # The fake controller acknowledges one closure (exit 0), then fails (exit 3)
     # so the supervisor loop terminates and the test can inspect both launches.
+    # runs_log keeps one argv line per launch (for the closure-count logic); the
+    # --config payload of each launch is appended to configs_log, delimiter-framed.
     fake_go.write_text(
         """#!/usr/bin/env bash
 set -euo pipefail
@@ -775,6 +830,7 @@ for a in "$@"; do
     cat > "$a" <<'SCRIPT'
 #!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$SDO_RUNS_LOG"
+if [ "$1" = "--config" ]; then printf '===CONFIG===\\n' >> "$SDO_CONFIGS_LOG"; cat "$2" >> "$SDO_CONFIGS_LOG"; fi
 if [ "$(wc -l < "$SDO_RUNS_LOG")" -ge 2 ]; then exit 3; fi
 exit 0
 SCRIPT
@@ -789,6 +845,7 @@ done
     monkeypatch.setenv("SDO_CONTROLLER_TOOL_ROOT", str(tool_root))
     monkeypatch.setenv("SDO_CONTROLLER_GO", str(fake_go))
     monkeypatch.setenv("SDO_RUNS_LOG", str(runs_log))
+    monkeypatch.setenv("SDO_CONFIGS_LOG", str(configs_log))
 
     exit_code = check_main(
         [
@@ -815,10 +872,15 @@ done
     runs = runs_log.read_text(encoding="utf-8").splitlines()
     assert len(runs) == 2
     for argv in runs:
-        assert "--restart-after-closure" in argv
-        assert "--exit-after-closure" not in argv
-        assert "--control-namespace demo-sdo" in argv
-        assert "--namespace demo" in argv
+        assert argv.split()[0] == "--config"
+    blocks = [block for block in configs_log.read_text(encoding="utf-8").split("===CONFIG===\n") if block.strip()]
+    assert len(blocks) == 2
+    for block in blocks:
+        config = json.loads(block)
+        assert config["restart_after_closure"] is True
+        assert "exit_after_closure" not in config  # omitted when false
+        assert config["control_namespace"] == "demo-sdo"
+        assert config["namespace"] == "demo"
     assert '"controller_supervisor": "relaunch"' in capsys.readouterr().out
 
 

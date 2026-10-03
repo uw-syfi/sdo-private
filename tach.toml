@@ -41,7 +41,13 @@ depends_on = []
 
 [[modules]]
 path = "controller.builder"
-depends_on = []
+# Seam 3: check_cli._controller_once builds the controller launch config from the
+# shared ControllerConfig proto. The import is function-scoped (it only runs in
+# the runtime image, which has sdo; the validator image has only controller/ and
+# never runs _controller_once) and enforced by
+# tests/unit/controller/builder/test_no_module_level_sdo_import.py. sdo.contracts
+# is pure generated/Pydantic data models with no onward deps.
+depends_on = ["sdo.contracts"]
 
 [[modules]]
 path = "sdo.contracts"

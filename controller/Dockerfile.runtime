@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.24.5-bookworm@sha256:ef8c5c733079ac219c77edab604c425d748c740d8699530ea6aced9de79aea40 AS go-runtime
+FROM golang:1.26.8-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d AS go-runtime
 WORKDIR /opt/sdo
 # Seed for the controller's in-pod detector build. The runtime has no C
 # compiler, so Go builds there with cgo off; cache keys include that setting.
@@ -9,6 +9,10 @@ ENV GOCACHE=/go/build-cache \
 COPY controller/sdk ./controller/sdk
 COPY controller/core ./controller/core
 COPY controller/runtime ./controller/runtime
+# The runtime module requires the generated proto-contracts module via a
+# relative replace (../contracts); copy it so the in-pod detector build can
+# resolve it without a network fetch.
+COPY controller/contracts ./controller/contracts
 COPY controller/builder ./controller/builder
 RUN cd controller/sdk && go mod download all
 RUN cd controller/core && go mod download all

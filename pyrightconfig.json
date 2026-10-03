@@ -1,6 +1,7 @@
 {
   "include": ["sdo", "controller", "benchmarks", "libs"],
-  "exclude": ["apps/", "benchmarks/sregym/analysis/", ".venv/", ".claude/"],
+  "exclude": ["apps/", "benchmarks/sregym/analysis/", ".venv/", ".claude/", "sdo/contracts/_gen/"],
+  "extraPaths": ["sdo/contracts/_gen"],
   "typeCheckingMode": "standard",
   "pythonVersion": "3.12",
   "venvPath": ".",

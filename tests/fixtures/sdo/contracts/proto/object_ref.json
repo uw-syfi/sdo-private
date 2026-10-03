@@ -1,0 +1,6 @@
+{
+  "api_version": "apps/v1",
+  "kind": "Deployment",
+  "name": "frontend",
+  "namespace": "hotel-reservation"
+}

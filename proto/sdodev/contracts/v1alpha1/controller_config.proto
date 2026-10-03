@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+// ControllerConfig is the controller's own launch configuration: the one typed
+// object the launcher populates (serialized once, mounted) and the controller
+// reads, replacing the hand-mirrored argv-flag boundary between the Python
+// launcher and the controller entry point (docs/seam-contracts-decisions.md,
+// seam 3). A flag the launcher sets that the controller does not define used to
+// crash every controller pod with "unrecognized arguments" (the
+// --closeout-state-gate drift); with one shared message a missing field is a
+// build error instead.
+//
+// This is distinct from the in-process runtime.ControllerConfig (detector
+// thresholds, intervals), which the controller derives from this launch config.
+// Serialized as protojson like every other contract.
+package sdodev.contracts.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+
+option go_package = "sdo.dev/controller/contracts/gen/sdodev/contracts/v1alpha1;contractsv1alpha1";
+
+message ControllerConfig {
+  // Observation and identity.
+  string namespace = 1 [(buf.validate.field).string.min_len = 1];
+  string control_namespace = 2;
+  string app_root = 3 [(buf.validate.field).string.min_len = 1];
+  string application = 4;
+  string source_commit = 5;
+  string deployed_commit = 6;
+
+  // Responder dispatch.
+  string dispatcher = 7 [(buf.validate.field).string.min_len = 1];
+  string dispatcher_mode = 8 [(buf.validate.field).string = {in: ["job", "local"]}];
+  repeated string dispatcher_args = 9;
+  string responder_image = 10;
+  string repository_pvc = 11;
+  string repository_mount_path = 12;
+  string repository_pvc_subpath = 13;
+  string responder_credentials_secret = 14;
+  repeated string responder_env = 15;
+
+  // Trusted incident broker.
+  string broker = 16;
+  string broker_worktree_root = 17;
+  repeated string broker_args = 18;
+
+  // Telemetry.
+  string firing_telemetry_path = 19;
+
+  // Timing and policy.
+  google.protobuf.Duration duration = 20;
+  google.protobuf.Duration response_timeout = 21;
+  google.protobuf.Duration verification_timeout = 22;
+  int32 max_follow_ups = 23 [(buf.validate.field).int32.gte = 0];
+  google.protobuf.Duration follow_up_cooldown = 24;
+  string repair_policy = 25 [(buf.validate.field).string = {in: ["commit", "recorded-actions"]}];
+
+  // Leader election.
+  string lease_name = 26;
+  google.protobuf.Duration lease_duration = 27;
+  string identity = 28;
+
+  // Lifecycle. Non-zero controller defaults (synthetic_traffic,
+  // clean_responder_helpers, state_baseline are true) use `optional` so an unset
+  // field keeps the controller default rather than flipping to false.
+  bool exit_after_closure = 29;
+  bool restart_after_closure = 30;
+  string maintenance_configmap = 31;
+  google.protobuf.Duration maintenance_poll_interval = 32;
+  google.protobuf.Duration resume_sync_timeout = 33;
+  optional bool synthetic_traffic = 34;
+  google.protobuf.Duration synthetic_traffic_warmup = 35;
+  string prober_binary = 36;
+  string prober_image = 37;
+  string prober_url = 38;
+  optional bool clean_responder_helpers = 39;
+  optional bool state_baseline = 40;
+}
