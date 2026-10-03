@@ -119,6 +119,12 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		"detector firing telemetry JSONL stream; defaults to <repository-mount-path>/.sdo-runtime/telemetry/detector-firings.jsonl "+
 			"in job mode and to disabled in local mode; \"off\" disables it",
 	)
+	lifecyclePath := flags.String(
+		"lifecycle-telemetry-path",
+		"",
+		"incident lifecycle telemetry JSONL stream; defaults to <repository-mount-path>/.sdo-runtime/telemetry/lifecycle-events.jsonl "+
+			"in job mode and to disabled in local mode; \"off\" disables it",
+	)
 	duration := flags.Duration("duration", 0, "bounded controller duration; zero runs until cancellation")
 	responseTimeout := flags.Duration("response-timeout", 30*time.Minute, "incident responder timeout")
 	verificationTimeout := flags.Duration(
@@ -381,6 +387,9 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		return fmt.Errorf("restore controller state: %w", err)
 	}
 	if err := attachFiringTelemetry(controller, *telemetryPath, *dispatcherMode, *repositoryMountPath); err != nil {
+		fmt.Fprintln(stderr, err)
+	}
+	if err := attachLifecycleTelemetry(controller, *lifecyclePath, *dispatcherMode, *repositoryMountPath); err != nil {
 		fmt.Fprintln(stderr, err)
 	}
 	if *exitAfterClosure && controller.LastAcknowledgedIncidentID() != "" {
@@ -793,6 +802,29 @@ func attachFiringTelemetry(controller *Controller, path string, dispatcherMode s
 		}
 	}
 	controller.SetFiringSink(sink)
+	return nil
+}
+
+// attachLifecycleTelemetry connects the durable incident lifecycle stream. Like
+// the firing stream it is observational, so a stream that cannot be opened is
+// reported and skipped rather than stopping the controller.
+func attachLifecycleTelemetry(controller *Controller, path string, dispatcherMode string, mountPath string) error {
+	if path == "off" || (path == "" && dispatcherMode != "job") {
+		return nil
+	}
+	if path == "" {
+		path = filepath.Join(mountPath, ".sdo-runtime", "telemetry", "lifecycle-events.jsonl")
+	}
+	sink, err := NewFileLifecycleSink(path, DefaultLifecycleStreamBytes)
+	if err != nil {
+		return fmt.Errorf("incident lifecycle telemetry disabled: %w", err)
+	}
+	if !controller.RestoredFromState() {
+		if err := sink.StartFresh(); err != nil {
+			return fmt.Errorf("incident lifecycle telemetry disabled: %w", err)
+		}
+	}
+	controller.SetLifecycleSink(sink)
 	return nil
 }
 

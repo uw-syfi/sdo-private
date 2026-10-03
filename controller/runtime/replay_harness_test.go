@@ -52,10 +52,11 @@ const replayFixtureRoot = "testdata/replay"
 // the closure and state are optional so a fixture can freeze whatever the
 // source run durably recorded.
 const (
-	replayFiringsFile = "detector-firings.jsonl"
-	replayClosureFile = "closure.json"
-	replayStateFile   = "state.json"
-	replayMetaFile    = "meta.json"
+	replayFiringsFile   = "detector-firings.jsonl"
+	replayLifecycleFile = "lifecycle-events.jsonl"
+	replayClosureFile   = "closure.json"
+	replayStateFile     = "state.json"
+	replayMetaFile      = "meta.json"
 )
 
 // replayMeta is a fixture's provenance and scrub record. It documents where the
@@ -70,12 +71,13 @@ type replayMeta struct {
 
 // replayFixture is one recorded incident frozen on disk.
 type replayFixture struct {
-	name    string
-	dir     string
-	firings []FiringRecord
-	closure *IncidentClosure
-	state   *RuntimeState
-	meta    replayMeta
+	name      string
+	dir       string
+	firings   []FiringRecord
+	lifecycle []LifecycleEvent
+	closure   *IncidentClosure
+	state     *RuntimeState
+	meta      replayMeta
 }
 
 // loadReplayFixtures scans the fixture root and loads every incident directory.
@@ -110,6 +112,7 @@ func loadReplayFixture(t *testing.T, dir string, name string) replayFixture {
 		t.Fatalf("fixture %s: %s is missing or empty", name, replayFiringsFile)
 	}
 	fixture := replayFixture{name: name, dir: dir, firings: firings}
+	fixture.lifecycle = readLifecycleStream(t, filepath.Join(dir, replayLifecycleFile))
 	if closure, ok := readReplayJSON[IncidentClosure](t, filepath.Join(dir, replayClosureFile)); ok {
 		fixture.closure = &closure
 	}
@@ -164,6 +167,11 @@ func replayIncident(t *testing.T, fx replayFixture) {
 	t.Helper()
 	t.Run("firing-stream-durable", func(t *testing.T) { replayFiringStreamDurable(t, fx) })
 	t.Run("event-id-attribution", func(t *testing.T) { replayEventIDAttribution(t, fx) })
+	if len(fx.lifecycle) > 0 {
+		t.Run("lifecycle-stream-durable", func(t *testing.T) { replayLifecycleStreamDurable(t, fx) })
+		t.Run("lifecycle-event-id-attribution", func(t *testing.T) { replayLifecycleEventIDAttribution(t, fx) })
+		t.Run("incident-timeline-reconstruction", func(t *testing.T) { replayIncidentTimeline(t, fx) })
+	}
 	if fx.closure != nil {
 		t.Run("closure-analysis-booleans", func(t *testing.T) { replayClosureAnalysis(t, fx) })
 	}
@@ -363,6 +371,158 @@ func TestReplayStateRoundTripContract(t *testing.T) {
 		t.Fatalf("representative state must be valid: %v", err)
 	}
 	replayStateRoundTrip(t, replayFixture{name: "state-round-trip-contract", state: &state})
+}
+
+// replayLifecycleStreamDurable re-emits the recorded lifecycle stream through
+// the production FileLifecycleSink and asserts the durable result is the record,
+// then that a restart over the same file replays every event idempotently and
+// leaves the stream byte-for-byte unchanged. This pins the crash-replay contract
+// the sink documents: RecordLifecycle is idempotent in EventID.
+func replayLifecycleStreamDurable(t *testing.T, fx replayFixture) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), replayLifecycleFile)
+	sink, err := NewFileLifecycleSink(path, DefaultLifecycleStreamBytes)
+	if err != nil {
+		t.Fatalf("new lifecycle sink: %v", err)
+	}
+	for _, event := range fx.lifecycle {
+		if err := sink.RecordLifecycle(event); err != nil {
+			t.Fatalf("record %s: %v", event.EventID, err)
+		}
+	}
+	got := readLifecycleStream(t, path)
+	assertLifecycleEventsEqual(t, fx.lifecycle, got)
+
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read durable lifecycle stream: %v", err)
+	}
+	restart, err := NewFileLifecycleSink(path, DefaultLifecycleStreamBytes)
+	if err != nil {
+		t.Fatalf("restart lifecycle sink: %v", err)
+	}
+	for _, event := range fx.lifecycle {
+		if err := restart.RecordLifecycle(event); err != nil {
+			t.Fatalf("replay event %s after restart: %v", event.EventID, err)
+		}
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read durable lifecycle stream after restart: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("replay after restart mutated the lifecycle stream (%d -> %d bytes)", len(before), len(after))
+	}
+}
+
+// replayLifecycleEventIDAttribution re-derives every lifecycle event's id from
+// its own durable content -- the incident id, the phase, and (for a supersede)
+// the superseding child -- and asserts it equals the recorded id and is unique
+// across the stream. The id is content-addressed, so a crashed controller
+// re-emitting a transition reproduces the identical id and the sink drops it.
+func replayLifecycleEventIDAttribution(t *testing.T, fx replayFixture) {
+	t.Helper()
+	seen := map[string]LifecycleEvent{}
+	for _, event := range fx.lifecycle {
+		want := lifecycleEventID(event.IncidentID, string(event.Event))
+		if event.Event == PhaseSuperseded {
+			want = lifecycleEventID(event.IncidentID, string(event.Event), event.SupersededBy)
+		}
+		if want != event.EventID {
+			t.Fatalf("lifecycle id for %s/%s mismatch: recorded %s, re-derived %s",
+				event.IncidentID, event.Event, event.EventID, want)
+		}
+		if prior, dup := seen[event.EventID]; dup {
+			t.Fatalf("lifecycle id %s is not unique: %s/%s and %s/%s",
+				event.EventID, prior.IncidentID, prior.Event, event.IncidentID, event.Event)
+		}
+		seen[event.EventID] = event
+	}
+}
+
+// replayIncidentTimeline reconstructs each incident's timeline from the frozen
+// lifecycle and firing streams and asserts the reconstruction is deterministic
+// (stable under a re-run), scoped to the incident, and non-decreasing in time.
+func replayIncidentTimeline(t *testing.T, fx replayFixture) {
+	t.Helper()
+	incidentIDs := map[string]struct{}{}
+	for _, event := range fx.lifecycle {
+		if event.IncidentID != "" {
+			incidentIDs[event.IncidentID] = struct{}{}
+		}
+	}
+	for incidentID := range incidentIDs {
+		timeline := ReconstructIncidentTimeline(incidentID, fx.lifecycle, fx.firings)
+		if len(timeline) == 0 {
+			t.Fatalf("incident %s reconstructed to an empty timeline", incidentID)
+		}
+		again := ReconstructIncidentTimeline(incidentID, fx.lifecycle, fx.firings)
+		if len(again) != len(timeline) {
+			t.Fatalf("incident %s reconstruction is not deterministic", incidentID)
+		}
+		for index := range timeline {
+			if timeline[index].EventID != again[index].EventID {
+				t.Fatalf("incident %s reconstruction order is not stable at %d", incidentID, index)
+			}
+			if index > 0 && timeline[index].At.Before(timeline[index-1].At) {
+				t.Fatalf("incident %s timeline goes backwards in time at %d", incidentID, index)
+			}
+			switch {
+			case timeline[index].Lifecycle != nil && timeline[index].Lifecycle.IncidentID != incidentID:
+				t.Fatalf("incident %s timeline leaked lifecycle event for %s", incidentID, timeline[index].Lifecycle.IncidentID)
+			case timeline[index].Firing != nil && timeline[index].Firing.IncidentID != incidentID:
+				t.Fatalf("incident %s timeline leaked firing for %s", incidentID, timeline[index].Firing.IncidentID)
+			}
+		}
+	}
+}
+
+// assertLifecycleEventsEqual asserts two lifecycle streams are equal
+// event-by-event in order, reporting the first divergence.
+func assertLifecycleEventsEqual(t *testing.T, want []LifecycleEvent, got []LifecycleEvent) {
+	t.Helper()
+	if len(want) != len(got) {
+		t.Fatalf("lifecycle stream length mismatch: recorded %d, durable %d", len(want), len(got))
+	}
+	for index := range want {
+		if !reflect.DeepEqual(want[index], got[index]) {
+			t.Fatalf("lifecycle event %d diverged after a durable round-trip:\n recorded %+v\n durable  %+v",
+				index, want[index], got[index])
+		}
+	}
+}
+
+// TestReplayLifecycleContract exercises the lifecycle replay dimensions
+// directly. No stored run exposes a frozen lifecycle stream yet, so no golden
+// fixture lights these dimensions up today; this self-test pins them against a
+// representative incident (open through acknowledgment, plus a superseded
+// parent) so the shipped path is covered. When a real lifecycle stream is ever
+// captured, dropping it in as lifecycle-events.jsonl replays here unchanged.
+func TestReplayLifecycleContract(t *testing.T) {
+	at := func(sec int64) time.Time { return time.Unix(1_790_931_114+sec, 0).UTC() }
+	lifecycle := []LifecycleEvent{
+		{SchemaVersion: LifecycleSchemaVersion, EventID: lifecycleEventID("demo-1", string(PhaseOpened)),
+			Event: PhaseOpened, IncidentID: "demo-1", Application: "demo", Namespace: "demo", RecordedAt: at(0)},
+		{SchemaVersion: LifecycleSchemaVersion, EventID: lifecycleEventID("demo-1", string(PhaseSuperseded), "demo-1-f1"),
+			Event: PhaseSuperseded, IncidentID: "demo-1", Application: "demo", Namespace: "demo",
+			SupersededBy: "demo-1-f1", Reason: "follow_up", RecordedAt: at(1)},
+		{SchemaVersion: LifecycleSchemaVersion, EventID: lifecycleEventID("demo-1", string(PhaseWorktreeReleased)),
+			Event: PhaseWorktreeReleased, IncidentID: "demo-1", Application: "demo", Namespace: "demo", RecordedAt: at(2)},
+		{SchemaVersion: LifecycleSchemaVersion, EventID: lifecycleEventID("demo-1-f1", string(PhaseOpened)),
+			Event: PhaseOpened, IncidentID: "demo-1-f1", Application: "demo", Namespace: "demo",
+			ParentIncidentID: "demo-1", FollowUpAttempt: 1, RecordedAt: at(1)},
+		{SchemaVersion: LifecycleSchemaVersion, EventID: lifecycleEventID("demo-1-f1", string(PhaseAcknowledged)),
+			Event: PhaseAcknowledged, IncidentID: "demo-1-f1", Application: "demo", Namespace: "demo",
+			OutcomeCommit: "outcome-sha", RecordedAt: at(3)},
+	}
+	firings := []FiringRecord{
+		{SchemaVersion: FiringSchemaVersion, EventID: firingEventID("demo-1-f1", "health", "fp", string(FiringBatched)),
+			Event: FiringBatched, IncidentID: "demo-1-f1", RecordedAt: at(1)},
+	}
+	fx := replayFixture{name: "lifecycle-contract", lifecycle: lifecycle, firings: firings}
+	replayLifecycleStreamDurable(t, fx)
+	replayLifecycleEventIDAttribution(t, fx)
+	replayIncidentTimeline(t, fx)
 }
 
 // assertFiringRecordsEqual asserts two firing streams are equal record-by-record
