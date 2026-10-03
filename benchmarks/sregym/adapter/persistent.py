@@ -54,6 +54,7 @@ from sdo.controller_install import (
     start_repository_sync,
     stop_repository_sync,
 )
+from sdo.operational_memory import incident_worktree_dirname
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -73,6 +74,15 @@ CONTROLLER_LOGS_SUBDIR = Path(RUNTIME_ARTIFACTS_DIRNAME) / "controller_logs"
 POLL_SECONDS = 1.0
 MAINTENANCE_ACK_TIMEOUT_SECONDS = 600.0
 DRAIN_TIMEOUT_SECONDS = 3600.0
+# After the reflection drain returns, the controller's asynchronous close-out may
+# still be settling the two volatile signals the strict receipt samples: the
+# durable responder result reaching a terminal ``completed`` status, and the
+# shared worktree directory draining. The relaunch-after-closure predicate can
+# fire on an intermediate relaunch on composite incidents (follow-ups and closure
+# retries), so the gate must wait for these to settle before it samples, or a
+# solved incident is rejected. Bounded so a genuinely unsettled receipt still
+# rejects promptly.
+CLOSEOUT_SETTLE_TIMEOUT_SECONDS = 120.0
 STAGE_END_EVIDENCE_SCOPE = "stage-end snapshot; the drained strict receipt supersedes it"
 _ZERO_TIME = "0001-01-01T00:00:00Z"
 
@@ -240,6 +250,8 @@ class ClusterOps(Protocol):
 
     def collect_receipt(self, config: RuntimeConfig, incident_id: str, artifacts_dir: Path) -> dict[str, Any]: ...
 
+    def reap_orphan_worktrees(self, config: RuntimeConfig, keep_dirnames: set[str]) -> list[str]: ...
+
     def export_runtime_artifacts(self, config: RuntimeConfig, artifacts_dir: Path) -> dict[str, str | None]: ...
 
     def export_controller_logs(self, control_namespace: str, artifacts_dir: Path) -> None: ...
@@ -308,6 +320,45 @@ class KubectlClusterOps:
         start_repository_sync(config)
         try:
             return collect_production_receipt(config, incident_id, artifacts_dir)
+        finally:
+            stop_repository_sync(config)
+
+    def reap_orphan_worktrees(self, config: RuntimeConfig, keep_dirnames: set[str]) -> list[str]:
+        """Remove worktrees under the shared root whose directory is not in *keep_dirnames*.
+
+        The caller guarantees the controller is quiescent, so every worktree
+        other than the kept ones belongs to a terminal incident. Returns the
+        worktree paths that remain after the reap.
+        """
+
+        control = config.control_namespace
+        start_repository_sync(config)
+        try:
+            listing = kubectl(
+                [
+                    "exec",
+                    "sdo-repository-sync",
+                    "--",
+                    "find",
+                    "/workspace/worktrees",
+                    "-mindepth",
+                    "1",
+                    "-maxdepth",
+                    "1",
+                    "-print",
+                ],
+                namespace=control,
+            )
+            remaining: list[str] = []
+            for line in listing.stdout.splitlines():
+                path = line.strip()
+                if not path:
+                    continue
+                if path.rsplit("/", 1)[-1] in keep_dirnames:
+                    remaining.append(path)
+                    continue
+                kubectl(["exec", "sdo-repository-sync", "--", "rm", "-rf", "--", path], namespace=control)
+            return remaining
         finally:
             stop_repository_sync(config)
 
@@ -650,6 +701,89 @@ def collect_followup_incident(
     return resolution
 
 
+def _closeout_settled(receipt: dict[str, Any]) -> bool:
+    """Whether the two volatile close-out signals the strict receipt samples have settled.
+
+    ``completed`` is the durable responder result's terminal status and
+    ``remaining_worktrees`` is the shared worktree directory the controller drains
+    asynchronously at acknowledge. The reflection-drain predicate can return while
+    either is still settling on composite incidents, so the gate must not sample
+    until both are quiescent.
+    """
+
+    return receipt.get("completed") is True and receipt.get("remaining_worktrees") == []
+
+
+def _orphan_reap_keep_set(state: dict[str, Any], draining_incident_id: str) -> set[str] | None:
+    """Dirnames to keep when reaping orphan worktrees, or ``None`` to reap nothing.
+
+    Reaping is safe only when the single-incident controller has gone positively
+    quiescent with the draining incident its last acknowledged incident: no
+    incident open and no closure in flight. Any ambiguity -- an unreadable state,
+    an open incident, a closure (including a follow-up) still settling, or a
+    different last-acknowledged incident -- yields ``None`` so no worktree is
+    removed. When quiescent, only the draining incident's worktree (shared by its
+    follow-ups) is kept; every other worktree belongs to a terminal incident.
+    """
+
+    if not state:
+        return None
+    if state.get("incident_open") or state.get("pending_closure") is not None:
+        return None
+    if state.get("last_acknowledged_incident_id") != draining_incident_id:
+        return None
+    return {incident_worktree_dirname(draining_incident_id)}
+
+
+def _reap_orphan_worktrees(
+    ops: ClusterOps, config: RuntimeConfig, state: dict[str, Any], draining_incident_id: str
+) -> None:
+    """Reap worktrees leaked by terminal incidents, but only when positively safe.
+
+    A worktree is orphaned when its incident was prepared and then abandoned
+    before any closure, so ``acknowledge`` never reaped it (``release_incident``
+    is the source fix). The gate samples the shared worktree directory globally,
+    so a leaked worktree from an earlier incident rejects a later incident's
+    receipt. On a single-incident controller that has gone quiescent, the drain
+    completes the teardown the abandoned incident never did.
+
+    ``state`` is the controller state the reflection drain already sampled at
+    quiescence; the reap does not poll the controller again (an extra read is a
+    no-op in production but would advance the controller state machine a caller
+    is still driving).
+    """
+
+    keep = _orphan_reap_keep_set(state, draining_incident_id)
+    if keep is None:
+        return
+    ops.reap_orphan_worktrees(config, keep)
+
+
+def _collect_settled_receipt(
+    ops: ClusterOps,
+    config: RuntimeConfig,
+    incident_id: str,
+    receipt_dir: Path,
+    clock: Clock,
+    timeout: float = CLOSEOUT_SETTLE_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Collect the receipt once close-out has settled, or once the bounded wait elapses.
+
+    Re-samples the receipt until its volatile close-out signals settle so a solved
+    incident is not rejected because the asynchronous close-out had not finished.
+    A genuinely unsettled receipt (for example a responder that never reported
+    ``completed``) still falls through after ``timeout`` and is validated as-is, so
+    a real failure is reported promptly rather than hidden.
+    """
+
+    receipt = ops.collect_receipt(config, incident_id, receipt_dir)
+    deadline = clock.monotonic() + timeout
+    while not _closeout_settled(receipt) and clock.monotonic() < deadline:
+        clock.sleep(POLL_SECONDS)
+        receipt = ops.collect_receipt(config, incident_id, receipt_dir)
+    return receipt
+
+
 def drain_pending_incident(
     record: ControllerRecord,
     *,
@@ -671,19 +805,27 @@ def drain_pending_incident(
         return 0.0
     started = clock.monotonic()
     try:
-        _wait_for_reflection_drain(ops, record.control_namespace, pending.incident_id, timeout_seconds, clock)
+        drained_state = _wait_for_reflection_drain(
+            ops, record.control_namespace, pending.incident_id, timeout_seconds, clock
+        )
     except ClosureFailedError:
         # The controller log holds every broker rejection of the closure.
         ops.export_controller_logs(record.control_namespace, pending.receipt_dir)
         raise
-    waited = clock.monotonic() - started
     config = replace(
         runtime_config_from_payload(record.runtime_config),
         repository=repository,
         artifacts_dir=pending.receipt_dir,
         persistent=True,
     )
-    receipt = ops.collect_receipt(config, pending.incident_id, pending.receipt_dir)
+    # Complete the teardown an abandoned incident left behind, so its leaked
+    # worktree does not reject this solved incident's receipt. Safe-guarded: only
+    # when the controller is positively quiescent.
+    _reap_orphan_worktrees(ops, config, drained_state, pending.incident_id)
+    receipt = _collect_settled_receipt(ops, config, pending.incident_id, pending.receipt_dir, clock)
+    # The reflection-drain cost includes the wait for close-out to settle; neither
+    # is resolution time (both are excluded below).
+    waited = clock.monotonic() - started
     receipt.update(pending.stage_receipt)
     recovery = receipt.get("phase_timings_seconds", {}).get("operational_recovery")
     if "incident_resolution_seconds" not in receipt and isinstance(recovery, (int, float)):
@@ -1004,12 +1146,15 @@ def wait_for_maintenance_ack(
     raise PersistentControllerError(f"controller in {control!r} did not acknowledge maintenance {generation!r}")
 
 
-def _wait_for_reflection_drain(ops: ClusterOps, control: str, incident_id: str, timeout: float, clock: Clock) -> None:
+def _wait_for_reflection_drain(
+    ops: ClusterOps, control: str, incident_id: str, timeout: float, clock: Clock
+) -> dict[str, Any]:
     """Wait until the incident is acknowledged and the supervisor relaunched the controller.
 
     The supervisor relaunches only after compiling and rolling out any
     detector the reflection accepted, so the relaunch marks learned memory
-    as live.
+    as live. Returns the final controller state sampled at quiescence, so the
+    caller need not poll the controller again to decide whether to reap.
     """
 
     deadline = clock.monotonic() + timeout
@@ -1018,7 +1163,7 @@ def _wait_for_reflection_drain(ops: ClusterOps, control: str, incident_id: str, 
         _raise_if_closure_failed(state, incident_id)
         acknowledged = state.get("last_acknowledged_incident_id") == incident_id
         if acknowledged and _relaunched_after(_log_records(ops.controller_logs(control)), incident_id):
-            return
+            return state
         clock.sleep(POLL_SECONDS)
     raise PersistentControllerError(f"incident {incident_id!r} was not reflected and rolled out within {timeout:.0f}s")
 

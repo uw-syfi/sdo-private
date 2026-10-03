@@ -283,6 +283,10 @@ class BrokerLedger(BaseModel):
     ack_token: str | None = None
     acknowledged: bool = False
     cleaned: bool = False
+    # Set when a prepared incident was abandoned before it closed and its
+    # worktree was reaped by ``release_incident`` rather than ``acknowledge``.
+    # Defaulted for ledgers written before the release path existed.
+    released: bool = False
 
 
 class BrokerService:
@@ -477,6 +481,40 @@ class BrokerService:
                 self.worktrees.cleanup(receipt.incident_id)
                 ledger.cleaned = True
                 self._save(ledger)
+
+    def release_incident(self, incident_id: str) -> bool:
+        """Reap the worktree of a prepared incident that was abandoned before it closed.
+
+        The controller prepares an isolated worktree for every incident, but the
+        only worktree-cleanup path is :meth:`acknowledge` after a closure is
+        committed. An incident that is prepared and then cancelled or superseded
+        before a closure is ever processed therefore leaks its worktree. This is
+        the primitive the controller must call on such a cancel/supersede so the
+        worktree is reaped at the source.
+
+        It is deliberately conservative: it reaps only when the incident is
+        prepared but has **no closure in flight** and has **not** been
+        acknowledged, so it can never remove the worktree of an incident the
+        broker is still closing. Idempotent; returns whether a worktree was
+        reaped by this call.
+        """
+
+        with self._locked():
+            ledger = self._load(incident_id)
+            if ledger is None:
+                # Nothing was prepared (or it was already pruned): a no-op.
+                return False
+            if ledger.closure is not None or ledger.acknowledged:
+                # A closure is in flight or already acknowledged; acknowledge()
+                # owns this worktree's cleanup. Never reap a closing incident.
+                return False
+            reaped = not ledger.cleaned
+            if reaped:
+                self.worktrees.cleanup(incident_id)
+                ledger.cleaned = True
+            ledger.released = True
+            self._save(ledger)
+            return reaped
 
     def _outcome(self, closure: BrokerClosure, ledger: BrokerLedger) -> OutcomeRecord:
         result = closure.result

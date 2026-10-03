@@ -33,6 +33,10 @@ REPAIRS = [
 def _receipt(incident_id: str, *, warm: bool) -> dict[str, Any]:
     return {
         "incident_id": incident_id,
+        # The two volatile close-out signals the strict gate samples; a solved
+        # incident reports them settled, so the drain's settle wait returns at once.
+        "completed": True,
+        "remaining_worktrees": [],
         "usage": {"input_tokens": 300000, "cached_input_tokens": 250000, "output_tokens": 3000},
         "reflection_usage": {} if warm else {"input_tokens": 800000, "cached_input_tokens": 700000, "output_tokens": 9},
         "reflection_attempts": 0 if warm else 1,
@@ -62,6 +66,9 @@ class FakeOps:
     receipt_override: dict[str, Any] | None = None
     #: Reflection finishes before the driver's first poll sees the verified closure.
     reflect_before_first_poll: bool = False
+    #: Worktree directory names under the shared /workspace/worktrees root. Empty by
+    #: default, so there is nothing for the quiescent-drain reap to remove.
+    worktrees: set[str] = field(default_factory=set)
 
     def controller_pod(self, control_namespace: str) -> ControllerPod | None:
         return self.pods.get(control_namespace)
@@ -141,6 +148,10 @@ class FakeOps:
         if self.reject_receipts:
             receipt["completed"] = False
         return receipt
+
+    def reap_orphan_worktrees(self, config: RuntimeConfig, keep_dirnames: set[str]) -> list[str]:
+        self.worktrees = {name for name in self.worktrees if name in keep_dirnames}
+        return [f"/workspace/worktrees/{name}" for name in sorted(self.worktrees)]
 
     def export_runtime_artifacts(self, config: Any, artifacts_dir: Path) -> dict[str, str | None]:
         return {"directory": None, "error": None}

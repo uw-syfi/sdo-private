@@ -95,6 +95,10 @@ class FakeOps:
     incomplete: set[str] = field(default_factory=set)
     polls_until_reflected: dict[str, int] = field(default_factory=dict)
     stage_evidence_error: str | None = None
+    # Worktree directory names present under the shared /workspace/worktrees root.
+    # Empty by default, so a receipt reports remaining_worktrees=[] unless a test
+    # models a leftover (for example a terminal incident's leaked worktree).
+    worktrees: set[str] = field(default_factory=set)
 
     def controller_pod(self, control_namespace: str) -> ControllerPod | None:
         return self.pods.get(control_namespace)
@@ -193,7 +197,13 @@ class FakeOps:
         receipt = _receipt(incident_id)
         receipt["artifacts_dir"] = str(artifacts_dir)
         receipt["completed"] = incident_id not in self.incomplete
+        receipt["remaining_worktrees"] = [f"/workspace/worktrees/{name}" for name in sorted(self.worktrees)]
         return receipt
+
+    def reap_orphan_worktrees(self, config: RuntimeConfig, keep_dirnames: set[str]) -> list[str]:
+        self.events.append(("reap", tuple(sorted(keep_dirnames))))
+        self.worktrees = {name for name in self.worktrees if name in keep_dirnames}
+        return [f"/workspace/worktrees/{name}" for name in sorted(self.worktrees)]
 
     def export_runtime_artifacts(self, config: RuntimeConfig, artifacts_dir: Path) -> dict[str, str | None]:
         self.events.append(("stage_evidence", config.control_namespace))
@@ -534,7 +544,11 @@ def test_a_rejected_receipt_is_still_reported_to_a_caller_that_drains_one_incide
 
     with pytest.raises(ReceiptRejectedError, match="completed=true"):
         drain_pending_incident(
-            record, ops=ops, repository=tmp_path / "s0" / "application_workspace", drained_by="fastloop"
+            record,
+            ops=ops,
+            repository=tmp_path / "s0" / "application_workspace",
+            drained_by="fastloop",
+            clock=_clock(ops),
         )
 
 

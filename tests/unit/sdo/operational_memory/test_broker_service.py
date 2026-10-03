@@ -1645,3 +1645,43 @@ def test_broker_validator_stages_the_healthy_baseline_source_only_when_given(tmp
     assert parsed.healthy_baseline_source == tmp_path
     with pytest.raises(ValueError, match="healthy_baseline_dir"):
         _memory_validator("local", healthy_baseline_source=tmp_path)
+
+
+def test_release_incident_reaps_an_abandoned_prepared_worktree(tmp_path: Path) -> None:
+    # A prepared incident that is cancelled before any closure must not leak its
+    # worktree: release_incident reaps it at the source.
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    service = _service(target, worktrees, AcceptRepairValidator())
+    workspace = service.prepare_incident("inc-abandoned-0001")
+    assert workspace.path.exists()
+
+    assert service.release_incident("inc-abandoned-0001") is True
+    assert not workspace.path.exists()
+    ledger = service.completion_state("inc-abandoned-0001")
+    assert ledger.released is True
+    assert ledger.cleaned is True
+
+    # Idempotent, and a no-op for an incident that was never prepared.
+    assert service.release_incident("inc-abandoned-0001") is False
+    assert service.release_incident("never-prepared-0002") is False
+
+
+def test_release_incident_never_reaps_a_closing_incident(tmp_path: Path) -> None:
+    # Once a closure has been processed, acknowledge() owns the worktree cleanup;
+    # release_incident must refuse so it can never remove a closing incident's work.
+    target = tmp_path / "target"
+    worktrees = tmp_path / "worktrees"
+    target.mkdir()
+    _write_memory(target)
+    _init_repository(target)
+    service = _service(target, worktrees, AcceptRepairValidator())
+    workspace = service.prepare_incident("inc-20260709-0001")
+    service.process_closure(_closure(workspace.path, workspace.base_commit))
+
+    assert service.release_incident("inc-20260709-0001") is False
+    assert workspace.path.exists()
+    assert service.completion_state("inc-20260709-0001").released is False
