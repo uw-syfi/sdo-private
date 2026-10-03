@@ -106,7 +106,7 @@ func lifecycleHealthDetector(id string, samples ...bool) *sequenceDetector {
 // streams reconstruct the incident's full timeline in order.
 func TestLifecycleStreamEmitsEveryTransitionOnce(t *testing.T) {
 	health := lifecycleHealthDetector("health", true, true, false, false, false, false)
-	controller, dispatcher, broker, lifecycle, firing, step := lifecycleController(t, health)
+	controller, dispatcher, _, lifecycle, firing, step := lifecycleController(t, health)
 	closed := make(chan IncidentClosure, 1)
 	controller.OnIncidentClosed = func(closure IncidentClosure) { closed <- closure }
 
@@ -190,7 +190,6 @@ func TestLifecycleStreamEmitsEveryTransitionOnce(t *testing.T) {
 		t.Fatalf("reconstructed timeline does not end at incident_acknowledged: %#v", last)
 	}
 	assertLifecycleTransportNeutral(t, lifecycle.events)
-	_ = broker
 }
 
 // TestLifecycleStreamRecordsSupersedeAndRelease drives a follow-up that
