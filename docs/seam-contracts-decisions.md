@@ -106,3 +106,28 @@ the controller owns its own *runtime config*.
 - `buf lint` + `buf breaking` in CI.
 - Each previously-fixed drift bug becomes a fixture (the ratchet).
 - Standard gates: `scripts/format_code.sh`, `scripts/check_errors.sh`, Go tests, `uv run pytest`.
+
+## Known follow-ups (post-merge, out of scope for the cutover)
+
+These are captured here deliberately rather than actioned in the cutover PR, to
+keep that PR scoped to the single-source-of-truth change.
+
+- **BSR remote-plugin rate-limiting during codegen.** `buf generate` resolves the
+  protovalidate plugin from the Buf Schema Registry (a *remote* plugin), which is
+  rate-limited; under `resource_exhausted: too many requests` the regen can abort
+  mid-run after deleting the vendored `sdo/contracts/_gen/buf/validate/validate_pb2.py[i]`,
+  leaving a dirty tree a careless `git add -A` would commit. Both the CI `proto
+  contracts` job and any contributor's local regen are exposed. Fix: vendor the
+  protovalidate plugin locally (as we already do for `protoc-gen-go`) or pin/cache
+  it, so `buf generate` cannot reach out mid-build. Until then, a rate-limited
+  regen is transient — re-run it, and never stage the transient deletions.
+- **Non-transitive Go `replace`.** The synthesized detector workspace and the image
+  builds must each re-declare `replace sdo.dev/controller/contracts => ../contracts`
+  because Go `replace` is not transitive (see `proto/README.md`). A `go.work`
+  workspace or publishing the contracts module would remove the duplication.
+- **Go toolchain pin.** `controller/runtime` requires `go 1.26` (via
+  `buf.build/go/protovalidate` v1.4.0 and its `golang.org/x/exp`); the controller
+  and validator images pin `golang:1.26.8-bookworm`. The CI Go jobs still request
+  `1.24.5` and rely on `GOTOOLCHAIN=auto` downloading 1.26 at job time — green but
+  non-deterministic; bump `actions/setup-go` to 1.26 for the runtime-compiling jobs
+  to make it explicit.
