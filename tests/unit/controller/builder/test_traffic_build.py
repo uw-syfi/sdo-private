@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -246,6 +247,7 @@ prev=""
 for a in "$@"; do
   if [ "$prev" = "-o" ]; then
     printf '#!/usr/bin/env bash\\nprintf "%%s\\n" "$*" > "$SDO_CONTROLLER_LOG"\\n' > "$a"
+    printf 'if [ "$1" = "--config" ]; then cat "$2" >> "$SDO_CONTROLLER_LOG"; fi\\n' >> "$a"
     chmod +x "$a"
   fi
   prev="$a"
@@ -288,6 +290,9 @@ done
     assert prober_build[0].split("|")[1] == "0"
     published = list((mount / ".sdo-prober").glob("*/sdo-prober"))
     assert len(published) == 1
-    argv = controller_log.read_text(encoding="utf-8")
-    assert f"--prober-binary {published[0]}" in argv
-    assert "--prober-image sdo-controller:v1" in argv
+    launch = controller_log.read_text(encoding="utf-8")
+    argv_line, _, config_text = launch.partition("\n")
+    assert argv_line.split()[0] == "--config"
+    config = json.loads(config_text)
+    assert config["prober_binary"] == str(published[0])
+    assert config["prober_image"] == "sdo-controller:v1"
