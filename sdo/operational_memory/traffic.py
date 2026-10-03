@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Final
 
 from google.protobuf import json_format
 
-from sdo.contracts.proto import TrafficLink, TrafficSLO, TrafficWorkload, TrafficWorkloadScenario
+from sdo.contracts import TrafficLink, TrafficSLO, TrafficWorkload, TrafficWorkloadScenario
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

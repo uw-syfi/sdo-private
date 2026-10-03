@@ -19,7 +19,7 @@ import pytest
 import yaml
 from google.protobuf import json_format
 
-from sdo.contracts.proto import TrafficWorkload
+from sdo.contracts import TrafficWorkload
 from sdo.operational_memory.traffic import TrafficWorkloadError, load_traffic_workload, scenario_slo
 
 FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "hotel_reservation" / "traffic" / "workloads"
