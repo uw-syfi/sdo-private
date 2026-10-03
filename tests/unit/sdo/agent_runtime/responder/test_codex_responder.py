@@ -13,7 +13,7 @@ from sdo.agent_runtime.responder.codex import (
     _responder_prompt,
     execute_incident,
 )
-from sdo.contracts import IncidentRequest, IncidentResult, PriorOutcomeEvidence
+from sdo.contracts import ConfirmedRootCause, IncidentRequest, IncidentResult, PriorOutcomeEvidence, RootCauseEvidence
 from tests.structured_turns import ScriptedAgent, failure
 from tests.unit.sdo.operational_memory.test_memory import _write_memory
 
@@ -360,6 +360,63 @@ def test_prompt_requires_live_evidence_for_every_root_cause() -> None:
     assert "static_context" in prompt
     assert "explained_detectors" in prompt
     assert "must clear after your fix" in prompt
+
+
+def test_prompt_states_the_cause_admissibility_bar_by_default() -> None:
+    prompt = _responder_prompt(IncidentRequest.model_validate_json(_fixture("incident_request.json")))
+
+    assert "Admissibility of a confirmed root cause" in prompt
+    assert "benign drift" in prompt
+    assert "record it in static_context, never in confirmed_root_causes" in prompt
+    assert "weakly evidenced; do not assert it" in prompt
+    # Problem-agnostic: no injected-fault vocabulary leaks into the bar.
+    assert "SREGym" not in prompt
+    assert "LOG_LEVEL" not in prompt
+
+
+def test_off_mode_keeps_the_prompt_free_of_the_admissibility_bar(monkeypatch) -> None:
+    monkeypatch.setenv("SDO_CAUSE_ADMISSIBILITY", "off")
+
+    prompt = _responder_prompt(IncidentRequest.model_validate_json(_fixture("incident_request.json")))
+
+    assert "Admissibility of a confirmed root cause" not in prompt
+
+
+def test_execute_incident_withholds_a_weakly_evidenced_cause() -> None:
+    request = IncidentRequest.model_validate_json(_fixture("incident_request.json"))
+    result = IncidentResult.model_validate_json(_fixture("incident_result.json"))
+    weak = result.confirmed_root_causes[0].model_copy(
+        update={
+            "summary": "benign image drift",
+            "evidence": [
+                RootCauseEvidence(
+                    kind="live-observation",
+                    source="kubectl get deploy",
+                    observation="image tag differs from a prior build",
+                )
+            ],
+            "explained_detectors": ["phantom-detector"],
+        }
+    )
+    assert isinstance(weak, ConfirmedRootCause)
+    payload = result.model_copy(update={"confirmed_root_causes": [*result.confirmed_root_causes, weak]})
+    message = {"type": "agent_message", "id": "msg", "text": payload.model_dump_json(exclude_none=True)}
+    agent = ScriptedAgent(
+        lambda _request: FakeRun(
+            stdout=[
+                '{"type":"thread.started","thread_id":"session-1"}\n',
+                json.dumps({"type": "item.completed", "item": message}) + "\n",
+                '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,'
+                '"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":1}}\n',
+            ]
+        )
+    )
+
+    completed = execute_incident(request, executor=agent.executor)
+
+    summaries = [cause.summary for cause in completed.confirmed_root_causes]
+    assert "benign image drift" not in summaries
+    assert summaries == ["The geo Deployment referenced an absent required ConfigMap"]
 
 
 def test_prompt_lists_changes_since_the_healthy_baseline_once() -> None:
