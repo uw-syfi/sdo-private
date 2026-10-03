@@ -123,6 +123,14 @@ type Controller struct {
 	workspaceResults           chan workspaceCompletion
 	closureResults             chan closureCompletion
 	acknowledgmentResults      chan acknowledgmentCompletion
+	releaseResults             chan releaseCompletion
+	// pendingReleases holds incident IDs whose prepared worktree was stranded
+	// when a follow-up superseded them in place; it is durable so a restart
+	// still reaps them. releaseInFlight is the one currently being released and
+	// is transient: a restart re-emits it from pendingReleases (release is
+	// idempotent).
+	pendingReleases []string
+	releaseInFlight string
 
 	// Baseline, when set, records healthy configuration and attaches the
 	// diff against it to each new incident request.
@@ -238,6 +246,7 @@ func NewController(
 		detectorSpecs:    detectorSpecs,
 		workspaceResults: make(chan workspaceCompletion, 1), closureResults: make(chan closureCompletion, 1),
 		acknowledgmentResults: make(chan acknowledgmentCompletion, 1),
+		releaseResults:        make(chan releaseCompletion, 1),
 		dispatchJitter:        rand.Float64,
 	}, nil
 }
@@ -894,6 +903,14 @@ func (c *Controller) startFollowUpLocked(now time.Time) bool {
 	request.RepositoryWorktree = parent.RepositoryWorktree
 	request.RepositoryBaseCommit = parent.RepositoryBaseCommit
 	c.batcher.RemoveKeys(findingKeys(residual))
+	// With a broker the follow-up re-prepares a distinct worktree (keyed on its
+	// own incident id), so the parent's prepared worktree is abandoned without a
+	// closure and must be released at the source. Without a broker the follow-up
+	// reuses the parent's worktree in place (set above), so there is nothing to
+	// release.
+	if c.broker != nil && parent.IncidentID != "" && parent.IncidentID != request.IncidentID {
+		c.enqueueReleaseLocked(parent.IncidentID)
+	}
 	c.currentIncidentRequest = cloneIncidentRequest(&request)
 	c.currentIncidentResult = nil
 	c.dispatchError = ""
@@ -905,6 +922,18 @@ func (c *Controller) startFollowUpLocked(now time.Time) bool {
 	}
 	c.incidentFindingKeys = findingKeys(residual)
 	return true
+}
+
+// enqueueReleaseLocked records an incident whose prepared worktree was stranded
+// by a supersede so the run loop reaps it through the broker. Idempotent;
+// callers hold c.mu.
+func (c *Controller) enqueueReleaseLocked(incidentID string) {
+	for _, id := range c.pendingReleases {
+		if id == incidentID {
+			return
+		}
+	}
+	c.pendingReleases = append(c.pendingReleases, incidentID)
 }
 
 const followUpSummaryLimit = 3000
@@ -1118,6 +1147,7 @@ func (c *Controller) ExportState() RuntimeState {
 		ClosureReceipt:             cloneClosureReceipt(c.closureReceipt),
 		ClosureFailure:             cloneClosureFailure(c.closureFailure),
 		LastAcknowledgedIncidentID: c.lastAcknowledgedIncidentID,
+		PendingReleases:            append([]string(nil), c.pendingReleases...),
 		IncidentView:               cloneIncidentView(c.incidentView),
 		EvaluationIteration:        c.evaluationIteration,
 		DetectorTimeline:           cloneTimeline(c.timeline),
@@ -1167,6 +1197,8 @@ func (c *Controller) RestoreState(state RuntimeState) error {
 	c.closureReceipt = cloneClosureReceipt(state.ClosureReceipt)
 	c.closureFailure = cloneClosureFailure(state.ClosureFailure)
 	c.lastAcknowledgedIncidentID = state.LastAcknowledgedIncidentID
+	c.pendingReleases = append([]string(nil), state.PendingReleases...)
+	c.releaseInFlight = ""
 	c.evaluationIteration = state.EvaluationIteration
 	c.timeline = cloneTimeline(state.DetectorTimeline)
 	return nil

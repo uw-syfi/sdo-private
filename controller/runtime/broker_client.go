@@ -44,6 +44,16 @@ func (b SubprocessIncidentBroker) AcknowledgeClosure(ctx context.Context, receip
 	return nil
 }
 
+func (b SubprocessIncidentBroker) ReleaseIncident(ctx context.Context, incidentID string) error {
+	// The broker reports whether a worktree was reaped; both outcomes are
+	// success for the controller, which only needs the leak gone. Surface only
+	// a transport or broker error.
+	var response struct {
+		Released bool `json:"released"`
+	}
+	return b.invoke(ctx, map[string]any{"operation": "release", "incident_id": incidentID}, &response)
+}
+
 func (b SubprocessIncidentBroker) invoke(ctx context.Context, request any, response any) error {
 	if len(b.Argv) == 0 || b.Argv[0] == "" {
 		return fmt.Errorf("broker argv is required")

@@ -11,6 +11,7 @@ import json
 import shlex
 import sys
 from pathlib import Path
+from typing import Any
 
 from sdo.agent_runtime.responder import (
     INCIDENT_REASONING_EFFORT,
@@ -195,26 +196,37 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         payload = json.load(sys.stdin)
-        operation = payload.get("operation")
-        if operation == "prepare":
-            workspace = service.prepare_incident(str(payload["incident_id"]))
-            response = {
-                "incident_id": workspace.incident_id,
-                "worktree": str(workspace.path),
-                "base_commit": workspace.base_commit,
-            }
-        elif operation == "process":
-            response = service.process_closure(BrokerClosure.model_validate(payload["closure"])).model_dump()
-        elif operation == "ack":
-            service.acknowledge(ClosureReceipt.model_validate(payload["receipt"]))
-            response = {"acknowledged": True}
-        else:
-            raise BrokerServiceError(f"unsupported operation {operation!r}")
+        response = dispatch_broker_operation(service, payload)
     except (KeyError, OSError, ValueError, BrokerServiceError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     print(json.dumps(response))
     return 0
+
+
+def dispatch_broker_operation(service: BrokerService, payload: dict[str, Any]) -> dict[str, Any]:
+    """Route one broker request payload to the service and return its response.
+
+    Factored out of :func:`main` so the controller's subprocess protocol can be
+    exercised without constructing a reflector or validator.
+    """
+
+    operation = payload.get("operation")
+    if operation == "prepare":
+        workspace = service.prepare_incident(str(payload["incident_id"]))
+        return {
+            "incident_id": workspace.incident_id,
+            "worktree": str(workspace.path),
+            "base_commit": workspace.base_commit,
+        }
+    if operation == "process":
+        return service.process_closure(BrokerClosure.model_validate(payload["closure"])).model_dump()
+    if operation == "ack":
+        service.acknowledge(ClosureReceipt.model_validate(payload["receipt"]))
+        return {"acknowledged": True}
+    if operation == "release":
+        return {"released": service.release_incident(str(payload["incident_id"]))}
+    raise BrokerServiceError(f"unsupported operation {operation!r}")
 
 
 if __name__ == "__main__":
