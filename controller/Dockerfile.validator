@@ -39,6 +39,7 @@ COPY --from=go-runtime /opt/sdo/controller /opt/sdo/controller
 RUN chmod -R a+rX /opt/sdo/controller
 RUN python -m pip install --no-cache-dir --no-deps \
       annotated-types==0.7.0 \
+      protobuf==6.33.4 \
       pydantic==2.12.5 \
       pydantic-core==2.41.5 \
       pyyaml==6.0.3 \
