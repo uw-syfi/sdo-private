@@ -142,6 +142,30 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		30*time.Second,
 		"wait after a response completes before its still-active health findings get a follow-up responder",
 	)
+	admissionLoadHigh := flags.Float64(
+		"admission-load-high", 0,
+		"load-aware admission: host-load pressure (PSI some avg10, 0-100) at or above which a ready incident is held; zero disables the load term",
+	)
+	admissionLoadLow := flags.Float64(
+		"admission-load-low", 0,
+		"load-aware admission: host-load pressure below which a held incident resumes (hysteresis); must not exceed --admission-load-high",
+	)
+	admissionBacklogHigh := flags.Int(
+		"admission-release-backlog-high", 0,
+		"load-aware admission: stranded-worktree release backlog at or above which a ready incident is held; zero disables the backlog term",
+	)
+	admissionBacklogLow := flags.Int(
+		"admission-release-backlog-low", 0,
+		"load-aware admission: release backlog below which a held incident resumes (hysteresis); must not exceed --admission-release-backlog-high",
+	)
+	admissionRecheckInterval := flags.Duration(
+		"admission-recheck-interval", 2*time.Second,
+		"load-aware admission: how often a held incident re-evaluates admission against a fresh load sample",
+	)
+	admissionPressurePath := flags.String(
+		"admission-pressure-path", "",
+		"load-aware admission: Linux PSI pressure file for the host-load gauge; defaults to /proc/pressure/cpu when the load term is enabled",
+	)
 	repairPolicy := flags.String("repair-policy", "commit", "repair evidence policy: commit or recorded-actions")
 	leaseName := flags.String("lease-name", "sdo-controller", "leader-election Lease name")
 	leaseDuration := flags.Duration("lease-duration", 60*time.Second, "leader-election Lease duration")
@@ -333,6 +357,14 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 	default:
 		return fmt.Errorf("unsupported dispatcher mode %q", *dispatcherMode)
 	}
+	admission := AdmissionConfig{
+		Enabled:                     *admissionLoadHigh > 0 || *admissionBacklogHigh > 0,
+		HighWatermark:               *admissionLoadHigh,
+		LowWatermark:                *admissionLoadLow,
+		ReleaseBacklogHighWatermark: *admissionBacklogHigh,
+		ReleaseBacklogLowWatermark:  *admissionBacklogLow,
+		RecheckInterval:             *admissionRecheckInterval,
+	}
 	start := time.Now().UTC()
 	controller, err := NewController(ControllerConfig{
 		Application: *application, Namespace: *namespace,
@@ -348,9 +380,15 @@ func RunWithOptions(ctx context.Context, detectors []sdk.Detector, options Runti
 		// over at least 2 s instead of waiting for the detector's interval;
 		// closure keeps the health judge's clear persistence.
 		GateConfirmation: GateConfirmationPolicy{Evaluations: 3, Window: 2 * time.Second, Interval: time.Second},
+		Admission:        admission,
 	}, detectors, snapshotProvider, dispatcher, start)
 	if err != nil {
 		return err
+	}
+	// The load term reads host pressure from a Linux PSI file; the backlog term
+	// needs no gauge. A gauge is attached only when the load term is enabled.
+	if admission.Enabled && admission.HighWatermark > 0 {
+		controller.SetLoadGauge(ProcPressureGauge{Path: *admissionPressurePath})
 	}
 	if *brokerCommand != "" {
 		if *brokerWorktreeRoot == "" {
