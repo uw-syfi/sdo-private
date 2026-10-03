@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime  # noqa: TC003 - Pydantic resolves this annotation at runtime.
 from enum import Enum
 from typing import Literal
@@ -147,177 +146,13 @@ class DiagnosticsManifest(MemoryModel):
 #: (``generators/``, with responder-owned ``generators/incident/``) and
 #: workload profiles (``workloads/<name>.yaml``; responders add only
 #: ``incident-*`` workloads). ``controller/sdk/traffic`` executes them; the
-#: workload model below mirrors its validation as the commit-time gate.
+#: proto ``TrafficWorkload`` schema and :mod:`sdo.operational_memory.traffic`
+#: loader are the commit-time gate.
 TRAFFIC_DIRECTORY = ".sdo/diagnostics/traffic"
 TRAFFIC_GENERATORS_DIRECTORY = f"{TRAFFIC_DIRECTORY}/generators"
 TRAFFIC_INCIDENT_GENERATORS_DIRECTORY = f"{TRAFFIC_GENERATORS_DIRECTORY}/incident"
 TRAFFIC_WORKLOAD_DIRECTORY = f"{TRAFFIC_DIRECTORY}/workloads"
 TRAFFIC_INCIDENT_WORKLOAD_PREFIX = "incident-"
-TRAFFIC_MAX_RATE_PER_SECOND = 20.0
-TRAFFIC_MAX_TIMEOUT_SECONDS = 10.0
-TRAFFIC_MAX_ITERATION_TIMEOUT_SECONDS = 30.0
-TRAFFIC_MAX_BURST_SECONDS = 60.0
-_GO_DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)")
-_GO_DURATION_SECONDS = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "ms": 1e-3, "s": 1.0, "m": 60.0, "h": 3600.0}
-_DNS_LABEL = r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
-
-
-def go_duration_seconds(value: str) -> float:
-    """Seconds in a Go duration string such as ``1m30s`` or ``500ms``."""
-
-    parts = list(_GO_DURATION_PART.finditer(value))
-    if not parts or "".join(part.group(0) for part in parts) != value:
-        raise ValueError(f"{value!r} is not a Go duration such as 2s or 500ms")
-    return sum(float(part.group(1)) * _GO_DURATION_SECONDS[part.group(2)] for part in parts)
-
-
-class TrafficModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-
-class TrafficSLO(TrafficModel):
-    """Per-scenario service-level objective; unset fields inherit the workload, then defaults."""
-
-    window: int | None = Field(default=None, ge=1, le=100)
-    min_samples: int | None = Field(default=None, ge=1, alias="minSamples")
-    max_age: str | None = Field(default=None, alias="maxAge")
-    max_error_rate: float | None = Field(default=None, gt=0, le=1, alias="maxErrorRate")
-    max_timeout_rate: float | None = Field(default=None, gt=0, le=1, alias="maxTimeoutRate")
-    latency_percentile: int | None = Field(default=None, ge=1, le=100, alias="latencyPercentile")
-    max_latency: str | None = Field(default=None, alias="maxLatency")
-
-    @field_validator("max_age", "max_latency")
-    @classmethod
-    def validate_duration(cls, value: str | None) -> str | None:
-        if value is not None and go_duration_seconds(value) <= 0:
-            raise ValueError("duration must be positive")
-        return value
-
-
-#: Defaults applied by ``controller/sdk/traffic`` when a workload leaves them unset.
-TRAFFIC_DEFAULT_SLO = TrafficSLO(
-    window=5,
-    minSamples=3,
-    maxAge="30s",
-    maxErrorRate=0.5,
-    maxTimeoutRate=0.5,
-    latencyPercentile=90,
-    maxLatency="1500ms",
-)
-
-
-def _merge_slo(base: TrafficSLO, override: TrafficSLO | None) -> TrafficSLO:
-    if override is None:
-        return base
-    return base.model_copy(update=override.model_dump(exclude_none=True))
-
-
-class TrafficWorkloadScenario(TrafficModel):
-    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]{0,62}$")
-    weight: int = Field(default=1, ge=1, le=100)
-    slo: TrafficSLO | None = None
-
-
-TRAFFIC_LINK_DEFAULT_FAILURES = 5
-TRAFFIC_LINK_MAX_LINKS = 64
-
-
-class TrafficLink(TrafficModel):
-    """One declared service-to-service dependency edge: ``from`` calls ``to`` on ``port``."""
-
-    source: str = Field(alias="from", pattern=_DNS_LABEL)
-    target: str = Field(alias="to", pattern=_DNS_LABEL)
-    port: int = Field(ge=1, le=65535)
-    protocol: Literal["tcp"] = "tcp"
-
-    @model_validator(mode="after")
-    def validate_edge(self) -> TrafficLink:
-        if self.source == self.target:
-            raise ValueError(f"link {self.source!r} calls itself")
-        return self
-
-
-class TrafficWorkload(TrafficModel):
-    """A workload profile: which generator scenarios run, how often, and against which SLO.
-
-    Stored at ``.sdo/diagnostics/traffic/workloads/<name>.yaml``. A
-    ``health-probe`` runs continuously and feeds traffic health detectors; a
-    ``verify-burst`` runs for a few seconds on demand to verify a repair; a
-    ``journey`` runs on demand for a bounded time. A ``link-probe`` runs
-    continuously with no scenarios: it dials each declared ``links`` edge afresh
-    every ``interval`` and lets a link detector report an edge after ``failures``
-    consecutive failed dials.
-    """
-
-    api_version: Literal["sdo.dev/v1alpha1"] = Field(alias="apiVersion")
-    kind: Literal["TrafficWorkload"]
-    name: str = Field(pattern=_DNS_LABEL)
-    description: str = ""
-    purpose: Literal["health-probe", "verify-burst", "journey", "link-probe"]
-    arrival: Literal["uniform", "poisson"] = "uniform"
-    rate_per_second: float = Field(default=4.0, gt=0, le=TRAFFIC_MAX_RATE_PER_SECOND, alias="ratePerSecond")
-    duration: str | None = None
-    timeout: str = "2s"
-    iteration_timeout: str = Field(default="10s", alias="iterationTimeout")
-    seed: int | None = Field(default=None, ge=0, lt=2**64)
-    slo: TrafficSLO = Field(default_factory=TrafficSLO)
-    scenarios: list[TrafficWorkloadScenario] = Field(default_factory=list)
-    links: list[TrafficLink] = Field(default_factory=list)
-    interval: str | None = None
-    failures: int | None = Field(default=None, ge=2, le=60)
-
-    @model_validator(mode="after")
-    def validate_profile(self) -> TrafficWorkload:
-        if self.purpose == "link-probe":
-            self._validate_link_probe()
-            return self
-        if self.links or self.interval is not None or self.failures is not None:
-            raise ValueError("links, interval and failures apply only to a link-probe workload")
-        if not self.scenarios:
-            raise ValueError("at least one scenario is required")
-        if self.purpose == "health-probe":
-            if self.duration is not None:
-                raise ValueError("a health-probe runs continuously and takes no duration")
-        elif self.duration is None or not 0 < go_duration_seconds(self.duration) <= TRAFFIC_MAX_BURST_SECONDS:
-            raise ValueError(f"a {self.purpose} workload needs a duration in (0, 60s]")
-        timeout = go_duration_seconds(self.timeout)
-        if not 0 < timeout <= TRAFFIC_MAX_TIMEOUT_SECONDS:
-            raise ValueError("timeout must be in (0, 10s]")
-        if not timeout <= go_duration_seconds(self.iteration_timeout) <= TRAFFIC_MAX_ITERATION_TIMEOUT_SECONDS:
-            raise ValueError("iterationTimeout must be in [timeout, 30s]")
-        ids = [scenario.id for scenario in self.scenarios]
-        duplicates = sorted({scenario_id for scenario_id in ids if ids.count(scenario_id) > 1})
-        if duplicates:
-            raise ValueError(f"scenario(s) listed twice: {', '.join(duplicates)}")
-        for scenario in self.scenarios:
-            slo = self.scenario_slo(scenario.id)
-            if slo.min_samples is not None and slo.window is not None and slo.min_samples > slo.window:
-                raise ValueError(f"scenario {scenario.id!r}: slo minSamples must not exceed window")
-        return self
-
-    def _validate_link_probe(self) -> None:
-        if self.duration is not None:
-            raise ValueError("a link-probe runs continuously and takes no duration")
-        if self.scenarios:
-            raise ValueError("a link-probe runs no scenarios")
-        if not 0 < len(self.links) <= TRAFFIC_LINK_MAX_LINKS:
-            raise ValueError(f"a link-probe needs 1 to {TRAFFIC_LINK_MAX_LINKS} links")
-        edges = [(link.source, link.target, link.port) for link in self.links]
-        duplicates = sorted({f"{a} -> {b}:{c}" for a, b, c in edges if edges.count((a, b, c)) > 1})
-        if duplicates:
-            raise ValueError(f"link(s) listed twice: {', '.join(duplicates)}")
-        if self.interval is not None and not 0.1 <= go_duration_seconds(self.interval) <= 60:
-            raise ValueError("interval must be in [100ms, 1m]")
-        timeout = go_duration_seconds(self.timeout)
-        if not 0 < timeout <= TRAFFIC_MAX_TIMEOUT_SECONDS:
-            raise ValueError("timeout must be in (0, 10s]")
-
-    def scenario_slo(self, scenario_id: str) -> TrafficSLO:
-        slo = _merge_slo(TRAFFIC_DEFAULT_SLO, self.slo)
-        for scenario in self.scenarios:
-            if scenario.id == scenario_id:
-                slo = _merge_slo(slo, scenario.slo)
-        return slo
 
 
 class OutcomeClassification(str, Enum):

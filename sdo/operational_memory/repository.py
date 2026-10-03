@@ -15,8 +15,8 @@ from sdo.operational_memory.models import (
     GoalMetadata,
     OutcomeRecord,
     PlaybookMetadata,
-    TrafficWorkload,
 )
+from sdo.operational_memory.traffic import TrafficWorkload, TrafficWorkloadError, load_traffic_workload
 
 MetadataT = TypeVar("MetadataT", bound=BaseModel)
 
@@ -112,8 +112,8 @@ class MemoryRepository:
             if path.suffix != ".yaml" or not path.is_file():
                 raise MemoryRepositoryError(f"{relative}: traffic workloads are <name>.yaml files")
             try:
-                workload = TrafficWorkload.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
-            except (OSError, yaml.YAMLError, ValidationError) as exc:
+                workload = load_traffic_workload(yaml.safe_load(path.read_text(encoding="utf-8")))
+            except (OSError, yaml.YAMLError, TrafficWorkloadError) as exc:
                 raise MemoryRepositoryError(f"invalid traffic workload {relative}: {exc}") from exc
             if workload.name != path.stem:
                 raise MemoryRepositoryError(

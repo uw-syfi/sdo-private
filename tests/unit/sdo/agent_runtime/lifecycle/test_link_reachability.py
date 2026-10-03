@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-from pydantic import ValidationError
 
 from controller.builder.manifest import load_manifest
 from sdo.agent_runtime.lifecycle.agents import TRAFFIC_AUTHORING, AuthoredTrafficFile
@@ -15,8 +14,8 @@ from sdo.agent_runtime.lifecycle.operational_memory import (
     _validate_health_judge_artifact,
     ensure_operational_memory,
 )
-from sdo.operational_memory.models import TrafficWorkload
 from sdo.operational_memory.repository import MemoryRepository
+from sdo.operational_memory.traffic import TrafficWorkload, TrafficWorkloadError, load_traffic_workload
 from tests.unit.sdo.agent_runtime.lifecycle.test_traffic_lifecycle import OBJECTIVE, _files, _judged
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
@@ -41,19 +40,19 @@ def _links(*edges: tuple[str, str, int], **extra: object) -> str:
 
 
 def _parse(text: str) -> TrafficWorkload:
-    return TrafficWorkload.model_validate(yaml.safe_load(text))
+    return load_traffic_workload(yaml.safe_load(text))
 
 
 def test_link_probe_workload_declares_edges_with_from_and_to() -> None:
     workload = _parse(_links(("frontend", "recommendation", 8085), ("frontend", "user", 8086), failures=4))
 
     assert workload.purpose == "link-probe"
-    assert [(link.source, link.target, link.port) for link in workload.links] == [
+    assert [(getattr(link, "from"), link.to, link.port) for link in workload.links] == [
         ("frontend", "recommendation", 8085),
         ("frontend", "user", 8086),
     ]
     assert workload.failures == 4
-    assert workload.scenarios == []
+    assert len(workload.scenarios) == 0
 
 
 @pytest.mark.parametrize(
@@ -70,17 +69,17 @@ def test_link_probe_workload_declares_edges_with_from_and_to() -> None:
     ],
 )
 def test_link_probe_workload_rejects_unsafe_declarations(text: str) -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(TrafficWorkloadError):
         _parse(text)
 
 
 def test_links_belong_only_to_link_probe_workloads() -> None:
     document = yaml.safe_load(_links(("a", "b", 80)))
     document.update(purpose="health-probe", scenarios=[{"id": "home"}])
-    with pytest.raises(ValidationError):
-        TrafficWorkload.model_validate(document)
-    with pytest.raises(ValidationError):
-        TrafficWorkload.model_validate({**document, "links": [], "scenarios": []})
+    with pytest.raises(TrafficWorkloadError):
+        load_traffic_workload(document)
+    with pytest.raises(TrafficWorkloadError):
+        load_traffic_workload({**document, "links": [], "scenarios": []})
 
 
 def test_judge_instruction_is_generic_and_derives_edges_from_the_source() -> None:

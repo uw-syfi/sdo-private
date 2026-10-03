@@ -48,7 +48,6 @@ from sdo.operational_memory.models import (
     ArtifactOwner,
     OutcomeClassification,
     OutcomeRecord,
-    TrafficWorkload,
 )
 from sdo.operational_memory.repository import MemoryRepository, MemoryRepositoryError
 from sdo.operational_memory.sandbox import (
@@ -57,6 +56,12 @@ from sdo.operational_memory.sandbox import (
     LocalSandboxRunner,
     SandboxResult,
     SandboxRunner,
+)
+from sdo.operational_memory.traffic import (
+    TrafficWorkload,
+    TrafficWorkloadError,
+    load_traffic_workload,
+    scenario_slo,
 )
 from sdo.operational_memory.validation import (
     PLACEHOLDER_RE,
@@ -114,6 +119,9 @@ __all__ = [
     "SandboxRunner",
     "TopologyReview",
     "TrafficWorkload",
+    "TrafficWorkloadError",
+    "load_traffic_workload",
+    "scenario_slo",
     "WarmPlaybookMatch",
     "incident_worktree_dirname",
     "warm_playbook_matches",
