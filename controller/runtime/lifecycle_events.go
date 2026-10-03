@@ -39,6 +39,12 @@ type LifecyclePhase string
 const (
 	// PhaseOpened: a batch of findings opened a new incident (or follow-up).
 	PhaseOpened LifecyclePhase = "incident_opened"
+	// PhaseAdmissionDeferred: a ready batch was held under resource pressure
+	// (load or release-backlog high watermark) before any worktree or dispatch.
+	PhaseAdmissionDeferred LifecyclePhase = "admission_deferred"
+	// PhaseAdmissionResumed: a held incident cleared the low watermarks and
+	// proceeded to dispatch.
+	PhaseAdmissionResumed LifecyclePhase = "admission_resumed"
 	// PhaseWorkspacePrepared: the broker prepared the incident's isolated worktree.
 	PhaseWorkspacePrepared LifecyclePhase = "workspace_prepared"
 	// PhaseDispatched: the responder was launched for the incident.
@@ -65,26 +71,30 @@ func (p LifecyclePhase) rank() int {
 	switch p {
 	case PhaseOpened:
 		return 0
-	case PhaseWorkspacePrepared:
+	case PhaseAdmissionDeferred:
 		return 1
-	case PhaseDispatched:
+	case PhaseAdmissionResumed:
 		return 2
-	case PhaseResponderCompleted:
+	case PhaseWorkspacePrepared:
 		return 3
-	case PhaseSuperseded:
+	case PhaseDispatched:
 		return 4
-	case PhaseWorktreeReleased:
+	case PhaseResponderCompleted:
 		return 5
-	case PhaseDetectorReviewRequired:
+	case PhaseSuperseded:
 		return 6
-	case PhaseClosed:
+	case PhaseWorktreeReleased:
 		return 7
-	case PhaseClosureCommitted:
+	case PhaseDetectorReviewRequired:
 		return 8
-	case PhaseAcknowledged:
+	case PhaseClosed:
 		return 9
-	default:
+	case PhaseClosureCommitted:
 		return 10
+	case PhaseAcknowledged:
+		return 11
+	default:
+		return 12
 	}
 }
 
@@ -125,6 +135,14 @@ type LifecycleEvent struct {
 	HealthClearedAt        *time.Time `json:"health_cleared_at,omitempty"`
 	DetectorReviewRequired bool       `json:"detector_review_required,omitempty"`
 	DispatchError          bool       `json:"dispatch_error,omitempty"`
+
+	// Load/backpressure fields describe an admission decision under resource
+	// pressure (admission_deferred / admission_resumed). They carry only
+	// controller-internal load facts: the gauge reading, the governing watermark,
+	// and the stranded-worktree release backlog; never a benchmark verdict.
+	LoadPressure   float64 `json:"load_pressure,omitempty"`
+	LoadThreshold  float64 `json:"load_threshold,omitempty"`
+	ReleaseBacklog int     `json:"release_backlog,omitempty"`
 }
 
 // LifecycleSink receives lifecycle events. Record must be idempotent in
@@ -264,6 +282,6 @@ func timelineRank(entry TimelineEntry) int {
 	if entry.Lifecycle != nil {
 		return entry.Lifecycle.Event.rank()
 	}
-	// Any firing record: between opened (0) and responder_completed (3).
+	// Any firing record: between opened and responder_completed, at the dispatch rank.
 	return PhaseDispatched.rank()
 }
