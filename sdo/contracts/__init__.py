@@ -21,8 +21,10 @@ from sdo.contracts.models import (
     StateFieldChange,
     UsageMetrics,
 )
+from sdo.contracts.sdk_schema import SDK_SCHEMA_IDENTITY
 
 __all__ = [
+    "SDK_SCHEMA_IDENTITY",
     "ConfirmedRootCause",
     "DetectorEvaluation",
     "DetectorEvaluationStatus",

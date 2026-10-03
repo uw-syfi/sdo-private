@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from sdo.contracts.sdk_schema import SDK_SCHEMA_IDENTITY
+from sdo.contracts import SDK_SCHEMA_IDENTITY
 from sdo.operational_memory.models import ValidatorNetworkPolicyCanary
 
 if TYPE_CHECKING:
